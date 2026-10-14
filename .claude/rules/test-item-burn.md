@@ -159,52 +159,73 @@ MEASURED with frame ids, never judged by eye. Design record: #272 comment
   references. One grey cell (level 0.04–0.96) → `(i, i + 1, w)`, `w` the
   LATER frame's weight in Q8, rounded (the program's `FrameBlend` unit).
   Never guessed: `no_strip`, `multi` (≥ 2 grey cells), `non_adjacent`,
-  `disagree` (the bands read positions > 8 Q8 apart: a torn picture).
-- `analyse`: readings within 8 Q8 of the one before = one boundary;
-  each step vs `fps / 30`, with a slack of 8 Q8 + the larger of the
+  `disagree` (the bands read positions more than `SAME_PICTURE` apart: a
+  torn picture).
+- **One picture = within `SAME_PICTURE`** (8 Q8 + the 0.04 level edge):
+  the program's own 8-bit blend (`nv12_mix.rs`, `(f(256 − w) + tw + 128)
+  >> 8` on 16 / 235) rounds a weight near 0 or 256 to either side of the
+  edge, so one picture can read grey or plain. Two boundaries are ≥ 0.8
+  frames apart.
+- `analyse`, per step vs `fps / 30`: slack = 8 Q8 + the larger of the
   pacer's dead band (2 ms × fps: a boundary inside it shows the plain
-  frame) and the reader's level edge (a weight within 0.04 of 256 reads as
-  the next frame) — review round 1 found every phase 0.03–0.05 of a frame
-  read as cadence errors without it, `test_every_grid_phase_…` sweeps 100
-  phases at 24 / 25 / 30 fps: ≥ 2 grid steps = lost boundaries, off the
-  grid = cadence error, back = jump back; frames no boundary showed = lost
-  frames. A step across an unreadable picture or a capture gap (an
-  interval over 1.5 × the median) is `unverified` (steps, frames), never
-  lost: the capture did not see it. Every boundary must be shown for the
-  refreshes the capture rate gives on the grid (`refreshes`: 60 Hz on 30 =
-  2; a rate the grid does not divide allows the two around it; from
-  `--refresh-hz` or the capture times) — another count is `uneven`
-  (judder), in the verdict; the capture's first and last boundary, one
-  with an unreadable picture in or beside it and the loop seam are not
-  judged. The clip LOOPS: a wrap is only the last
-  3 frames → the first 3; the wrap step ± 1 are the loop seam, reported in
-  `loop_seams` and kept out of the verdict (a jump to 0 from mid-clip is a
-  jump back). Weights vs the pacer's rule (`genlock.md`, "BLENDED") at the
-  grid phase fitted per pass (median, + half a Q8 step for the floor),
-  compared with where the READER reads the pacer's weight
-  (`shown_position`: one within the edge reads plain): 25 on 30 from 0 =
-  0, 213, 170, 128, 85, 42; 24 = 0, 204, 153, 102, 51; 30 / 15 / 50 =
-  none. The dead band is the pacer's `BLEND_DEAD_BAND_100NS`, read from
-  `pacer_blend.rs` by `test_the_reader_s_dead_band_is_the_pacer_s`.
-- Capture glue (untested, tiny): `--video FILE [--width W] [--refresh-hz
-  R]` (ffmpeg, grey, `-fps_mode passthrough` so every stored frame is read
-  as stored, the size read by `av_sync_check.probe_video_size`: the box has
-  no ffprobe; `video_read_args` is tested) or `--dxcam OUTPUT [--region
-  L,T,R,B] --seconds S` (Windows, the box's `ops\probe-venv`): only each
-  picture's sampled columns are kept (~170 KB at 1080 rows) and decoded
-  after the capture, a poll with no new picture sleeps 1 ms (Python 3.11+
-  sleeps on a high-resolution timer there); `capture` reports its own
-  intervals and gaps. JSON on stdout; exit 0 clean / 1 defects / 2
-  nothing decoded.
+  frame) and the level edge; ≥ 2 grid steps = lost boundaries, off the grid
+  = cadence error, back = jump back; frames no boundary showed = lost
+  frames. Weights vs the pacer's rule (`genlock.md`, "BLENDED") at the grid
+  phase fitted per play (a loop or a jump back starts one; median, + half
+  a Q8 step for the floor), against every place the reader may read the
+  weight (`readable_positions`): 25 on 30 from 0 = 0, 213, 170, 128, 85,
+  42 (read 0, 213, 169, 127, 85, 42 through the program's byte blend);
+  24 = 0, 204, 153, 102, 51; 30 / 15 / 50 = none. The dead band is the
+  pacer's `BLEND_DEAD_BAND_100NS`, read from `pacer_blend.rs` by a test.
+  Review rounds 1–2: `test_every_grid_phase_…` sweeps 512 phases per frame
+  through the program's byte blend at 24 / 25 fps (and 30): clean.
+- **What the capture did not see excuses one boundary per unseen
+  refresh, no more** (review round 2: one unreadable picture used to
+  excuse a 1000-frame skip). Unseen = each unreadable picture + each
+  refresh inside a blind span. Excused boundaries (and the frames they
+  could show) are `unverified`; the rest is lost; a cadence error is never
+  excused. Blind spans: a video's pts gaps (> 1.5 × the median: the
+  recorder dropped frames, `pts_gaps`), a dxcam poll > 8 ms after the one
+  before (`late_polls`). A poll on time that finds no new picture is the
+  wall HOLDING one: with capture times a boundary's refreshes are counted
+  by time (its first picture to the next boundary's), so a stall reads as
+  judder plus the lost boundaries Arena never presented.
+- Every boundary must be on screen for the refreshes the capture rate
+  gives on the grid (`refreshes`: 60 Hz on 30 = 2; a rate the grid does
+  not divide allows the two around it; `--refresh-hz`, else the capture
+  times / pts) — another count is `uneven` (judder), in the verdict. Not
+  judged: the capture's first and last boundary, one with an unreadable
+  picture or a blind span in or beside it, the song's last boundary and
+  the new play's first two at a loop seam.
+- The clip LOOPS: a wrap is only the last 3 frames → the first 3; the wrap
+  step ± 1 are the loop seam, `loop_seams.errors` (irregular steps,
+  frames missing there, weights), kept out of the verdict; a jump to 0
+  from mid-clip is a jump back.
+- **Verdict**: `defects` (any loss, jump back, cadence error, weight
+  mismatch or judder) → exit 1; else `incomplete` (unverified steps, or
+  under 95 % of the pictures decoded) → exit 3, never clean; else `clean`
+  → exit 0; nothing decoded → exit 2.
+- Capture glue: `--video FILE [--width W] [--refresh-hz R]` (`read_video`:
+  ffmpeg, `-fps_mode passthrough` so every stored frame is read as stored,
+  each frame's pts from `showinfo`, size and pts through `av_sync_check`'s
+  readers: the box has no ffprobe; `video_read_args` is tested) or
+  `--dxcam OUTPUT [--region L,T,R,B] --seconds S` (`capture_dxcam`,
+  Windows, the box's `ops\probe-venv`, dxcam's default colour output so no
+  OpenCV): every poll timed, only each picture's sampled columns kept as
+  luma (~170 KB at 1080 rows, ~345 KB at 2160) and decoded after the
+  capture, an empty poll sleeps 1 ms (Python 3.11+ sleeps on a
+  high-resolution timer there). `--fps` takes 24 / 25 / 30.
 - Measured on dev1 (#272 comment 6164962209): every frame of the three
-  clips reads back; real decoded frames blended 25 on 30, cut to an SNV
+  clips reads back (also through `read_video`'s pts path: 1440 / 1500 /
+  1800, clean); real decoded frames blended 25 on 30, cut to an SNV
   quarter band, ×4 and noised read 0, 214, 170, 127, 85, 41 (±1 Q8).
 - The clip's song / artist go to the wall's title clip like any song's
   (nothing treats the test playlist apart there): a strip the title covers
   fails its reference check and the consensus takes the other bands; a
   picture with every visible strip covered is `no_strip`, its steps
-  `unverified`, never lost. Whether a test item should write the wall
-  title at all is open (a follow-up candidate on #272).
+  `unverified` (one boundary per picture), never clean. Whether a test
+  item should write the wall title at all is open (a follow-up candidate
+  on #272).
 
 ## Box procedure (main session, once per box)
 
@@ -250,7 +271,9 @@ post-deploy spec reads the list. The scripts: `scripts/tests/test_wall_clip.py`
 encode leaving no ffmpeg and no partial file) and
 `scripts/tests/test_wall_frames.py` (blends, bands, ×4 + noise, the named
 failures, the pacer's rule and its dead band tied to `pacer_blend.rs`,
-`analyse` with loops / losses / jumps / weights / unverified steps / judder,
-every grid phase at 24 / 25 / 30 fps, end to end, the video read's args,
+`analyse` with loops / losses / jumps / weights / unverified steps (one
+boundary per unseen refresh) / judder / a stall / coverage, every grid
+phase through the program's byte blend at 24 / 25 / 30 fps, `late_polls`,
+`pts_gaps`, end to end, the video read's args,
 `main`'s exit codes), both numpy-only for CI's Eval Checks job,
 whose ruff lists name both scripts.
