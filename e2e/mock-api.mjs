@@ -1531,6 +1531,8 @@ const WALL_DEFAULT = {
   },
   read_errors: [],
   checked_at_ms: null,
+  // #254: the guard that ends a crashed or hung Arena: nothing ended.
+  guard: { ends: 0, last: null, phase: "idle" },
 };
 let wall = { ...WALL_DEFAULT };
 app.get("/api/v1/wall", (_req, res) => {

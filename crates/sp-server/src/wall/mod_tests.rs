@@ -1,23 +1,32 @@
 //! #259: the wall report's published status, its log steps, the bounded
-//! read of a check and the route.
+//! read of a check and the route. #254: the guard's check (an end it orders
+//! runs through a recorder here), its record on the status, and the source
+//! scan that keeps its one act in `guard_win.rs`.
 
 use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use sp_core::wall::{WallFact, WallProblem, WallRead, WallState, WallStatus};
+use sp_core::wall::{
+    GuardEnd, GuardPhase, GuardWhy, WallFact, WallGuard, WallProblem, WallRead, WallState,
+    WallStatus,
+};
 use tower::ServiceExt;
 
 use super::*;
 use crate::prod_env::Reader;
-use crate::wall::fake::{FakeReader, nvidia_read, snv_facts, snv_nvidia, vdd};
-use crate::wall::read::{NvidiaFacts, read_facts};
+use crate::wall::fake::{
+    ARENA_PID, FakeReader, MONITOR_PID, crash_report_window, monitor_key, monitor_times,
+    nvidia_read, snv_arena_process, snv_facts, snv_nvidia, snv_times, vdd,
+};
+use crate::wall::guard::{ArenaProcess, EndOrder, Guard};
+use crate::wall::read::{Arena, NvidiaFacts, read_facts};
 
 const NOW: i64 = 1_791_608_681_366;
 
 #[test]
 fn a_checks_status_names_its_state_problems_facts_and_reasons() {
-    let (status, problems) = status_of(&snv_facts(), NOW);
+    let (status, problems) = status_of(&snv_facts(), WallGuard::default(), NOW);
     assert!(problems.is_empty());
     let wire = serde_json::to_value(&status).unwrap();
     assert_eq!(wire["checked"], true);
@@ -37,7 +46,7 @@ fn a_checks_status_names_its_state_problems_facts_and_reasons() {
         nvidia: snv_nvidia(),
         ..snv_facts()
     };
-    let wire = serde_json::to_value(status_of(&span_gone, NOW).0).unwrap();
+    let wire = serde_json::to_value(status_of(&span_gone, WallGuard::default(), NOW).0).unwrap();
     assert_eq!(wire["read"]["nvidia"], "read");
     assert_eq!(
         wire["read"]["grids"][0]["displays"],
@@ -48,7 +57,7 @@ fn a_checks_status_names_its_state_problems_facts_and_reasons() {
         nvidia: nvidia_read(Ok(Vec::new()), Ok(Vec::new())),
         ..snv_facts()
     };
-    let (status, problems) = status_of(&night, NOW);
+    let (status, problems) = status_of(&night, WallGuard::default(), NOW);
     assert_eq!(status.state, WallState::ScreensOff);
     assert_eq!(
         status.problems,
@@ -60,7 +69,7 @@ fn a_checks_status_names_its_state_problems_facts_and_reasons() {
 #[test]
 fn nothing_read_is_unknown_with_its_reason_once() {
     let why = "the wall read did not finish within 10s";
-    let (status, problems) = status_of(&WallFacts::unread(why), NOW);
+    let (status, problems) = status_of(&WallFacts::unread(why), WallGuard::default(), NOW);
     assert_eq!(
         status,
         WallStatus {
@@ -70,6 +79,7 @@ fn nothing_read_is_unknown_with_its_reason_once() {
             read: WallRead::default(),
             read_errors: vec![why.to_string()],
             checked_at_ms: Some(NOW),
+            guard: WallGuard::default(),
         }
     );
     assert_eq!(problems, [WallProblem::Unreadable(WallFact::Arena)]);
@@ -125,12 +135,149 @@ fn a_check_publishes_into_its_store() {
         nvidia: NvidiaFacts::NoDriver,
         ..snv_facts()
     };
-    assert_eq!(apply(&store, &mut r, &night, 10), LogStep::Holds);
-    assert_eq!(store.current(), status_of(&night, 10).0);
-    assert_eq!(apply(&store, &mut r, &night, 20), LogStep::Quiet);
+    let idle = WallGuard::default;
+    assert_eq!(apply(&store, &mut r, idle(), &night, 10), LogStep::Holds);
+    assert_eq!(store.current(), status_of(&night, idle(), 10).0);
+    assert_eq!(apply(&store, &mut r, idle(), &night, 20), LogStep::Quiet);
     assert_eq!(store.current().checked_at_ms, Some(20));
-    assert_eq!(apply(&store, &mut r, &snv_facts(), 30), LogStep::Changed);
+    assert_eq!(
+        apply(&store, &mut r, idle(), &snv_facts(), 30),
+        LogStep::Changed
+    );
     assert_eq!(store.current().state, WallState::Ok);
+    // #254: the guard's record goes out with the check.
+    let ended = WallGuard {
+        ends: 2,
+        last: Some(GuardEnd {
+            at_ms: 25,
+            why: GuardWhy::Hung,
+            pid: ARENA_PID,
+            monitors: Vec::new(),
+            error: None,
+        }),
+        phase: GuardPhase::Relaunching,
+    };
+    assert_eq!(
+        apply(&store, &mut r, ended.clone(), &snv_facts(), 40),
+        LogStep::Quiet
+    );
+    assert_eq!(store.current().guard, ended);
+}
+
+/// An end the glue ran with no failure, recorded nowhere.
+fn nothing_failed(_: &EndOrder) -> Result<(), String> {
+    Ok(())
+}
+
+/// SNV's Arena with its crash reporter's window up.
+fn crashed() -> WallFacts {
+    WallFacts {
+        guard: Ok(vec![ArenaProcess {
+            monitors: vec![monitor_key()],
+            crash_report: Ok(true),
+            ..snv_arena_process()
+        }]),
+        ..snv_facts()
+    }
+}
+
+/// The box after the end: no Arena.
+fn gone() -> WallFacts {
+    WallFacts {
+        arena: Ok(Arena::default()),
+        guard: Ok(Vec::new()),
+        ..snv_facts()
+    }
+}
+
+#[test]
+fn the_guard_ends_a_crashed_arena_once_and_the_status_names_it_until_it_runs_again() {
+    let mut guard = Guard::default();
+    let mut orders: Vec<EndOrder> = Vec::new();
+    let mut end = |order: &EndOrder| -> Result<(), String> {
+        orders.push(order.clone());
+        Ok(())
+    };
+    let record = guard_check(&mut guard, &crashed(), NOW, &mut end);
+    // Still listed at the next check (the end takes a moment): no second end.
+    let again = guard_check(&mut guard, &crashed(), NOW + 5_000, &mut end);
+    assert_eq!(
+        orders,
+        [EndOrder {
+            pid: ARENA_PID,
+            created_100ns: snv_times().created_100ns,
+            why: GuardWhy::CrashReport,
+            monitors: vec![monitor_key()],
+        }]
+    );
+    let end_record = GuardEnd {
+        at_ms: NOW,
+        why: GuardWhy::CrashReport,
+        pid: ARENA_PID,
+        monitors: vec![MONITOR_PID],
+        error: None,
+    };
+    let relaunching = WallGuard {
+        ends: 1,
+        last: Some(end_record),
+        phase: GuardPhase::Relaunching,
+    };
+    assert_eq!((record, again), (relaunching.clone(), relaunching.clone()));
+    // Gone: the status reads Arena off and names the end.
+    let off = guard_check(&mut guard, &gone(), NOW + 10_000, &mut nothing_failed);
+    let wire = serde_json::to_value(status_of(&gone(), off, NOW + 10_000).0).unwrap();
+    assert_eq!(wire["state"], "arena_off");
+    assert_eq!(wire["guard"]["ends"], 1);
+    assert_eq!(wire["guard"]["phase"], "relaunching");
+    assert_eq!(wire["guard"]["last"]["why"], "crash_report");
+    assert_eq!(wire["guard"]["last"]["pid"], ARENA_PID);
+    assert_eq!(
+        wire["guard"]["last"]["monitors"],
+        serde_json::json!([MONITOR_PID])
+    );
+    assert_eq!(wire["guard"]["last"]["at_ms"], NOW);
+    assert_eq!(wire["guard"]["last"]["error"], serde_json::Value::Null);
+    // A new Arena runs: the end stays on record, nothing pending.
+    let relaunched = WallFacts {
+        guard: Ok(vec![ArenaProcess {
+            pid: ARENA_PID + 4,
+            ..snv_arena_process()
+        }]),
+        ..snv_facts()
+    };
+    let back = guard_check(&mut guard, &relaunched, NOW + 15_000, &mut nothing_failed);
+    assert_eq!(
+        back,
+        WallGuard {
+            phase: GuardPhase::Idle,
+            ..relaunching
+        }
+    );
+}
+
+#[test]
+fn a_crash_report_read_from_the_box_ends_its_arena() {
+    let crashed_box = FakeReader {
+        processes: Ok(vec![
+            (ARENA_PID, "Arena.exe".to_string()),
+            (MONITOR_PID, "BugSplatMonitor.exe".to_string()),
+        ]),
+        parents: vec![(MONITOR_PID, ARENA_PID)],
+        times: vec![
+            (ARENA_PID, Ok(snv_times())),
+            (MONITOR_PID, Ok(monitor_times())),
+        ],
+        windows: Ok(vec![(MONITOR_PID, crash_report_window())]),
+        ..FakeReader::snv()
+    };
+    let facts = read_facts(&crashed_box);
+    let mut orders = Vec::new();
+    let mut end = |order: &EndOrder| -> Result<(), String> {
+        orders.push(order.why);
+        Ok(())
+    };
+    guard_check(&mut Guard::default(), &facts, NOW, &mut end);
+    assert_eq!(orders, [GuardWhy::CrashReport]);
 }
 
 /// SNV's box, read through the fake.
@@ -159,9 +306,12 @@ async fn a_check_reads_within_its_bound() {
 }
 
 /// The report reads the box without launching anything (a launched process
-/// is what Defender scanned on PP, #233) and changes nothing on it.
+/// is what Defender scanned on PP, #233) and changes nothing on it. #254:
+/// its ONE act, the guard's end of a dead Arena, lives in `guard_win.rs`
+/// alone, and no wall file names Arena's clip routes (clips run only from
+/// the operator's Stream Deck).
 #[test]
-fn the_wall_reads_spawn_no_process_and_set_nothing() {
+fn the_wall_reads_spawn_no_process_and_only_the_guard_ends_one() {
     let sources = [
         ("mod.rs", include_str!("mod.rs")),
         ("read.rs", include_str!("read.rs")),
@@ -169,6 +319,8 @@ fn the_wall_reads_spawn_no_process_and_set_nothing() {
         ("decide.rs", include_str!("decide.rs")),
         ("nvapi.rs", include_str!("nvapi.rs")),
         ("win.rs", include_str!("win.rs")),
+        ("guard.rs", include_str!("guard.rs")),
+        ("guard_win.rs", include_str!("guard_win.rs")),
     ];
     let banned = [
         "std::process",
@@ -186,18 +338,27 @@ fn the_wall_reads_spawn_no_process_and_set_nothing() {
         "Mosaic_Set",
         "MOSAIC_SET",
         "SetCurrentTopo",
+        // #254: Arena's REST routes that start or connect a clip.
+        "/clips/",
+        "/connect",
+        "/trigger",
     ];
     for (file, text) in sources {
         for word in banned {
             assert!(!text.contains(word), "{file} uses {word}");
         }
+        assert_eq!(
+            text.contains("TerminateProcess"),
+            file == "guard_win.rs",
+            "{file}: only guard_win.rs ends a process"
+        );
     }
 }
 
 #[tokio::test]
 async fn the_route_answers_the_published_status() {
     let state = crate::api::routes::tests::test_state().await;
-    let (published, _) = status_of(&snv_facts(), NOW);
+    let (published, _) = status_of(&snv_facts(), WallGuard::default(), NOW);
     global().publish(published.clone());
     let req = Request::builder()
         .uri("/api/v1/wall")

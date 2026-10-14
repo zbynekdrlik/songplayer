@@ -11,7 +11,7 @@ paths:
   - "e2e/mock-api.mjs"
 ---
 
-# The LED wall report (#259 lane 1: read and report)
+# The LED wall report (#259 lane 1: read and report; #254: the guard)
 
 ## The owner's rule — read this first
 
@@ -24,7 +24,8 @@ ROZHODNUTÉ 13.10.2026 (#259 comment 6142937258), binding for every lane:
   table on the ticket is one day's observation, never a target). The
   `wall_layout` setting idea is DROPPED.
 - **Off on every node by default; a deploy to PP (another setup) changes
-  nothing on its displays.** This lane acts on NOTHING: it reads and
+  nothing on its displays.** This lane acts on NOTHING (#254's guard,
+  below, is the one exception, for a DEAD Arena only): it reads and
   reports. A later lane that acts may only restore what a power cycle took,
   once per return, from a setup it learned itself (rules 3-4 of the
   ruling); never a loop, never a takeover of Arena's output.
@@ -36,6 +37,83 @@ ROZHODNUTÉ 13.10.2026 (#259 comment 6142937258), binding for every lane:
   operator's Arena setup can be — no `AdvancedOutput.xml`, no preset named,
   a preset file that does not exist — is a calm state (`no_preset`), never
   `unknown` and never a gate failure.
+
+## #254: the guard ends a crashed or hung Arena (`wall/guard.rs`)
+
+ROZHODNUTÉ 14.10.2026 (#254 comment 6169316862, the owner's "1"): the one
+exception to "acts on nothing". Why (SNV 14.10.2026, comment 6167739543):
+Arena 7.27.1's render thread crashed, BugSplat's monitor (`BugSplatMonitor.exe`,
+Arena's CHILD) showed a window "Crash Report" and waited for a click, the
+crashed thread kept the locks the main thread waits on, so Arena never
+exited; the operator's hotkey script relaunches only a GONE Arena, and the
+wall report read `ok`. Design: comment 6169337303.
+
+- **Reads** (each 5 s check, same walk, `read::guard_facts`): every
+  `Arena.exe` (never `Arena-Bridge.exe`, PP's other Resolume) with its
+  `GetProcessTimes` (start + kernel/user CPU, a handle opened for
+  `PROCESS_QUERY_LIMITED_INFORMATION` only), whether a VISIBLE top-level
+  window of it is `IsHungAppWindow` (sends nothing to it), and its crash
+  reporters = each `BugSplatMonitor.exe` whose Toolhelp PARENT is that
+  Arena AND that started no earlier than it (review round 1: a parent id
+  is never updated and outlives its parent, ids are reused, so a reporter
+  Arena-Bridge left up could read as the child of a later Songs Arena with
+  the Bridge's old id; a child is never older than its parent; a reporter
+  whose start is unread, or any reporter of an Arena whose start is unread,
+  is not counted), and whether one shows a visible window titled exactly
+  `Crash Report`. Each read keeps its own
+  error (`read_errors` lists them; never a state change).
+- **The rule** (`guard::decide`, pure): its crash reporter's window → end
+  at once; hung AND its CPU time unchanged since the check that first saw
+  it hung, for `HUNG_FOR_MS` 30 s → end; NEVER while the CPU time moves (a
+  composition load hangs the UI too: every move restarts the watch, so
+  does an answer in between, so does a check that read nothing); at most
+  ONCE per process = `(pid, start time)` (an id is reused); an Arena whose
+  times cannot be read is never acted on; one end per check.
+- **The act** (`guard_win.rs`, the ONLY wall file holding
+  `TerminateProcess`, pinned by the source scan in `mod_tests.rs`, which
+  also bans Arena's clip routes `/clips/`, `/connect`, `/trigger` in every
+  wall file): each crash reporter, then Arena; each opened by id and
+  checked first (its image's file name AND its start time, as read); a process
+  gone already counts as ended; exit code 1. Failures are joined into the
+  end's `error`, never retried (once per process).
+- **After an end** (`guard::follow`): `relaunching` until a NEW Arena (a key
+  not ended; one whose start is unread: an id no ended process had) runs →
+  `idle` + one INFO; none `RELAUNCH_WAIT_MS` 60 s after
+  the end → `not_back` + one WARN (the state itself is `arena_off`). One
+  ERROR per end naming why (`wall guard: ended …` / `could not end …`).
+- **Status:** `GET /api/v1/wall` `guard: {ends, last: {at_ms, why:
+  crash_report|hung, pid, monitors, error}, phase:
+  idle|relaunching|not_back}` (`sp_core::wall::WallGuard`, `serde(default)`:
+  an older server reads nothing ended). The HealthBar segment, while the
+  last end is pending (`phase != idle`) and the state shows a segment at
+  all, reads RED `Stena: Resolume spadol|zamrzol — ukončený, čaká na nové
+  spustenie` / `— ukončený, ale znova sa nespustil` / `— nepodarilo sa ho
+  ukončiť`, its tooltip ends with the full sentence, `data-guard` = the
+  phase. `RULE_SK` names the exception. The gate's `wallSummary` logs
+  `guard=ended Nx …` once the guard ended one.
+- **Never:** a clip (clips run only from the operator's Stream Deck; after
+  a relaunch none runs until he presses a scene — that report is #275), a
+  Resolume or display setting, a relaunch of our own (the operator's
+  script does it), `Arena-Bridge.exe`.
+- **Known effects:** a debugger that suspends Arena (`cdb -pv`) for 30 s
+  reads hung + CPU still: the guard ends it — inspect a hung Arena within
+  30 s, or before SongPlayer's next check after a crash window shows (it
+  ends at once). A BugSplat monitor that is not Arena's child is not
+  attributed: only the 30 s hang rule catches that crash.
+- **Tests:** `guard_tests.rs` (every branch: the crash window, a hang still
+  30 s at its boundary, a hang while the CPU time moves, an answer in
+  between, reads that fail, once per process, a reused id, the relaunch
+  wait at 59 999 / 60 000 ms, the lingering old process, a failed end, an
+  unread relaunch), `read_tests.rs` (the parent rule, a reporter older than
+  Arena or with its start unread, a hidden or other-titled window, each
+  read's error), `mod_tests.rs` (the check over a recorder, the status's
+  `guard`, the incident end to end from a scripted box), `win_tests.rs`
+  (Windows job: a copy of the test binary run as `Arena.exe` /
+  `Arena-Bridge.exe` / `BugSplatMonitor.exe` — its parent, times, no hung
+  window, ended only when the image and start time match, the reporter
+  first, exit code 1), `sp-core wall_tests.rs`
+  (texts, label, wire), `e2e/health-wall.spec.ts` (red until it runs
+  again, console clean), `e2e/wall-gate.spec.ts` (the summary).
 
 ## The reference: Resolume Arena's OWN saved output setup (`wall/resolume.rs`)
 
@@ -74,7 +152,8 @@ elsewhere (OneDrive) is not followed (known limit).
 
 ## What else is read (`wall/win.rs`, Windows only, every fn `mutants::skip`)
 
-Nothing spawns a process, nothing on the box changes.
+Nothing spawns a process, nothing on the box changes (#254's one act lives
+in `guard_win.rs`, never here).
 
 - **Arena:** a Toolhelp snapshot of the processes (image file names, no
   handle opened); `Arena.exe` (any case) = running; then its top-level
@@ -185,7 +264,7 @@ Each step reads only the facts it needs; a needed fact that failed =
   width, height, hz}], nvidia: "not_read" | "no_driver" | "read",
   connected: [{id: "0x80061083", connector, flags}] | null, grids: [{rows,
   columns, displays, width, height, hz}] | null}, read_errors,
-  checked_at_ms}` (`connected` / `grids` null when not read or that read
+  checked_at_ms, guard}` (`guard`: #254 above; `connected` / `grids` null when not read or that read
   failed; its reason in `read_errors`). Problem codes: `unreadable:<arena|arena_output|displays|nvapi>`,
   `screens_off`, `display_absent`, `display_size`, `arena_not_drawing`.
 - Dashboard: the HealthBar polls it every 5 s; the `health-wall` segment

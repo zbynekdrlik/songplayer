@@ -35,7 +35,9 @@
 //! draw on it (`sp_core::wall::label`), polled every 5 s; nothing while
 //! Resolume drives no physical display. The bar's `data-wall` says what the
 //! last poll said (`sp_core::wall::marker`). It only reports: the operator's
-//! own setup in Resolume is the reference, nothing is ever changed.
+//! own setup in Resolume is the reference, nothing is ever changed. #254:
+//! after the guard ended a crashed or hung Resolume the segment names that
+//! end, red, until Resolume runs again (`data-guard`: the guard's phase).
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -188,14 +190,22 @@ pub fn HealthBar() -> impl IntoView {
                 let title = health::resolume_title(&hosts);
                 view! { <span class=cls title=title data-testid="health-resolume">{text}</span> }
             }}
-            // #259: the LED wall against Resolume's own saved output.
+            // #259: the LED wall against Resolume's own saved output; #254:
+            // `data-guard` = the guard's phase after its last end of Arena.
             {move || {
                 let status = wall_status.get();
                 let state = status.state.name();
+                let guard = status.guard.phase.name();
                 wall::label(&status).map(|(tone, text, tip)| {
                     let cls = format!("health-seg {}", tone.css_class());
                     view! {
-                        <span class=cls title=tip data-testid="health-wall" data-state=state>
+                        <span
+                            class=cls
+                            title=tip
+                            data-testid="health-wall"
+                            data-state=state
+                            data-guard=guard
+                        >
                             {text}
                         </span>
                     }

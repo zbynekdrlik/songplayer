@@ -221,6 +221,35 @@ test("the summary line tells what Resolume wants and what the box shows", () => 
     "state=screens_off arena=true output=? windows=? nvidia=none problems=[screens_off]",
   );
   expect(wallSummary(null)).toBe("no answer");
+  // #254: the guard's ends, only once it ended one.
+  const nothingEnded = snv({ guard: { ends: 0, last: null, phase: "idle" } });
+  expect(wallSummary(nothingEnded)).toBe(wallSummary(snv()));
+  const ended = snv({
+    state: "arena_off",
+    read: { arena_running: false },
+    guard: {
+      ends: 2,
+      last: { at_ms: 1, why: "crash_report", pid: 15176, error: null },
+      phase: "relaunching",
+    },
+  });
+  expect(wallSummary(ended)).toBe(
+    "state=arena_off arena=false output=? windows=? nvidia=? connected, grids=? " +
+      "guard=ended 2x last=crash_report pid 15176 phase=relaunching",
+  );
+  const refused = snv({
+    state: "arena_off",
+    read: { arena_running: false },
+    guard: {
+      ends: 1,
+      last: { at_ms: 1, why: "hung", pid: 15176, error: "access denied" },
+      phase: "not_back",
+    },
+  });
+  expect(wallSummary(refused)).toBe(
+    "state=arena_off arena=false output=? windows=? nvidia=? connected, grids=? " +
+      "guard=ended 1x last=hung pid 15176 (failed: access denied) phase=not_back",
+  );
 });
 
 test("the mock serves a report the gate passes", async ({ request }) => {
@@ -230,6 +259,7 @@ test("the mock serves a report the gate passes", async ({ request }) => {
   const status = (await resp.json()) as WallStatus;
   expect(wallChecked(status)).toBe(true);
   expect(status.state).toBe("simple_output");
+  expect(status.guard).toEqual({ ends: 0, last: null, phase: "idle" });
   expect(wallFailures(status)).toEqual([]);
   await request.post("/__mock/wall", { data: { state: "unknown" } });
   const unknown = (await (await request.get("/api/v1/wall")).json()) as WallStatus;

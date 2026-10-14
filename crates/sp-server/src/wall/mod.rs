@@ -30,16 +30,23 @@
 //! One WARN when the state turns into a problem, one INFO when it holds
 //! again ([`Reporter`]). The vocabulary (states, codes, Slovak texts, the
 //! wire shape) is `sp_core::wall`.
+//!
+//! #254 (the owner's ONE exception to "acts on nothing", ROZHODNUTÉ
+//! 14.10.2026, #254 comment 6169316862): the guard ([`guard`]) ends a
+//! crashed or hung Arena at each check, so the operator's relaunch script
+//! brings it back. Its only act on the box lives in `guard_win.rs`; it never
+//! touches Arena's setup, a display or a clip.
 
 use std::sync::{LazyLock, RwLock};
 use std::time::Duration;
 
-use sp_core::wall::{WallProblem, WallProblemView, WallState, WallStatus};
-use tracing::{info, warn};
+use sp_core::wall::{WallGuard, WallProblem, WallProblemView, WallState, WallStatus};
+use tracing::{error, info, warn};
 
 use crate::prod_env::Reader;
 
 pub mod decide;
+pub mod guard;
 pub mod nvapi;
 pub mod read;
 pub mod resolume;
@@ -60,8 +67,13 @@ fn views(problems: &[WallProblem]) -> Vec<WallProblemView> {
     problems.iter().map(WallProblem::view).collect()
 }
 
-/// The published status of one check's facts, and its problems.
-pub fn status_of(facts: &WallFacts, now_ms: i64) -> (WallStatus, Vec<WallProblem>) {
+/// The published status of one check's facts with the guard's record, and
+/// its problems.
+pub fn status_of(
+    facts: &WallFacts,
+    guard: WallGuard,
+    now_ms: i64,
+) -> (WallStatus, Vec<WallProblem>) {
     let verdict = decide::decide(facts);
     let status = WallStatus {
         checked: true,
@@ -70,6 +82,7 @@ pub fn status_of(facts: &WallFacts, now_ms: i64) -> (WallStatus, Vec<WallProblem
         read: decide::read_view(facts),
         read_errors: decide::read_errors(facts),
         checked_at_ms: Some(now_ms),
+        guard,
     };
     (status, verdict.problems)
 }
@@ -143,14 +156,16 @@ pub fn global() -> &'static WallStore {
     &STORE
 }
 
-/// One check: publishes its status into `store` and logs what changed.
+/// One check: publishes its status (with the guard's record) into `store`
+/// and logs what changed.
 pub fn apply(
     store: &WallStore,
     reporter: &mut Reporter,
+    guard: WallGuard,
     facts: &WallFacts,
     now_ms: i64,
 ) -> LogStep {
-    let (status, problems) = status_of(facts, now_ms);
+    let (status, problems) = status_of(facts, guard, now_ms);
     let step = reporter.step(status.state, &problems);
     log_step(step, &status);
     store.publish(status);
@@ -178,6 +193,51 @@ fn log_step(step: LogStep, status: &WallStatus) {
     }
 }
 
+/// #254: one check's guard — its step over the facts (an end it orders
+/// runs through `end`), each event logged — and its record for the status.
+pub fn guard_check(
+    guard: &mut guard::Guard,
+    facts: &WallFacts,
+    now_ms: i64,
+    end: &mut dyn FnMut(&guard::EndOrder) -> Result<(), String>,
+) -> WallGuard {
+    for event in guard::step(guard, &facts.guard, now_ms, end) {
+        log_guard(&event);
+    }
+    guard.view()
+}
+
+/// The log line of a guard's event.
+#[cfg_attr(test, mutants::skip)] // log text only; the events are pinned by `guard`'s tests
+fn log_guard(event: &guard::GuardEvent) {
+    use sp_core::wall::GuardWhy;
+    match event {
+        guard::GuardEvent::Ended(end) => error!(
+            pid = end.pid,
+            why = end.why.name(),
+            monitors = ?end.monitors,
+            failed = ?end.error,
+            "wall guard: {} Resolume Arena (pid {}): {}",
+            if end.error.is_none() { "ended" } else { "could not end" },
+            end.pid,
+            match end.why {
+                GuardWhy::CrashReport => "its crash reporter waited on its \"Crash Report\" window",
+                GuardWhy::Hung => "its windows did not answer and its CPU time stood still for 30 s",
+            }
+        ),
+        guard::GuardEvent::NotBack(end) => warn!(
+            pid = end.pid,
+            why = end.why.name(),
+            "wall guard: no new Resolume Arena runs {} s after the guard ended pid {}",
+            guard::RELAUNCH_WAIT_MS / 1000,
+            end.pid
+        ),
+        guard::GuardEvent::Back { pid } => {
+            info!(pid, "wall guard: Resolume Arena runs again (pid {pid})")
+        }
+    }
+}
+
 /// This check's facts, read within `bound` (a read past it reads as
 /// unreadable, and the next check waits for that same read:
 /// `prod_env::Reader`).
@@ -202,19 +262,36 @@ fn read_now() -> WallFacts {
     WallFacts::unread("not Windows: the wall is read on Windows only")
 }
 
+/// #254: the guard's end of an Arena (Windows: `guard_win.rs`).
+#[cfg(windows)]
+#[cfg_attr(test, mutants::skip)] // platform wiring; the order is tested over a recorder
+fn end_now(order: &guard::EndOrder) -> Result<(), String> {
+    guard_win::end(order)
+}
+
+/// Off Windows nothing is read, so nothing is ever ordered to end.
+#[cfg(not(windows))]
+#[cfg_attr(test, mutants::skip)] // platform wiring
+fn end_now(_order: &guard::EndOrder) -> Result<(), String> {
+    Err("not Windows: nothing is ended".to_string())
+}
+
 /// Checks the wall at once and every [`CHECK_EVERY`], publishing into
 /// [`global`], until the shutdown.
 #[cfg_attr(test, mutants::skip)] // the loop; `next_check`, `apply` and the reader are tested
 pub async fn run(mut shutdown: tokio::sync::broadcast::Receiver<()>) {
     let mut reader = Reader::named(read_now, READ_WHAT);
     let mut reporter = Reporter::default();
+    let mut guard = guard::Guard::default();
     let mut tick = tokio::time::interval(CHECK_EVERY);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tokio::select! {
             _ = tick.tick() => {
                 let facts = next_check(&mut reader, READ_BOUND).await;
-                apply(global(), &mut reporter, &facts, chrono::Utc::now().timestamp_millis());
+                let now = chrono::Utc::now().timestamp_millis();
+                let record = guard_check(&mut guard, &facts, now, &mut end_now);
+                apply(global(), &mut reporter, record, &facts, now);
             }
             _ = shutdown.recv() => break,
         }
@@ -224,6 +301,10 @@ pub async fn run(mut shutdown: tokio::sync::broadcast::Receiver<()>) {
 #[cfg(windows)]
 #[path = "win.rs"]
 mod win;
+
+#[cfg(windows)]
+#[path = "guard_win.rs"]
+mod guard_win;
 
 #[cfg(test)]
 #[path = "read_fake.rs"]

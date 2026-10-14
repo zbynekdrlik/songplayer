@@ -15,11 +15,16 @@
 //!   whole list failed;
 //! - Arena's saved setup files in `%USERPROFILE%\Documents`
 //!   (`resolume.rs`, bounded reads);
-//! - the processes (a Toolhelp snapshot: their image file names, no handle
-//!   to any process opened);
-//! - Arena's top-level windows (`EnumWindows`).
+//! - the processes (a Toolhelp snapshot: their image file names and parent
+//!   ids, no handle to any process opened);
+//! - Arena's top-level windows (`EnumWindows`);
+//! - #254, for the guard: an Arena process's start and CPU time
+//!   (`GetProcessTimes` on a handle opened for limited query only) and
+//!   whether a visible window of it does not answer (`IsHungAppWindow`,
+//!   which sends nothing to it).
 //!
-//! Nothing spawns a process and nothing on the box is changed. Every
+//! Nothing spawns a process and nothing on the box is changed (the guard's
+//! one act is `guard_win.rs`'s, never this file's). Every
 //! decision on what was read is `read.rs`'s and `decide.rs`'s, tested on
 //! Linux; this file only reads. Not compiled on the Linux runner, so every
 //! fn is `mutants::skip`.
@@ -40,8 +45,9 @@ use std::time::Instant;
 use sp_core::wall::{ArenaWindow, Display};
 use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM};
 
+use super::guard::ProcessTimes;
 use super::nvapi::{self, NvGpuDisplayIds, NvMosaicGridTopoV2, Session};
-use super::read::{NvidiaRaw, WallReader};
+use super::read::{NvidiaRaw, ProcessEntry, WallReader};
 use super::resolume;
 
 type QueryInterface = unsafe extern "C" fn(u32) -> *mut c_void;
@@ -258,6 +264,66 @@ fn grids(nvapi: &Nvapi) -> Result<Vec<NvMosaicGridTopoV2>, String> {
     Ok(grids)
 }
 
+/// Every top-level window (`EnumWindows`).
+#[cfg_attr(test, mutants::skip)] // Windows glue
+fn top_level_windows() -> Result<Vec<HWND>, String> {
+    use windows_sys::Win32::Foundation::GetLastError;
+    use windows_sys::Win32::UI::WindowsAndMessaging::EnumWindows;
+    let mut handles: Vec<HWND> = Vec::new();
+    // SAFETY: `collect_window` only pushes onto `handles`, which outlives
+    // the call.
+    let listed = unsafe {
+        EnumWindows(
+            Some(collect_window),
+            &mut handles as *mut Vec<HWND> as LPARAM,
+        )
+    };
+    if listed == 0 {
+        // SAFETY: reads this thread's last error.
+        let error = unsafe { GetLastError() };
+        return Err(format!("EnumWindows failed (error {error})"));
+    }
+    Ok(handles)
+}
+
+/// #254: a FILETIME's halves (`(low, high)`).
+#[cfg_attr(test, mutants::skip)] // Windows glue
+fn halves(time: &windows_sys::Win32::Foundation::FILETIME) -> (u32, u32) {
+    (time.dwLowDateTime, time.dwHighDateTime)
+}
+
+/// #254: the start and CPU time of the process `handle` was opened for
+/// (with at least `PROCESS_QUERY_LIMITED_INFORMATION`); `pid` names it in
+/// the error. Shared with the guard's end (`guard_win.rs`), which checks
+/// Arena's start time before it ends it.
+#[cfg_attr(test, mutants::skip)] // Windows glue
+pub(super) fn process_times(
+    handle: windows_sys::Win32::Foundation::HANDLE,
+    pid: u32,
+) -> Result<ProcessTimes, String> {
+    use windows_sys::Win32::Foundation::{FILETIME, GetLastError};
+    use windows_sys::Win32::System::Threading::GetProcessTimes;
+    let zero = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let (mut created, mut exited, mut kernel, mut user) = (zero, zero, zero, zero);
+    // SAFETY: `handle` is an open process handle; the four FILETIMEs
+    // outlive the call.
+    let read =
+        unsafe { GetProcessTimes(handle, &mut created, &mut exited, &mut kernel, &mut user) };
+    if read == 0 {
+        // SAFETY: reads this thread's last error.
+        let error = unsafe { GetLastError() };
+        return Err(format!("GetProcessTimes({pid}) failed (error {error})"));
+    }
+    Ok(ProcessTimes::from_filetimes(
+        halves(&created),
+        halves(&kernel),
+        halves(&user),
+    ))
+}
+
 /// The box's reads on Windows.
 pub struct WinReader;
 
@@ -349,7 +415,7 @@ impl WallReader for WinReader {
     }
 
     #[cfg_attr(test, mutants::skip)] // Windows glue
-    fn processes(&self) -> Result<Vec<(u32, String)>, String> {
+    fn processes(&self) -> Result<Vec<ProcessEntry>, String> {
         use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, INVALID_HANDLE_VALUE};
         use windows_sys::Win32::System::Diagnostics::ToolHelp::{
             CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
@@ -370,7 +436,11 @@ impl WallReader for WinReader {
         // `dwSize` is its size (each call below likewise).
         let mut more = unsafe { Process32FirstW(snapshot, &mut entry) } != 0;
         while more && processes.len() < MAX_PROCESSES {
-            processes.push((entry.th32ProcessID, wide_string(&entry.szExeFile)));
+            processes.push(ProcessEntry {
+                pid: entry.th32ProcessID,
+                parent: entry.th32ParentProcessID,
+                image: wide_string(&entry.szExeFile),
+            });
             // SAFETY: as above.
             more = unsafe { Process32NextW(snapshot, &mut entry) } != 0;
         }
@@ -381,25 +451,12 @@ impl WallReader for WinReader {
 
     #[cfg_attr(test, mutants::skip)] // Windows glue
     fn windows_of(&self, pids: &[u32]) -> Result<Vec<ArenaWindow>, String> {
-        use windows_sys::Win32::Foundation::{GetLastError, RECT};
+        use windows_sys::Win32::Foundation::RECT;
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            EnumWindows, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
+            GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
         };
         let _dpi = DpiAware::per_monitor();
-        let mut handles: Vec<HWND> = Vec::new();
-        // SAFETY: `collect_window` only pushes onto `handles`, which outlives
-        // the call.
-        let listed = unsafe {
-            EnumWindows(
-                Some(collect_window),
-                &mut handles as *mut Vec<HWND> as LPARAM,
-            )
-        };
-        if listed == 0 {
-            // SAFETY: reads this thread's last error.
-            let error = unsafe { GetLastError() };
-            return Err(format!("EnumWindows failed (error {error})"));
-        }
+        let handles = top_level_windows()?;
         let mut windows = Vec::new();
         for hwnd in handles {
             let mut pid = 0_u32;
@@ -437,6 +494,48 @@ impl WallReader for WinReader {
             });
         }
         Ok(windows)
+    }
+
+    #[cfg_attr(test, mutants::skip)] // Windows glue
+    fn times(&self, pid: u32) -> Result<ProcessTimes, String> {
+        use windows_sys::Win32::Foundation::{CloseHandle, GetLastError};
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+        // SAFETY: opens the process for a limited query only (no right to
+        // change it); closed below.
+        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if handle.is_null() {
+            // SAFETY: reads this thread's last error.
+            let error = unsafe { GetLastError() };
+            return Err(format!("OpenProcess({pid}) failed (error {error})"));
+        }
+        let times = process_times(handle, pid);
+        // SAFETY: the handle is closed once, here.
+        unsafe { CloseHandle(handle) };
+        times
+    }
+
+    #[cfg_attr(test, mutants::skip)] // Windows glue
+    fn hung(&self, pid: u32) -> Result<bool, String> {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GetWindowThreadProcessId, IsHungAppWindow, IsWindowVisible,
+        };
+        for hwnd in top_level_windows()? {
+            let mut owner = 0_u32;
+            // SAFETY: `hwnd` came from EnumWindows (a window closed since
+            // answers 0); `owner` outlives the call.
+            unsafe { GetWindowThreadProcessId(hwnd, &mut owner) };
+            // SAFETY: as above. IsHungAppWindow reads how long the window's
+            // thread has not taken a message; it sends nothing to it.
+            if owner == pid
+                && unsafe { IsWindowVisible(hwnd) } != 0
+                && unsafe { IsHungAppWindow(hwnd) } != 0
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }
 
