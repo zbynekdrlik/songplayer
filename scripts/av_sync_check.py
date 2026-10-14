@@ -885,6 +885,11 @@ def _pts(line: str, path: str) -> float:
     return float(m.group(1))
 
 
+def showinfo_pts(stderr: str, path: str) -> list[float]:
+    """Every frame's pts (s) from ffmpeg's ``showinfo`` lines on stderr."""
+    return [_pts(ln, path) for ln in _info_lines(stderr, "showinfo")]
+
+
 def decode_audio(ffmpeg: str, path: str) -> tuple[np.ndarray, float]:
     """First audio stream as 8 kHz mono float32 + the time of its sample 0."""
     out, err = _run(
@@ -911,7 +916,7 @@ def probe_video_size(ffmpeg: str, path: str) -> tuple[int, int]:
     raise RuntimeError(f"could not read the video size of {path}")
 
 
-def decode_video(
+def gray_video_args(
     ffmpeg: str,
     path: str,
     width: int,
@@ -919,9 +924,14 @@ def decode_video(
     start: float | None = None,
     duration: float | None = None,
     crop: tuple[float, float, float, float] | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Frames (optionally cropped to source-pixel ``(x, y, w, h)`` first) scaled
-    to ``width`` x ``height`` gray (uint8), plus their container pts."""
+) -> list[str]:
+    """ffmpeg's command line for a video's frames as raw 8-bit gray at
+    ``width`` x ``height`` on stdout (optionally cropped to source-pixel
+    ``(x, y, w, h)`` first): every stored frame as stored (``-fps_mode
+    passthrough``), each one's container pts on stderr (``showinfo``, before
+    the crop and scale, at ffmpeg's default log level). The A/V gate's
+    ``decode_video`` and the wall reader (``wall_frames.read_video``) both
+    read with it."""
     # -ss/-t are INPUT options: ffmpeg trims before the filter graph, so showinfo
     # reports exactly the frames written (an output -t under -copyts counts from
     # 0, not from the seek point, and cuts frames showinfo already logged).
@@ -938,8 +948,22 @@ def decode_video(
     cmd += ["-i", path, "-map", "0:v:0",
             "-vf", f"showinfo,{crop_f}scale={width}:{height}:flags=area,format=gray",
             "-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"]  # fmt: skip
-    out, err = _run(cmd)
-    pts = np.array([_pts(ln, path) for ln in _info_lines(err, "showinfo")])
+    return cmd
+
+
+def decode_video(
+    ffmpeg: str,
+    path: str,
+    width: int,
+    height: int,
+    start: float | None = None,
+    duration: float | None = None,
+    crop: tuple[float, float, float, float] | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Frames (optionally cropped to source-pixel ``(x, y, w, h)`` first) scaled
+    to ``width`` x ``height`` gray (uint8), plus their container pts."""
+    out, err = _run(gray_video_args(ffmpeg, path, width, height, start, duration, crop))
+    pts = np.array(showinfo_pts(err, path))
     frame_bytes = width * height
     n = len(out) // frame_bytes
     if n == 0 or n != len(pts):
