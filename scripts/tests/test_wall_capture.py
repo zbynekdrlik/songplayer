@@ -174,9 +174,9 @@ def test_main_reads_a_dxcam_capture_by_its_polls(monkeypatch, capsys):
         "late": dxcam_capture(late=(0.49, 0.535)),
         # The wall stopped after the clip's last present, the polls ran on.
         "stopped": dxcam_capture(after=1.0),
-        # Every grab costs 20 ms (> a refresh): a refresh hidden before
-        # every picture, so a clean wall is never judged, never read as
-        # judder (review round 4: 17-22 ms grabs read it as defects).
+        # Every grab costs 20 ms (> a refresh): no picture is timed, so the
+        # given rate cannot be checked, and an unchecked rate would read as
+        # judder (review round 7): the capture fails, never the wall.
         "slow": dxcam_capture(grab=0.020),
         # Grabs of 10 ms: the poll after a picture is late but finds
         # nothing; the next picture comes on a timely poll: all judged.
@@ -184,6 +184,10 @@ def test_main_reads_a_dxcam_capture_by_its_polls(monkeypatch, capsys):
         # No poll for 12 ms before boundary 15's first present is caught: its
         # start is known only to 12 ms, still within one count.
         "lag": dxcam_capture(late=(0.4995, 0.5115)),
+        # A grab preempted between its stamp and its acquire (review round
+        # 7): the frame was on screen within the window, never at the stamp.
+        "held 5": dxcam_capture(held=(0.4995, 0.005)),
+        "held 40": dxcam_capture(held=(0.4995, 0.040)),
     }
     asked = []
 
@@ -211,14 +215,28 @@ def test_main_reads_a_dxcam_capture_by_its_polls(monkeypatch, capsys):
     assert "not in whole 45 Hz refreshes" in capsys.readouterr().err
     assert wf.main([*args, "--region", "0,0,64,32"]) == 0
     capsys.readouterr()
-    expected = {"clean": 0, "late": 3, "slow": 3, "stopped": 1, "half": 0, "lag": 0}
+    asked.append("slow")
+    assert wf.main(args) == 5
+    assert "60 Hz refresh rate cannot be checked" in capsys.readouterr().err
+    # Every acquire window 2 ms: no picture is timed to a tenth of a refresh.
+    times, sampled, polls, _ = dxcam_capture()
+    captures["windows"] = (times, sampled, polls, [t + 0.002 for t in times])
+    asked.append("windows")
+    assert wf.main(args) == 5
+    assert "cannot be checked" in capsys.readouterr().err
+    expected = {"clean": 0, "late": 3, "stopped": 1, "half": 0, "lag": 0}
+    expected |= {"held 5": 0, "held 40": 3}
     reports = {}
     for name, code in expected.items():
         asked.append(name)
         assert wf.main(args) == code, name
         reports[name] = json.loads(capsys.readouterr().out)
-        assert reports[name]["boundaries"] == (29 if name == "late" else 30), name
-    for name, judged in (("slow", 0), ("half", 28), ("lag", 28)):
+        whole = 29 if name in ("late", "held 40") else 30
+        assert reports[name]["boundaries"] == whole, name
+    for name in ("held 5", "held 40"):
+        assert reports[name]["refreshes"]["uneven"] == 0, name
+        assert reports[name]["lost_boundaries"] == 0, name
+    for name, judged in (("half", 28), ("lag", 28)):
         assert reports[name]["refreshes"]["uneven"] == 0, name
         assert reports[name]["refreshes"]["judged"] == judged, name
         assert reports[name]["lost_boundaries"] == 0, name
@@ -249,10 +267,43 @@ def test_a_dxcam_present_rate_must_be_whole_refreshes():
         wa.check_present_rate([n / 59.88 for n in range(300)], 60, [0.0005] * 300)
     wa.check_present_rate([n / 59.94 for n in range(300)], 60, [0.0005] * 300)
     # Only pictures timed within TIMED_SHARE of a refresh count (successive
-    # ones, untimed between), and too few are no check.
-    wa.check_present_rate(every, 45, [0.02] * 30)
-    wa.check_present_rate(every, 45, [0.003] * 30)  # 0.18 of a refresh: untimed
+    # ones, untimed between), the acquire window included; too few cannot
+    # check the rate, and an unchecked rate is refused too (review round 7).
+    for untimed in ([0.02] * 30, [0.003] * 30):  # 0.003 = 0.18 of a refresh
+        with pytest.raises(ValueError, match="cannot be checked"):
+            wa.check_present_rate(every, 45, untimed)
+    with pytest.raises(ValueError, match="cannot be checked"):
+        wa.check_present_rate(every, 60, timed, [0.002] * 30)
+    wa.check_present_rate(every, 60, timed, [0.001] * 30)
     wa.check_present_rate(every, 60, [0.02, 0.0005] * 15)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="not in whole"):
         wa.check_present_rate(every, 45, [0.02, 0.0005] * 15)
-    wa.check_present_rate(every[: wa.MIN_TIMED], 45, timed[: wa.MIN_TIMED])
+    with pytest.raises(ValueError, match="cannot be checked"):
+        wa.check_present_rate(every[: wa.MIN_TIMED], 45, timed[: wa.MIN_TIMED])
+    wa.check_present_rate(every[: wa.MIN_TIMED + 2], 60, timed[: wa.MIN_TIMED + 2])
+
+
+def test_a_locked_recording_must_be_the_wall_s_own_refreshes():
+    # Review round 7: --locked was taken on trust. Each interval must be a
+    # whole number of the wall's refreshes, and the rate the wall's.
+    wa.check_locked([n / 60 for n in range(600)], 60)
+    wa.check_locked([round(n / 60, 3) for n in range(600)], 60)  # 1 ms pts
+    wa.check_locked([n / 60 for n in range(600) if n % 7], 60)  # dropped ones
+    with pytest.raises(ValueError, match="no whole 60 Hz refreshes"):
+        wa.check_locked([n / 120 for n in range(600)], 60)  # a 120 fps camera
+    with pytest.raises(ValueError, match="one is 0.67"):
+        wa.check_locked([n / 90 for n in range(600)], 60)  # a third off
+    with pytest.raises(ValueError, match="runs at 59.880 Hz"):
+        wa.check_locked([n / 59.88 for n in range(600)], 60)
+    wa.check_locked([0.0], 60)
+
+
+def test_main_refuses_a_locked_video_that_is_no_recording_of_the_wall(
+    monkeypatch, capsys
+):
+    readings = [wa.Reading("ok", 0, None, 0, 8)] * 240
+    times = [n / 120 for n in range(240)]
+    monkeypatch.setattr(wf, "read_video", lambda *_: (readings, times))
+    args = ["--fps", "30", "--video", "rec.mp4", "--refresh-hz", "60", "--locked"]
+    assert wf.main(args) == 5
+    assert "not a recording of the wall's own signal" in capsys.readouterr().err

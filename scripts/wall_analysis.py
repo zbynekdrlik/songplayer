@@ -78,8 +78,10 @@ TIMED_SHARE = 0.1
 # its nominal rate (60 for a 60/1.001 wall, 0.1 %); dxcam's measured
 # present rate must agree to it (check_present_rate).
 RATE_TOLERANCE = 0.0015
-# How far a dxcam capture instant may be off: the poll's own clock is exact,
-# the frame dxcam acquires is the newest DWM composed by then.
+# How far a dxcam stamp may be off. A picture's poll is stamped before its
+# grab and its acquire window closed after it (``Timing.late``): the frame
+# was on screen inside that window, never assumed at the stamp (review round
+# 7: a grab preempted between the stamp and the acquire read judder).
 POLL_TIME_ERROR = 0.0005
 # The least a recording's instant may be off: showinfo prints 6 decimals.
 PTS_TIME_ERROR = 1e-6
@@ -179,6 +181,36 @@ class Boundary:
     def end(self) -> Reading:
         """Its last reading."""
         return self.last_reading or self.reading
+
+
+def mixed_exposures(
+    readings: list[Reading], n_frames: int, fps: int, grid_fps: int
+) -> list[Reading]:
+    """A camera's exposure lasts: one taken across a boundary change mixes
+    the two and reads a position between them (review round 7: a 120 fps
+    camera read hundreds of cadence errors on a clean wall). A lone decoded
+    picture strictly between its decoded neighbours, off the grid from the
+    one before (the capture's first: to the one after; its last: from the
+    one before), is such a mix: ``mixed``, unreadable — the boundaries
+    beside it stay open (unresolved), never a cadence error. A real
+    off-grid boundary a camera sees once is then incomplete, never clean."""
+
+    def off(x: Reading, y: Reading) -> bool:
+        return step_count(x, y, n_frames, fps, grid_fps)[2]
+
+    out = list(readings)
+    last = len(readings) - 1
+    for k, r in enumerate(readings):
+        a = readings[k - 1] if k > 0 and readings[k - 1].ok else None
+        b = readings[k + 1] if k < last and readings[k + 1].ok else None
+        if not r.ok or (a is None and b is None):
+            continue
+        v = r.position()
+        after = a is None or a.position() + SAME_PICTURE < v
+        before = b is None or v < b.position() - SAME_PICTURE
+        if after and before and (off(a, r) if a else off(r, b)):
+            out[k] = Reading("mixed")
+    return out
 
 
 def boundaries(readings: list[Reading]) -> list[Boundary]:
@@ -288,6 +320,14 @@ class Timing:
     locked: bool
     span: tuple[float, float] | None
     error: float = 0.0
+    late: list[float] | None = None
+
+    def by(self, k: int) -> float:
+        """An instant at or after picture ``k``'s content was on screen:
+        its time (the frame was on screen at or after it), plus its acquire
+        window (``late``: dxcam stamps a poll before its grab)."""
+        assert self.times is not None
+        return self.times[k] + (self.late[k] if self.late else 0.0)
 
     def lag(self, k: int) -> float:
         """How long before picture ``k`` its content can have appeared: its
@@ -311,7 +351,8 @@ class Timing:
         assert self.blind is not None and self.period is not None
         if self.locked:
             return max(0, round(self.blind[k] / self.period) - 1)
-        return hidden_refreshes(self.blind[k], self.period, self.error)
+        late = self.late[k] if self.late else 0.0
+        return hidden_refreshes(self.blind[k] + late, self.period, self.error)
 
 
 def unseen_refreshes(prev: Boundary, run: Boundary, timing: Timing) -> int:
@@ -410,7 +451,7 @@ def seam_steps(steps: list[Step]) -> set[int]:
     """The steps at a loop seam: the wrap and the step on each side. Their
     losses and cadence are judged like any step's (``step_count`` knows the
     song-end clamp); what the seam is spared is its timing (the song's last
-    boundary and the new play's first two may be held up to
+    boundary and the new play's first may be held up to
     ``SEAM_HOLD_S``) and its weights (the clamped last frame is plain)."""
     seam: set[int] = set()
     for n, s in enumerate(steps):
@@ -430,6 +471,7 @@ def analyse(
     span: tuple[float, float] | None = None,
     min_boundaries: int = MIN_BOUNDARIES,
     locked: bool = False,
+    late: list[float] | None = None,
 ) -> dict:
     """The report of a capture of the ``fps`` clip (see the module doc).
 
@@ -437,7 +479,8 @@ def analyse(
     blind span before it when the pictures are the wall's presents (dxcam:
     since the poll before), else ``None``: a recording, each picture an
     instant sample (``capture_blind``); ``span`` the capture's own start
-    and end (default: its first and last picture); ``locked`` whether each
+    and end (default: its first and last picture); ``late`` each dxcam
+    picture's acquire window after its time; ``locked`` whether each
     recorded picture is one wall refresh. Without times, each sample is one
     refresh. The refresh check needs the wall's ``refresh_hz``. ``clean``
     needs ``min_boundaries`` boundaries judged for judder."""
@@ -451,7 +494,9 @@ def analyse(
         blind = capture_blind(times, blind)
         if span is None and times:
             span = (times[0], times[-1])
-    timing = Timing(times, blind, period, locked, span, error)
+    timing = Timing(times, blind, period, locked, span, error, late)
+    if times is not None and not presents and not locked:
+        readings = mixed_exposures(readings, n_frames, fps, grid_fps)
     runs = boundaries(readings)
     steps = steps_between(
         runs, n_frames, fps, grid_fps, timing, min(expected, default=1)
@@ -542,7 +587,7 @@ def verdict(report: dict) -> str:
     judged = refresh["judged"] if refresh else 0
     if report["unverified"]["steps"] or coverage < MIN_COVERAGE:
         return "incomplete"
-    if refresh and refresh["unresolved"]:
+    if refresh and (refresh["unresolved"] or refresh["inconsistent"]):
         return "incomplete"
     if judged < report["min_boundaries"]:
         return "incomplete"
@@ -625,11 +670,14 @@ def held_range(n: int, runs: list[Boundary], timing: Timing) -> tuple[int, float
         return lo, lo if clean_in and clean_out else math.inf
     t, p = timing.times, timing.period
     assert p is not None
+    # A lower bound of when a picture's content was on screen is its time,
+    # an upper bound ``by`` (the end of dxcam's acquire window).
     a, b = t[run.first_sample], t[run.last_sample]
+    a_by = timing.by(run.first_sample)
     if n == last and timing.span is not None:
         after = run.last_sample + 1
         if after < len(t):  # unreadable pictures follow: to the look before
-            b = max(b, t[after] - timing.lag(after))
+            b = max(b, t[after] - timing.blind[after])
         else:
             b = max(b, timing.span[1])
     # Locked: every time sits on a refresh and the content changes ON one,
@@ -637,22 +685,22 @@ def held_range(n: int, runs: list[Boundary], timing: Timing) -> tuple[int, float
     if timing.locked:
         lo = round((b - a) / p) + 1
     else:
-        lo = math.floor(timing.fewest(b - a) + EPS) + 1
-    if n < last:
-        t_next = t[runs[n + 1].first_sample]
+        lo = math.floor(timing.fewest(b - a_by) + EPS) + 1
     if n < last and clean_out and not timing.locked:
         # It ended after the last look before the next one's first picture
         # (locked, that look is its own last picture: nothing to add).
-        end_lo = max(b, t_next - timing.lag(runs[n + 1].first_sample))
-        lo = max(lo, math.floor(timing.fewest(end_lo - a) + EPS) + 1)
+        following = runs[n + 1].first_sample
+        end_lo = max(b, t[following] - timing.lag(following))
+        lo = max(lo, math.floor(timing.fewest(end_lo - a_by) + EPS) + 1)
     if n in (0, last):
         return lo, math.inf
     start_lo = t[runs[n - 1].last_sample]
     if clean_in:
         start_lo = max(start_lo, a - timing.lag(run.first_sample))
+    next_by = timing.by(runs[n + 1].first_sample)
     if timing.locked:
-        return lo, round((t_next - start_lo) / p)
-    return lo, math.ceil(timing.most(t_next - start_lo) - EPS) - 1
+        return lo, round((next_by - start_lo) / p)
+    return lo, math.ceil(timing.most(next_by - start_lo) - EPS) - 1
 
 
 def refresh_report(
@@ -679,13 +727,16 @@ def refresh_report(
         return None
     allowance = round(SEAM_HOLD_S / timing.period)
     uneven = []
-    judged = unresolved = 0
+    judged = unresolved = inconsistent = 0
     seam_hold = 0
     last = len(runs) - 1
     # The song's last boundary and the new play's first, around each wrap.
     held = {k for w, s in enumerate(steps) if s.wrapped for k in (w, w + 1)}
     for n, run in enumerate(runs):
         lo, hi = held_range(n, runs, timing)
+        if lo > hi:  # no count fits: the capture's timing broke its model
+            inconsistent += 1
+            continue
         if n in held:
             seam_hold = max(seam_hold, lo)
             if lo > max(expected) + allowance or hi < min(expected):
@@ -706,6 +757,7 @@ def refresh_report(
         "uneven": len(uneven),
         "uneven_samples": uneven[:LIST_MAX],
         "unresolved": unresolved,
+        "inconsistent": inconsistent,
         "seam_hold_s": round(seam_hold * timing.period, 3),
     }
 
@@ -823,20 +875,58 @@ def capture_report(times: list[float], timing: Timing) -> dict:
     }
 
 
+def check_locked(times: list[float], refresh_hz: float) -> None:
+    """A ``--locked`` recording's pictures are the wall's refreshes: every
+    interval between them is a whole number of periods (within a quarter),
+    and their count over their sum matches the given rate to
+    ``RATE_TOLERANCE``. Else it is no recording of the wall's own signal
+    (``ValueError``): a 120 fps camera on a 60 Hz wall. A recorder clocked
+    apart from the signal at the same nominal rate passes this and drifts
+    against the wall: ``--locked`` needs the signal's own clock."""
+    gaps = [b - a for a, b in zip(times, times[1:])]
+    if not gaps:
+        return
+    counts = [g * refresh_hz for g in gaps]
+    bad = [c for c in counts if round(c) < 1 or abs(c - round(c)) > 0.25]
+    if bad:
+        raise ValueError(
+            f"--locked: {len(bad)} picture intervals are no whole {refresh_hz:g} Hz"
+            f" refreshes (one is {bad[0]:.2f}): not a recording of the wall's own"
+            " signal"
+        )
+    measured = sum(round(c) for c in counts) / sum(gaps)
+    if abs(measured / refresh_hz - 1) > RATE_TOLERANCE:
+        raise ValueError(
+            f"--locked: the recording runs at {measured:.3f} Hz, not the wall's"
+            f" {refresh_hz:g} Hz"
+        )
+
+
 def check_present_rate(
-    times: list[float], refresh_hz: float, blind: list[float]
+    times: list[float],
+    refresh_hz: float,
+    blind: list[float],
+    late: list[float] | None = None,
 ) -> None:
     """A dxcam capture's pictures are the wall's presents: the intervals
-    between successive pictures it timed (each within ``TIMED_SHARE`` of a
-    refresh of its poll before) are whole numbers of refreshes at the given
-    rate: their refreshes over their sum, the rate measured over the whole
-    capture, matches it to ``RATE_TOLERANCE``. Else ``--refresh-hz`` is not the wall's
-    (``ValueError``). Fewer than ``MIN_TIMED`` such intervals: no check."""
+    between successive pictures it timed (each known within ``TIMED_SHARE``
+    of a refresh: its poll before plus its acquire window ``late``) are
+    whole numbers of refreshes at the given rate: their refreshes over
+    their sum, the rate measured over the whole capture, matches it to
+    ``RATE_TOLERANCE``. Else ``--refresh-hz`` is not the wall's
+    (``ValueError``). Fewer than ``MIN_TIMED`` such intervals: the rate
+    cannot be checked, and an unchecked rate would read as judder or losses
+    (review round 7), so that is a ``ValueError`` too."""
     near = TIMED_SHARE / refresh_hz
-    timed_at = [times[k] for k in range(len(times)) if blind[k] <= near]
+    windows = late or [0.0] * len(times)
+    timed_at = [t for t, x, w in zip(times, blind, windows) if x + w <= near]
     timed = [b - a for a, b in zip(timed_at, timed_at[1:])]
     if len(timed) < MIN_TIMED:
-        return
+        raise ValueError(
+            f"only {len(timed)} intervals timed within {near * 1000:.2f} ms: the"
+            f" {refresh_hz:g} Hz refresh rate cannot be checked (a faster capture,"
+            " or a smaller --region)"
+        )
     whole = [max(1, round(d * refresh_hz)) for d in timed]
     measured = sum(whole) / sum(timed)
     if abs(measured / refresh_hz - 1) > RATE_TOLERANCE:

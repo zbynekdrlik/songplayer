@@ -186,6 +186,7 @@ def test_a_repeated_boundary_is_judder_at_a_known_refresh_rate():
         "uneven": 1,
         "uneven_samples": [4],
         "unresolved": 0,
+        "inconsistent": 0,
     }
     assert report["verdict"] == "defects"
 

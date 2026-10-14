@@ -126,27 +126,38 @@ def judder(n: int, every: int = 20) -> list[int]:
 
 
 def dxcam_capture(
-    late: tuple[float, float] | None = None, after: float = 0.0, grab: float = 0.001
+    late: tuple[float, float] | None = None,
+    after: float = 0.0,
+    grab: float = 0.001,
+    held: tuple[float, float] | None = None,
 ):
     """What ``capture_dxcam`` returns for the 30 fps clip on a 60 Hz output
     (two presents per boundary, frames 100..129): a poll every millisecond
-    gets the newest present since the last one. ``late``: no poll in that
-    span; ``after``: polls run on that long after the last present;
-    ``grab``: what a poll that got a picture costs."""
+    gets the newest present since the last one, acquired at its stamp.
+    ``late``: no poll in that span; ``after``: polls run on that long after
+    the last present; ``grab``: what a poll that got a picture costs;
+    ``held`` ``(at, delay)``: the first poll from ``at`` acquires ``delay``
+    after its stamp (preempted between the two)."""
     presents = [(n / 60 + 0.0005, 100 + n // 2) for n in range(60)]
     end = presents[-1][0] + 0.002 + after
-    times, sampled, polls = [], [], []
+    times, sampled, polls, ended = [], [], [], []
     seen = -1
     t = 0.0
     while t < end:
         polls.append(t)
-        newest = max((k for k, (at, _) in enumerate(presents) if at <= t), default=-1)
+        taken = t
+        if held and held[0] <= t:
+            taken, held = t + held[1], None
+        newest = max(
+            (k for k, (at, _) in enumerate(presents) if at <= taken), default=-1
+        )
         if newest > seen:
             seen = newest
             times.append(t)
+            ended.append(taken)
             sampled.append(wf.sample_columns(frame(presents[newest][1], 30), (0, 1)))
-            t += grab - 0.001
+            t = max(t + grab - 0.001, taken)
         t += 0.001
         if late and late[0] <= t < late[1]:
             t = late[1]
-    return times, sampled, polls
+    return times, sampled, polls, ended

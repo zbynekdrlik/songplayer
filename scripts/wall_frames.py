@@ -68,6 +68,7 @@ from wall_analysis import (
     SAME_PICTURE,
     Reading,
     analyse,
+    check_locked,
     check_present_rate,
 )
 
@@ -256,34 +257,69 @@ def capture_dxcam(
     region: tuple[int, int, int, int] | None,
     seconds: float,
     x_range: tuple[float, float],
-) -> tuple[list[float], list[np.ndarray], list[float]]:
+) -> tuple[list[float], list[np.ndarray], list[float], list[float]]:
     """Every new picture of desktop output ``output`` for ``seconds``
     (Windows, dxcam with ``output_color="BGRA"``: no colour conversion, so
     dxcam 0.3+ never loads OpenCV; dxcam 0.0.5 imports it whatever the
-    colour): its capture time and its strip columns as luma (decoded after
-    the capture, so the decode never delays a grab), and every poll's time.
-    A poll that finds nothing sleeps 1 ms (Python 3.11+ on Windows sleeps
-    on a high-resolution timer)."""
+    colour): its poll's time (stamped before the grab), its strip columns
+    as luma (decoded after the capture, so the decode never delays a grab),
+    every poll's time, and when each picture's acquire was over at the
+    latest (``acquire_ended``). The frame was on screen between the stamp
+    and that end — a grab preempted before its acquire must not move the
+    picture early (review round 7). The end is stamped right after dxcam's
+    ``AcquireNextFrame`` call when this dxcam exposes it, else after the
+    whole grab. A poll that finds nothing sleeps 1 ms (Python 3.11+ on
+    Windows sleeps on a high-resolution timer)."""
     import dxcam  # Windows only (the box's ops\probe-venv)
 
     camera = dxcam.create(output_idx=output, output_color="BGRA")
+    acquired = time_acquire(camera)
     times: list[float] = []
     pictures: list[np.ndarray] = []
     polls: list[float] = []
+    acquire_ended: list[float] = []
     columns = None
     deadline = time.perf_counter() + seconds
     while (now := time.perf_counter()) < deadline:
         polls.append(now)
+        acquired[0] = None
         picture = camera.grab(region=region)
         if picture is None:
             time.sleep(0.001)
             continue
+        ended = acquired[0] if acquired[0] is not None else time.perf_counter()
         if columns is None:
             columns = cell_columns(picture.shape[1], x_range)
         times.append(now)
+        acquire_ended.append(ended)
         pictures.append(to_luma(picture[:, columns]).astype(np.uint8))
     del camera
-    return times, pictures, polls
+    return times, pictures, polls, acquire_ended
+
+
+def time_acquire(camera: object) -> list[float | None]:
+    """Stamp the end of each of ``camera``'s acquires: dxcam's duplicator
+    calls ``AcquireNextFrame`` in ``update_frame``, so the stamp right after
+    it returns bounds when the frame was taken. The returned cell holds the
+    latest stamp (reset by the caller before each grab); a dxcam with no
+    such duplicator leaves it ``None`` and the caller stamps after the grab."""
+    acquired: list[float | None] = [None]
+    duplicator = getattr(camera, "_duplicator", None)
+    update = getattr(duplicator, "update_frame", None)
+    if update is None:
+        return acquired
+
+    def timed_update(*args, **kwargs):
+        try:
+            return update(*args, **kwargs)
+        finally:
+            acquired[0] = time.perf_counter()
+
+    try:
+        duplicator.update_frame = timed_update
+    except AttributeError:  # a frozen or slotted duplicator: whole grabs
+        pass
+    return acquired
 
 
 def parse_pair(text: str) -> tuple[float, float]:
@@ -304,17 +340,21 @@ def poll_blind(times: list[float], polls: list[float]) -> list[float]:
 
 def capture(args: argparse.Namespace) -> dict:
     """Capture or read the pictures ``args`` names, then the report."""
+    late = None
     if args.video is not None:
         readings, times = read_video(args.video, args.width, args.x_range)
+        if args.locked:
+            check_locked(times, args.refresh_hz)
         blind = None  # since the picture before
         span = None  # the first picture's pts to the last one's
     else:
-        times, sampled, polls = capture_dxcam(
+        times, sampled, polls, ended = capture_dxcam(
             args.dxcam, args.region, args.seconds, args.x_range
         )
         readings = [read_columns(s) for s in sampled]
         blind = poll_blind(times, polls)
-        check_present_rate(times, args.refresh_hz, blind)
+        late = [max(0.0, e - t) for t, e in zip(times, ended)]
+        check_present_rate(times, args.refresh_hz, blind, late)
         span = (polls[0], polls[-1]) if polls else None
     return analyse(
         readings,
@@ -327,6 +367,7 @@ def capture(args: argparse.Namespace) -> dict:
         span=span,
         min_boundaries=args.min_boundaries,
         locked=args.locked,
+        late=late,
     )
 
 

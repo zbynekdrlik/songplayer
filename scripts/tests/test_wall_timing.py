@@ -401,6 +401,34 @@ def test_unreadable_pictures_after_the_last_boundary_do_not_stretch_it():
     readings = pacer_readings(30, Fraction(0), 40, frames=1800)
     report = dxcam(readings + [wa.Reading("no_strip")] * 2, min_boundaries=1)
     assert report["refreshes"]["uneven"] == 0, "the trailing presents are others"
+    # Locked too (review round 7): the look before an unreadable picture is
+    # the picture before it, the last boundary's own last one.
+    report = locked(readings + [wa.Reading("no_strip")] * 2, min_boundaries=1)
+    assert report["refreshes"]["uneven"] == 0
+    assert report["verdict"] == "clean"
+
+
+def test_a_grab_preempted_before_its_acquire_never_reads_as_judder():
+    # Review round 7: dxcam stamps a poll before its grab; a poll preempted
+    # until 2-40 ms later takes the frame on screen THEN. Its acquire
+    # window (``late``) keeps the picture's content within it.
+    readings = pacer_readings(30, Fraction(0), 120, frames=1800)
+    for delay in (0.002, 0.005, 0.010, 0.020, 0.040):
+        for at in range(10, 200, 7):
+            # The poll at ``at`` is stamped ``delay`` before its acquire,
+            # which takes the refresh on screen then (``shown``); the
+            # refreshes in between no poll saw.
+            times = [n / 60 + 0.0005 for n in range(len(readings))]
+            shown = at + math.floor(delay * 60)
+            kept = readings[:at] + readings[shown:]
+            times = times[:at] + [times[shown] - delay] + times[shown + 1 :]
+            late = [0.0] * at + [delay] + [0.0] * (len(times) - at - 1)
+            blind = [math.inf] + [0.001] * (len(times) - 1)
+            report = wa.analyse(
+                kept, 30, times=times, refresh_hz=60, blind=blind, late=late
+            )
+            assert report["verdict"] != "defects", (delay, at)
+            assert report["refreshes"]["inconsistent"] == 0, (delay, at)
 
 
 @pytest.mark.parametrize(
@@ -467,3 +495,59 @@ def test_each_capture_s_instants_carry_their_own_error():
     assert 0.03 <= report["capture"]["time_error_ms"] <= 0.1, "the pts' jitter"
     report = wa.analyse(readings, 30, times=at_60_hz(readings), refresh_hz=60)
     assert report["capture"]["time_error_ms"] == 0.001, "exact pts: PTS_TIME_ERROR"
+
+
+def test_a_camera_exposure_that_mixes_two_boundaries_is_no_cadence_error():
+    # Review round 7: a 120 fps camera's exposure taken across a boundary
+    # change reads between the two. Each boundary's first picture a mix.
+    readings = []
+    for k in range(100, 420):
+        mix = wa.Reading("ok", k - 1, k, 102, 8)  # 0.4 of the way to k
+        readings += [mix] + [pacer_readings(30, Fraction(k), 1, frames=1800)[0]] * 3
+    times = [n / 120 + 0.0013 for n in range(len(readings))]
+    report = wa.analyse(readings, 30, times=times, refresh_hz=60)
+    assert report["cadence_errors"] == 0 and report["lost_boundaries"] == 0
+    assert report["undecoded"] == {"mixed": 320}, "the first one too"
+    assert report["verdict"] != "defects"
+    # A mix seen twice is a boundary of its own: off the grid, a defect.
+    doubled = []
+    for n in range(0, len(readings), 4):
+        doubled += [readings[n]] * 2 + readings[n + 1 : n + 4]
+    at_150 = [n / 150 + 0.0013 for n in range(len(doubled))]  # 5 a boundary
+    stuck = wa.analyse(doubled, 30, times=at_150, refresh_hz=60)
+    assert stuck["cadence_errors"] > 0 and stuck["verdict"] == "defects"
+    # dxcam's presents are never exposures.
+    blind = [math.inf] + [0.001] * (len(times) - 1)
+    presents = wa.analyse(readings, 30, times=times, refresh_hz=60, blind=blind)
+    assert presents["cadence_errors"] > 0
+
+
+def test_an_impossible_bracket_is_the_capture_s_fault_never_judder():
+    # Review round 7's mechanism: a poll stamped 5 ms before its acquire
+    # (no acquire window known) puts boundary 20 5 ms early: boundary 19
+    # reads at most 1 refresh, boundary 20 at least 3 — no count fits
+    # either: ``inconsistent``, incomplete, never judder.
+    readings = pacer_readings(30, Fraction(0), 40, frames=1800)
+    times = [n / 60 + 0.0005 for n in range(len(readings))]
+    times[40] -= 0.005
+    blind = [math.inf] + [0.001] * (len(times) - 1)
+    report = wa.analyse(
+        readings, 30, times=times, refresh_hz=60, blind=blind, min_boundaries=1
+    )
+    assert report["refreshes"]["inconsistent"] == 2
+    assert report["refreshes"]["uneven"] == 0
+    assert report["verdict"] == "incomplete"
+    # Its acquire window known, both are judged, and the wall is clean.
+    late = [0.0] * len(times)
+    late[40] = 0.005
+    report = wa.analyse(
+        readings,
+        30,
+        times=times,
+        refresh_hz=60,
+        blind=blind,
+        late=late,
+        min_boundaries=1,
+    )
+    assert report["refreshes"]["inconsistent"] == 0
+    assert report["verdict"] == "clean"
