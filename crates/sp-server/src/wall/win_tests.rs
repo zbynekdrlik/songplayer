@@ -4,9 +4,105 @@
 //! aware and give the thread back as it was, and the walk over the real
 //! reads finds no Arena (the runner runs none). Read only: nothing on the
 //! runner is changed.
+//!
+//! #254: the guard's reads and its end, on a child process of this test (a
+//! copy of this test binary that waits, run as `Arena.exe` or under another
+//! name): its parent, start and CPU time, no hung window, and the end — the
+//! child is ended only when its image and start time are the ones ordered.
+//! The tests that start such a child and the one that expects no Arena hold
+//! one lock, so no Arena child runs while the walk looks for none.
+
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
+
+use sp_core::wall::GuardWhy;
 
 use super::*;
+use crate::wall::guard::EndOrder;
+use crate::wall::guard_win;
 use crate::wall::read::{Arena, read_facts};
+
+/// Held by every test that starts an `Arena.exe` child, and by the one that
+/// expects no Arena.
+static ARENA_CHILDREN: Mutex<()> = Mutex::new(());
+
+/// Numbers each child's directory (a removed one may still be held).
+static NEXT_CHILD: AtomicU32 = AtomicU32::new(0);
+
+/// Set in the child's environment: the waiting test waits only then.
+const CHILD_ENV: &str = "SP_WALL_GUARD_CHILD";
+
+/// The waiting test's full name, for the child's harness.
+const WAITER: &str = "wall::win::tests::the_child_waits_to_be_ended";
+
+/// The child process's body (not a check of its own): a copy of this test
+/// binary run with only this test and [`CHILD_ENV`] set waits here until
+/// the test that started it ends it. Run by the harness itself it returns
+/// at once.
+#[test]
+fn the_child_waits_to_be_ended() {
+    if std::env::var_os(CHILD_ENV).is_some() {
+        std::thread::sleep(Duration::from_secs(120));
+    }
+}
+
+/// A child of this test: a copy of this test binary named `image` in a
+/// directory of its own, waiting; killed and removed when dropped.
+struct Waiting {
+    child: Child,
+    dir: PathBuf,
+}
+
+impl Waiting {
+    fn start(image: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!(
+            "sp-wall-guard-{}-{}",
+            std::process::id(),
+            NEXT_CHILD.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join(image);
+        std::fs::copy(std::env::current_exe().unwrap(), &exe).unwrap();
+        let child = Command::new(&exe)
+            .args(["--exact", WAITER, "--test-threads=1"])
+            .env(CHILD_ENV, "1")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        Self { child, dir }
+    }
+
+    fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
+    /// It still runs.
+    fn running(&mut self) -> bool {
+        self.child.try_wait().unwrap().is_none()
+    }
+}
+
+impl Drop for Waiting {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+/// The order to end `child` as an Arena started at `created_100ns`.
+fn order(child: &Waiting, created_100ns: u64) -> EndOrder {
+    EndOrder {
+        pid: child.pid(),
+        created_100ns,
+        why: GuardWhy::Hung,
+        monitors: Vec::new(),
+    }
+}
 
 #[test]
 fn the_process_list_holds_this_test_process_by_its_file_name() {
@@ -17,7 +113,7 @@ fn the_process_list_holds_this_test_process_by_its_file_name() {
     assert!(
         processes
             .iter()
-            .any(|(pid, image)| *pid == me && image.eq_ignore_ascii_case(&name)),
+            .any(|p| p.pid == me && p.image.eq_ignore_ascii_case(&name)),
         "pid {me} ({name}) is not in the {} processes listed",
         processes.len()
     );
@@ -48,6 +144,61 @@ fn the_reads_are_per_monitor_aware_and_give_the_thread_back_as_it_was() {
 
 #[test]
 fn the_walk_over_the_runner_finds_no_arena() {
+    let _alone = ARENA_CHILDREN.lock().unwrap_or_else(|e| e.into_inner());
     let facts = read_facts(&WinReader);
     assert_eq!(facts.arena, Ok(Arena::default()));
+    assert_eq!(facts.guard, Ok(Vec::new()));
+}
+
+#[test]
+fn the_guard_reads_an_arenas_parent_times_and_windows() {
+    let _alone = ARENA_CHILDREN.lock().unwrap_or_else(|e| e.into_inner());
+    let child = Waiting::start("Arena.exe");
+    let me = std::process::id();
+    let listed = WinReader.processes().unwrap();
+    let entry = listed.iter().find(|p| p.pid == child.pid()).unwrap();
+    assert_eq!((entry.parent, entry.image.as_str()), (me, "Arena.exe"));
+    let times = WinReader.times(child.pid()).unwrap();
+    assert!(times.created_100ns > 0, "{times:?}");
+    // A console process has no window to hang.
+    assert_eq!(WinReader.hung(child.pid()), Ok(false));
+    let facts = read_facts(&WinReader);
+    let arena = facts
+        .guard
+        .unwrap()
+        .into_iter()
+        .find(|a| a.pid == child.pid())
+        .unwrap();
+    assert_eq!(
+        arena.times.map(|t| t.created_100ns),
+        Ok(times.created_100ns)
+    );
+    assert_eq!((arena.hung, arena.crash_report), (Ok(false), Ok(false)));
+    assert!(arena.monitors.is_empty());
+}
+
+#[test]
+fn the_guard_ends_an_arena_it_was_ordered_to_end() {
+    let _alone = ARENA_CHILDREN.lock().unwrap_or_else(|e| e.into_inner());
+    let mut child = Waiting::start("Arena.exe");
+    let created = WinReader.times(child.pid()).unwrap().created_100ns;
+    assert!(child.running());
+    assert_eq!(guard_win::end(&order(&child, created)), Ok(()));
+    let status = child.child.wait().unwrap();
+    assert_eq!(status.code(), Some(1));
+}
+
+#[test]
+fn the_guard_leaves_another_program_or_a_later_arena_running() {
+    let _alone = ARENA_CHILDREN.lock().unwrap_or_else(|e| e.into_inner());
+    let mut bridge = Waiting::start("Arena-Bridge.exe");
+    let created = WinReader.times(bridge.pid()).unwrap().created_100ns;
+    let refused = guard_win::end(&order(&bridge, created)).unwrap_err();
+    assert!(refused.contains("not Arena.exe: left running"), "{refused}");
+    assert!(bridge.running());
+    let mut later = Waiting::start("Arena.exe");
+    let created = WinReader.times(later.pid()).unwrap().created_100ns;
+    let refused = guard_win::end(&order(&later, created + 1)).unwrap_err();
+    assert!(refused.contains("started since the read"), "{refused}");
+    assert!(later.running());
 }

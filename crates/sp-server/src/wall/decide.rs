@@ -33,6 +33,7 @@ use sp_core::wall::{
     ArenaWindow, Display, NvidiaRead, WallFact, WallProblem, WallRead, WallState, WantedDisplay,
 };
 
+use super::guard::GuardFacts;
 use super::read::{NvidiaFacts, WallFacts};
 
 /// The title of Arena's output window (an Advanced Output screen's window;
@@ -260,7 +261,7 @@ pub fn read_view(facts: &WallFacts) -> WallRead {
 }
 
 /// Why facts could not be read, each reason once, in the facts' order
-/// (NVAPI's connected displays, then its grids).
+/// (NVAPI's connected displays, then its grids; #254: then the guard's).
 pub fn read_errors(facts: &WallFacts) -> Vec<String> {
     let (connected, grids) = match &facts.nvidia {
         NvidiaFacts::Read { connected, grids } => (connected.as_ref().err(), grids.as_ref().err()),
@@ -274,12 +275,35 @@ pub fn read_errors(facts: &WallFacts) -> Vec<String> {
         grids,
     ];
     let mut errors: Vec<String> = Vec::new();
-    for why in reasons.into_iter().flatten() {
+    for why in reasons
+        .into_iter()
+        .flatten()
+        .chain(guard_errors(&facts.guard))
+    {
         if !errors.contains(why) {
             errors.push(why.clone());
         }
     }
     errors
+}
+
+/// #254: why the guard could not read: the process list, else each Arena's
+/// times, hang and crash reporter.
+fn guard_errors(guard: &GuardFacts) -> Vec<&String> {
+    match guard {
+        Err(why) => vec![why],
+        Ok(arenas) => arenas
+            .iter()
+            .flat_map(|a| {
+                [
+                    a.times.as_ref().err(),
+                    a.hung.as_ref().err(),
+                    a.crash_report.as_ref().err(),
+                ]
+            })
+            .flatten()
+            .collect(),
+    }
 }
 
 #[cfg(test)]

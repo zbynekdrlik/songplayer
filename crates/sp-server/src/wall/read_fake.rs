@@ -11,15 +11,18 @@
 //!   size, so never on this healthy box): three screens connected
 //!   (`0x80061083` HDMI, `0x80061086` and `0x80061087` DisplayPort) joined
 //!   into one 1×3 grid of 2560×1080;
-//! - Arena's output window `Display` at 3840,0 – 11520,1080.
+//! - Arena's output window `Display` at 3840,0 – 11520,1080;
+//! - #254: Arena answers, its CPU time read as 1098.7 s (the hung Arena of
+//!   14.10.2026 stood still at that), no crash reporter running.
 
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 
 use sp_core::wall::{ArenaOutput, ArenaWindow, Connected, Display, DisplayId, Grid, WantedDisplay};
 
+use super::guard::{ArenaProcess, ProcessTimes};
 use super::nvapi::{NvGpuDisplayIds, NvMosaicGridTopoV2};
-use super::read::{Arena, NvidiaFacts, NvidiaRaw, WallFacts, WallReader};
+use super::read::{Arena, NvidiaFacts, NvidiaRaw, ProcessEntry, WallFacts, WallReader};
 use super::resolume;
 
 /// The span's device key (Arena's `deviceId` of Display 1).
@@ -35,6 +38,40 @@ pub const RIGHT: DisplayId = DisplayId(0x8006_1083);
 
 /// Arena's process id in the fake.
 pub const ARENA_PID: u32 = 5120;
+
+/// #254: Arena's crash reporter's process id in the fake.
+pub const MONITOR_PID: u32 = 9188;
+
+/// #254: Arena's times: started 14.10.2026 08:05 local, 1098.7 s of CPU.
+pub fn snv_times() -> ProcessTimes {
+    ProcessTimes {
+        created_100ns: 134_049_123_000_000_000,
+        cpu_100ns: 10_987_000_000,
+    }
+}
+
+/// #254: SNV's Arena as the guard reads it: it answers, no crash reporter.
+pub fn snv_arena_process() -> ArenaProcess {
+    ArenaProcess {
+        pid: ARENA_PID,
+        times: Ok(snv_times()),
+        hung: Ok(false),
+        monitors: Vec::new(),
+        crash_report: Ok(false),
+    }
+}
+
+/// #254: the crash reporter's window that waits for a click.
+pub fn crash_report_window() -> ArenaWindow {
+    ArenaWindow {
+        title: "Crash Report".to_string(),
+        visible: true,
+        left: 1500,
+        top: 800,
+        right: 2100,
+        bottom: 1250,
+    }
+}
 
 /// The fake's Documents folder.
 pub fn documents() -> PathBuf {
@@ -219,6 +256,7 @@ pub fn snv_facts() -> WallFacts {
         arena_output: Ok(snv_output()),
         displays: Ok(vec![vdd(), span()]),
         nvidia: NvidiaFacts::NotRead,
+        guard: Ok(vec![snv_arena_process()]),
     }
 }
 
@@ -248,6 +286,13 @@ pub struct FakeReader {
     pub nvidia_asked: Cell<u32>,
     pub displays: Result<Vec<Display>, String>,
     pub processes: Result<Vec<(u32, String)>, String>,
+    /// #254: each process's parent (`(pid, parent)`; a process not listed
+    /// has parent 0).
+    pub parents: Vec<(u32, u32)>,
+    /// #254: each process's times (a process not listed cannot be opened).
+    pub times: Vec<(u32, Result<ProcessTimes, String>)>,
+    /// #254: whether a window of each process hangs (not listed: no).
+    pub hung: Vec<(u32, Result<bool, String>)>,
     /// Every top-level window, with its process id.
     pub windows: Result<Vec<(u32, ArenaWindow)>, String>,
     pub documents: Result<PathBuf, String>,
@@ -271,6 +316,9 @@ impl FakeReader {
                 (ARENA_PID, "Arena.exe".to_string()),
                 (777, "SongPlayer.exe".to_string()),
             ]),
+            parents: Vec::new(),
+            times: vec![(ARENA_PID, Ok(snv_times()))],
+            hung: Vec::new(),
             windows: Ok(vec![
                 (ARENA_PID, arena_main()),
                 (
@@ -325,8 +373,23 @@ impl WallReader for FakeReader {
         self.displays.clone()
     }
 
-    fn processes(&self) -> Result<Vec<(u32, String)>, String> {
-        self.processes.clone()
+    fn processes(&self) -> Result<Vec<ProcessEntry>, String> {
+        let parent = |pid: u32| {
+            self.parents
+                .iter()
+                .find(|(child, _)| *child == pid)
+                .map_or(0, |(_, parent)| *parent)
+        };
+        Ok(self
+            .processes
+            .clone()?
+            .into_iter()
+            .map(|(pid, image)| ProcessEntry {
+                pid,
+                parent: parent(pid),
+                image,
+            })
+            .collect())
     }
 
     fn windows_of(&self, pids: &[u32]) -> Result<Vec<ArenaWindow>, String> {
@@ -348,5 +411,19 @@ impl WallReader for FakeReader {
             None => Ok(None),
             Some((_, text)) => text.clone().map(Some),
         }
+    }
+
+    fn times(&self, pid: u32) -> Result<ProcessTimes, String> {
+        match self.times.iter().find(|(listed, _)| *listed == pid) {
+            None => Err(format!("OpenProcess({pid}) failed (error 87)")),
+            Some((_, times)) => times.clone(),
+        }
+    }
+
+    fn hung(&self, pid: u32) -> Result<bool, String> {
+        self.hung
+            .iter()
+            .find(|(listed, _)| *listed == pid)
+            .map_or(Ok(false), |(_, hung)| hung.clone())
     }
 }

@@ -62,6 +62,13 @@ export interface WallStatus {
   };
   read_errors?: string[];
   checked_at_ms?: number | null;
+  /** #254: the guard that ends a crashed or hung Resolume
+   * (`sp_core::wall::WallGuard`); absent from an older server. */
+  guard?: {
+    ends: number;
+    last?: { at_ms: number; why: string; pid: number; error?: string | null } | null;
+    phase: string;
+  } | null;
 }
 
 /** How long the gate waits for SongPlayer's first wall check after a
@@ -134,7 +141,8 @@ export function wallFailures(status: WallStatus | null | undefined): string[] {
 }
 
 /** One line for the gate's log: the state, what Resolume wants, what
- * Windows shows, NVAPI, and every problem. */
+ * Windows shows, NVAPI, every problem, and (#254) the guard's ends of
+ * Resolume when it ended one since SongPlayer started. */
 export function wallSummary(status: WallStatus | null | undefined): string {
   if (status === null || status === undefined) return "no answer";
   const read = status.read ?? {};
@@ -158,8 +166,15 @@ export function wallSummary(status: WallStatus | null | undefined): string {
             read.grids ? `[${read.grids.map((g) => `${g.rows}x${g.columns}`).join(", ")}]` : "?"
           }`;
   const problems = (status.problems ?? []).map((p) => p.code).join(", ");
+  const guard = status.guard;
+  const ended =
+    guard && guard.ends > 0
+      ? ` guard=ended ${guard.ends}x last=${guard.last?.why ?? "?"} pid ${guard.last?.pid ?? "?"}` +
+        `${guard.last?.error ? ` (failed: ${guard.last.error})` : ""} phase=${guard.phase}`
+      : "";
   return (
     `state=${status.state} arena=${read.arena_running ?? "?"} ${wanted} ${windows} ${nvidia}` +
-    (problems ? ` problems=[${problems}]` : "")
+    (problems ? ` problems=[${problems}]` : "") +
+    ended
   );
 }
