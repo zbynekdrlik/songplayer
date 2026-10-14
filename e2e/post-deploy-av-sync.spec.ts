@@ -123,6 +123,7 @@ import {
   type ProbeLock,
 } from "./av-sync-settle";
 import { AUDIO_WAIT_TIMEOUT_MS } from "./obs-audio-wait";
+import { persistCollection } from "./obs-collection-save";
 import {
   classifyAvSyncRun,
   isPlayingWithFrames,
@@ -139,6 +140,9 @@ const SONGPLAYER_URL = process.env.SONGPLAYER_URL || "http://localhost:8920";
 // #221 L3: scene switches go through SongPlayer's facade; cg OBS only records.
 const FACADE_WS_URL = process.env.FACADE_WS_URL || "ws://localhost:4456";
 const OBS_WS_URL = process.env.OBS_WS_URL || "ws://localhost:4455";
+// #271: cg OBS's saved scene collections. The runner runs as the user cg
+// OBS runs as (RESOLUME-SNV\Resolume), so it is this process's %APPDATA%.
+const OBS_SCENES_DIR = path.join(process.env.APPDATA ?? "", "obs-studio", "basic", "scenes");
 const PYTHON =
   process.env.SP_AVSYNC_PYTHON ||
   "C:\\ProgramData\\SongPlayer\\e2e\\avsync_venv\\Scripts\\python.exe";
@@ -362,6 +366,10 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
   let cgInitialScene: string | null = null;
   let cgSwitched = false;
   let probePointed = false;
+  // #271: the gate pointed the probe / switched cg OBS in this run, so cg
+  // OBS's saved collection may hold the take (it saves mid-take): afterAll
+  // makes it save the restore.
+  let cgTouched = false;
   // cg OBS was ON the probe scene before the gate (a dead run): the body
   // fails at its start (nothing to restore it to), afterAll idles the probe.
   let cgStuckOnProbe = false;
@@ -471,7 +479,8 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
   test.afterAll(async () => {
     tornDown = true;
     // Worst case: start settle 10 + stop 10 + faders/scene ~10 + deleting up
-    // to MAX_TAKES+1 recordings (15 s remux wait + 2 x 10 s busy retries).
+    // to MAX_TAKES+1 recordings (15 s remux wait + 2 x 10 s busy retries)
+    // + the #271 persist (5 s).
     test.setTimeout(180_000);
     const driver = scenes;
     const rec = recorder;
@@ -559,6 +568,21 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
           `the A/V gate must restore cg OBS's program scene "${cgInitialScene}"`,
         ).toBe(cgInitialScene);
       });
+      // #271: make cg OBS SAVE what was just restored. OBS saved its
+      // collection in the take (program = the probe scene, the probe pointed)
+      // and neither restore above reaches its SaveProject(), so a crash before
+      // its next save brought cg OBS up on the probe (SNV, 14.10.2026). Not
+      // for a run that found cg OBS stuck on the probe: its own scene is unknown.
+      await step("persist cg OBS's restored state (#271)", async () => {
+        if (!cgTouched || !cgInitialScene || cgStuckOnProbe) return;
+        await persistCollection({
+          rec,
+          dir: OBS_SCENES_DIR,
+          collection: await rec.currentSceneCollection(),
+          program: cgInitialScene,
+          probeInput: AV_PROBE_INPUT,
+        });
+      });
       await step("delete the recordings", async () => {
         // A StopRecord whose inactive-poll timed out still left its path.
         const last = rec.lastRecordingPath;
@@ -638,6 +662,7 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
     const receiversBefore = await settledReceivers(request);
     assertNotTornDown("pointing the probe at SP-program");
     probePointed = true;
+    cgTouched = true;
     await rec.setInputSettings(AV_PROBE_INPUT, { ndi_source_name: probeSource });
     if ((await rec.currentProgramScene()) !== AV_PROBE_SCENE) {
       assertNotTornDown("cg OBS's probe scene switch");

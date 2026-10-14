@@ -232,6 +232,17 @@ export class ObsDriver {
     await this.obs.call("CreateScene", { sceneName });
   }
 
+  /** #271: with `createScene`, the only requests that reach OBS's `SaveProject()`. */
+  async removeScene(sceneName: string): Promise<void> {
+    await this.obs.call("RemoveScene", { sceneName });
+  }
+
+  /** #271: the scene collection OBS runs (its saved file carries this `name`). */
+  async currentSceneCollection(): Promise<string> {
+    const r = await this.obs.call("GetSceneCollectionList");
+    return (r as { currentSceneCollectionName: string }).currentSceneCollectionName;
+  }
+
   /** Create an input in `sceneName`; returns its scene item id. */
   async createInput(
     sceneName: string,
