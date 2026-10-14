@@ -208,7 +208,14 @@ imports `wall_clip`, `wall_analysis` and `av_sync_check` (with its
   next boundary's first picture (`held_range` → the refresh counts it can
   have had, `lo..hi`, `hi` open at a capture edge; the capture's last
   boundary is held to the capture's end only when no unreadable picture
-  follows it). Every span between two instants is taken as short and as
+  follows it, else to the look before them — locked, its own last picture,
+  round 7). dxcam stamps a poll BEFORE its grab: a picture's content was on
+  screen between that stamp and the end of its acquire (`Timing.late`,
+  stamped right after dxcam's `AcquireNextFrame` through its duplicator's
+  `update_frame`, else after the whole grab), so a bound "at or before the
+  picture" takes the window's end (`Timing.by`) and a hidden refresh the
+  span to it (round 7: a grab preempted 5–60 ms between stamp and acquire
+  read a clean wall as judder). Every span between two instants is taken as short and as
   long as the instants' error and the rate's tolerance allow
   (`Timing.fewest` / `most`): each instant may be off by `error` — dxcam
   `POLL_TIME_ERROR` 0.5 ms, a recording its pts' own quantization
@@ -219,7 +226,14 @@ imports `wall_clip`, `wall_analysis` and `av_sync_check` (with its
   measured why: with exact arithmetic, quantized pts and a 0.1 % rate
   mismatch read clean walls as judder. A `--locked` recording (each
   picture one wall refresh: the wall's own signal at its rate) changes
-  content ON a refresh: whole periods, closed bounds.
+  content ON a refresh: whole periods, closed bounds. It is checked
+  (`check_locked`, else exit 5): every interval a whole number of periods
+  within a quarter, the rate to `RATE_TOLERANCE` (round 7: a 120 fps camera
+  given `--locked` read 1699 uneven boundaries). A recorder clocked apart
+  from the signal at the same nominal rate passes that check and drifts
+  against the wall, read as judder: `--locked` needs a recorder clocked by
+  the signal itself (a capture card on the wall's output), never an OBS or
+  software recording at the nominal rate.
 - **What the capture did not see excuses at most one boundary per
   refresh a boundary takes, no more.** Unseen between two boundaries
   (`unseen_refreshes`) = the unreadable pictures between them plus the
@@ -251,9 +265,16 @@ imports `wall_clip`, `wall_analysis` and `av_sync_check` (with its
   clean verdict needs none: what the capture did not resolve could hide
   judder (round 5: a 60 fps camera on a 75 Hz wall left a 4-refresh
   boundary open; round 6: a stall of the box hid each judder from dxcam
-  too). In practice: dxcam polling on time, a camera at ≥ 2× the wall's
-  rate, or a `--locked` recording prove every count; a camera at the
-  wall's rate unlocked, or slower, mostly cannot (incomplete, never
+  too). A bracket no count fits (`lo > hi`) is the capture's fault, not
+  the wall's: `inconsistent`, incomplete, never judder (round 7). A
+  camera's exposure lasts: one taken across a boundary change reads a
+  position between the two, so in a recording (not dxcam, not `--locked`)
+  a lone decoded picture between its neighbours and off the grid is
+  `mixed`, unreadable (`mixed_exposures`; round 7: a 120 fps camera read
+  hundreds of cadence errors on a clean wall). In practice: dxcam polling
+  on time or a signal-clocked `--locked` recording prove every count; a
+  camera at ≥ 2× the wall's rate with a short shutter mostly does; a camera
+  at the wall's rate unlocked, or slower, mostly cannot (incomplete, never
   judder). **What dxcam sees is DWM's composition, not the wall's
   scanout**: on SNV DWM composes at 60.0000 Hz while the wall's own vblank
   is 59.979 Hz (`gpu-max.md`), so dxcam on SNV takes `--refresh-hz 60` and
@@ -281,14 +302,18 @@ imports `wall_clip`, `wall_analysis` and `av_sync_check` (with its
   song's last boundary and the new play's first may be held up to
   `SEAM_HOLD_S` longer (1 s: the new play's open; round 5: a 5 s freeze
   there read clean), never shown shorter (round 6: a 1 + 3 pair there read
-  clean; the new play's second boundary is the cadence again), `loop_seams.hold_s` the longest, the box's own measure
+  clean; the new play's second boundary is the cadence again). Known
+  limit (round 7, not closed): at 24 / 25 fps, where two boundaries fall
+  in the clamped last frame, the song's last run is judged against ONE
+  boundary's refreshes, so a wall skipping one of the two (the new play one
+  boundary early) is not seen. `loop_seams.hold_s` is the longest hold, the box's own measure
   of the loop's restart — and its weights (`loop_seams.weight_mismatches`:
   the clamped frame has none). A jump to 0 from mid-clip is a jump back.
 - **Verdict**: `defects` (any loss, jump back, cadence error, weight
   mismatch, judder, a frozen wall, or no boundary) → exit 1; else
   `incomplete` — `clean` needs positive evidence: unverified steps, under
   95 % of the pictures decoded (`MIN_COVERAGE`), no refresh rate, any
-  `unresolved` boundary, or fewer boundaries judged for judder than
+  `unresolved` or `inconsistent` boundary, or fewer boundaries judged for judder than
   `--min-boundaries` (default `MIN_BOUNDARIES` 300 = 10 s on the grid:
   round 4, a 0.3 s capture of a wall losing a boundary every second read
   clean; every inner boundary is judged or unresolved, so only the
@@ -299,7 +324,11 @@ imports `wall_clip`, `wall_analysis` and `av_sync_check` (with its
   rate that is no whole number of `--refresh-hz` refreshes, or off it by
   more than `RATE_TOLERANCE` over the whole capture — `check_present_rate`,
   on the intervals between successive pictures timed within a tenth of a
-  refresh, `TIMED_SHARE`) → exit 5 with the error on stderr; a usage error → 2
+  refresh, `TIMED_SHARE`, poll gap plus acquire window — or fewer than 10
+  such intervals, so the rate cannot be checked (an unchecked wrong rate
+  reads as judder or losses, round 7: grabs over ~15 ms at 60 Hz, or any
+  wall over 100 Hz with 1 ms polls), a `--locked` recording that is no
+  recording of the wall's own signal) → exit 5 with the error on stderr; a usage error → 2
   (argparse). A broken capture never reads as a broken wall.
 - Capture glue: `--video FILE --refresh-hz R [--locked] [--width W]`
   (`read_video`: `av_sync_check.gray_video_args` — the A/V gate's own
@@ -378,7 +407,7 @@ band tied to `pacer_blend.rs`), `test_wall_frames_analyse.py` (one sample
 per refresh: every grid phase through the program's byte blend at 24 / 25
 / 30 fps, loops / losses / jumps / weights / unverified steps at 60 and
 50 Hz / judder / the song-end clamp at every phase, a loss at the seam, a hold over 1 s there / the
-300-boundary minimum / coverage), `test_wall_timing.py` (the brackets: a locked recording and dxcam on time exact, 120 / 240 fps cameras proving counts and finding judder, cameras too coarse — 60 / 59.94 / 50 / 30 fps on 60 Hz, 60 fps on 50 Hz, 120 fps on 144 Hz, 60 fps on 75 Hz — never calling judder and never calling it clean, `unresolved`, a stall at the start, middle and end, blind refreshes hiding one boundary per refresh at 60 and 50 Hz, `hidden_refreshes`, `unseen_refreshes`, `held_range`, a frozen wall (dxcam only), the judged share, the required rate; round 6: unreadable pictures after the last boundary, cameras' pts on 1/90000, 1/10000, 1/1000 and 1/600 timebases, a rate within its tolerance either way, judder a box stall hid from dxcam) and `test_wall_capture.py`
+300-boundary minimum / coverage), `test_wall_timing.py` (the brackets: a locked recording and dxcam on time exact, 120 / 240 fps cameras proving counts and finding judder, cameras too coarse — 60 / 59.94 / 50 / 30 fps on 60 Hz, 60 fps on 50 Hz, 120 fps on 144 Hz, 60 fps on 75 Hz — never calling judder and never calling it clean, `unresolved`, a stall at the start, middle and end, blind refreshes hiding one boundary per refresh at 60 and 50 Hz, `hidden_refreshes`, `unseen_refreshes`, `held_range`, a frozen wall (dxcam only), the judged share, the required rate; round 6: unreadable pictures after the last boundary, cameras' pts on 1/90000, 1/10000, 1/1000 and 1/600 timebases, a rate within its tolerance either way, judder a box stall hid from dxcam; round 7: a grab preempted 2–40 ms before its acquire, an impossible bracket, a locked capture ending on unreadable pictures, a camera exposure mixing two boundaries) and `test_wall_capture.py` (round 7: `--locked` checked, a rate that cannot be checked)
 (`av_sync_check.gray_video_args`, `showinfo_pts`, `read_video` against a
 stand-in ffmpeg — pts, a half frame, a failed exit, the kill when a read
 fails —, `poll_blind`, `check_present_rate`, `main`'s exit codes for a
