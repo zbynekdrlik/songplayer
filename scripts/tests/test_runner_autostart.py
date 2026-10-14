@@ -85,13 +85,19 @@ def test_the_installer_holds_no_copy_and_runs_the_script_on_every_path():
     assert 'Set-Content "$RunnerDir\\start-runner.vbs"' not in s
     assert 'Set-Content "$RunnerDir\\start-runner.bat"' not in s
     assert "WshShell" not in s, "a second copy of the vbs"
+    # The one helper that runs the script, defined before its first use.
+    helper = _function(s, "Install-RunnerAutostart")
+    assert "runner-autostart.ps1" in helper
+    assert "-File" in helper and "$LASTEXITCODE" in helper and "throw" in helper
+    call = "Install-RunnerAutostart -RunnerDir $RunnerDir"
     configured = s.index("Runner already configured")
+    assert s.index("function Install-RunnerAutostart") < configured
     returned = s.index("return", configured)
-    assert "runner-autostart.ps1" in s[configured:returned], (
+    assert call in s[configured:returned], (
         "a box that already has a runner must get the files too"
     )
     task = s.index("Register-ScheduledTask")
-    assert "runner-autostart.ps1" in s[returned:task], (
+    assert call in s[returned:task], (
         "a new install writes the files before its task runs them"
     )
 
