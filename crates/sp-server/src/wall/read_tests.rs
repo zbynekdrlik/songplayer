@@ -8,9 +8,10 @@ use sp_core::wall::ArenaOutput;
 use super::*;
 use crate::wall::fake::{
     ADVANCED, ARENA_PID, FakeReader, MONITOR_PID, arena_main, arena_output as output_window,
-    crash_report_window, documents, snv_arena_process, snv_facts, snv_nvidia, snv_nvidia_raw,
-    snv_output, snv_times, span, vdd,
+    crash_report_window, documents, monitor_key, monitor_times, snv_arena_process, snv_facts,
+    snv_nvidia, snv_nvidia_raw, snv_output, snv_times, span, vdd,
 };
+use crate::wall::guard::ProcessTimes;
 use crate::wall::resolume;
 
 #[test]
@@ -366,6 +367,11 @@ fn crashed_box() -> FakeReader {
             (MONITOR_PID, crash_report_window()),
             (BRIDGE_MONITOR_PID, crash_report_window()),
         ]),
+        times: vec![
+            (ARENA_PID, Ok(snv_times())),
+            (MONITOR_PID, Ok(monitor_times())),
+            (BRIDGE_MONITOR_PID, Ok(monitor_times())),
+        ],
         hung: vec![(ARENA_PID, Ok(true))],
         ..FakeReader::snv()
     }
@@ -384,7 +390,7 @@ fn the_guard_reads_each_arena_with_its_own_crash_reporter() {
             pid: ARENA_PID,
             times: Ok(snv_times()),
             hung: Ok(true),
-            monitors: vec![MONITOR_PID],
+            monitors: vec![monitor_key()],
             crash_report: Ok(true),
         }])
     );
@@ -431,7 +437,7 @@ fn only_a_visible_crash_report_window_of_arenas_own_reporter_counts() {
         ("another title", other_title),
     ] {
         let guard = read_facts(&reader).guard.unwrap();
-        assert_eq!(guard[0].monitors, [MONITOR_PID], "{name}");
+        assert_eq!(guard[0].monitors, [monitor_key()], "{name}");
         assert_eq!(guard[0].crash_report, Ok(false), "{name}");
     }
     // A "Crash Report" window of a process of Arena's that is no reporter.
@@ -459,10 +465,10 @@ fn each_guard_read_that_fails_names_why() {
         read_facts(&no_list).guard,
         Err("CreateToolhelp32Snapshot failed (error 5)".to_string())
     );
+    // Arena's start unread: no reporter can be told its own.
     let unreadable = FakeReader {
         times: Vec::new(),
         hung: vec![(ARENA_PID, Err("EnumWindows failed (error 5)".to_string()))],
-        windows: Err("EnumWindows failed (error 1400)".to_string()),
         ..crashed_box()
     };
     let guard = guard_facts(&unreadable, &unreadable.processes().unwrap());
@@ -472,10 +478,52 @@ fn each_guard_read_that_fails_names_why() {
             pid: ARENA_PID,
             times: Err(format!("OpenProcess({ARENA_PID}) failed (error 87)")),
             hung: Err("EnumWindows failed (error 5)".to_string()),
-            monitors: vec![MONITOR_PID],
-            crash_report: Err("EnumWindows failed (error 1400)".to_string()),
+            monitors: Vec::new(),
+            crash_report: Ok(false),
         }]
     );
+    let no_windows = FakeReader {
+        windows: Err("EnumWindows failed (error 1400)".to_string()),
+        ..crashed_box()
+    };
+    let guard = guard_facts(&no_windows, &no_windows.processes().unwrap());
+    assert_eq!(
+        (guard[0].monitors.clone(), guard[0].crash_report.clone()),
+        (
+            vec![monitor_key()],
+            Err("EnumWindows failed (error 1400)".to_string())
+        )
+    );
+}
+
+/// #254 review round 1: PP's Arena-Bridge.exe crashed and only it was
+/// killed; its reporter stays up with its window, and a Songs Arena started
+/// later got the Bridge's old id. A parent id is never updated, so that
+/// reporter reads as Arena's child, but it started before Arena: it is not
+/// Arena's, and Arena is never ended for it.
+#[test]
+fn a_reporter_older_than_arena_is_another_programs() {
+    let older = ProcessTimes {
+        created_100ns: snv_times().created_100ns - 10_000_000,
+        cpu_100ns: 5,
+    };
+    let stale = FakeReader {
+        times: vec![(ARENA_PID, Ok(snv_times())), (MONITOR_PID, Ok(older))],
+        ..crashed_box()
+    };
+    // A reporter whose start cannot be read is not counted either.
+    let unread = FakeReader {
+        times: vec![(ARENA_PID, Ok(snv_times()))],
+        ..crashed_box()
+    };
+    for (name, reader) in [("older", stale), ("unread", unread)] {
+        let guard = read_facts(&reader).guard.unwrap();
+        assert_eq!(
+            (guard[0].monitors.clone(), guard[0].crash_report.clone()),
+            (Vec::new(), Ok(false)),
+            "{name}"
+        );
+    }
 }
 
 #[test]

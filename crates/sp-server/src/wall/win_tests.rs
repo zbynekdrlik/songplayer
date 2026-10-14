@@ -21,7 +21,7 @@ use std::time::Duration;
 use sp_core::wall::GuardWhy;
 
 use super::*;
-use crate::wall::guard::EndOrder;
+use crate::wall::guard::{EndOrder, ProcessKey};
 use crate::wall::guard_win;
 use crate::wall::read::{Arena, read_facts};
 
@@ -201,4 +201,41 @@ fn the_guard_leaves_another_program_or_a_later_arena_running() {
     let refused = guard_win::end(&order(&later, created + 1)).unwrap_err();
     assert!(refused.contains("started since the read"), "{refused}");
     assert!(later.running());
+}
+
+#[test]
+fn the_guard_ends_arenas_reporter_first_only_when_it_is_the_one_read() {
+    let _alone = ARENA_CHILDREN.lock().unwrap_or_else(|e| e.into_inner());
+    // A reporter started since the read: left running, Arena still ended.
+    let mut reporter = Waiting::start("BugSplatMonitor.exe");
+    let mut arena = Waiting::start("Arena.exe");
+    let reporter_created = WinReader.times(reporter.pid()).unwrap().created_100ns;
+    let arena_created = WinReader.times(arena.pid()).unwrap().created_100ns;
+    let later = EndOrder {
+        monitors: vec![ProcessKey {
+            pid: reporter.pid(),
+            created_100ns: reporter_created + 1,
+        }],
+        ..order(&arena, arena_created)
+    };
+    let refused = guard_win::end(&later).unwrap_err();
+    assert!(
+        refused.contains("another BugSplatMonitor.exe (started since the read)"),
+        "{refused}"
+    );
+    assert!(reporter.running());
+    assert_eq!(arena.child.wait().unwrap().code(), Some(1));
+    // The reporter read: ended first, then Arena.
+    let mut reporter = Waiting::start("BugSplatMonitor.exe");
+    let mut arena = Waiting::start("Arena.exe");
+    let read = EndOrder {
+        monitors: vec![ProcessKey {
+            pid: reporter.pid(),
+            created_100ns: WinReader.times(reporter.pid()).unwrap().created_100ns,
+        }],
+        ..order(&arena, WinReader.times(arena.pid()).unwrap().created_100ns)
+    };
+    assert_eq!(guard_win::end(&read), Ok(()));
+    assert_eq!(reporter.child.wait().unwrap().code(), Some(1));
+    assert_eq!(arena.child.wait().unwrap().code(), Some(1));
 }

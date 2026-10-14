@@ -16,8 +16,8 @@ use tower::ServiceExt;
 use super::*;
 use crate::prod_env::Reader;
 use crate::wall::fake::{
-    ARENA_PID, FakeReader, MONITOR_PID, crash_report_window, nvidia_read, snv_arena_process,
-    snv_facts, snv_nvidia, snv_times, vdd,
+    ARENA_PID, FakeReader, MONITOR_PID, crash_report_window, monitor_key, monitor_times,
+    nvidia_read, snv_arena_process, snv_facts, snv_nvidia, snv_times, vdd,
 };
 use crate::wall::guard::{ArenaProcess, EndOrder, Guard};
 use crate::wall::read::{Arena, NvidiaFacts, read_facts};
@@ -173,7 +173,7 @@ fn nothing_failed(_: &EndOrder) -> Result<(), String> {
 fn crashed() -> WallFacts {
     WallFacts {
         guard: Ok(vec![ArenaProcess {
-            monitors: vec![MONITOR_PID],
+            monitors: vec![monitor_key()],
             crash_report: Ok(true),
             ..snv_arena_process()
         }]),
@@ -207,7 +207,7 @@ fn the_guard_ends_a_crashed_arena_once_and_the_status_names_it_until_it_runs_aga
             pid: ARENA_PID,
             created_100ns: snv_times().created_100ns,
             why: GuardWhy::CrashReport,
-            monitors: vec![MONITOR_PID],
+            monitors: vec![monitor_key()],
         }]
     );
     let end_record = GuardEnd {
@@ -263,6 +263,10 @@ fn a_crash_report_read_from_the_box_ends_its_arena() {
             (MONITOR_PID, "BugSplatMonitor.exe".to_string()),
         ]),
         parents: vec![(MONITOR_PID, ARENA_PID)],
+        times: vec![
+            (ARENA_PID, Ok(snv_times())),
+            (MONITOR_PID, Ok(monitor_times())),
+        ],
         windows: Ok(vec![(MONITOR_PID, crash_report_window())]),
         ..FakeReader::snv()
     };

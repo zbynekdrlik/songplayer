@@ -91,8 +91,10 @@ pub struct ArenaProcess {
     /// A visible top-level window of it does not answer
     /// (`IsHungAppWindow`).
     pub hung: Result<bool, String>,
-    /// Its crash reporter's processes (`BugSplatMonitor.exe` it started).
-    pub monitors: Vec<u32>,
+    /// Its crash reporter's processes: each `BugSplatMonitor.exe` it
+    /// started (`read::guard_facts`: its parent, and started after it), by
+    /// id and start time.
+    pub monitors: Vec<ProcessKey>,
     /// One of them shows a visible window titled [`CRASH_REPORT_TITLE`].
     pub crash_report: Result<bool, String>,
 }
@@ -101,7 +103,8 @@ pub struct ArenaProcess {
 /// process list could not be read.
 pub type GuardFacts = Result<Vec<ArenaProcess>, String>;
 
-/// One Arena process: its id and its start time.
+/// One process: its id and its start time (an id is reused, the pair is
+/// not).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProcessKey {
     pub pid: u32,
@@ -119,14 +122,14 @@ impl ArenaProcess {
 }
 
 /// The end of one Arena the guard orders: its crash reporter's processes
-/// first, then Arena itself (only while it is still the process started
-/// at `created_100ns`).
+/// first, then Arena itself, each only while it is still the process
+/// started at the time read.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EndOrder {
     pub pid: u32,
     pub created_100ns: u64,
     pub why: GuardWhy,
-    pub monitors: Vec<u32>,
+    pub monitors: Vec<ProcessKey>,
 }
 
 /// What the guard logs.
@@ -289,7 +292,7 @@ pub fn record_end(
         at_ms: now_ms,
         why: order.why,
         pid: order.pid,
-        monitors: order.monitors.clone(),
+        monitors: order.monitors.iter().map(|m| m.pid).collect(),
         error: result.err(),
     };
     guard.record.ends = guard.record.ends.saturating_add(1);

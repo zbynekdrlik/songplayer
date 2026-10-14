@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use sp_core::wall::{ArenaOutput, ArenaWindow, Connected, Display, DisplayId, Grid, WantedDisplay};
 
-use super::guard::{ArenaProcess, ProcessTimes};
+use super::guard::{ArenaProcess, ProcessKey, ProcessTimes};
 use super::nvapi::{NvGpuDisplayIds, NvMosaicGridTopoV2};
 use super::read::{Arena, NvidiaFacts, NvidiaRaw, ProcessEntry, WallFacts, WallReader};
 use super::resolume;
@@ -47,6 +47,23 @@ pub fn snv_times() -> ProcessTimes {
     ProcessTimes {
         created_100ns: 134_049_123_000_000_000,
         cpu_100ns: 10_987_000_000,
+    }
+}
+
+/// #254: Arena's crash reporter's times: started 200 s after Arena (Arena
+/// starts it, so it is never older).
+pub fn monitor_times() -> ProcessTimes {
+    ProcessTimes {
+        created_100ns: snv_times().created_100ns + 2_000_000_000,
+        cpu_100ns: 1_000,
+    }
+}
+
+/// #254: Arena's crash reporter, by id and start time.
+pub fn monitor_key() -> ProcessKey {
+    ProcessKey {
+        pid: MONITOR_PID,
+        created_100ns: monitor_times().created_100ns,
     }
 }
 

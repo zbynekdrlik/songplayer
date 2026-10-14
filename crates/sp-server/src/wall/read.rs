@@ -17,7 +17,7 @@ use sp_core::wall::{ArenaOutput, ArenaWindow, Connected, Display, Grid};
 
 use super::decide;
 use super::guard::{
-    ArenaProcess, CRASH_MONITOR_IMAGE, CRASH_REPORT_TITLE, GuardFacts, ProcessTimes,
+    ArenaProcess, CRASH_MONITOR_IMAGE, CRASH_REPORT_TITLE, GuardFacts, ProcessKey, ProcessTimes,
 };
 use super::nvapi::{self, NvGpuDisplayIds, NvMosaicGridTopoV2};
 use super::resolume;
@@ -182,22 +182,23 @@ fn arena_of(
 
 /// #254: what the guard needs of each Arena process in `processes`: its
 /// times, whether a window of it hangs, its crash reporter's processes
-/// (each `BugSplatMonitor.exe` whose parent it is: never another program's,
-/// PP's Arena-Bridge.exe uses BugSplat too) and whether one of them shows a
-/// visible window titled exactly [`CRASH_REPORT_TITLE`].
+/// ([`reporters_of`]; none while Arena's own start cannot be read) and
+/// whether one of them shows a visible window titled exactly
+/// [`CRASH_REPORT_TITLE`].
 pub fn guard_facts(reader: &dyn WallReader, processes: &[ProcessEntry]) -> Vec<ArenaProcess> {
     pids_of(processes, ARENA_IMAGE)
         .into_iter()
         .map(|pid| {
-            let monitors: Vec<u32> = processes
-                .iter()
-                .filter(|p| p.parent == pid && p.image.eq_ignore_ascii_case(CRASH_MONITOR_IMAGE))
-                .map(|p| p.pid)
-                .collect();
+            let times = reader.times(pid);
+            let monitors = match &times {
+                Ok(arena) => reporters_of(reader, processes, pid, arena.created_100ns),
+                Err(_) => Vec::new(),
+            };
             let crash_report = if monitors.is_empty() {
                 Ok(false)
             } else {
-                reader.windows_of(&monitors).map(|windows| {
+                let pids: Vec<u32> = monitors.iter().map(|m| m.pid).collect();
+                reader.windows_of(&pids).map(|windows| {
                     windows
                         .iter()
                         .any(|w| w.visible && w.title == CRASH_REPORT_TITLE)
@@ -205,11 +206,37 @@ pub fn guard_facts(reader: &dyn WallReader, processes: &[ProcessEntry]) -> Vec<A
             };
             ArenaProcess {
                 pid,
-                times: reader.times(pid),
+                times,
                 hung: reader.hung(pid),
                 monitors,
                 crash_report,
             }
+        })
+        .collect()
+}
+
+/// #254: Arena `pid`'s crash reporters: each `BugSplatMonitor.exe` whose
+/// parent id is `pid` AND that started no earlier than Arena
+/// (`arena_created_100ns`). A parent id is never updated and outlives its
+/// parent, and ids are reused: a reporter another program left up (PP's
+/// Arena-Bridge.exe uses BugSplat too) whose id Arena now has started
+/// before Arena, and is never Arena's. A reporter whose start cannot be
+/// read is not counted.
+fn reporters_of(
+    reader: &dyn WallReader,
+    processes: &[ProcessEntry],
+    pid: u32,
+    _arena_created_100ns: u64,
+) -> Vec<ProcessKey> {
+    processes
+        .iter()
+        .filter(|p| p.parent == pid && p.image.eq_ignore_ascii_case(CRASH_MONITOR_IMAGE))
+        .filter_map(|p| {
+            let times = reader.times(p.pid).ok()?;
+            Some(ProcessKey {
+                pid: p.pid,
+                created_100ns: times.created_100ns,
+            })
         })
         .collect()
 }

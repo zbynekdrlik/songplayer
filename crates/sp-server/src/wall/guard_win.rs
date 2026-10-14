@@ -38,13 +38,14 @@ impl Drop for Opened {
     }
 }
 
-/// Ends `order`'s crash reporter's processes, then its Arena; why any of
-/// them could not be ended, every reason joined.
+/// Ends `order`'s crash reporter's processes, then its Arena, each only
+/// while it is the process read (image and start time); why any of them
+/// could not be ended, every reason joined.
 #[cfg_attr(test, mutants::skip)] // Windows glue
 pub fn end(order: &EndOrder) -> Result<(), String> {
     let mut failed = Vec::new();
-    for &monitor in &order.monitors {
-        if let Err(why) = end_process(monitor, CRASH_MONITOR_IMAGE, None) {
+    for monitor in &order.monitors {
+        if let Err(why) = end_process(monitor.pid, CRASH_MONITOR_IMAGE, None) {
             failed.push(why);
         }
     }
@@ -58,8 +59,8 @@ pub fn end(order: &EndOrder) -> Result<(), String> {
     }
 }
 
-/// Ends process `pid` when its image is `image` and (when given) it was
-/// started at `created_100ns`; a process that is gone already is ended.
+/// Ends process `pid` when its image is `image` and it was started at
+/// `created_100ns`; a process that is gone already is ended.
 #[cfg_attr(test, mutants::skip)] // Windows glue
 fn end_process(pid: u32, image: &str, created_100ns: Option<u64>) -> Result<(), String> {
     // SAFETY: opens the process to read its image and times and to end it;

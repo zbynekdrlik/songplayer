@@ -228,7 +228,7 @@ fn log_guard(event: &guard::GuardEvent) {
         guard::GuardEvent::NotBack(end) => warn!(
             pid = end.pid,
             why = end.why.name(),
-            "wall guard: no Resolume Arena runs {} s after the guard ended pid {}",
+            "wall guard: no new Resolume Arena runs {} s after the guard ended pid {}",
             guard::RELAUNCH_WAIT_MS / 1000,
             end.pid
         ),

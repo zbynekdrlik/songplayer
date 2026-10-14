@@ -20,6 +20,14 @@ const MONITOR: u32 = 9188;
 /// No event.
 const NONE: [GuardEvent; 0] = [];
 
+/// The crash reporter, by id and start time (started after Arena).
+fn monitor() -> ProcessKey {
+    ProcessKey {
+        pid: MONITOR,
+        created_100ns: CREATED + 1_000,
+    }
+}
+
 /// An Arena that answers, `cpu` 100 ns of CPU time used.
 fn answers(pid: u32, cpu: u64) -> ArenaProcess {
     ArenaProcess {
@@ -45,7 +53,7 @@ fn hung(pid: u32, cpu: u64) -> ArenaProcess {
 /// An Arena whose crash reporter shows its "Crash Report" window.
 fn crashed(pid: u32, cpu: u64) -> ArenaProcess {
     ArenaProcess {
-        monitors: vec![MONITOR],
+        monitors: vec![monitor()],
         crash_report: Ok(true),
         ..answers(pid, cpu)
     }
@@ -57,7 +65,7 @@ fn order(guard: &mut Guard, arenas: Vec<ArenaProcess>, at: i64) -> Option<EndOrd
 }
 
 /// The order to end Arena `pid` for `why`.
-fn ended(pid: u32, why: GuardWhy, monitors: Vec<u32>) -> Option<EndOrder> {
+fn ended(pid: u32, why: GuardWhy, monitors: Vec<ProcessKey>) -> Option<EndOrder> {
     Some(EndOrder {
         pid,
         created_100ns: CREATED,
@@ -112,7 +120,7 @@ fn a_crash_report_window_ends_its_arena_at_once() {
         step,
         Step {
             events: Vec::new(),
-            end: ended(5120, GuardWhy::CrashReport, vec![MONITOR]),
+            end: ended(5120, GuardWhy::CrashReport, vec![monitor()]),
         }
     );
 }
@@ -262,13 +270,13 @@ fn a_new_arena_process_is_guarded_again() {
             pid: 5120,
             created_100ns: CREATED + 10,
             why: GuardWhy::CrashReport,
-            monitors: vec![MONITOR],
+            monitors: vec![monitor()],
         })
     );
     // Another process id.
     assert_eq!(
         order(&mut guard, vec![crashed(6000, 3)], 15_000),
-        ended(6000, GuardWhy::CrashReport, vec![MONITOR])
+        ended(6000, GuardWhy::CrashReport, vec![monitor()])
     );
 }
 
@@ -446,4 +454,19 @@ fn a_new_arena_that_crashed_too_is_back_then_ended_again() {
             phase: GuardPhase::Relaunching,
         }
     );
+}
+
+#[test]
+fn a_relaunched_arena_whose_start_cannot_be_read_is_back() {
+    let mut guard = Guard::default();
+    step(&mut guard, &Ok(vec![crashed(5120, 1)]), T0, &mut ok);
+    let unread = ArenaProcess {
+        times: Err("OpenProcess(5124) failed (error 5)".to_string()),
+        ..answers(5124, 3)
+    };
+    assert_eq!(
+        step(&mut guard, &Ok(vec![unread]), T0 + 5_000, &mut ok),
+        [GuardEvent::Back { pid: 5124 }]
+    );
+    assert_eq!(guard.view().phase, GuardPhase::Idle);
 }
