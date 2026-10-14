@@ -174,3 +174,41 @@ def test_a_size_must_keep_the_cell_fractions():
     for bad in ("1000x500", "1920x1081", "0x0"):
         with pytest.raises(argparse.ArgumentTypeError):
             clip.parse_size(bad)
+
+
+def fake_ffmpeg(directory: Path, body: str) -> str:
+    """A stand-in ffmpeg: a shell script that gets ffmpeg's arguments (the
+    output file last) and the raw frames on stdin."""
+    script = directory / "ffmpeg"
+    script.write_text("#!/bin/sh\nfor last; do :; done\n" + body)
+    script.chmod(0o755)
+    return str(script)
+
+
+def test_a_clip_is_renamed_into_place_once_ffmpeg_succeeded(tmp_path):
+    ffmpeg = fake_ffmpeg(tmp_path, 'wc -c > "$last"\n')
+    out = tmp_path / "clip.mp4"
+    clip.write_clip(30, 960, 540, 1, out, ffmpeg)
+    frame_bytes = 960 * 540 * 3 // 2
+    assert int(out.read_text()) == 30 * frame_bytes, "every frame, Y + U + V"
+    assert not (tmp_path / "clip.mp4.partial").exists()
+
+
+def test_a_failed_encode_leaves_no_partial_file(tmp_path):
+    ffmpeg = fake_ffmpeg(
+        tmp_path, 'cat > /dev/null\necho half > "$last"\necho boom >&2\nexit 3\n'
+    )
+    out = tmp_path / "clip.mp4"
+    with pytest.raises(RuntimeError, match="ffmpeg exited 3: boom"):
+        clip.write_clip(30, 960, 540, 1, out, ffmpeg)
+    assert not out.exists()
+    assert not (tmp_path / "clip.mp4.partial").exists()
+
+
+def test_an_ffmpeg_that_stops_reading_is_killed_and_cleaned_up(tmp_path):
+    ffmpeg = fake_ffmpeg(tmp_path, 'echo half > "$last"\nexit 1\n')
+    out = tmp_path / "clip.mp4"
+    with pytest.raises(BrokenPipeError):
+        clip.write_clip(30, 960, 540, 1, out, ffmpeg)
+    assert not out.exists()
+    assert not (tmp_path / "clip.mp4.partial").exists()

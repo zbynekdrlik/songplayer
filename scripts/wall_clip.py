@@ -44,6 +44,7 @@ import argparse
 import hashlib
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -331,20 +332,28 @@ def write_clip(
     chroma = bytes([C_NEUTRAL]) * (2 * (width // 2) * (height // 2))
     temp = out.with_name(out.name + ".partial")
     args = ffmpeg_args(fps, width, height, seconds, temp, ffmpeg)
-    proc = subprocess.Popen(args, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
-    assert proc.stdin is not None and proc.stderr is not None
-    try:
-        for index in range(frame_count(fps, seconds)):
-            proc.stdin.write(draw_frame(index, fps, lay, base).data)
-            proc.stdin.write(chroma)
-        proc.stdin.close()
-    except BrokenPipeError:
-        proc.wait()
-        err = proc.stderr.read().decode(errors="replace").strip()
-        raise RuntimeError(f"ffmpeg stopped reading frames: {err}") from None
-    err = proc.stderr.read().decode(errors="replace").strip()
-    code = proc.wait()
+    # ffmpeg's messages go to a file, never a pipe nobody reads while the
+    # frames are written.
+    with tempfile.TemporaryFile() as log:
+        proc = subprocess.Popen(args, stdin=subprocess.PIPE, stderr=log)
+        assert proc.stdin is not None
+        try:
+            for index in range(frame_count(fps, seconds)):
+                proc.stdin.write(draw_frame(index, fps, lay, base).data)
+                proc.stdin.write(chroma)
+            proc.stdin.close()
+            code = proc.wait()
+        except BaseException:
+            # Any failure (ffmpeg gone, Ctrl-C): no ffmpeg left running, no
+            # partial file left behind.
+            proc.kill()
+            proc.wait()
+            temp.unlink(missing_ok=True)
+            raise
+        log.seek(0)
+        err = log.read().decode(errors="replace").strip()
     if code != 0:
+        temp.unlink(missing_ok=True)
         raise RuntimeError(f"ffmpeg exited {code}: {err}")
     temp.replace(out)
 
