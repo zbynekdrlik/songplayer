@@ -219,7 +219,7 @@ fn the_guard_ends_a_crashed_arena_once_and_the_status_names_it_until_it_runs_aga
     };
     let relaunching = WallGuard {
         ends: 1,
-        last: Some(end_record.clone()),
+        last: Some(end_record),
         phase: GuardPhase::Relaunching,
     };
     assert_eq!((record, again), (relaunching.clone(), relaunching.clone()));
