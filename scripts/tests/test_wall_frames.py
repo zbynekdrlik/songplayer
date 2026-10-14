@@ -229,7 +229,7 @@ def test_where_the_reader_may_read_a_boundary():
 def test_pictures_blended_by_the_rule_read_back_to_the_rule():
     readings = []
     step = Fraction(25, 30)
-    for k in range(13):
+    for k in range(22):
         position = k * step
         index = int(position)
         q8 = wa.blend_q8(position, 25)
@@ -238,11 +238,11 @@ def test_pictures_blended_by_the_rule_read_back_to_the_rule():
         )
         readings.append(wf.read_frame(picture))
     report = wa.analyse(readings, 25, refresh_hz=30)
-    assert report["boundaries"] == 13
+    assert report["boundaries"] == 22
     observed = report["weights"]["observed_first_cycle"]
     for got, want in zip(observed, [0, 213, 170, 128, 85, 42]):
         assert abs(got - want) <= 2, observed
-    report = wa.analyse(readings, 25, refresh_hz=30, min_boundaries=13)
+    report = wa.analyse(readings, 25, refresh_hz=30, min_boundaries=20)
     assert report["verdict"] == "clean"
 
 

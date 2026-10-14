@@ -1,11 +1,12 @@
 """Shared fakes for the wall reader's tests (#272): the clip's own frames,
-the program's byte blend, the pacer's readings and a simulated dxcam
-capture."""
+the program's byte blend, the pacer's readings, the wall's refreshes as a
+camera samples them, and a simulated dxcam capture."""
 
 from __future__ import annotations
 
 import dataclasses
 import functools
+import math
 from fractions import Fraction
 
 import numpy as np
@@ -88,16 +89,40 @@ def at_60_hz(readings: list[wa.Reading]) -> list[float]:
     return [n / 60 for n in range(len(readings))]
 
 
-# Review round 3, the hand mutants: what each threshold and guard decides.
+def wall_refreshes(
+    counts: list[int], fps: int, start: Fraction = Fraction(100), frames: int = 1500
+) -> list[wa.Reading]:
+    """The wall's refreshes, one reading each: the pacer's boundary ``k``
+    (from clip position ``start``) on screen ``counts[k]`` refreshes."""
+    step = Fraction(fps, wa.GRID_FPS)
+    out: list[wa.Reading] = []
+    for k, count in enumerate(counts):
+        out.extend([reading_at(start + k * step, fps, frames)] * count)
+    return out
 
 
-def two_boundaries(gap_refreshes: float, unread: int = 0):
-    """Two boundaries, ``gap_refreshes`` apart at 60 Hz (times), with
-    ``unread`` undecoded pictures between them."""
-    prev = wa.Boundary(0, 0, wa.Reading("ok", 10, None, 0, 8))
-    run = wa.Boundary(unread + 1, unread + 1, wa.Reading("ok", 12, None, 0, 8))
-    times = [0.0] + [None] * unread + [gap_refreshes / 60]
-    return prev, run, times
+def camera(
+    refreshes: list[wa.Reading], wall_hz: float, cam_fps: float, offset: float
+) -> tuple[list[wa.Reading], list[float]]:
+    """A camera (or recorder) sampling the wall at ``cam_fps`` from
+    ``offset`` s: what the refresh on screen at each sample instant shows,
+    and the instants."""
+    readings, times = [], []
+    j = 0
+    while (r := math.floor((t := offset + j / cam_fps) * wall_hz)) < len(refreshes):
+        readings.append(refreshes[r])
+        times.append(t)
+        j += 1
+    return readings, times
+
+
+def judder(n: int, every: int = 20) -> list[int]:
+    """Refresh counts at 60 Hz on the 30 fps grid: 2 each, but every
+    ``every``-th pair 1 + 3."""
+    counts = [2] * n
+    for k in range(0, n - 1, every):
+        counts[k], counts[k + 1] = 1, 3
+    return counts
 
 
 def dxcam_capture(

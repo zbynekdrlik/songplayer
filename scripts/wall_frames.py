@@ -46,6 +46,7 @@ stderr), 2 = a usage error: a broken capture never reads as a broken wall.
 from __future__ import annotations
 
 import argparse
+import bisect
 import json
 import math
 import subprocess
@@ -68,8 +69,6 @@ from wall_analysis import (
     Reading,
     analyse,
     check_present_rate,
-    late_polls,
-    video_blind_spans,
 )
 
 FULL_SCALE = 255.0
@@ -292,21 +291,29 @@ def parse_pair(text: str) -> tuple[float, float]:
     return a, b
 
 
+def poll_blind(times: list[float], polls: list[float]) -> list[float]:
+    """Each dxcam picture's blind span: the time since the poll before the
+    one that got it (an empty poll proves nothing new was presented); the
+    first poll's picture: unknown (``inf``)."""
+    out = []
+    for t in times:
+        k = bisect.bisect_left(polls, t)
+        out.append(t - polls[k - 1] if k else math.inf)
+    return out
+
+
 def capture(args: argparse.Namespace) -> dict:
     """Capture or read the pictures ``args`` names, then the report."""
     if args.video is not None:
         readings, times = read_video(args.video, args.width, args.x_range)
-        blind = video_blind_spans(times, args.refresh_hz)
+        blind = None  # since the picture before
         span = None  # the first picture's pts to the last one's
     else:
-        region = tuple(int(v) for v in args.region.split(",")) if args.region else None
         times, sampled, polls = capture_dxcam(
-            args.dxcam, region, args.seconds, args.x_range
+            args.dxcam, args.region, args.seconds, args.x_range
         )
         readings = [read_columns(s) for s in sampled]
-        # A picture's time is its poll's: a poll more than half a refresh
-        # late can no longer time it to the refresh.
-        blind = late_polls(polls, 0.5 / args.refresh_hz)
+        blind = poll_blind(times, polls)
         check_present_rate(times, args.refresh_hz, blind)
         span = (polls[0], polls[-1]) if polls else None
     return analyse(
@@ -314,12 +321,21 @@ def capture(args: argparse.Namespace) -> dict:
         args.fps,
         args.grid_fps,
         args.frames,
-        times,
-        args.refresh_hz,
-        blind,
-        span,
-        args.min_boundaries,
+        times=times,
+        refresh_hz=args.refresh_hz,
+        blind=blind,
+        span=span,
+        min_boundaries=args.min_boundaries,
+        locked=args.locked,
     )
+
+
+def parse_region(text: str) -> tuple[int, int, int, int]:
+    try:
+        left, top, right, bottom = (int(v) for v in text.split(","))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not L,T,R,B: {text!r}") from None
+    return left, top, right, bottom
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -332,9 +348,18 @@ def main(argv: list[str] | None = None) -> int:
     source.add_argument("--video", type=Path)
     source.add_argument("--dxcam", type=int, metavar="OUTPUT")
     parser.add_argument("--width", type=int, help="scale a video to this width")
-    parser.add_argument("--refresh-hz", type=float, help="the wall's refresh rate")
+    # The wall's own rate: one read from a capture is the capture's (a
+    # camera's; dxcam's 1 ms polls read 58.8 Hz for 60).
+    parser.add_argument(
+        "--refresh-hz", type=float, required=True, help="the wall's refresh rate"
+    )
+    parser.add_argument(
+        "--locked",
+        action="store_true",
+        help="each video picture is one wall refresh (the wall's own signal)",
+    )
     parser.add_argument("--seconds", type=float, default=20.0)
-    parser.add_argument("--region", help="dxcam region L,T,R,B")
+    parser.add_argument("--region", type=parse_region, help="dxcam region L,T,R,B")
     parser.add_argument(
         "--min-boundaries",
         type=int,
@@ -342,10 +367,8 @@ def main(argv: list[str] | None = None) -> int:
         help="boundaries a clean capture judges for judder",
     )
     args = parser.parse_args(argv)
-    if args.dxcam is not None and not args.refresh_hz:
-        # dxcam's 1 ms polls skew a rate read from its pictures (58.8 Hz
-        # for 60): the wall's own rate is the reference.
-        parser.error("--dxcam needs the wall's --refresh-hz")
+    if args.locked and args.dxcam is not None:
+        parser.error("--locked is for a --video of the wall's own signal")
     try:
         report = capture(args)
     except Exception as exc:  # a broken capture is never a broken wall
