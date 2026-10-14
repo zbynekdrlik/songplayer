@@ -161,6 +161,24 @@ jobs:
           }
           Write-Host "Installer: $($installers[0].Name) ($($installers[0].Length) bytes)"
 
+      # Issue 274: deliver the runner's auto-start from the repo on every
+      # deploy (start-runner.bat + the guarded start-runner.vbs), and end a
+      # duplicate listener of C:\actions-runner: setup-runner.ps1 returns on
+      # a configured box, so a fix to these files never reached a box set up
+      # before it (PP: four listeners, a duplicate cancelled an E2E). Before
+      # "Stop SongPlayer", after the box check: a failure here stops nothing. A child process,
+      # so a throw in it never ends this step half-way.
+      - name: Deliver the runner's auto-start (scripts/runner-autostart.ps1)
+        shell: powershell
+        timeout-minutes: 2
+        run: |
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE\scripts\runner-autostart.ps1"
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            Write-Error "FAIL: scripts/runner-autostart.ps1 exited $code - the runner's auto-start is not delivered (see its lines above); SongPlayer was not stopped"
+            exit 1
+          }
+
       # The phase-0 task `SongPlayer` (MultipleInstances=IgnoreNew): end the
       # task INSTANCE first, else Task Scheduler can still report it Running
       # after a taskkill and the later `schtasks /run` does nothing
