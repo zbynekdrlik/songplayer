@@ -19,8 +19,9 @@
 //! - The same route with NO body (or `{}`) imports every listed clip found
 //!   in the sample dir under its own file name: `200 {clips: [{name, file,
 //!   outcome: imported | already | absent | wrong_file | failed, found?,
-//!   error?}]}` — an absent clip is no error; `500` with the same body when
-//!   one failed; `503` before ffmpeg is ready.
+//!   error?}]}` — an absent clip is no error; the same body with `422`
+//!   when a file in the bench is not its clip, `500` when one failed; `503`
+//!   before ffmpeg is ready.
 //! - `POST /api/v1/test-item/start` plays a clip from position 0 (the
 //!   engine's `PlayVideo`, as the play-video route does): no body (or `{}`)
 //!   = camera-box's, `{"clip": "<name>"}` = that listed clip; `204`, `404`
@@ -140,10 +141,15 @@ pub fn start_clip(req: &StartRequest) -> Option<&'static Clip> {
     }
 }
 
-/// The list import's status: `500` when a clip failed, else `200`.
+/// The list import's status: `500` when a clip failed, else `422` when a
+/// file in the bench is not its clip (a stale or broken copy a script must
+/// not read as done), else `200` (absent clips are no error).
 pub fn list_status(clips: &[ClipImport]) -> StatusCode {
-    if clips.iter().any(|c| c.outcome == ClipOutcome::Failed) {
+    let any = |outcome: ClipOutcome| clips.iter().any(|c| c.outcome == outcome);
+    if any(ClipOutcome::Failed) {
         StatusCode::INTERNAL_SERVER_ERROR
+    } else if any(ClipOutcome::WrongFile) {
+        StatusCode::UNPROCESSABLE_ENTITY
     } else {
         StatusCode::OK
     }

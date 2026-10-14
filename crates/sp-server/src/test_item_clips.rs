@@ -17,8 +17,10 @@
 //!   (the video stream copied, the audio into FLAC with no filter).
 //! - **Which clip plays.** `/start {"clip"}` plays one from position 0 (no
 //!   body: camera-box's). Loop repeats it, and Loop's memory (V37) keeps the
-//!   clip started LAST: a press of `sp-test` with no start plays that one.
-//!   camera-box's protocol starts its clip before it cuts, as before.
+//!   clip started LAST: a press of `sp-test` with no start plays THAT clip,
+//!   where before #272 it could only be camera-box's. So a wall run ends
+//!   with `/start` and `/stop` with no body, which leaves camera-box's clip
+//!   as the one a bare press plays.
 
 use super::{
     TEST_ARTIST, TEST_CLIP_FILE, TEST_CLIP_SHA256, TEST_DURATION_MS, TEST_SONG, TEST_TITLE,

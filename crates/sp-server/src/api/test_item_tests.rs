@@ -404,8 +404,8 @@ async fn the_list_import_of_an_empty_sample_dir_imports_nothing() {
     assert!(engine.try_recv().is_err());
 }
 
-/// A file under a listed clip's name that is not that clip: named with its
-/// sha256, nothing written; the other clips are absent.
+/// A file under a listed clip's name that is not that clip: 422, named
+/// with its sha256, nothing written; the other clips are absent.
 #[tokio::test]
 async fn the_list_import_names_a_file_that_is_not_its_clip() {
     let dir = tempfile::tempdir().unwrap();
@@ -413,7 +413,7 @@ async fn the_list_import_names_a_file_that_is_not_its_clip() {
     let (state, mut engine) = test_state_with_engine_rx().await;
     let state = with_samples(state, dir.path()).await;
     let (status, text) = call_raw(state.clone(), "/api/v1/test-item/import", "").await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     let json: serde_json::Value = serde_json::from_str(&text).unwrap();
     let outcomes: Vec<&str> = json["clips"]
         .as_array()
@@ -489,14 +489,18 @@ fn the_list_import_s_status_and_pipeline_follow_the_outcomes() {
         outcomes.iter().copied().map(one).collect()
     };
     let ok = StatusCode::OK;
+    let wrong = StatusCode::UNPROCESSABLE_ENTITY;
     let failed = StatusCode::INTERNAL_SERVER_ERROR;
-    let table: [OutcomeRow; 7] = [
+    let table: [OutcomeRow; 10] = [
         (&[], ok, false),
         (&[Absent, Absent], ok, false),
-        (&[WrongFile], ok, false),
         (&[Absent, Imported], ok, true),
         (&[Already], ok, true),
+        (&[WrongFile], wrong, false),
+        (&[Absent, WrongFile], wrong, false),
+        (&[Imported, WrongFile], wrong, true),
         (&[Imported, Failed], failed, true),
+        (&[WrongFile, Failed], failed, false),
         (&[Failed], failed, false),
     ];
     for (outcomes, status, any) in table {
