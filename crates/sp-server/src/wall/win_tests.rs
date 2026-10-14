@@ -12,8 +12,9 @@
 //! The tests that start such a child and the one that expects no Arena hold
 //! one lock, so no Arena child runs while the walk looks for none.
 
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdout, Command, Stdio};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
@@ -49,11 +50,17 @@ fn the_child_waits_to_be_ended() {
     }
 }
 
+/// How long a child may take to start its harness.
+const CHILD_START: Duration = Duration::from_secs(30);
+
 /// A child of this test: a copy of this test binary named `image` in a
-/// directory of its own, waiting; killed and removed when dropped.
+/// directory of its own, waiting; killed and removed when dropped. Its
+/// output is kept open (`out`) so its harness never meets a closed pipe.
 struct Waiting {
     child: Child,
     dir: PathBuf,
+    #[allow(dead_code)] // held, never read: its pipe stays open
+    out: BufReader<ChildStdout>,
 }
 
 impl Waiting {
@@ -66,14 +73,36 @@ impl Waiting {
         std::fs::create_dir_all(&dir).unwrap();
         let exe = dir.join(image);
         std::fs::copy(std::env::current_exe().unwrap(), &exe).unwrap();
-        let child = Command::new(&exe)
+        let mut child = Command::new(&exe)
             .args(["--exact", WAITER, "--test-threads=1"])
             .env(CHILD_ENV, "1")
-            .stdout(Stdio::null())
+            .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
-        Self { child, dir }
+        // CI 38626241313: a child read the instant it was spawned had no
+        // image name yet (QueryFullProcessImageNameW error 31). Its harness
+        // prints "running 1 test" once the process runs, so wait for it.
+        let out = BufReader::new(child.stdout.take().unwrap());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut out = out;
+            let mut line = String::new();
+            let started = loop {
+                line.clear();
+                match out.read_line(&mut line) {
+                    Ok(0) | Err(_) => break false,
+                    Ok(_) if line.contains("running 1 test") => break true,
+                    Ok(_) => {}
+                }
+            };
+            let _ = tx.send((started, out));
+        });
+        let (started, out) = rx
+            .recv_timeout(CHILD_START)
+            .unwrap_or_else(|_| panic!("{image} did not start its harness"));
+        assert!(started, "{image} ended before its harness ran");
+        Self { child, dir, out }
     }
 
     fn pid(&self) -> u32 {
