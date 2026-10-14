@@ -11,6 +11,7 @@ from fractions import Fraction
 import numpy as np
 
 import wall_clip as clip
+import wall_analysis as wa
 import wall_frames as wf
 
 
@@ -52,12 +53,12 @@ def program_level(shown: int, later: int, q8: int) -> float:
     return (y - clip.Y_BLACK) / (clip.Y_WHITE - clip.Y_BLACK)
 
 
-def reading_at(position: Fraction, fps: int, frames: int) -> wf.Reading:
+def reading_at(position: Fraction, fps: int, frames: int) -> wa.Reading:
     """What the reader reads of the pacer's boundary at clip ``position``:
     the strip blended by the program's own 8-bit arithmetic at the pacer's
     weight, read by the reader's level rule."""
     index = int(position)
-    q8 = wf.blend_q8(position, fps)
+    q8 = wa.blend_q8(position, fps)
     if index + 1 >= frames:
         q8 = 0  # the song's end: no next frame to blend
     shown = clip.code_bits(index)
@@ -68,13 +69,13 @@ def reading_at(position: Fraction, fps: int, frames: int) -> wf.Reading:
 
 def pacer_readings(
     fps: int, start: Fraction, boundaries: int, frames: int, refreshes: int = 2
-) -> list[wf.Reading]:
+) -> list[wa.Reading]:
     """What a capture of the pacer's output reads: one reading per refresh,
     ``refreshes`` per boundary, from clip position ``start``. The clip loops
     after ``frames`` frames; the loop's new play starts on a boundary."""
     out = []
     position = start
-    step = Fraction(fps, wf.GRID_FPS)
+    step = Fraction(fps, wa.GRID_FPS)
     for _ in range(boundaries):
         out.extend([reading_at(position, fps, frames)] * refreshes)
         position += step
@@ -83,7 +84,7 @@ def pacer_readings(
     return out
 
 
-def at_60_hz(readings: list[wf.Reading]) -> list[float]:
+def at_60_hz(readings: list[wa.Reading]) -> list[float]:
     return [n / 60 for n in range(len(readings))]
 
 
@@ -93,8 +94,8 @@ def at_60_hz(readings: list[wf.Reading]) -> list[float]:
 def two_boundaries(gap_refreshes: float, unread: int = 0):
     """Two boundaries, ``gap_refreshes`` apart at 60 Hz (times), with
     ``unread`` undecoded pictures between them."""
-    prev = wf.Boundary(0, 0, wf.Reading("ok", 10, None, 0, 8))
-    run = wf.Boundary(unread + 1, unread + 1, wf.Reading("ok", 12, None, 0, 8))
+    prev = wa.Boundary(0, 0, wa.Reading("ok", 10, None, 0, 8))
+    run = wa.Boundary(unread + 1, unread + 1, wa.Reading("ok", 12, None, 0, 8))
     times = [0.0] + [None] * unread + [gap_refreshes / 60]
     return prev, run, times
 

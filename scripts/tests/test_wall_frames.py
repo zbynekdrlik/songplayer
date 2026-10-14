@@ -30,6 +30,7 @@ import numpy as np
 import pytest
 
 import wall_clip as clip
+import wall_analysis as wa
 import wall_frames as wf
 from wall_fakes import (
     blend,
@@ -41,7 +42,7 @@ from wall_fakes import (
 
 def test_a_clean_frame_reads_its_index_in_every_band():
     reading = wf.read_frame(frame(1234))
-    assert reading == wf.Reading("ok", 1234, None, 0, clip.BANDS)
+    assert reading == wa.Reading("ok", 1234, None, 0, clip.BANDS)
     assert reading.position() == 1234
 
 
@@ -102,7 +103,7 @@ def test_a_clip_spanning_part_of_the_capture_reads_with_its_x_range():
 
 def test_a_picture_with_no_strip_is_named():
     blank = np.full((540, 960), clip.Y_BACKGROUND, dtype=np.uint8)
-    assert wf.read_frame(blank) == wf.Reading("no_strip")
+    assert wf.read_frame(blank) == wa.Reading("no_strip")
     white = np.full((540, 960), 255, dtype=np.uint8)
     assert wf.read_frame(white).status == "no_strip"
 
@@ -134,14 +135,14 @@ def test_a_torn_picture_disagrees():
 
 def test_decode_levels_reads_plain_and_blended_strips():
     bits = np.array(clip.code_bits(9), dtype=float)
-    assert wf.decode_levels(bits) == wf.Reading("ok", 9, None, 0, 1)
+    assert wf.decode_levels(bits) == wa.Reading("ok", 9, None, 0, 1)
     k = int(np.flatnonzero(bits != np.array(clip.code_bits(10)))[0])
     blended = bits.copy()
     blended[k] = 0.25 if bits[k] == 0 else 0.75
-    assert wf.decode_levels(blended) == wf.Reading("ok", 9, 10, 64, 1)
+    assert wf.decode_levels(blended) == wa.Reading("ok", 9, 10, 64, 1)
     near_white = bits.copy()
     near_white[k] = 0.97 if bits[k] == 0 else 0.03
-    assert wf.decode_levels(near_white) == wf.Reading("ok", 10, None, 0, 1)
+    assert wf.decode_levels(near_white) == wa.Reading("ok", 10, None, 0, 1)
     # The weight is rounded to Q8, not cut: 0.3 x 256 = 76.8 -> 77.
     blended[k] = 0.3 if bits[k] == 0 else 0.7
     assert wf.decode_levels(blended).weight_q8 == 77
@@ -183,17 +184,17 @@ def test_a_washed_out_picture_is_not_read():
 
 
 def test_the_pacer_s_blend_rule():
-    assert wf.expected_weights(25) == [0, 213, 170, 128, 85, 42]
-    assert wf.expected_weights(24) == [0, 204, 153, 102, 51]
-    assert wf.expected_weights(30) == [0]
-    assert wf.expected_weights(15) == [0, 0], "a 2-slot hold, never blended"
-    assert wf.expected_weights(50) == [0, 0, 0]
-    assert wf.cycle_length(25) == 6 and wf.cycle_length(24) == 5
+    assert wa.expected_weights(25) == [0, 213, 170, 128, 85, 42]
+    assert wa.expected_weights(24) == [0, 204, 153, 102, 51]
+    assert wa.expected_weights(30) == [0]
+    assert wa.expected_weights(15) == [0, 0], "a 2-slot hold, never blended"
+    assert wa.expected_weights(50) == [0, 0, 0]
+    assert wa.cycle_length(25) == 6 and wa.cycle_length(24) == 5
     # Inside the 2 ms dead band after the shown frame: plain.
-    assert wf.blend_q8(Fraction(1, 25), 25) == 0
-    assert wf.blend_q8(Fraction(1, 10), 25) == 25
+    assert wa.blend_q8(Fraction(1, 25), 25) == 0
+    assert wa.blend_q8(Fraction(1, 10), 25) == 25
     # From another phase.
-    assert wf.expected_weights(25, phase=Fraction(1, 2)) == [128, 85, 42, 0, 213, 170]
+    assert wa.expected_weights(25, phase=Fraction(1, 2)) == [128, 85, 42, 0, 213, 170]
 
 
 def test_the_reader_s_dead_band_is_the_pacer_s():
@@ -201,20 +202,20 @@ def test_the_reader_s_dead_band_is_the_pacer_s():
     source = (rust / "playback" / "pacer_blend.rs").read_text()
     found = re.search(r"pub const BLEND_DEAD_BAND_100NS: i64 = ([0-9_]+);", source)
     assert found, "the pacer's dead band constant"
-    assert wf.DEAD_BAND_S == Fraction(int(found.group(1).replace("_", "")), 10**7)
+    assert wa.DEAD_BAND_S == Fraction(int(found.group(1).replace("_", "")), 10**7)
 
 
 def test_a_step_s_slack_is_the_dead_band_or_the_level_edge():
-    q8 = wf.Q8_TOLERANCE / 256
-    assert wf.step_tolerance(25) == pytest.approx(q8 + 0.05), "2 ms x 25"
-    assert wf.step_tolerance(24) == pytest.approx(q8 + 0.048)
-    assert wf.step_tolerance(15) == pytest.approx(q8 + wf.LEVEL_EDGE), "0.03 < edge"
-    assert wf.SAME_PICTURE == pytest.approx((8 + 0.04 * 256) / 256)
+    q8 = wa.Q8_TOLERANCE / 256
+    assert wa.step_tolerance(25) == pytest.approx(q8 + 0.05), "2 ms x 25"
+    assert wa.step_tolerance(24) == pytest.approx(q8 + 0.048)
+    assert wa.step_tolerance(15) == pytest.approx(q8 + wa.LEVEL_EDGE), "0.03 < edge"
+    assert wa.SAME_PICTURE == pytest.approx((8 + 0.04 * 256) / 256)
 
 
 def test_where_the_reader_may_read_a_boundary():
     def at(frames: int, hundredths: int, fps: int = 25) -> list[Fraction]:
-        return wf.readable_positions(Fraction(frames * 100 + hundredths, 100), fps)
+        return wa.readable_positions(Fraction(frames * 100 + hundredths, 100), fps)
 
     assert at(5, 0) == [5]
     assert at(5, 1) == [5], "the dead band"
@@ -231,17 +232,17 @@ def test_pictures_blended_by_the_rule_read_back_to_the_rule():
     for k in range(13):
         position = k * step
         index = int(position)
-        q8 = wf.blend_q8(position, 25)
+        q8 = wa.blend_q8(position, 25)
         picture = blend(
             frame(index, 25, 480, 270), frame(index + 1, 25, 480, 270), q8 / 256
         )
         readings.append(wf.read_frame(picture))
-    report = wf.analyse(readings, 25, refresh_hz=30)
+    report = wa.analyse(readings, 25, refresh_hz=30)
     assert report["boundaries"] == 13
     observed = report["weights"]["observed_first_cycle"]
     for got, want in zip(observed, [0, 213, 170, 128, 85, 42]):
         assert abs(got - want) <= 2, observed
-    report = wf.analyse(readings, 25, refresh_hz=30, min_boundaries=13)
+    report = wa.analyse(readings, 25, refresh_hz=30, min_boundaries=13)
     assert report["verdict"] == "clean"
 
 
