@@ -18,14 +18,17 @@ cells, and decodes each picture to ``(index, next_index, weight_q8)``:
 ``analyse`` turns a run of readings (one per captured refresh) into the
 report: boundaries and the refreshes each was on screen for (another count
 than the capture rate gives is judder; with capture times a stall that held
-a picture shows here too), lost frames, lost boundaries, jumps back,
+a picture shows here too, at the capture's edges as well; a wall that
+stopped presenting is ``frozen``), lost frames, lost boundaries, jumps back,
 cadence errors, loops, and the blend weights against the pacer's rule for
 the clip's fps on SongPlayer's 30 fps grid (``.claude/rules/genlock.md``:
 25 on 30 = plain, 213, 170, 128, 85, 42), at the grid phase fitted per play.
 What the capture did not see (unreadable pictures, spans it was blind) can
-excuse at most one boundary per unseen refresh, as ``unverified``; anything
-beyond that is lost. A capture with unverified steps or under
-``MIN_COVERAGE`` decoded pictures is ``incomplete``, never ``clean``. The
+excuse at most one boundary per refresh a boundary takes, as
+``unverified``; anything beyond that is lost. ``clean`` needs positive
+evidence: a capture with unverified steps, under ``MIN_COVERAGE`` decoded
+pictures, no refresh rate or under ``MIN_JUDGED`` of its boundaries judged
+for judder is ``incomplete``, never ``clean``. The
 clip LOOPS (the test playlist's mode): the song's end and the new play are
 not the measured cadence, so the steps at a loop seam are reported under
 ``loop_seams`` and kept out of the verdict; a jump to the start from
@@ -38,8 +41,9 @@ ffmpeg (every stored frame, ``-fps_mode passthrough``, with its pts from
 a pts gap is a span the recording was blind), or the Windows desktop
 duplication of one output through ``dxcam`` (the box's ``ops\\probe-venv``):
 only each picture's sampled columns are kept, as luma, and decoded AFTER
-the capture; every poll is timed, and a poll that came late is a blind span
-(a poll on time that finds no new picture is the wall holding one).
+the capture; every poll is timed, and a poll more than one refresh after
+the one before is a blind span (a poll on time that finds no new picture
+is the wall holding one).
 
 Usage::
 
@@ -99,10 +103,10 @@ WRAP_FRAMES = 3
 # A video pts interval over this many times the median: the recording was
 # blind there (it dropped frames).
 CAPTURE_GAP = 1.5
-# A dxcam poll this late after the one before may have missed a refresh.
-POLL_LATE_S = 0.008
-# Below this share of decoded pictures a capture is incomplete.
+# Below this share of decoded pictures, or of boundaries judged for
+# judder, a capture is incomplete.
 MIN_COVERAGE = 0.95
+MIN_JUDGED = 0.9
 LIST_MAX = 20
 
 
@@ -355,6 +359,18 @@ def step_tolerance(fps: int) -> float:
     return Q8_TOLERANCE / 256 + max(dead_band, LEVEL_EDGE)
 
 
+def expected_refreshes(refresh_hz: float | None, grid_fps: int) -> list[int]:
+    """How many refreshes a boundary is on screen at ``refresh_hz`` (60 Hz
+    on a 30 fps grid: 2; a rate the grid does not divide: the two around
+    it); none without a rate."""
+    if not refresh_hz:
+        return []
+    per = refresh_hz / grid_fps
+    if abs(per - round(per)) <= 0.01 * per:
+        return [round(per)]
+    return [math.floor(per), math.ceil(per)]
+
+
 def unseen_refreshes(
     prev: Boundary,
     run: Boundary,
@@ -362,15 +378,16 @@ def unseen_refreshes(
     period: float | None,
     blind_spans: list[tuple[float, float]] | None,
 ) -> int:
-    """How many refreshes between two boundaries the capture did not see:
-    each unreadable picture, and each refresh inside a span it was blind."""
+    """How many refreshes between two boundaries' pictures the capture did
+    not read: each unreadable picture; and when a blind span lies between
+    them, every refresh in between (``round(gap / period) - 1``, the two
+    read pictures not counted)."""
     unseen = run.first_sample - prev.last_sample - 1
-    if times is not None and blind_spans:
-        t0, t1 = times[prev.last_sample], times[run.first_sample]
-        for a, b in blind_spans:
-            overlap = min(b, t1) - max(a, t0)
-            if overlap > 0:
-                unseen += math.ceil(overlap / period) if period else 1
+    if times is None or not period or not blind_spans:
+        return unseen
+    t0, t1 = times[prev.last_sample], times[run.first_sample]
+    if any(min(b, t1) > max(a, t0) for a, b in blind_spans):
+        unseen = max(unseen, round((t1 - t0) / period) - 1)
     return unseen
 
 
@@ -382,25 +399,23 @@ def steps_between(
     times: list[float] | None = None,
     period: float | None = None,
     blind_spans: list[tuple[float, float]] | None = None,
+    per_boundary: int = 1,
 ) -> list[Step]:
     """Each step's clip advance (frames) and its grid boundaries, judged:
     ``jump_back`` (the clip went back), ``cadence`` (not a whole number of
     grid steps), ``lost`` (boundaries never shown) or ``None``. Boundaries
     a step skips that fit in the refreshes the capture did not see
-    (``unseen``, one boundary each) are ``excused``: such a step is
-    ``unverified``, and only what does not fit is ``lost``. The clip's loop
-    (its last frames to its first) is ``wrapped``, never a jump back."""
+    (``unseen``, ``per_boundary`` refreshes each: a boundary shown for
+    fewer is judder) are ``excused``: such a step is ``unverified``, and
+    only what does not fit is ``lost``. The clip's loop (its last frames to
+    its first) is ``wrapped``, never a jump back."""
     step = fps / grid_fps
     tolerance = step_tolerance(fps)
     out = []
     for prev, run in zip(runs[:-1], runs[1:]):
         before, after = prev.reading.position(), run.reading.position()
         delta = after - before
-        wrapped = (
-            delta < -n_frames / 2
-            and before >= n_frames - WRAP_FRAMES
-            and after < WRAP_FRAMES
-        )
+        wrapped = before >= n_frames - WRAP_FRAMES and after < WRAP_FRAMES
         if wrapped:
             delta += n_frames
         count = round(delta / step)
@@ -412,7 +427,7 @@ def steps_between(
         elif count == 0 or abs(delta - count * step) > tolerance:
             kind = "cadence"
         elif count > 1:
-            excused = min(count - 1, unseen)
+            excused = min(count - 1, unseen // per_boundary)
             lost = count - 1 - excused
             kind = "lost" if lost else "unverified"
         out.append(
@@ -431,12 +446,21 @@ def seam_steps(steps: list[Step]) -> set[int]:
     return seam
 
 
+def capture_period(times: list[float] | None) -> float | None:
+    """The median interval between captured pictures (s); ``None`` with
+    fewer than two."""
+    if times is None or len(times) < 2:
+        return None
+    return statistics.median(b - a for a, b in zip(times, times[1:]))
+
+
 def pts_gaps(times: list[float]) -> list[tuple[float, float]]:
     """The spans a recording was blind: a pts interval over ``CAPTURE_GAP``
     times the median (the recorder dropped frames there)."""
-    if len(times) < 2:
+    period = capture_period(times)
+    if period is None:
         return []
-    limit = CAPTURE_GAP * statistics.median(b - a for a, b in zip(times, times[1:]))
+    limit = CAPTURE_GAP * period
     return [(a, b) for a, b in zip(times, times[1:]) if b - a > limit]
 
 
@@ -448,27 +472,42 @@ def analyse(
     times: list[float] | None = None,
     refresh_hz: float | None = None,
     blind_spans: list[tuple[float, float]] | None = None,
+    span: tuple[float, float] | None = None,
 ) -> dict:
     """The report of a capture of the ``fps`` clip (see the module doc).
 
     ``times`` are the pictures' capture times (s), ``blind_spans`` the
-    spans the capture could not see. The refresh rate is ``refresh_hz``,
-    else read from ``times``, else there is no refresh check. Errors at a
-    loop seam (``seam_steps``) are reported under ``loop_seams``; the
-    verdict counts the steady cadence."""
+    spans the capture could not see, ``span`` the capture's own start and
+    end (default: its first and last picture). The refresh rate is
+    ``refresh_hz``, else read from ``times``, else there is no refresh
+    check. Errors at a loop seam (``seam_steps``) are reported under
+    ``loop_seams``; the verdict counts the steady cadence."""
     n_frames = clip.frame_count(fps, clip.CLIP_SECONDS) if frames is None else frames
-    if refresh_hz is None and times is not None and len(times) > 1:
-        refresh_hz = 1 / statistics.median(b - a for a, b in zip(times, times[1:]))
+    period = capture_period(times)
+    if refresh_hz is None and period:
+        refresh_hz = 1 / period
     period = 1 / refresh_hz if refresh_hz else None
+    expected = expected_refreshes(refresh_hz, grid_fps)
     runs = boundaries(readings)
-    steps = steps_between(runs, n_frames, fps, grid_fps, times, period, blind_spans)
+    steps = steps_between(
+        runs,
+        n_frames,
+        fps,
+        grid_fps,
+        times,
+        period,
+        blind_spans,
+        min(expected, default=1),
+    )
     seam = seam_steps(steps)
     steady = [s for n, s in enumerate(steps) if n not in seam]
     at_seam = [s for n, s in enumerate(steps) if n in seam]
     jumps = [s.sample for s in steady if s.kind == "jump_back"]
     losses = frame_losses(runs, steps, seam, n_frames, fps, grid_fps)
     weights = weight_report(runs, steps, seam, fps, grid_fps)
-    refresh = refresh_report(runs, steps, seam, grid_fps, refresh_hz, times)
+    if span is None and times:
+        span = (times[0], times[-1])
+    refresh = refresh_report(runs, steps, seam, refresh_hz, expected, times, span)
     decoded = sum(r.ok for r in readings)
     report: dict = {
         "fps": fps,
@@ -482,6 +521,7 @@ def analyse(
             str(k): v for k, v in sorted(Counter(b.refreshes for b in runs).items())
         },
         "refreshes": refresh,
+        "frozen": frozen(times, span, grid_fps),
         "frames_seen": len(frames_seen(runs, steps, n_frames)),
         "lost_frames": len(losses["lost"]),
         "lost_frame_list": losses["lost"][:LIST_MAX],
@@ -509,11 +549,25 @@ def analyse(
     return report
 
 
+def frozen(
+    times: list[float] | None, span: tuple[float, float] | None, grid_fps: int
+) -> bool:
+    """Whether the capture got fewer new pictures than half the grid's
+    boundaries over its span: the wall stopped presenting (one picture in
+    20 s has no refresh rate to judge). A span of two slots or less never
+    is: one picture is half of it."""
+    if not times or span is None:
+        return False
+    slots = (span[1] - span[0]) * grid_fps
+    return len(times) < slots / 2
+
+
 def verdict(report: dict) -> str:
-    """``defects`` for any loss, jump back, cadence error, weight mismatch
-    or judder (or nothing decoded); else ``incomplete`` when the capture did
-    not see it all (unverified steps, or under ``MIN_COVERAGE`` decoded);
-    else ``clean``."""
+    """``defects`` for any loss, jump back, cadence error, weight mismatch,
+    judder or a frozen wall (or nothing decoded); else ``incomplete`` when
+    the evidence is short: unverified steps, under ``MIN_COVERAGE`` of the
+    pictures decoded, no refresh check, or under ``MIN_JUDGED`` of the
+    boundaries judged for it; else ``clean``."""
     refresh = report["refreshes"]
     defects = (
         report["lost_frames"]
@@ -522,11 +576,15 @@ def verdict(report: dict) -> str:
         + report["cadence_errors"]
         + report["weights"]["mismatches"]
         + (refresh["uneven"] if refresh else 0)
+        + report["frozen"]
     )
     if defects or not report["boundaries"]:
         return "defects"
     coverage = report["decoded"] / report["samples"]
+    judged = refresh["judged"] / report["boundaries"] if refresh else 0
     if report["unverified"]["steps"] or coverage < MIN_COVERAGE:
+        return "incomplete"
+    if judged < MIN_JUDGED:
         return "incomplete"
     return "clean"
 
@@ -557,9 +615,10 @@ def frame_losses(
 ) -> dict:
     """The clip frames no boundary showed, step by step: ``lost`` (the
     frames), ``unverified`` (how many the step's excused boundaries could
-    have shown unseen) and ``seam`` (how many, at a loop seam)."""
+    have shown unseen: up to the last one's position, rounded up when it
+    blends) and ``seam`` (how many, at a loop seam)."""
     seen = frames_seen(runs, steps, n_frames)
-    step = fps / grid_fps
+    step = Fraction(fps, grid_fps)
     lost: list[int] = []
     unverified = at_seam = 0
     loops = 0
@@ -568,16 +627,16 @@ def frame_losses(
         loops += s.wrapped
         prev, run = runs[n].reading, runs[n + 1].reading
         assert prev.index is not None and run.index is not None
-        last = prev.index if prev.next_index is None else prev.next_index
-        last += before * n_frames
+        # A blended prev's next frame is in ``seen``.
+        last = prev.index + before * n_frames
         first = run.index + loops * n_frames
         missing = [f for f in range(last + 1, first) if f not in seen]
         if n in seam:
             at_seam += len(missing)
             continue
-        # The frames the excused boundaries could have shown unseen.
-        reach = math.floor(prev.position() + before * n_frames + s.excused * step)
-        unseen = [f for f in missing if s.excused and f <= reach + 1]
+        start = prev.index + before * n_frames + Fraction(prev.weight_q8, 256)
+        reach = math.ceil(start + s.excused * step)
+        unseen = [f for f in missing if s.excused and f <= reach]
         unverified += len(unseen)
         lost.extend(f % n_frames for f in missing if f not in unseen)
     return {"lost": lost, "unverified": unverified, "seam": at_seam}
@@ -587,43 +646,48 @@ def refresh_report(
     runs: list[Boundary],
     steps: list[Step],
     seam: set[int],
-    grid_fps: int,
     refresh_hz: float | None,
+    expected: list[int],
     times: list[float] | None,
+    span: tuple[float, float] | None,
 ) -> dict | None:
-    """Every boundary on screen for the refreshes the capture rate gives on
-    the grid (60 Hz on 30 fps: 2), else ``uneven`` (judder: held too long,
-    a stall included, or too short). With capture times a boundary's count
-    is the time from its first picture to the next boundary's, so a wall
-    that held a picture while the capture saw no new one counts in full.
-    Judged only where the capture saw it whole: not the first or last
-    boundary (the capture's edges), none with an unreadable picture or a
-    blind span inside or beside it, and not the song's last boundary or the
-    new play's first two at a loop seam (the boundaries a seam step leads
-    to). ``None`` without a refresh rate."""
+    """Every boundary on screen for the ``expected`` refreshes, else
+    ``uneven`` (judder: held too long, a stall included, or too short). With
+    capture times a boundary's count is the time from its first picture to
+    the next boundary's (the last one: to the capture's end), so a wall that
+    held a picture while the capture saw no new one counts in full. The
+    capture's first and last boundary may have been on screen before or
+    after it: judged for too long only. Not judged: a boundary with an
+    unreadable picture or a blind span inside or beside it, and the song's
+    last boundary and the new play's first two at a loop seam (the
+    boundaries a seam step leads to). ``judged`` counts the rest. ``None``
+    without a refresh rate."""
     if not refresh_hz:
         return None
-    per = refresh_hz / grid_fps
-    if abs(per - round(per)) <= 0.01 * per:
-        expected = [round(per)]
-    else:
-        expected = [math.floor(per), math.ceil(per)]
     uneven = []
-    for n in range(1, len(runs) - 1):
-        run = runs[n]
-        if not run.whole() or steps[n - 1].unseen or steps[n].unseen:
+    judged = 0
+    last = len(runs) - 1
+    for n, run in enumerate(runs):
+        beside = [steps[k] for k in (n - 1, n) if 0 <= k < len(steps)]
+        if not run.whole() or any(s.unseen for s in beside):
             continue
-        if n - 1 in seam:
+        if n and n - 1 in seam:
             continue
         shown = run.refreshes
         if times is not None:
-            on_screen = times[runs[n + 1].first_sample] - times[run.first_sample]
-            shown = round(on_screen * refresh_hz)
-        if shown not in expected:
+            if n < last:
+                stop = times[runs[n + 1].first_sample]
+            else:
+                stop = max(times[run.last_sample] + 1 / refresh_hz, span[1])
+            shown = round((stop - times[run.first_sample]) * refresh_hz)
+        judged += 1
+        edge = n in (0, last)
+        if shown > max(expected) if edge else shown not in expected:
             uneven.append(run.first_sample)
     return {
         "refresh_hz": round(refresh_hz, 3),
         "expected": expected,
+        "judged": judged,
         "uneven": len(uneven),
         "uneven_samples": uneven[:LIST_MAX],
     }
@@ -750,8 +814,9 @@ def read_video(
 ) -> tuple[list[Reading], list[float]]:
     """Every picture of a video file, read one at a time (scaled to
     ``width`` if given), and its pts (s)."""
-    # The repo's ffmpeg-only size and showinfo readers (no ffprobe on the box).
-    from av_sync_check import _info_lines, _pts, probe_video_size
+    # The repo's ffmpeg-only readers of a video's size and pts (the box has
+    # no ffprobe).
+    from av_sync_check import probe_video_size, showinfo_pts
 
     src_w, src_h = probe_video_size(ffmpeg, str(path))
     out_w = width or src_w
@@ -772,18 +837,20 @@ def read_video(
         err = log.read().decode(errors="replace")
     if code != 0:
         raise RuntimeError(f"ffmpeg exited {code} reading {path}: {err[-2000:]}")
-    times = [_pts(line, str(path)) for line in _info_lines(err, "showinfo")]
+    times = showinfo_pts(err, str(path))
     if len(times) != len(readings):
         raise RuntimeError(f"read {len(readings)} pictures but {len(times)} pts")
     return readings, times
 
 
-def late_polls(
-    polls: list[float], late: float = POLL_LATE_S
-) -> list[tuple[float, float]]:
-    """The spans between two polls more than ``late`` apart: the capture may
-    have missed a refresh there (a poll on time that found no new picture
-    is the wall holding one)."""
+def late_polls(polls: list[float], late: float | None) -> list[tuple[float, float]]:
+    """The spans between two polls more than ``late`` apart (one refresh
+    period: a shorter gap holds at most one present, which the next poll
+    still gets): the capture may have missed a refresh there. A poll on
+    time that found no new picture is the wall holding one. None without a
+    period."""
+    if not late:
+        return []
     return [(a, b) for a, b in zip(polls, polls[1:]) if b - a > late]
 
 
@@ -792,16 +859,16 @@ def capture_dxcam(
     region: tuple[int, int, int, int] | None,
     seconds: float,
     x_range: tuple[float, float],
-) -> tuple[list[float], list[np.ndarray], list[tuple[float, float]]]:
+) -> tuple[list[float], list[np.ndarray], list[float]]:
     """Every new picture of desktop output ``output`` for ``seconds``
-    (Windows, dxcam in its default colour output: no OpenCV needed): its
-    capture time and its strip columns as luma (decoded after the capture,
-    so the decode never delays a grab), and the spans the capture was blind
-    (``late_polls``). A poll that finds nothing sleeps 1 ms (Python 3.11+ on
-    Windows sleeps on a high-resolution timer)."""
+    (Windows, dxcam with ``output_color="BGRA"``: its RGB default needs
+    OpenCV): its capture time and its strip columns as luma (decoded after
+    the capture, so the decode never delays a grab), and every poll's time.
+    A poll that finds nothing sleeps 1 ms (Python 3.11+ on Windows sleeps
+    on a high-resolution timer)."""
     import dxcam  # Windows only (the box's ops\probe-venv)
 
-    camera = dxcam.create(output_idx=output)
+    camera = dxcam.create(output_idx=output, output_color="BGRA")
     times: list[float] = []
     pictures: list[np.ndarray] = []
     polls: list[float] = []
@@ -818,7 +885,7 @@ def capture_dxcam(
         times.append(now)
         pictures.append(to_luma(picture[:, columns]).astype(np.uint8))
     del camera
-    return times, pictures, late_polls(polls)
+    return times, pictures, polls
 
 
 def parse_pair(text: str) -> tuple[float, float]:
@@ -843,12 +910,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.video is not None:
         readings, times = read_video(args.video, args.width, args.x_range)
         blind = pts_gaps(times)
+        span = None  # the first picture's pts to the last one's
     else:
         region = tuple(int(v) for v in args.region.split(",")) if args.region else None
-        times, sampled, blind = capture_dxcam(
+        times, sampled, polls = capture_dxcam(
             args.dxcam, region, args.seconds, args.x_range
         )
         readings = [read_columns(s) for s in sampled]
+        period = 1 / args.refresh_hz if args.refresh_hz else capture_period(times)
+        blind = late_polls(polls, period)
+        span = (polls[0], polls[-1]) if polls else None
     report = analyse(
         readings,
         args.fps,
@@ -857,6 +928,7 @@ def main(argv: list[str] | None = None) -> int:
         times,
         args.refresh_hz,
         blind,
+        span,
     )
     print(json.dumps(report, indent=2))
     if not report["decoded"]:

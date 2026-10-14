@@ -314,7 +314,7 @@ def test_every_grid_phase_of_the_program_s_own_blend_reads_clean():
 
 def test_a_clean_25_on_30_capture_through_a_loop_is_clean():
     readings = pacer_readings(25, Fraction(40), 60, frames=60)
-    report = wf.analyse(readings, 25, frames=60)
+    report = wf.analyse(readings, 25, frames=60, refresh_hz=60)
     assert report["samples"] == report["decoded"] == 120
     assert report["boundaries"] == 60
     assert report["refreshes_per_boundary"] == {"2": 60}
@@ -340,18 +340,19 @@ def test_a_clean_25_on_30_capture_through_a_loop_is_clean():
 
 def test_a_clean_30_on_30_capture_counts_every_frame():
     readings = pacer_readings(30, Fraction(10), 40, frames=1800, refreshes=2)
-    report = wf.analyse(readings, 30)
+    report = wf.analyse(readings, 30, refresh_hz=60)
     assert report["frames_in_clip"] == 1800
     assert report["frames_seen"] == 40
     assert report["verdict"] == "clean"
 
 
 def test_a_30_on_30_loop_is_a_seamless_wrap():
-    readings = pacer_readings(30, Fraction(55), 10, frames=60)
-    report = wf.analyse(readings, 30, frames=60)
-    assert report["loops"] == 1
-    assert report["frames_seen"] == 10
-    assert report["loop_seams"] == {"steps": 3, "errors": 0}
+    # 55..59, 0..59, 0..14: two loops, every frame numbered on across them.
+    readings = pacer_readings(30, Fraction(55), 80, frames=60)
+    report = wf.analyse(readings, 30, frames=60, refresh_hz=60)
+    assert report["loops"] == 2
+    assert report["frames_seen"] == 80
+    assert report["loop_seams"] == {"steps": 6, "errors": 0}
     assert report["verdict"] == "clean"
 
 
@@ -361,6 +362,13 @@ def test_a_jump_to_the_start_from_beyond_the_last_frames_is_a_jump_back():
     report = wf.analyse(readings, 30, frames=60)
     assert report["loops"] == 0, "50 is 10 frames before the end: no loop"
     assert report["jumps_back"] == 1
+    # The last WRAP_FRAMES frames (57..59) to the first: a loop (58 and 59
+    # never shown: at the seam); from 56: a jump back.
+    for last, loops in ((57, 1), (56, 0)):
+        readings = pacer_readings(30, Fraction(last - 4), 5, frames=60)
+        readings += pacer_readings(30, Fraction(0), 5, frames=60)
+        report = wf.analyse(readings, 30, frames=60)
+        assert (report["loops"], report["jumps_back"]) == (loops, 1 - loops), last
 
 
 def test_a_few_wrong_boundaries_do_not_move_the_fitted_phase():
@@ -438,12 +446,13 @@ def test_a_repeated_boundary_is_judder_at_a_known_refresh_rate():
     assert report["refreshes_per_boundary"] == {"2": 9, "4": 1}
     assert report["boundaries"] == 10
     assert report["refreshes"] is None, "no refresh rate, no refresh check"
-    assert report["verdict"] == "clean"
+    assert report["verdict"] == "incomplete", "clean needs the judder check"
     # At 60 Hz every boundary must be shown twice: a 4-refresh one is judder.
     report = wf.analyse(readings, 30, refresh_hz=60)
     assert report["refreshes"] == {
         "refresh_hz": 60,
         "expected": [2],
+        "judged": 10,
         "uneven": 1,
         "uneven_samples": [4],
     }
@@ -458,13 +467,15 @@ def test_uneven_refreshes_are_judder():
     report = wf.analyse(readings, 30, refresh_hz=60)
     assert report["lost_frames"] == report["cadence_errors"] == 0
     assert report["refreshes_per_boundary"] == {"1": 10, "3": 10}
-    assert report["refreshes"]["uneven"] == 18, "all but the capture's edges"
-    assert report["refreshes"]["uneven_samples"][:3] == [3, 4, 7]
+    # Every boundary, the capture's first one held 3 (too long) included;
+    # its last one, shown 1, may have gone on after the capture.
+    assert report["refreshes"]["uneven"] == 19
+    assert report["refreshes"]["uneven_samples"][:3] == [0, 3, 4]
     assert report["verdict"] == "defects"
     # A capture rate the grid does not divide allows both counts around it.
     report = wf.analyse(readings, 30, refresh_hz=50)
     assert report["refreshes"]["expected"] == [1, 2]
-    assert report["refreshes"]["uneven"] == 9, "the 3-refresh ones inside"
+    assert report["refreshes"]["uneven"] == 10, "the 3-refresh ones"
 
 
 def test_a_wall_holding_a_picture_while_the_capture_polls_is_a_stall():
@@ -507,8 +518,8 @@ def test_one_unreadable_picture_can_hide_one_boundary_and_no_more():
     skip += pacer_readings(30, Fraction(1010), 10, frames=1800)
     report = wf.analyse(skip, 30)
     assert report["lost_boundaries"] == 1002
-    assert report["unverified"] == {"steps": 1, "boundaries": 1, "frames": 2}
-    assert report["lost_frames"] == 1001
+    assert report["unverified"] == {"steps": 1, "boundaries": 1, "frames": 1}
+    assert report["lost_frames"] == 1002
     assert report["verdict"] == "defects"
 
 
@@ -556,7 +567,7 @@ def test_an_unreadable_picture_inside_a_boundary_is_not_judged():
 
 
 def test_the_loop_seam_s_boundaries_are_not_judged_for_judder():
-    readings = pacer_readings(30, Fraction(55), 12, frames=60)
+    readings = pacer_readings(30, Fraction(55), 40, frames=60)
     # The wrap is from 59 (boundary 4) to 0 (boundary 5): seam steps 3, 4
     # and 5 lead to boundaries 4, 5 and 6. The song's end holds 59 longer and
     # the new play's second boundary comes late: neither is judged.
@@ -575,8 +586,8 @@ def test_the_loop_seam_s_boundaries_are_not_judged_for_judder():
 
 def test_a_frame_missing_at_the_loop_seam_is_a_seam_error_not_a_loss():
     readings = pacer_readings(30, Fraction(54), 5, frames=60)  # 54..58
-    readings += pacer_readings(30, Fraction(0), 5, frames=60)  # 59 never shown
-    report = wf.analyse(readings, 30, frames=60)
+    readings += pacer_readings(30, Fraction(0), 30, frames=60)  # 59 never shown
+    report = wf.analyse(readings, 30, frames=60, refresh_hz=60)
     assert report["loops"] == 1
     assert report["lost_frames"] == 0
     assert report["loop_seams"]["errors"] == 2, "the 2-step wrap + frame 59"
@@ -587,13 +598,19 @@ def test_video_recording_gaps_are_blind_spans():
     times = [0, 1 / 30, 2 / 30, 4 / 30, 5 / 30, 6 / 30]
     assert wf.pts_gaps(times) == [(2 / 30, 4 / 30)]
     assert wf.pts_gaps([0.0]) == []
+    # Exactly CAPTURE_GAP times the median is still on time.
+    assert wf.pts_gaps([0.0, 1.0, 2.0, 3.5]) == []
 
 
-def test_a_late_poll_is_a_blind_span_and_a_poll_on_time_is_not():
-    polls = [0.0, 0.001, 0.002, 0.012, 0.013, 0.014, 0.0245]
-    assert wf.late_polls(polls) == [(0.002, 0.012), (0.014, 0.0245)]
-    assert wf.late_polls(polls, late=0.0102) == [(0.014, 0.0245)]
-    assert wf.late_polls([0.0]) == []
+def test_a_poll_later_than_a_refresh_is_a_blind_span_and_one_on_time_is_not():
+    polls = [0.0, 0.001, 0.002, 0.012, 0.013, 0.014, 0.0315]
+    # At 60 Hz a 10 ms gap holds at most one present: the next poll gets it.
+    assert wf.late_polls(polls, 1 / 60) == [(0.014, 0.0315)]
+    assert wf.late_polls(polls, 0.008) == [(0.002, 0.012), (0.014, 0.0315)]
+    assert wf.late_polls(polls, None) == []
+    assert wf.late_polls([0.0], 1 / 60) == []
+    # Exactly one period apart: on time.
+    assert wf.late_polls([0.0, 0.25], 0.25) == []
 
 
 def test_an_empty_capture_is_not_clean():
@@ -613,12 +630,12 @@ def test_pictures_blended_by_the_rule_read_back_to_the_rule():
             frame(index, 25, 480, 270), frame(index + 1, 25, 480, 270), q8 / 256
         )
         readings.append(wf.read_frame(picture))
-    report = wf.analyse(readings, 25)
+    report = wf.analyse(readings, 25, refresh_hz=30)
     assert report["boundaries"] == 13
     observed = report["weights"]["observed_first_cycle"]
     for got, want in zip(observed, [0, 213, 170, 128, 85, 42]):
         assert abs(got - want) <= 2, observed
-    assert report["verdict"] == "clean", report
+    assert wf.analyse(readings, 25, refresh_hz=30)["verdict"] == "clean"
 
 
 def test_the_sampled_columns_sit_inside_each_cell():
@@ -685,3 +702,303 @@ def test_main_reads_a_video_and_exits_by_the_verdict(monkeypatch, capsys):
     with pytest.raises(SystemExit):
         wf.main(["--fps", "15", "--video", "clean.mp4"])
     capsys.readouterr()
+
+
+# Review round 3: positive evidence before "clean", edges, the excuse
+# arithmetic, grouping, the band consensus and the loop guard.
+
+
+def test_a_frozen_wall_is_never_clean():
+    # One frame presented every refresh for 20 s: the capture's only
+    # boundary, held far too long.
+    readings = [reading_at(Fraction(100), 30, 1800)] * 1200
+    report = wf.analyse(readings, 30, times=at_60_hz(readings))
+    assert report["refreshes"]["uneven"] == 1 and report["verdict"] == "defects"
+    # Arena stopped presenting: one picture in a 20 s capture.
+    report = wf.analyse(readings[:1], 30, times=[0.0], span=(0.0, 20.0))
+    assert report["frozen"] is True and report["refreshes"] is None
+    assert report["verdict"] == "defects"
+    # Two pictures 10 s apart.
+    two = [reading_at(Fraction(100), 30, 1800), reading_at(Fraction(101), 30, 1800)]
+    report = wf.analyse(two, 30, times=[0.0, 10.0], span=(0.0, 20.0))
+    assert report["frozen"] is True and report["verdict"] == "defects"
+
+
+def test_a_stall_at_the_capture_s_start_or_end_is_judder():
+    readings = pacer_readings(30, Fraction(0), 20, frames=1800)
+    held = [readings[0]] * 600 + readings[2:]  # boundary 0 held 10 s
+    report = wf.analyse(held, 30, times=at_60_hz(held))
+    assert report["refreshes"]["uneven"] == 1
+    assert report["refreshes"]["uneven_samples"] == [0]
+    assert report["verdict"] == "defects"
+    tail = readings[:-2] + [readings[-1]] * 600  # boundary 19 held 10 s
+    report = wf.analyse(tail, 30, times=at_60_hz(tail))
+    assert report["refreshes"]["uneven"] == 1 and report["verdict"] == "defects"
+    # The last boundary runs to the capture's end even with no new picture.
+    times = at_60_hz(readings)
+    report = wf.analyse(readings, 30, times=times, span=(0.0, times[-1] + 10.0))
+    assert report["refreshes"]["uneven"] == 1 and report["verdict"] == "defects"
+
+
+def test_too_few_boundaries_judged_for_judder_is_incomplete():
+    # The recording kept one picture of each boundary's two and was blind
+    # in between: no boundary's refreshes can be judged.
+    readings = pacer_readings(30, Fraction(0), 30, frames=1800)[::2]
+    times = at_60_hz(readings * 2)[::2]
+    blind = list(zip(times, times[1:]))
+    report = wf.analyse(readings, 30, times=times, refresh_hz=60, blind_spans=blind)
+    assert report["lost_boundaries"] == 0 and report["refreshes"]["uneven"] == 0
+    assert report["refreshes"]["judged"] < 0.9 * report["boundaries"]
+    assert report["verdict"] == "incomplete"
+
+
+def test_a_blind_span_excuses_a_boundary_per_two_unseen_refreshes_at_60_hz():
+    # Long enough that the two boundaries beside the gap leave 90 % judged:
+    # only the excused step makes the second capture incomplete.
+    readings = pacer_readings(30, Fraction(0), 60, frames=1800)
+    times = at_60_hz(readings)
+    # The recording dropped ONE picture and the wall lost boundary 8:
+    # nothing can hide a boundary in one refresh.
+    keep = readings[:16] + readings[18:]
+    kept = times[:16] + [t - 1 / 60 for t in times[18:]]
+    gap = [(kept[15], kept[16])]
+    report = wf.analyse(keep, 30, times=kept, blind_spans=gap)
+    assert report["lost_boundaries"] == 1
+    assert report["unverified"]["boundaries"] == 0
+    assert report["verdict"] == "defects"
+    # Two dropped pictures (boundary 8 whole): one boundary excused.
+    keep = readings[:16] + readings[18:]
+    kept = times[:16] + times[18:]
+    report = wf.analyse(keep, 30, times=kept, blind_spans=[(kept[15], kept[16])])
+    assert report["lost_boundaries"] == 0
+    assert report["unverified"] == {"steps": 1, "boundaries": 1, "frames": 1}
+    assert report["decoded"] == report["samples"]
+    assert report["refreshes"]["judged"] >= 0.9 * report["boundaries"]
+    assert report["verdict"] == "incomplete"
+
+
+def test_excused_frames_follow_the_clip_s_own_step_at_25_fps():
+    readings = pacer_readings(25, Fraction(0), 20, frames=1500)
+    # Boundary 3 (2.5) is read, then 5 unreadable pictures, then boundary 12
+    # (10.0): 9 grid steps, 5 boundaries excused, 3 lost. The excused ones
+    # reach 2.5 + 5 x 5/6 = 6.67: frames 4..7 unseen, 8 and 9 lost.
+    hidden = readings[:8] + [wf.Reading("no_strip")] * 5 + readings[24:]
+    report = wf.analyse(hidden, 25)
+    assert report["unverified"] == {"steps": 1, "boundaries": 5, "frames": 4}
+    assert report["lost_boundaries"] == 3
+    assert report["lost_frame_list"] == [8, 9]
+
+
+def test_losses_after_a_loop_are_numbered_in_the_clip():
+    readings = pacer_readings(30, Fraction(55), 15, frames=60)  # 55..59, 0..9
+    # After the loop: boundary 9 (frame 4) one unreadable picture, boundary
+    # 10 (frame 5) never shown.
+    hidden = readings[:18] + [wf.Reading("no_strip")] + readings[22:]
+    report = wf.analyse(hidden, 30, frames=60)
+    assert report["loops"] == 1
+    assert report["unverified"] == {"steps": 1, "boundaries": 1, "frames": 1}
+    assert report["lost_frame_list"] == [5]
+
+
+def test_one_boundary_read_grey_then_plain_is_one_boundary():
+    # A weight near 256 rounds either way of the level edge from refresh to
+    # refresh: still one picture.
+    readings = pacer_readings(30, Fraction(0), 10, frames=1800)
+    readings[8:10] = [wf.Reading("ok", 3, 4, 245, 8), wf.Reading("ok", 4, None, 0, 8)]
+    report = wf.analyse(readings, 30, refresh_hz=60)
+    assert report["boundaries"] == 10
+    assert report["cadence_errors"] == 0
+
+
+def test_the_bands_agree_on_their_median():
+    # Bands read 0.28 (top), 0.30 (middle), 0.32 (bottom) of frame 1001.
+    a, b = frame(1001), frame(1002)
+    picture = blend(a, b, 0.30)
+    picture[:135] = blend(a, b, 0.28)[:135]
+    picture[405:] = blend(a, b, 0.32)[405:]
+    reading = wf.read_frame(picture)
+    assert reading.ok and (reading.index, reading.next_index) == (1001, 1002)
+    assert abs(reading.weight_q8 - 77) <= 1, reading
+
+
+def test_a_jump_from_the_clip_s_end_to_its_middle_is_a_jump_back():
+    readings = pacer_readings(30, Fraction(55), 5, frames=60)  # 55..59
+    readings += pacer_readings(30, Fraction(30), 5, frames=60)
+    report = wf.analyse(readings, 30, frames=60)
+    assert report["loops"] == 0
+    assert report["jumps_back"] == 1
+    assert report["verdict"] == "defects"
+
+
+def test_showinfo_pts_are_read_the_av_gate_s_way():
+    import av_sync_check
+
+    stderr = "\n".join(
+        [
+            "[Parsed_showinfo_0 @ 0x1] n:   0 pts:      0 pts_time:0       ",
+            "something else pts_time:9",
+            "[Parsed_showinfo_0 @ 0x1] n:   1 pts:   1001 pts_time:0.0333667",
+        ]
+    )
+    assert av_sync_check.showinfo_pts(stderr, "rec.mp4") == [0.0, 0.0333667]
+
+
+# Review round 3, the hand mutants: what each threshold and guard decides.
+
+
+def two_boundaries(gap_refreshes: float, unread: int = 0):
+    """Two boundaries, ``gap_refreshes`` apart at 60 Hz (times), with
+    ``unread`` undecoded pictures between them."""
+    prev = wf.Boundary(0, 0, wf.Reading("ok", 10, None, 0, 8))
+    run = wf.Boundary(unread + 1, unread + 1, wf.Reading("ok", 12, None, 0, 8))
+    times = [0.0] + [None] * unread + [gap_refreshes / 60]
+    return prev, run, times
+
+
+def test_only_a_blind_span_between_the_two_pictures_counts_their_refreshes():
+    prev, run, times = two_boundaries(10)
+    t1 = times[-1]
+    # A stall (10 refreshes, polls on time): nothing unseen.
+    assert wf.unseen_refreshes(prev, run, times, 1 / 60, []) == 0
+    # A blind span that ends at the first picture or starts at the second,
+    # or lies elsewhere, is not between them.
+    for span in ((-0.05, 0.0), (t1, t1 + 0.05), (t1 + 1, t1 + 2)):
+        assert wf.unseen_refreshes(prev, run, times, 1 / 60, [span]) == 0, span
+    assert wf.unseen_refreshes(prev, run, times, 1 / 60, [(0.0, t1)]) == 9
+
+
+def test_a_blind_gap_s_refreshes_are_rounded_never_fewer_than_the_unread():
+    prev, run, times = two_boundaries(2.2)
+    assert wf.unseen_refreshes(prev, run, times, 1 / 60, [(0.0, times[-1])]) == 1
+    # Two unreadable pictures in a gap that reads 2.4 refreshes (jitter).
+    prev, run, times = two_boundaries(2.4, unread=2)
+    assert wf.unseen_refreshes(prev, run, times, 1 / 60, [(0.0, times[-1])]) == 2
+
+
+def test_at_50_hz_a_boundary_can_hide_in_one_refresh():
+    # 50 Hz on the 30 fps grid: a boundary is shown 1 or 2 refreshes, so
+    # each unseen refresh can hide one.
+    readings = pacer_readings(30, Fraction(0), 20, frames=1800, refreshes=1)
+    readings[8:10] = [wf.Reading("no_strip")] * 2
+    report = wf.analyse(readings, 30, refresh_hz=50)
+    assert report["unverified"]["boundaries"] == 2
+    assert report["lost_boundaries"] == 0
+
+
+def test_under_half_a_picture_per_grid_slot_is_frozen():
+    readings = pacer_readings(30, Fraction(0), 320, frames=1800, refreshes=1)
+    times = [n / 14 for n in range(280)]
+    assert wf.analyse(readings[:280], 30, times=times)["frozen"] is True
+    times = [n / 16 for n in range(320)]
+    assert wf.analyse(readings, 30, times=times)["frozen"] is False
+
+
+def test_a_capture_that_decoded_too_little_is_incomplete_on_its_own():
+    # The capture began before the clip was on the wall: 14 pictures with no
+    # strip, then 60 clean boundaries. Nothing unverified, every boundary
+    # judged, coverage 0.896.
+    readings = [wf.Reading("no_strip")] * 14
+    readings += pacer_readings(30, Fraction(0), 60, frames=1800)
+    report = wf.analyse(readings, 30, times=at_60_hz(readings))
+    assert report["unverified"]["steps"] == 0
+    assert report["refreshes"]["judged"] == 60
+    assert report["verdict"] == "incomplete"
+
+
+def test_three_quarters_of_the_boundaries_judged_is_incomplete():
+    # The recording dropped one picture of 5 boundaries of 40 (a blind
+    # span each): the boundary and the next one are not judged.
+    readings = pacer_readings(30, Fraction(0), 40, frames=1800)
+    times = at_60_hz(readings)
+    drop = {2 * k + 1 for k in (4, 12, 20, 28, 36)}
+    keep = [r for n, r in enumerate(readings) if n not in drop]
+    kept = [t for n, t in enumerate(times) if n not in drop]
+    blind = [(times[n - 1], times[n + 1]) for n in sorted(drop)]
+    report = wf.analyse(keep, 30, times=kept, refresh_hz=60, blind_spans=blind)
+    assert report["unverified"]["steps"] == 0 and report["lost_boundaries"] == 0
+    assert report["refreshes"]["judged"] == 30 and report["refreshes"]["uneven"] == 0
+    assert report["verdict"] == "incomplete"
+
+
+def test_an_excused_boundary_reaches_from_the_blend_it_follows():
+    # 25 fps from 0: boundary 1 is 0.833 (frames 0 / 1 at 213), then one
+    # unreadable picture where boundaries 2-4 should be, then boundary 5
+    # (4.167). 3 skipped, 1 excused: it could have shown up to 0.833 +
+    # 0.833 = 1.67, so frame 2 is unverified and frame 3 lost.
+    readings = pacer_readings(25, Fraction(0), 12, frames=1500)
+    hidden = readings[:4] + [wf.Reading("no_strip")] + readings[10:]
+    report = wf.analyse(hidden, 25)
+    assert report["unverified"] == {"steps": 1, "boundaries": 1, "frames": 1}
+    assert report["lost_boundaries"] == 2
+    assert report["lost_frame_list"] == [3]
+
+
+def test_the_capture_s_first_boundary_may_have_begun_before_it():
+    readings = pacer_readings(30, Fraction(0), 40, frames=1800)[1:]
+    report = wf.analyse(readings, 30, times=at_60_hz(readings))
+    assert report["refreshes"]["uneven"] == 0
+    assert report["verdict"] == "clean"
+
+
+def test_the_new_play_s_phase_is_fitted_away_from_the_seam():
+    # 25 fps, a 60-frame clip from 40: 24 boundaries to the song's end,
+    # then the new play's 0, 0.833, 1.667. The first two (beside the seam)
+    # read wrong: the phase is fitted on the third alone, which then
+    # matches it. Fitted on all three, the two wrong ones move it and the
+    # third reads as a mismatch.
+    readings = pacer_readings(25, Fraction(40), 27, frames=60)
+    readings[48:52] = [wf.Reading("ok", 0, 1, 100, 8)] * 2 + [
+        wf.Reading("ok", 0, 1, 150, 8)
+    ] * 2
+    report = wf.analyse(readings, 25, frames=60)
+    assert report["loops"] == 1
+    assert len(report["weights"]["phase_frames"]) == 2
+    assert report["weights"]["mismatches"] == 0
+
+
+def dxcam_capture(late: tuple[float, float] | None = None, after: float = 0.0):
+    """What ``capture_dxcam`` returns for the 30 fps clip on a 60 Hz output
+    (two presents per boundary, frames 100..129): a poll every millisecond
+    gets the newest present since the last one. ``late``: no poll in that
+    span; ``after``: polls run on that long after the last present."""
+    presents = [(n / 60 + 0.0005, 100 + n // 2) for n in range(60)]
+    end = presents[-1][0] + 0.002 + after
+    times, sampled, polls = [], [], []
+    seen = -1
+    t = 0.0
+    while t < end:
+        polls.append(t)
+        newest = max((k for k, (at, _) in enumerate(presents) if at <= t), default=-1)
+        if newest > seen:
+            seen = newest
+            times.append(t)
+            sampled.append(wf.sample_columns(frame(presents[newest][1], 30), (0, 1)))
+        t += 0.001
+        if late and late[0] <= t < late[1]:
+            t = late[1]
+    return times, sampled, polls
+
+
+def test_main_reads_a_dxcam_capture_by_its_polls(monkeypatch, capsys):
+    captures = {
+        "clean": dxcam_capture(),
+        # No poll for 45 ms over boundary 15: blind, so it is unverified.
+        "late": dxcam_capture(late=(0.49, 0.535)),
+        # The wall stopped after the clip's last present, the polls ran on.
+        "stopped": dxcam_capture(after=1.0),
+    }
+    asked = []
+
+    def fake_dxcam(output, region, seconds, x_range):
+        assert (output, region, seconds, x_range) == (1, None, 2.0, (0.0, 1.0))
+        return captures[asked[-1]]
+
+    monkeypatch.setattr(wf, "capture_dxcam", fake_dxcam)
+    args = ["--fps", "30", "--dxcam", "1", "--seconds", "2", "--refresh-hz", "60"]
+    expected = {"clean": 0, "late": 3, "stopped": 1}
+    for name, code in expected.items():
+        asked.append(name)
+        assert wf.main(args) == code, name
+        report = json.loads(capsys.readouterr().out)
+        assert report["boundaries"] == (29 if name == "late" else 30), name
+    assert report["refreshes"]["uneven_samples"] == [58]

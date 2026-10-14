@@ -41,6 +41,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import subprocess
 import sys
@@ -345,6 +346,10 @@ def write_clip(
             proc.stdin.close()
         except BrokenPipeError:
             stopped = True  # ffmpeg quit early: its own message says why
+            # Close the write end too; its flush meets the same broken pipe,
+            # which the RuntimeError below already reports.
+            with contextlib.suppress(BrokenPipeError):
+                proc.stdin.close()
         except BaseException:
             # Any other failure (Ctrl-C): no ffmpeg left running, no partial
             # file left behind.

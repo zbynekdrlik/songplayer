@@ -885,6 +885,11 @@ def _pts(line: str, path: str) -> float:
     return float(m.group(1))
 
 
+def showinfo_pts(stderr: str, path: str) -> list[float]:
+    """Every frame's pts (s) from ffmpeg's ``showinfo`` lines on stderr."""
+    return [_pts(ln, path) for ln in _info_lines(stderr, "showinfo")]
+
+
 def decode_audio(ffmpeg: str, path: str) -> tuple[np.ndarray, float]:
     """First audio stream as 8 kHz mono float32 + the time of its sample 0."""
     out, err = _run(
@@ -939,7 +944,7 @@ def decode_video(
             "-vf", f"showinfo,{crop_f}scale={width}:{height}:flags=area,format=gray",
             "-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"]  # fmt: skip
     out, err = _run(cmd)
-    pts = np.array([_pts(ln, path) for ln in _info_lines(err, "showinfo")])
+    pts = np.array(showinfo_pts(err, path))
     frame_bytes = width * height
     n = len(out) // frame_bytes
     if n == 0 or n != len(pts):
