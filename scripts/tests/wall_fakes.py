@@ -99,11 +99,14 @@ def two_boundaries(gap_refreshes: float, unread: int = 0):
     return prev, run, times
 
 
-def dxcam_capture(late: tuple[float, float] | None = None, after: float = 0.0):
+def dxcam_capture(
+    late: tuple[float, float] | None = None, after: float = 0.0, grab: float = 0.001
+):
     """What ``capture_dxcam`` returns for the 30 fps clip on a 60 Hz output
     (two presents per boundary, frames 100..129): a poll every millisecond
     gets the newest present since the last one. ``late``: no poll in that
-    span; ``after``: polls run on that long after the last present."""
+    span; ``after``: polls run on that long after the last present;
+    ``grab``: what a poll that got a picture costs."""
     presents = [(n / 60 + 0.0005, 100 + n // 2) for n in range(60)]
     end = presents[-1][0] + 0.002 + after
     times, sampled, polls = [], [], []
@@ -116,6 +119,7 @@ def dxcam_capture(late: tuple[float, float] | None = None, after: float = 0.0):
             seen = newest
             times.append(t)
             sampled.append(wf.sample_columns(frame(presents[newest][1], 30), (0, 1)))
+            t += grab - 0.001
         t += 0.001
         if late and late[0] <= t < late[1]:
             t = late[1]

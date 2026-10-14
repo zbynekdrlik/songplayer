@@ -241,7 +241,8 @@ def test_pictures_blended_by_the_rule_read_back_to_the_rule():
     observed = report["weights"]["observed_first_cycle"]
     for got, want in zip(observed, [0, 213, 170, 128, 85, 42]):
         assert abs(got - want) <= 2, observed
-    assert wf.analyse(readings, 25, refresh_hz=30)["verdict"] == "clean"
+    report = wf.analyse(readings, 25, refresh_hz=30, min_boundaries=13)
+    assert report["verdict"] == "clean"
 
 
 def test_the_sampled_columns_sit_inside_each_cell():
