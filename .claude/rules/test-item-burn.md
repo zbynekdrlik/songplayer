@@ -8,6 +8,10 @@ paths:
   - "crates/sp-server/src/api/test_item*.rs"
   - "crates/sp-server/src/api/program_tests_burn.rs"
   - "e2e/post-deploy-test-item.spec.ts"
+  - "scripts/wall_clip.py"
+  - "scripts/wall_frames.py"
+  - "scripts/tests/test_wall_clip.py"
+  - "scripts/tests/test_wall_frames.py"
 ---
 
 # The SP-program burn 911014, the on-air item, the local test item (#228)
@@ -90,6 +94,91 @@ audio" and "SongPlayer holds the rig lease" stay parked on camera-box.
 - `POST /api/v1/test-item/start` = `PlayVideo {position_ms: 0}`, `/stop` =
   Pause; `GET /api/v1/test-item` = ids, scene, clip name, sha256.
 
+## The clip list and the wall clips (#272 lane 1)
+
+The owner (14.10.2026): whether the wall gets every frame, in order, is
+MEASURED with frame ids, never judged by eye. Design record: #272 comment
+6164497836.
+
+- **`test_item_clips.rs`: a pinned LIST** — `CLIPS` = camera-box's clip
+  (`CAMERA_BOX`, the default; #228's row `measure-v01` unchanged), then
+  `wall-24` / `wall-25` / `wall-30` (rows `wallclip-24/25/30`, files
+  `wall-clip-v1-{fps}fps-60s.mp4`, artist `SongPlayer`, 60 s). Each is a
+  ROW of the one test playlist, never a playlist of its own (a scene in the
+  catalog and an idle pipeline per clip on the boxes); `not_test_item!`
+  goes by the playlist's kind, so every row stays out of every queue.
+  sha256s are byte arrays, like camera-box's.
+- `import(file, clips)` imports a file as the listed clip whose sha256 it
+  has, under that clip's names; `import_listed` takes each clip from the
+  bench under its OWN file name (`absent` is no error; `wrong_file` names
+  the sha256 found; `failed` the error).
+- Routes: `POST /start` with no body / `{}` = camera-box's clip,
+  `{"clip": "<name>"}` = that clip, `400` with a fixed text for an unknown
+  name (`UNKNOWN_CLIP`) or a body that does not read (`START_BODY_REFUSED`,
+  unknown fields refused), `404` before its import. `/stop` pauses the test
+  playlist with ANY clip imported. `/import {"file"}` as #228 (any listed
+  clip; the 422 adds `expected_any`); `/import` with no body / `{}` = the
+  list import: `200 {clips: [{name, file, outcome, found?, error?}]}`,
+  `500` when one failed, `503` before ffmpeg. `GET` keeps every #228 field
+  (camera-box's) and adds `clips: [{name, file, fps, sha256, imported}]`.
+  Bodies are bytes → typed structs (`body_or_default`), never
+  `serde_json::Value`.
+- **Loop's memory keeps the clip started LAST**: a press of `sp-test` with
+  no start plays it. camera-box's protocol starts its clip first (`/start`
+  with no body); after a wall run, `/start` + `/stop` with no body leaves
+  camera-box's clip in the memory.
+
+### `scripts/wall_clip.py` (the generator, deterministic)
+
+- 20 equal cells across the frame: margin `W // 48`, cell
+  `(W − 2·margin) // 20` (184 px at 3840; any width that is a multiple of
+  960 keeps the same fractions, which the reader samples by); cells 0 / 19
+  black, 1 / 18 white (the references), 2–17 the index in reflected Gray
+  code, MSB first, white = 1. Two consecutive indices differ in ONE cell:
+  a 2-frame blend shows one grey cell whose level is the weight.
+- 8 bands; per band the strip at 10–40 % of its height, the digits
+  (`0037  25 FPS`, a 5×7 numpy font, inside the strip's inner cells) at
+  52–88 %. Any quarter of the height holds a whole strip row (pinned at
+  4K). No QR: `qrcode` is not in CI's eval env.
+- Raw yuv420p (luma 16 / 235 / background 40, chroma 128) into libx264 on
+  ONE thread, `veryfast` crf 16, GOP = fps, no B-frames, BT.709 tv tags,
+  plus a silent 48 kHz stereo AAC track (the import splits it as
+  camera-box's), `+bitexact`, no metadata: the same ffmpeg gives the same
+  bytes (dev1 regenerated the 25 fps clip byte-identical). A changed
+  picture = bump `CLIP_VERSION` (new file names) and re-pin the sha256s.
+
+### `scripts/wall_frames.py` (the reader)
+
+- Per picture: the 20 cells' sampled columns (the central half, at the
+  cells' fractions of `--x-range`), the rows whose references read black /
+  white with contrast > 25 % of full scale and every bit between them, a
+  run of ≥ 3 such rows = one strip; its core rows normalised by its own
+  references. One grey cell (level 0.04–0.96) → `(i, i + 1, w)`, `w` the
+  LATER frame's weight in Q8, rounded (the program's `FrameBlend` unit).
+  Never guessed: `no_strip`, `multi` (≥ 2 grey cells), `non_adjacent`,
+  `disagree` (the bands read positions > 8 Q8 apart: a torn picture).
+- `analyse`: readings within 8 Q8 of the one before = one boundary
+  (refreshes per boundary); each step vs `fps / 30`: ≥ 2 grid steps =
+  lost boundaries, off the grid = cadence error, back = jump back; frames
+  no boundary showed = lost frames. The clip LOOPS: a wrap is only the last
+  3 frames → the first 3; the wrap step ± 1 are the loop seam, reported in
+  `loop_seams` and kept out of the verdict (a jump to 0 from mid-clip is a
+  jump back). Weights vs the pacer's rule (`genlock.md`, "BLENDED") at the
+  grid phase fitted per pass (median, + half a Q8 step for the floor):
+  25 on 30 from 0 = 0, 213, 170, 128, 85, 42; 24 = 0, 204, 153, 102, 51;
+  30 / 15 / 50 = none.
+- Capture glue (untested, tiny): `--video FILE [--width W]` (ffmpeg, grey)
+  or `--dxcam OUTPUT [--region L,T,R,B] --seconds S` (Windows, the box's
+  `ops\probe-venv`), polled with no sleep; `capture` reports its own
+  intervals and gaps. JSON on stdout; exit 0 clean / 1 defects / 2 nothing
+  decoded.
+- Measured on dev1 (#272 comment 6164962209): every frame of the three
+  clips reads back; real decoded frames blended 25 on 30, cut to an SNV
+  quarter band, ×4 and noised read 0, 214, 170, 127, 85, 41 (±1 Q8).
+- Check on the first wall run: the clip's song / artist go to the wall's
+  title clip like any song's; a strip the title covers reads `multi` /
+  `disagree` there, the consensus takes the clean bands.
+
 ## Box procedure (main session, once per box)
 
 1. Put camera-box's clip on the box as
@@ -103,6 +192,12 @@ audio" and "SongPlayer holds the rig lease" stay parked on camera-box.
    item`.
 3. `GET /api/v1/test-item` → `imported: true`; `/api/v1/ndi/health` has an
    `SP-test` row.
+4. #272, the wall clips: copy `wall-clip-v1-{24,25,30}fps-60s.mp4` (dev1
+   `~/.claude/work-products/issue-272/`, sizes and sha256s in
+   `test_item_clips.rs`) into the same bench dir, then `POST
+   /api/v1/test-item/import` with NO body → 200, each listed clip
+   `imported` / `already` (`absent` for a file not copied, never an
+   error); `GET /api/v1/test-item` → `clips[*].imported`.
 
 ## Tests
 
@@ -115,3 +210,17 @@ a fade, the published item), `handle_pipeline_event_tests_item.rs`,
 with a fake transcoder), `test_item_tests_queues.rs`, `api/test_item_tests.rs`
 and the read-only `e2e/post-deploy-test-item.spec.ts` (never turns the burn
 on, never starts the item, never cuts).
+
+#272: `test_item_tests.rs` also pins the clip list (camera-box's clip
+unchanged, the wall clips' generated sha256s, unique ids / files / hashes),
+`clip_named`, each clip's cache names, an import as the matching clip, one
+playlist for every clip, `find_any`'s order and `import_listed`'s five
+outcomes; `api/test_item_tests.rs` the GET's `clips`, a start by name / by
+default / refused / 404, a stop with any clip, the list import (absent,
+`wrong_file`, `503`, unreadable bodies), its status and pipeline rules; the
+post-deploy spec reads the list. The scripts: `scripts/tests/test_wall_clip.py`
+(Gray code, layout, any quarter band, frames, the pinned encode) and
+`scripts/tests/test_wall_frames.py` (blends, bands, ×4 + noise, the named
+failures, the pacer's rule, `analyse` with loops / losses / jumps / weights,
+end to end, `main`'s exit codes), both numpy-only for CI's Eval Checks job,
+whose ruff lists name both scripts.
