@@ -21,6 +21,7 @@ paths:
   - "e2e/av-sync-evidence.ts"
   - "e2e/obs-audio-wait*.ts"
   - "e2e/obs-driver.ts"
+  - "e2e/obs-collection-save*.ts"
   - "scripts/av_sync_check.py"
   - "scripts/av_sync_drift.py"
   - "scripts/av_sync_warp.py"
@@ -527,6 +528,31 @@ the output every consumer takes, through cg OBS's own probe scene (below).
     mid-take, `cgStuckOnProbe`) fails the body at its start, naming it:
     there is no scene of the owner's to restore cg OBS to. `afterAll` still
     idles the probe in that case.
+  - **Then cg OBS is made to SAVE the restore (#271).** OBS writes its scene
+    collection only from its own frontend paths. On SNV it saved IN the
+    take (13.10. 15:58:29Z and 14.10. 06:28:40Z: program = the probe scene,
+    the probe pointed), and neither `SetCurrentProgramScene` nor
+    `SetInputSettings` reaches `SaveProject()`. So after a take the saved
+    state was the take, and the owner's hard reset of 14.10. brought cg OBS
+    up on the probe scene, which the next run's preflight refused.
+    - Only `CreateScene` / `RemoveScene` reach `SaveProject()` (camera-box
+      read its vendored frontend: `OBSBasic::AddScene` / `RemoveScene`,
+      `OBSBasic_Scenes.cpp`), and Qt runs it deferred.
+    - So the teardown step "persist cg OBS's restored state (#271)" creates
+      and removes "A/V gate save" (a leftover from a dead run is removed
+      first). It then polls ≤ 5 s (`PERSIST_TIMEOUT_MS`) until the collection
+      file (`%APPDATA%\obs-studio\basic\scenes\*.json` whose `name` =
+      `GetSceneCollectionList.currentSceneCollectionName`; the runner and
+      cg OBS both run as `RESOLUME-SNV\Resolume`) is rewritten AND reads
+      cg's own scene on program with an empty probe source. Otherwise the
+      step fails, naming what is saved.
+    - The step is skipped when the gate never touched cg OBS (`cgTouched`)
+      or when it found cg OBS stuck on the probe.
+    - Companion sees two `SceneListChanged` (the facade passes cg OBS's
+      through). Its buttons send stored names, so nothing moves.
+    - The decisions and the loop are `e2e/obs-collection-save.ts`
+      (mock-suite spec `obs-collection-save.spec.ts`, a fake cg OBS that
+      writes the file after the RemoveScene).
   - Before lane 3 the gate recorded cg OBS's sp-* input of the baseline
     playlist's own NDI output (lane 1's stopgap, deleted with those
     outputs).
