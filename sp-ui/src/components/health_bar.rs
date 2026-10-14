@@ -20,12 +20,22 @@
 //! firewall profile on, or a fact that cannot be read), a red segment names
 //! it (`sp_core::prod_env::label`), polled every 10 s; the bar's
 //! `data-environment` says what the last poll said
-//! (`sp_core::prod_env::marker`).
+//! (`sp_core::prod_env::marker`). #255: the audio profile's report-only
+//! facts that are not the production ones are a grey `Profil PC: N
+//! poznámky` segment from the same poll (`sp_core::prod_env::notes_label`).
 //!
 //! #257: the whole audio chain is ONE segment right after WS (every
 //! service's first glance, #248): `Zvuk: bez chyby …`, amber / red on a
 //! loss naming the worst path; a click opens the per-path panel under the
 //! bar (`audio_faults.rs`), polled every 10 s.
+//!
+//! #259: the LED wall report — `Stena: …`, green while Resolume draws on
+//! every display it wants, grey while the screens are off or Resolume does
+//! not run, red while a display Resolume wants is missing or it does not
+//! draw on it (`sp_core::wall::label`), polled every 5 s; nothing while
+//! Resolume drives no physical display. The bar's `data-wall` says what the
+//! last poll said (`sp_core::wall::marker`). It only reports: the operator's
+//! own setup in Resolume is the reference, nothing is ever changed.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -33,6 +43,7 @@ use serde::Deserialize;
 use sp_core::background_hold::{self, BackgroundHold};
 use sp_core::health;
 use sp_core::prod_env::{self, EnvironmentStatus};
+use sp_core::wall::{self, WallStatus};
 
 use crate::api;
 use crate::components::audio_faults::{AudioFaults, AudioFaultsPanel, AudioSegment};
@@ -96,6 +107,12 @@ pub fn HealthBar() -> impl IntoView {
     let _env_poll = Effect::new(move |_| {
         poll_into("/api/v1/environment", 10_000, cancelled, environment);
     });
+    // #259: the LED wall report, polled every 5 s (the server reads the box
+    // every 5 s: a screen switched off shows up with no reload).
+    let wall_status = RwSignal::new(WallStatus::default());
+    let _wall_poll = Effect::new(move |_| {
+        poll_into("/api/v1/wall", 5_000, cancelled, wall_status);
+    });
     // #257: the audio fault history, one request at a time.
     let audio = AudioFaults::new();
     audio.start(cancelled);
@@ -128,6 +145,7 @@ pub fn HealthBar() -> impl IntoView {
             class="health-bar"
             data-testid="health-bar"
             data-environment=move || prod_env::marker(&environment.get())
+            data-wall=move || wall::marker(&wall_status.get())
         >
             // WS
             {move || {
@@ -155,15 +173,34 @@ pub fn HealthBar() -> impl IntoView {
             </span>
             // Resolume push-chain
             {move || {
-                let hosts = store.resolume_health.get();
-                let problems: Vec<String> = hosts
+                // #262: only a host that does not answer is a problem; a
+                // token the composition lacks is the tooltip's note.
+                let hosts: Vec<(String, health::ResolumeHostView)> = store
+                    .resolume_health
+                    .get()
                     .iter()
-                    .filter_map(|h| h.problem().map(|p| format!("{}: {}", h.host, p)))
+                    .map(|h| (h.host.clone(), h.view()))
                     .collect();
-                let (tone, text) = health::resolume_label(hosts.len(), problems.len());
+                let unreachable = hosts.iter().filter(|(_, v)| v.problem.is_some()).count();
+                let clipless = hosts.iter().filter(|(_, v)| !v.has_clips).count();
+                let (tone, text) = health::resolume_label(hosts.len(), unreachable, clipless);
                 let cls = format!("health-seg {}", tone.css_class());
-                let title = problems.join(" | ");
+                let title = health::resolume_title(&hosts);
                 view! { <span class=cls title=title data-testid="health-resolume">{text}</span> }
+            }}
+            // #259: the LED wall against Resolume's own saved output.
+            {move || {
+                let status = wall_status.get();
+                let state = status.state.name();
+                wall::label(&status).map(|(tone, text, tip)| {
+                    let cls = format!("health-seg {}", tone.css_class());
+                    view! {
+                        <span class=cls title=tip data-testid="health-wall" data-state=state>
+                            {text}
+                        </span>
+                    }
+                    .into_any()
+                })
             }}
             // Tools (yt-dlp / ffmpeg / JS runtime)
             {move || {
@@ -236,6 +273,17 @@ pub fn HealthBar() -> impl IntoView {
                 prod_env::label(&environment.get()).map(|(tone, text, tip)| {
                     let cls = format!("health-seg {}", tone.css_class());
                     view! { <span class=cls title=tip data-testid="health-environment">{text}</span> }
+                        .into_any()
+                })
+            }}
+            // #255: the audio profile's report-only notes (grey, never a
+            // problem: the Dante adapter's driver, the Windows Update driver
+            // exclusion, core parking), the notes and the power scheme as
+            // the tooltip.
+            {move || {
+                prod_env::notes_label(&environment.get()).map(|(tone, text, tip)| {
+                    let cls = format!("health-seg {}", tone.css_class());
+                    view! { <span class=cls title=tip data-testid="health-environment-notes">{text}</span> }
                         .into_any()
                 })
             }}

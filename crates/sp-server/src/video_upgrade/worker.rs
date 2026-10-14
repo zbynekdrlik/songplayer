@@ -155,7 +155,7 @@ pub(crate) async fn next_song(
                 OR (v.video_upgrade_state != 'busy' AND v.video_upgrade_state NOT LIKE 'failed:%')) \
            AND v.{} \
          GROUP BY v.youtube_id ORDER BY MAX(p.is_active) DESC, MIN(v.id) LIMIT 1",
-        crate::test_item::not_test_item!()
+        crate::db::queue_row!()
     );
     sqlx::query_scalar(&sql)
         .bind(i64::from(cap))
@@ -308,7 +308,7 @@ pub(crate) async fn counts(pool: &SqlitePool, cap: u32) -> Result<Counts, sqlx::
                       MAX(video_upgrade_state) AS state \
                FROM videos WHERE normalized = 1 AND file_path IS NOT NULL AND {} \
                GROUP BY youtube_id)",
-        crate::test_item::not_test_item!()
+        crate::db::queue_row!()
     );
     sqlx::query_as(&sql)
         .bind(i64::from(cap))

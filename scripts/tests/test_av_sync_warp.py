@@ -193,7 +193,7 @@ def test_measure_compensates_the_drift_and_reports_it(monkeypatch):
     def fake_decode_audio(_ffmpeg, path):
         return (rec, 0.0) if path == "rec.mkv" else (orig, 0.0)
 
-    def video(_ffmpeg, _rec, _orig, center_s):
+    def video(_ffmpeg, _rec, _orig, center_s, _analysis_start_s=0.0):
         # The picture is in sync with the audio at the recording's midpoint.
         return {
             "frames": 600,

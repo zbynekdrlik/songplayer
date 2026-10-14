@@ -25,6 +25,7 @@ fn production() -> EnvFacts {
         defender_antivirus_enabled: Some(true),
         antivirus_on: Some(Vec::new()),
         firewall: [Some(false); 3],
+        audio: audio::production_example(),
         read_errors: Vec::new(),
     }
 }
@@ -325,7 +326,46 @@ fn every_problem_is_listed_in_order() {
             EnvProblem::Unreadable(Unreadable::Firewall(FirewallProfile::Domain)),
             EnvProblem::Unreadable(Unreadable::Firewall(FirewallProfile::Private)),
             EnvProblem::Unreadable(Unreadable::Firewall(FirewallProfile::Public)),
+            EnvProblem::Unreadable(Unreadable::SoundGrid),
+            EnvProblem::Unreadable(Unreadable::WindowsUpdate),
+            EnvProblem::Unreadable(Unreadable::Mmcss),
         ]
+    );
+}
+
+/// #255: the audio profile's problems come after the #233 ones, and make
+/// the box fail like any other.
+#[test]
+fn the_audio_profile_s_problems_follow_the_firewall_s() {
+    let mut audio = audio::production_example();
+    audio.no_auto_update = Some(false);
+    let v = verdict(&EnvFacts {
+        firewall: [None, Some(false), Some(false)],
+        audio,
+        ..production()
+    });
+    assert!(!v.ok);
+    assert_eq!(
+        v.problems,
+        [
+            EnvProblem::Unreadable(Unreadable::Firewall(FirewallProfile::Domain)),
+            EnvProblem::AutoUpdateOn,
+        ]
+    );
+    let mut cx = audio::production_example();
+    if let audio::SoundGridFacts::Adapter { nic, .. } = &mut cx.soundgrid {
+        nic.kmdf_library_version = audio::Reading::Value("1.33".to_string());
+    }
+    let v = verdict(&EnvFacts {
+        audio: cx,
+        ..production()
+    });
+    assert!(!v.ok);
+    assert_eq!(
+        v.problems,
+        [EnvProblem::SoundGridNicNetAdapterCx {
+            nic: "soundgrid-pcie".to_string()
+        }]
     );
 }
 
@@ -359,6 +399,7 @@ fn the_status_carries_every_fact_and_problem() {
         defender_antivirus_enabled: Some(false),
         antivirus_on: Some(vec!["ESET Security".to_string()]),
         firewall: [Some(true), None, Some(false)],
+        audio: audio::production_example(),
         read_errors: vec!["the private firewall setting is missing".to_string()],
     };
     let (status, problems) = status_of(&Check::Read(facts), 2_000);
@@ -392,6 +433,7 @@ fn the_status_carries_every_fact_and_problem() {
                 private: None,
                 public: Some(false),
             },
+            audio: audio::view(&audio::production_example()),
             problems: expected_problems.iter().map(EnvProblem::view).collect(),
             read_errors: vec!["the private firewall setting is missing".to_string()],
             checked_at_ms: Some(2_000),
@@ -402,6 +444,25 @@ fn the_status_carries_every_fact_and_problem() {
     assert!(none.is_empty());
     assert_eq!(held.ltsc, Some(true));
     assert_eq!(held.edition_allowed, Some(true));
+    // #255: the audio profile and its report-only notes; they never make
+    // the box fail.
+    assert_eq!(
+        held.audio.soundgrid_port_mac.as_deref(),
+        Some("6c2408e59c91")
+    );
+    assert_eq!(
+        held.audio
+            .soundgrid_nic
+            .as_ref()
+            .and_then(|n| n.service.as_deref()),
+        Some("rt640x64")
+    );
+    // One note: the DVS adapter on NetAdapterCx. The driver exclusion is
+    // a gate since lane 2, and production_example() holds it.
+    assert_eq!(held.audio.notes.len(), 1);
+    // Off Windows nothing is read, so no note either.
+    let (off, _) = status_of(&Check::NotWindows, 4_000);
+    assert_eq!(off.audio, sp_core::prod_env::audio::AudioProfile::default());
 }
 
 // ---- what a check logs ----

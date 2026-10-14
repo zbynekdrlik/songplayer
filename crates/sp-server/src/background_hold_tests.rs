@@ -86,6 +86,7 @@ fn every_job_has_its_stable_name() {
         (Job::Peer, "peer"),
         (Job::YtdlpUpdate, "ytdlp_update"),
         (Job::VideoUpgrade, "video_upgrade"),
+        (Job::Retention, "retention"),
     ];
     for (job, name) in names {
         assert_eq!(job.as_str(), name);

@@ -1880,6 +1880,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "roxmltree"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1964b10c76125c36f8afe190065a4bf9a87bf324842c05701330bba9f1cacbb"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "rqrr"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2230,14 +2239,14 @@ dependencies = [
 
 [[package]]
 name = "sp-asrc"
-version = "0.81.0"
+version = "0.82.0"
 dependencies = [
  "rubato",
 ]
 
 [[package]]
 name = "sp-core"
-version = "0.81.0"
+version = "0.82.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2246,7 +2255,7 @@ dependencies = [
 
 [[package]]
 name = "sp-decoder"
-version = "0.81.0"
+version = "0.82.0"
 dependencies = [
  "mutants",
  "sp-core",
@@ -2259,7 +2268,7 @@ dependencies = [
 
 [[package]]
 name = "sp-gpu"
-version = "0.81.0"
+version = "0.82.0"
 dependencies = [
  "cc",
  "mutants",
@@ -2271,7 +2280,7 @@ dependencies = [
 
 [[package]]
 name = "sp-ndi"
-version = "0.81.0"
+version = "0.82.0"
 dependencies = [
  "libloading",
  "mutants",
@@ -2282,7 +2291,7 @@ dependencies = [
 
 [[package]]
 name = "sp-server"
-version = "0.81.0"
+version = "0.82.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2294,6 +2303,7 @@ dependencies = [
  "futures",
  "if-addrs",
  "jpeg-encoder",
+ "libloading",
  "mdns-sd",
  "mutants",
  "qrcode",
@@ -2301,6 +2311,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rmp-serde",
+ "roxmltree",
  "rqrr",
  "rtrb",
  "rubato",

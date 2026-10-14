@@ -241,29 +241,15 @@ pub struct HostHealth {
 }
 
 impl HostHealth {
-    /// Short human reason this host is unhealthy, or `None` if healthy. Same
-    /// logic the old `ResolumeHealthCard` alert used — now folded into the
-    /// `HealthBar` Resolume segment's tooltip.
-    pub fn problem(&self) -> Option<String> {
-        if self.circuit_breaker_open {
-            return Some("okruh otvorený — Resolume nedostupné".into());
-        }
-        if self.consecutive_failures > 0 {
-            return Some(format!(
-                "obnova zlyháva ({} po sebe)",
-                self.consecutive_failures
-            ));
-        }
-        let missing: Vec<&str> = self
-            .clips_by_token
-            .iter()
-            .filter(|(_, n)| **n == 0)
-            .map(|(k, _)| k.as_str())
-            .collect();
-        if !missing.is_empty() {
-            return Some(format!("chýbajúce klipy: {}", missing.join(", ")));
-        }
-        None
+    /// #262: this host as the health bar reads it — a problem only when it
+    /// does not answer, a token the composition has no clip for only a note
+    /// (`sp_core::health::resolume_host_view`).
+    pub fn view(&self) -> sp_core::health::ResolumeHostView {
+        sp_core::health::resolume_host_view(
+            self.circuit_breaker_open,
+            self.consecutive_failures,
+            &self.clips_by_token,
+        )
     }
 }
 

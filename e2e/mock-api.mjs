@@ -1476,6 +1476,24 @@ const ENV_HOLDS = {
   defender_antivirus_enabled: null,
   antivirus_on: null,
   firewall: { domain: null, private: null, public: null },
+  // #255: the production PC's audio profile: nothing read off Windows, so
+  // no note either (a spec sends `audio: {notes: […]}` for the grey
+  // "Profil PC" segment).
+  audio: {
+    soundgrid: null,
+    soundgrid_port_mac: null,
+    soundgrid_nic: null,
+    dante: { installed: null, interface_address: null, interface_name: null, nic: null },
+    windows_update: { no_auto_update: null, drivers_excluded: null },
+    mmcss: {
+      system_responsiveness: null,
+      network_throttling_index: null,
+      pro_audio_priority: null,
+      pro_audio_scheduling_category: null,
+    },
+    power: { scheme_guid: null, scheme_name: null, core_parking_min_cores_pct: null },
+    notes: [],
+  },
   problems: [],
   read_errors: [],
   checked_at_ms: null,
@@ -1491,6 +1509,40 @@ app.post("/__mock/environment", (req, res) => {
 app.post("/__mock/environment-reset", (_req, res) => {
   environment = { ...ENV_HOLDS };
   res.json(environment);
+});
+
+// #259: the LED wall report the health bar polls every 5 s, as
+// `sp_core::wall::WallStatus`. The mock's Resolume uses its simple output,
+// so by default the bar shows no wall segment (as on a box whose Resolume
+// drives no physical display); `POST /__mock/wall {…}` sends those fields
+// over that, `POST /__mock/wall-reset` restores it.
+const WALL_DEFAULT = {
+  checked: true,
+  state: "simple_output",
+  problems: [],
+  read: {
+    arena_running: true,
+    arena_windows: [],
+    arena_output: { advanced: false, preset: null, preset_found: false, displays: [] },
+    displays: [],
+    nvidia: "not_read",
+    connected: null,
+    grids: null,
+  },
+  read_errors: [],
+  checked_at_ms: null,
+};
+let wall = { ...WALL_DEFAULT };
+app.get("/api/v1/wall", (_req, res) => {
+  res.json(wall);
+});
+app.post("/__mock/wall", (req, res) => {
+  wall = { ...WALL_DEFAULT, ...req.body };
+  res.json(wall);
+});
+app.post("/__mock/wall-reset", (_req, res) => {
+  wall = { ...WALL_DEFAULT };
+  res.json(wall);
 });
 
 // Status
@@ -1538,8 +1590,16 @@ app.delete("/api/v1/resolume/hosts/:id", (_req, res) => {
 // hidden. The endpoint must exist so the frontend's async completion
 // (snapshot.set) actually runs in the E2E instead of failing to
 // deserialize the SPA-fallback index.html.
+// #262: the Resolume push-chain health the health bar polls every 5 s. No
+// host by default; `POST /__mock/resolume-health {hosts: […]}` sets the
+// rows, `POST /__mock/resolume-health {}` clears them.
+let resolumeHealth = [];
 app.get("/api/v1/resolume/health", (_req, res) => {
-  res.json([]);
+  res.json(resolumeHealth);
+});
+app.post("/__mock/resolume-health", (req, res) => {
+  resolumeHealth = Array.isArray(req.body?.hosts) ? req.body.hosts : [];
+  res.json(resolumeHealth);
 });
 
 // #230: the background hold the health bar polls every 5 s. Not held by

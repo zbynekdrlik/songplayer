@@ -1,9 +1,9 @@
 //! Tests for the Spout sender's registration state machine (#223 S1b).
 
 use super::{
-    ACCESS_HELD, ACCESS_TIMEOUT_US, AccessHeld, AfterSend, BeforeSend, FirstSendFacts, Listed,
-    MAX_ACCESS_HELD, MAX_UNREADABLE, NOT_LISTED, REGISTRATION_FAILED, Registration, TAKEN,
-    UNREADABLE, access_held, after_send, before_send, claim,
+    ACCESS_HELD, ACCESS_TIMEOUT_US, AccessHeld, AfterSend, BeforeSend, FirstSendFacts, ListCheck,
+    Listed, MAX_ACCESS_HELD, MAX_UNREADABLE, NOT_LISTED, REGISTRATION_FAILED, RELIST_EVERY,
+    Registration, TAKEN, UNREADABLE, access_held, after_send, before_send, claim, list_check,
 };
 use crate::error::GpuError;
 
@@ -345,4 +345,37 @@ fn a_texture_lock_held_without_costing_the_send_its_wait_is_not_counted() {
         access_held(29, true, 67_500),
         AccessHeld::Refuse(ACCESS_HELD)
     );
+}
+
+/// #243 (SNV 13.10.2026): another program's clean-up dropped the sender's
+/// name from Spout's list; it kept sending, unseen, and Arena's layer went
+/// black for 3 min. A confirmed sender looks at the list every 30th send
+/// (1 s at 30 fps), and only then.
+#[test]
+fn a_confirmed_sender_checks_the_list_every_thirtieth_send() {
+    assert_eq!(RELIST_EVERY, 30);
+    for sends in [1, 29, 31, 59] {
+        assert_eq!(list_check(sends, never_listed), ListCheck::Skip, "{sends}");
+    }
+    for sends in [0, 30, 60, 300] {
+        assert_eq!(
+            list_check(sends, || Listed::Yes),
+            ListCheck::Fine,
+            "{sends}"
+        );
+    }
+}
+
+/// The check that finds the name gone puts it back.
+#[test]
+fn a_name_dropped_from_the_list_is_listed_again() {
+    assert_eq!(list_check(30, || Listed::No), ListCheck::Relist);
+    assert_eq!(list_check(60, || Listed::No), ListCheck::Relist);
+}
+
+/// A list that cannot be read now (its 67 ms lock) is read again at the
+/// next check, never taken for a lost name.
+#[test]
+fn an_unreadable_list_is_left_until_the_next_check() {
+    assert_eq!(list_check(30, || Listed::Unknown), ListCheck::Fine);
 }

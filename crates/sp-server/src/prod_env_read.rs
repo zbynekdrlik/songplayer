@@ -9,6 +9,7 @@
 
 use sp_core::prod_env::FirewallProfile;
 
+use super::audio::AudioFacts;
 use super::{EnvFacts, WBEM_E_INVALID_CLASS, WBEM_E_INVALID_NAMESPACE};
 
 /// A registry string as read: the value, `None` when the key or the value
@@ -59,6 +60,10 @@ pub struct DirectRead {
     pub firewall_local: [RegDword; 3],
     /// The `WinDefend` service.
     pub defender_service: ServiceRead,
+    /// #255: the audio profile, walked from the registry, the network
+    /// interfaces, DVS's configuration and the power API
+    /// (`audio::read::read_audio`; registry-fast, so read directly).
+    pub audio: AudioFacts,
 }
 
 /// Defender's status row (`MSFT_MpComputerStatus`), each property `None`
@@ -423,6 +428,9 @@ pub fn facts_from(direct: &DirectRead, wmi: &Result<WmiRead, String>) -> EnvFact
             None
         }
     };
+    for why in &direct.audio.errors {
+        note(&mut errors, why.clone());
+    }
     EnvFacts {
         edition_id,
         product_name,
@@ -433,6 +441,7 @@ pub fn facts_from(direct: &DirectRead, wmi: &Result<WmiRead, String>) -> EnvFact
         defender_antivirus_enabled: row.and_then(|row| row.antivirus_enabled),
         antivirus_on,
         firewall,
+        audio: direct.audio.clone(),
         read_errors: errors,
     }
 }

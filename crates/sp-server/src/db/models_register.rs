@@ -27,10 +27,11 @@ pub async fn stamp_register(
 
 /// A served song whose track was not checked under the version bound as the
 /// first parameter: a row with lyrics, of an active playlist, downloaded,
-/// never a dub's Live-Translate subtitles (the second parameter).
+/// still in its YouTube playlist (#260), never a dub's Live-Translate
+/// subtitles (the second parameter).
 const STALE_REGISTER: &str = "SELECT v.id, v.youtube_id FROM videos v JOIN playlists p ON p.id = v.playlist_id \
      WHERE v.has_lyrics = 1 AND v.lyrics_register_version < ? \
-           AND p.is_active = 1 AND v.normalized = 1 \
+           AND p.is_active = 1 AND v.normalized = 1 AND v.removed_at IS NULL \
            AND (v.lyrics_source IS NULL OR v.lyrics_source != ?) \
      ORDER BY v.id ASC";
 

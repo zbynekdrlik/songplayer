@@ -222,7 +222,7 @@ test.describe("the Player once told a playlist has no song (#225 review round 2)
 
     // The old socket's song is not kept as if it were still loaded.
     await expect(title).toHaveText("Nič nehrá", { timeout: 15000 });
-    await expect(page.getByTestId("player-state")).toHaveText("Čaká na scénu");
+    await expect(page.getByTestId("player-state")).toHaveText("Pozastavené (mimo programu)");
     await expect(page.getByTestId("player-mixer-idle")).toBeVisible();
   });
 
@@ -404,13 +404,13 @@ test("a program cut flips the badge together with the state label, well inside 1
   ).toBeLessThan(100);
 
   // It leaves program (paused off air): both flip back together.
-  await watchFlip(page, "Čaká na scénu", "○ Mimo programu");
+  await watchFlip(page, "Pozastavené (mimo programu)", "○ Mimo programu");
   await request.post("/__mock/set-playing", {
     data: { playlist_id: 184, state: "WaitingForScene", transport: "Paused" },
   });
   await expect(badge).toHaveText("○ Mimo programu", { timeout: 1000 });
   await expect(badge).not.toHaveClass(/\bon\b/);
-  await expect(label).toHaveText("Čaká na scénu", { timeout: 1000 });
+  await expect(label).toHaveText("Pozastavené (mimo programu)", { timeout: 1000 });
   at = await flipTimes(page);
   expect(at.label, "the state label flipped back").not.toBeNull();
   expect(at.badge, "the badge flipped back").not.toBeNull();

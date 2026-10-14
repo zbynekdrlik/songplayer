@@ -504,7 +504,7 @@ def test_measure_reports_segments_and_drift(monkeypatch):
         audio, frames, pts, lambda t: np.where(t >= 12.0, 0.06, 0.0)
     )
 
-    def video(_ffmpeg, _rec, _orig, center_s):
+    def video(_ffmpeg, _rec, _orig, center_s, _analysis_start_s=0.0):
         vid = avs.video_offset(rec_frames, rec_pts, frames, pts, center_s=center_s)
         return {
             "frames": len(rec_pts),
@@ -555,7 +555,7 @@ def test_a_profile_error_never_changes_the_verdict(monkeypatch):
     audio, frames, pts = _original()
     rec_audio, _, _ = _recording(audio, frames, pts, _const(0.0))
 
-    def video(_ffmpeg, _rec, _orig, center_s):
+    def video(_ffmpeg, _rec, _orig, center_s, _analysis_start_s=0.0):
         return {
             "frames": 600,
             "_offset_exact": center_s,

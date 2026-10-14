@@ -5,7 +5,7 @@
 use sp_core::fit::Placement;
 
 use super::{covers, layer_rgb, pixel, sample, taps, tolerance, unorm8, yuv_to_rgb};
-use crate::composition::{Composition, Layer, Slot};
+use crate::composition::{Composition, FHD_FIT, Layer, Slot};
 use crate::picture::{Nv12Picture, Plane};
 
 const PAD: u8 = 0xEE;
@@ -56,6 +56,7 @@ fn layer(
         slot: Slot::Outgoing,
         picture,
         place: Placement { w, h, off_x, off_y },
+        uv_rect: [0.0, 0.0, 1.0, 1.0],
         weight,
     }
 }
@@ -161,6 +162,36 @@ fn a_quad_covers_the_pixels_whose_centres_are_inside_its_rectangle() {
     assert_eq!(layer_rgb(&quad, 10, 6), None, "past both edges");
 }
 
+/// #267: a quad shows the `uv_rect` part of its picture, the coordinates
+/// interpolated across it from its edges: picture A's middle half on each
+/// axis, drawn 8×4 at (2, 2).
+#[test]
+fn a_cropped_quad_samples_only_its_part_of_the_picture() {
+    let cropped = |uv_rect| Layer {
+        uv_rect,
+        ..layer(picture_a(), (8, 4, 2, 2), 1.0)
+    };
+    let middle = cropped([0.25, 0.25, 0.75, 0.75]);
+    assert_eq!(pixel(&[middle], 2, 2), [0, 32, 65, 255], "the first pixel");
+    assert_eq!(pixel(&[middle], 5, 4), [146, 119, 82, 255]);
+    assert_eq!(
+        pixel(&[middle], 9, 5),
+        [255, 163, 32, 255],
+        "the last pixel"
+    );
+    // Each axis reads its own edges: the rows only, then the columns only.
+    let rows = cropped([0.0, 0.25, 1.0, 0.75]);
+    assert_eq!(pixel(&[rows], 5, 4), [120, 104, 79, 255]);
+    let columns = cropped([0.25, 0.0, 0.75, 1.0]);
+    assert_eq!(pixel(&[columns], 5, 4), [153, 126, 89, 255]);
+    // The whole picture reads otherwise there (`one_layer_is_…` below).
+    let whole = layer(picture_a(), (8, 4, 2, 2), 1.0);
+    assert_eq!(pixel(&[whole], 5, 4), [126, 110, 85, 255]);
+    // Coverage is the place's alone.
+    assert_eq!(layer_rgb(&middle, 1, 2), None, "left of the quad");
+    assert_eq!(layer_rgb(&middle, 10, 5), None, "right of the quad");
+}
+
 #[test]
 fn one_layer_is_its_rgb_stored_as_bgra() {
     let quad = layer(picture_a(), (8, 4, 2, 2), 1.0);
@@ -191,6 +222,7 @@ fn two_layers_add_at_their_weights_stored_in_8_bits_between() {
     assert_eq!(pixel(&layers, 4, 2), [37, 77, 107, 255]);
 }
 
+/// #267: a picture wider than 16:9 keeps its letterbox under MAX's rule.
 #[test]
 fn a_composed_picture_is_letterboxed_in_the_4k_canvas() {
     // 4×2 (2:1) → 3840×1920 at row 120.
@@ -207,23 +239,43 @@ fn a_composed_picture_is_letterboxed_in_the_4k_canvas() {
     assert_eq!(pixel(&layers, 0, 2040), [0, 0, 0, 255], "the first bar row");
 }
 
+/// #267: a picture narrower than 16:9 fills MAX's whole canvas: B (2×2,
+/// 1:1) scaled to 3840×3840, its rows 840..3000 shown, so no pixel is a
+/// bar (each within one code: one quad covers it).
+#[test]
+fn a_composed_narrow_picture_fills_the_4k_canvas() {
+    let layers = Composition::Picture(picture_b()).layers();
+    assert_eq!(pixel(&layers, 0, 0), [134, 200, 255, 255], "the top left");
+    assert_eq!(pixel(&layers, 0, 1079), [87, 153, 243, 255]);
+    assert_eq!(pixel(&layers, 1920, 1080), [61, 127, 217, 255]);
+    assert_eq!(pixel(&layers, 3839, 0), [0, 25, 115, 255], "the top right");
+    assert_eq!(pixel(&layers, 3839, 2159), [111, 177, 255, 255]);
+    assert_eq!(tolerance(&layers, 0, 0), 1, "a picture, not a bar");
+    assert_eq!(tolerance(&layers, 3839, 2159), 1, "a picture, not a bar");
+}
+
 #[test]
 fn a_composed_fade_adds_each_side_where_its_quad_reaches() {
-    // A (4×2) at 1 − 64/256 over rows 120..2040; B (2×2) at 64/256 over
-    // columns 840..3000.
+    // A (4×2) at 1 − 64/256 over rows 120..2040; B (2×2) at 64/256 over the
+    // whole canvas (#267: it fills MAX's width, rows 840..3000 of its 3840
+    // scaled rows shown).
     let layers = Composition::Fade {
         from: Some(picture_a()),
         to: Some(picture_b()),
         weight_q8: 64,
     }
     .layers();
-    assert_eq!(pixel(&layers, 100, 50), [0, 0, 0, 255], "neither");
-    assert_eq!(pixel(&layers, 1000, 50), [33, 50, 64, 255], "to only");
-    assert_eq!(pixel(&layers, 100, 1000), [0, 4, 38, 255], "from only");
-    assert_eq!(pixel(&layers, 1000, 1000), [24, 67, 120, 255], "both");
+    assert_eq!(pixel(&layers, 100, 50), [33, 50, 64, 255], "to only");
+    assert_eq!(pixel(&layers, 1000, 50), [33, 49, 64, 255], "to only");
+    assert_eq!(pixel(&layers, 0, 119), [33, 50, 64, 255], "to only");
+    assert_eq!(pixel(&layers, 0, 120), [33, 50, 94, 255], "both");
+    assert_eq!(pixel(&layers, 100, 1000), [23, 43, 100, 255], "both");
+    assert_eq!(pixel(&layers, 1000, 1000), [22, 66, 119, 255], "both");
     assert_eq!(pixel(&layers, 2999, 2039), [210, 128, 64, 255], "both");
-    assert_eq!(pixel(&layers, 3000, 1000), [191, 134, 26, 255], "from only");
-    assert_eq!(pixel(&layers, 3839, 2159), [0, 0, 0, 255], "neither");
+    assert_eq!(pixel(&layers, 3000, 1000), [198, 158, 72, 255], "both");
+    assert_eq!(pixel(&layers, 3839, 2039), [154, 72, 64, 255], "both");
+    assert_eq!(pixel(&layers, 3839, 2040), [28, 44, 64, 255], "to only");
+    assert_eq!(pixel(&layers, 3839, 2159), [28, 44, 64, 255], "to only");
 }
 
 /// #239: each layer carries its place in its own target
@@ -233,7 +285,7 @@ fn a_composed_fade_adds_each_side_where_its_quad_reaches() {
 #[test]
 fn a_composed_picture_is_letterboxed_in_the_fhd_target() {
     // 4×2 (2:1) → 1920×960 at row 60.
-    let layers = Composition::Picture(picture_a()).layers_in(1920, 1080);
+    let layers = Composition::Picture(picture_a()).layers_in(1920, 1080, FHD_FIT);
     assert_eq!(pixel(&layers, 0, 0), [0, 0, 0, 255]);
     assert_eq!(pixel(&layers, 0, 59), [0, 0, 0, 255], "the last bar row");
     assert_eq!(pixel(&layers, 0, 60), [0, 0, 39, 255], "texel (0, 0)");
@@ -259,7 +311,7 @@ fn a_composed_fade_in_the_fhd_target_samples_its_own_grid() {
         to: Some(picture_b()),
         weight_q8: 64,
     }
-    .layers_in(1920, 1080);
+    .layers_in(1920, 1080, FHD_FIT);
     assert_eq!(pixel(&layers, 50, 25), [0, 0, 0, 255], "neither");
     assert_eq!(pixel(&layers, 500, 25), [33, 50, 64, 255], "to only");
     assert_eq!(pixel(&layers, 50, 500), [0, 4, 38, 255], "from only");
@@ -275,24 +327,31 @@ fn a_composed_fade_in_the_fhd_target_samples_its_own_grid() {
 
 #[test]
 fn the_tolerance_is_one_code_per_layer_covering_the_pixel() {
-    // The same fade: A over rows 120..2040, B over columns 840..3000.
+    // The same fade: A over rows 120..2040, B (#267) over the whole canvas.
     let layers = Composition::Fade {
         from: Some(picture_a()),
         to: Some(picture_b()),
         weight_q8: 64,
     }
     .layers();
-    assert_eq!(tolerance(&layers, 100, 50), 0, "neither: exact");
-    assert_eq!(tolerance(&layers, 1000, 50), 1, "to only");
-    assert_eq!(tolerance(&layers, 100, 1000), 1, "from only");
+    assert_eq!(tolerance(&layers, 100, 50), 1, "to only: A's bar");
+    assert_eq!(tolerance(&layers, 0, 119), 1, "to only, A's last bar row");
+    assert_eq!(tolerance(&layers, 0, 120), 2, "both, A's first row");
     assert_eq!(tolerance(&layers, 1000, 1000), 2, "both");
-    assert_eq!(
-        tolerance(&layers, 840, 120),
-        2,
-        "both, at their first pixel"
-    );
-    assert_eq!(tolerance(&layers, 839, 119), 0, "neither, just outside");
-    assert_eq!(tolerance(&[], 1000, 1000), 0, "the black");
+    assert_eq!(tolerance(&layers, 3839, 2039), 2, "both, A's last pixel");
+    assert_eq!(tolerance(&layers, 3839, 2040), 1, "to only, A's bar");
+    assert_eq!(tolerance(&[], 1000, 1000), 0, "the black: exact");
+    // `SP-program`'s target keeps the bars: there B is pillarboxed
+    // (columns 420..1500), and a pixel neither side reaches is exact.
+    let fhd = Composition::Fade {
+        from: Some(picture_a()),
+        to: Some(picture_b()),
+        weight_q8: 64,
+    }
+    .layers_in(1920, 1080, FHD_FIT);
+    assert_eq!(tolerance(&fhd, 50, 25), 0, "neither: exact");
+    assert_eq!(tolerance(&fhd, 500, 25), 1, "to only");
+    assert_eq!(tolerance(&fhd, 50, 500), 1, "from only");
 }
 
 #[test]

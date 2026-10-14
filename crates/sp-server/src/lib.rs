@@ -42,6 +42,7 @@ pub mod test_item; // #228: camera-box's measurement clip as a one-item test pla
 mod test_log; // a scoped log capture shared by the tests
 mod tools_ready; // #144: publish the ready tools, then the slow follow-ups
 pub mod video_upgrade; // #223 S11: a cached song's video upgraded in place
+pub mod wall; // #259: the LED wall report (Arena's own output setup vs the box; acts on nothing)
 
 pub use panic_hook::install_panic_hook;
 
@@ -440,6 +441,12 @@ pub async fn start(
         shutdown_tx.subscribe(),
     )); // #207: per-minute host commit/pagefile logger (Windows only)
     tokio::spawn(crate::prod_env::run(shutdown_tx.subscribe())); // #233: checked now + every minute
+    tokio::spawn(crate::wall::run(shutdown_tx.subscribe())); // #259: the wall, now + every 5 s
+    // #260: a song that left its YouTube playlist goes a year later, files and all.
+    tokio::spawn(playlist::retention::run(
+        pool.clone(),
+        shutdown_tx.subscribe(),
+    ));
     tokio::spawn(async move {
         match tools_mgr.ensure_tools().await {
             Ok(paths) => {
@@ -634,10 +641,16 @@ pub async fn start(
             match playlist::sync_playlist(&sync_pool, req.playlist_id, &req.youtube_url, &ytdlp)
                 .await
             {
-                Ok(new_count) => {
+                Ok(report) => {
+                    // #260: the songs that left the YouTube playlist / came back.
                     info!(
                         playlist_id = req.playlist_id,
-                        new_count, "playlist sync complete"
+                        new_count = report.new,
+                        marked = report.marked.len(),
+                        back = report.back.len(),
+                        removed = %playlist::membership::names(&report.marked),
+                        returned = %playlist::membership::names(&report.back),
+                        "playlist sync complete"
                     );
                 }
                 Err(e) => {

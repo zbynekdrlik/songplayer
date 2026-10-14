@@ -1,19 +1,23 @@
-//! Playlist sync — fetch video IDs from YouTube via yt-dlp and upsert to DB.
+//! Playlist sync — fetch video IDs from YouTube via yt-dlp and upsert to DB;
+//! a song that left the YouTube playlist is marked (#260, `membership`).
 
 pub mod loop_memory; // #229 follow-up: Loop's song across a restart
+pub mod membership; // #260: a fetch marks the songs that left the playlist
+pub mod retention; // #260: a year later the marked row goes, with its files
 pub mod selector;
 
 use sqlx::SqlitePool;
 use std::path::Path;
 
-/// Sync a YouTube playlist: fetch video IDs via yt-dlp, upsert to DB.
-/// Returns count of new videos found.
+/// Sync a YouTube playlist: fetch video IDs via yt-dlp, upsert to DB, mark
+/// the rows whose song left the playlist (#260, [`membership::record_fetch`]).
+/// Returns what changed (new rows, marked ones, ones brought back).
 pub async fn sync_playlist(
     pool: &SqlitePool,
     playlist_id: i64,
     youtube_url: &str,
     ytdlp_path: &Path,
-) -> Result<usize, anyhow::Error> {
+) -> Result<membership::SyncReport, anyhow::Error> {
     // Shared builder (#189): tools dir first on PATH (bundled deno) +
     // `--js-runtimes deno` when supported + CREATE_NO_WINDOW + UTF-8 env. The
     // UTF-8 env matters here because `--dump-json` title text must not be
@@ -42,16 +46,8 @@ pub async fn sync_playlist(
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let entries = parse_ndjson(&stdout)?;
-
-    let mut new_count = 0;
-    for entry in &entries {
-        let was_new = upsert_entry(pool, playlist_id, entry).await?;
-        if was_new {
-            new_count += 1;
-        }
-    }
-
-    Ok(new_count)
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    Ok(membership::record_fetch(pool, playlist_id, &entries, now_ms).await?)
 }
 
 /// Return the last (at most) `max` bytes of `s`, rounded forward to the
@@ -107,7 +103,8 @@ pub fn parse_ndjson(input: &str) -> Result<Vec<PlaylistEntry>, anyhow::Error> {
     Ok(entries)
 }
 
-/// Upsert a single entry, returning true if it was newly inserted.
+/// Upsert a single entry, returning true if it was newly inserted. A song
+/// listed again is in its playlist again: its row's #260 mark is cleared.
 async fn upsert_entry(
     pool: &SqlitePool,
     playlist_id: i64,
@@ -123,7 +120,8 @@ async fn upsert_entry(
     if existing.is_some() {
         // Update title and duration if provided.
         sqlx::query(
-            "UPDATE videos SET title = COALESCE(?, title), duration_ms = COALESCE(?, duration_ms)
+            "UPDATE videos SET title = COALESCE(?, title), duration_ms = COALESCE(?, duration_ms),
+                 removed_at = NULL
              WHERE playlist_id = ? AND youtube_id = ?",
         )
         .bind(&entry.title)

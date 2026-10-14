@@ -6,6 +6,7 @@ paths:
   - "scripts/tests/test_rig_lease_gate.py"
   - "scripts/spout-quiesce.ps1"
   - "scripts/tests/test_spout_quiesce_workflows.py"
+  - "scripts/tests/test_setup_prod_pc_workflows.py"
 ---
 
 # CI workflows — self-hosted runner shell traps, mutation gate, event de-dup
@@ -104,6 +105,29 @@ process the same way as `taskkill /F`.
   - a relaunch: `schtasks /run`, `Start-ScheduledTask` or `Start-Process`
     on a line naming SongPlayer.
   A new kill shape a step uses needs its pattern here first.
+
+## Every start after a stop applies the production PC profile first (#255 lane 2)
+
+`scripts/setup-prod-pc.ps1` (`prod-environment.md`, "The setup script")
+runs while SongPlayer is stopped, before every start: ci.yml's "Apply the
+production PC profile" step (between "Deploy SongPlayer" and "Configure
+auto-start and launch"), ci.yml's E2E "Restart SongPlayer" (after its stop
+and again in its fallback), deploy-pp.yml's own step (after the install,
+before the `always()` start). Always a CHILD process (`powershell.exe
+-NoProfile -NonInteractive -ExecutionPolicy Bypass -File …`): a throw in
+it never ends the calling step, and a hang is bounded (the two own steps:
+`timeout-minutes: 5`; the restart step, which has no bound: a
+`ProcessStartInfo` with `UseShellExecute = $false` and `WaitForExit(300000)`,
+then `Kill()`). A failed or hung run never keeps SongPlayer down: SNV's
+launch step is `if: ${{ !cancelled() && steps.deploy.outcome == 'success' }}`
+(a failed stop or install still skips it), PP's start is `always()`, the
+restart step relaunches first and fails after. Guard:
+`scripts/tests/test_setup_prod_pc_workflows.py` walks every PowerShell step
+of a workflow in order with the Spout guard's stop / start vocabulary (a
+step's plain `$Name = "literal"` variables put in, so `schtasks /run /tn
+$TaskName` reads as a start; a stop of what is already stopped resets
+nothing) and fails on a start after a stop with no run of the script in
+between; it also proves the walk flags the workflows without the script.
 
 ## Mutation gate (`.cargo/mutants.toml` + ci.yml `mutation-testing`)
 

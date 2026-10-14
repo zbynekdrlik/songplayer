@@ -77,7 +77,10 @@ pub fn player_title(view: NowPlayingView, song: &str, artist: &str) -> String {
 
 /// The Player's state label. #221 L4b: a ▶ claims no program, so a playlist
 /// that is not on air plays OFF program — the scene-aware `state` is
-/// `WaitingForScene` while the transport is `Playing`.
+/// `WaitingForScene` while the transport is `Playing`. #266: one that is not
+/// on air and does not decode is PAUSED ("Pozastavené (mimo programu)"; it
+/// read "Čaká na scénu", but since #221 L4b nothing waits for a scene — the
+/// owner at PP had no idea why his paused ytfast would not start).
 pub fn state_label(
     state_known: bool,
     state: PlaybackState,
@@ -90,7 +93,7 @@ pub fn state_label(
         (PlaybackState::Playing, _) => "Hrá",
         (PlaybackState::Idle, _) => "Nehrá",
         (PlaybackState::WaitingForScene, TransportState::Playing) => "Hrá mimo programu",
-        (PlaybackState::WaitingForScene, _) => "Čaká na scénu",
+        (PlaybackState::WaitingForScene, _) => "Pozastavené (mimo programu)",
     }
 }
 
@@ -197,9 +200,9 @@ fn waits_for_retry(state_known: bool, transport: TransportState, retry: bool) ->
 
 /// The Player's state label ([`state_label`]), except while the playlist
 /// waits for the retry of its failed opens ([`waits_for_retry`]): "Čaká na
-/// ďalší pokus", not "Čaká na scénu" (it may well be on program, black). A
-/// pipeline told it decodes keeps its label ("Hrá", or "Hrá mimo programu"
-/// off program). Until the state is known the label claims nothing ("—",
+/// ďalší pokus", not "Pozastavené (mimo programu)" (it may well be on
+/// program, black). A pipeline told it decodes keeps its label ("Hrá", or
+/// "Hrá mimo programu" off program). Until the state is known the label claims nothing ("—",
 /// #225), the retry included.
 pub fn player_state_label(
     state_known: bool,
@@ -234,6 +237,184 @@ pub fn player_program_badge(
         ProgramBadge::OnProgramRetry
     } else {
         program_badge(state_known, state)
+    }
+}
+
+/// #266: a playlist's state in words, for the playlist list (the desktop
+/// rows and the mobile `<select>`). The owner's rule (ROZHODNUTÉ
+/// 13.10.2026): no ▶ / ⏸ glyph as a STATE marker — a glyph reads as the
+/// button that does that action — so a state is said in words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaylistStatus {
+    /// The state is not known yet: no word (#225: claim nothing).
+    Unknown,
+    /// SP-program's playlist: the wall shows it.
+    OnProgram,
+    /// Its pipeline decodes off program (a ▶ off air, a dub prepared).
+    PlaysOffProgram,
+    /// Its pipeline does not decode, off program.
+    Paused,
+    /// Nothing is loaded.
+    Idle,
+}
+
+impl PlaylistStatus {
+    /// The words the list shows ("" while the state is not known).
+    pub fn label(self) -> &'static str {
+        match self {
+            PlaylistStatus::Unknown => "",
+            PlaylistStatus::OnProgram => "NA PROGRAME",
+            PlaylistStatus::PlaysOffProgram => "hrá mimo programu",
+            PlaylistStatus::Paused => "pozastavené",
+            PlaylistStatus::Idle => "nehrá",
+        }
+    }
+
+    /// The row's `data-status` and its CSS class (`status-<code>`).
+    pub fn code(self) -> &'static str {
+        match self {
+            PlaylistStatus::Unknown => "unknown",
+            PlaylistStatus::OnProgram => "on_program",
+            PlaylistStatus::PlaysOffProgram => "off_program",
+            PlaylistStatus::Paused => "paused",
+            PlaylistStatus::Idle => "idle",
+        }
+    }
+}
+
+/// #266: the playlist list's word for a playlist, from its WS state and
+/// transport. "On program" is the Player badge's own rule
+/// ([`player_program_badge`]: the WS `state == Playing`, and #229's retry
+/// of SP-program's source), so a row and the Player's badge never
+/// disagree. Off program the transport decides: decoding → "hrá mimo
+/// programu", else "pozastavené"; `Idle` → "nehrá"; nothing until the state
+/// is known.
+pub fn playlist_status(
+    state_known: bool,
+    state: PlaybackState,
+    transport: TransportState,
+    retry_on_program: bool,
+) -> PlaylistStatus {
+    if !state_known {
+        return PlaylistStatus::Unknown;
+    }
+    if player_program_badge(state_known, state, transport, retry_on_program).is_on_program() {
+        return PlaylistStatus::OnProgram;
+    }
+    match (state, transport) {
+        (PlaybackState::Idle, _) => PlaylistStatus::Idle,
+        (_, TransportState::Playing) => PlaylistStatus::PlaysOffProgram,
+        _ => PlaylistStatus::Paused,
+    }
+}
+
+/// #266: the mobile `<select>`'s option: the playlist, its scene label and
+/// its state in words (the name alone while the state is not known).
+pub fn picker_option_text(name: &str, scene: &str, status: PlaylistStatus) -> String {
+    match status {
+        PlaylistStatus::Unknown => format!("{name} ({scene})"),
+        _ => format!("{name} ({scene}) — {}", status.label()),
+    }
+}
+
+/// #266: the preview slot's line for a paused playlist.
+pub const PREVIEW_PAUSED: &str = "Náhľad sa zobrazí, keď playlist hrá — tento je pozastavený.";
+/// #266: the preview slot's line for a playlist that plays nothing.
+pub const PREVIEW_IDLE: &str = "Náhľad sa zobrazí, keď playlist hrá — tento nehrá.";
+
+/// #266: what the Player's live-preview slot may do for its playlist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewSlot {
+    /// Not known yet: no state was told (#225), or the pipeline decodes and
+    /// its song has not arrived. "Načítavam…".
+    Pending,
+    /// The pipeline DECODES a song (its own transport plays, #201 — on or off
+    /// program, the dub prepared off program included): "▶ Živý náhľad" is
+    /// offered.
+    Offered,
+    /// A song is loaded and the pipeline does not decode. No NEW preview: a
+    /// paused pipeline offers the encoder no picture (#221 A1), ffmpeg never
+    /// opens its inputs, no init segment comes, the `<video>` stays black
+    /// (the owner's ytslow at PP). A preview already running keeps its last
+    /// picture (`preview_view`).
+    Paused,
+    /// Nothing plays.
+    Idle,
+}
+
+impl PreviewSlot {
+    /// The slot's line while it shows no preview and offers none.
+    pub fn text(self) -> &'static str {
+        match self {
+            PreviewSlot::Pending => PENDING_TITLE,
+            PreviewSlot::Offered => "",
+            PreviewSlot::Paused => PREVIEW_PAUSED,
+            PreviewSlot::Idle => PREVIEW_IDLE,
+        }
+    }
+
+    /// The operator's preview ends with its playlist's song: nothing plays
+    /// any more, so a later song never starts an encoder by itself. Not
+    /// while the state is unknown (a reconnect: the preview comes back by
+    /// itself, #225) nor at a pause (it resumes with the song).
+    pub fn ends_preview(self) -> bool {
+        self == PreviewSlot::Idle
+    }
+}
+
+/// #266: the ONE rule of the preview slot — a preview is offered only while
+/// the pipeline decodes (`transport == Playing`) a song. It read the
+/// scene-aware WS `state` (`Playing | WaitingForScene` + a song), so a PAUSED
+/// playlist off program (`WaitingForScene`, transport `Paused`) offered a
+/// preview that could only stay black.
+pub fn preview_slot(
+    state_known: bool,
+    has_song: bool,
+    state: PlaybackState,
+    transport: TransportState,
+) -> PreviewSlot {
+    if !state_known {
+        return PreviewSlot::Pending;
+    }
+    // The pipeline's OWN transport says whether it decodes (#201), on program
+    // or off; the scene-aware `state` folds the program in.
+    if transport == TransportState::Playing {
+        return if has_song {
+            PreviewSlot::Offered
+        } else {
+            PreviewSlot::Pending
+        };
+    }
+    if has_song && state != PlaybackState::Idle {
+        PreviewSlot::Paused
+    } else {
+        PreviewSlot::Idle
+    }
+}
+
+/// #266: what the preview slot shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewView {
+    /// The live preview (`PreviewVideo`).
+    Video,
+    /// The "▶ Živý náhľad" start button.
+    Start,
+    /// The slot's line ([`PreviewSlot::text`]).
+    Placeholder,
+}
+
+/// #266: the slot's view. `preview_on` = the operator started the preview
+/// (and has not stopped it); `showing` = the slot shows it now. A NEW preview
+/// mounts only where one is offered; a preview already showing stays through
+/// a pause, holding its last picture (#221 A1 — `post-deploy-preview.spec.ts`
+/// "pause freezes the preview" is the owner's path), and is never mounted
+/// anew on a paused playlist (a reconnect while paused waits for the resume).
+pub fn preview_view(slot: PreviewSlot, preview_on: bool, showing: bool) -> PreviewView {
+    match slot {
+        PreviewSlot::Offered if preview_on => PreviewView::Video,
+        PreviewSlot::Offered => PreviewView::Start,
+        PreviewSlot::Paused if preview_on && showing => PreviewView::Video,
+        _ => PreviewView::Placeholder,
     }
 }
 
@@ -323,9 +504,11 @@ mod tests {
             state_label(true, PlaybackState::WaitingForScene, PLAYING),
             "Hrá mimo programu"
         );
+        // #266: a paused pipeline off program is said as such (nothing waits
+        // for a scene since #221 L4b).
         assert_eq!(
             state_label(true, PlaybackState::WaitingForScene, PAUSED),
-            "Čaká na scénu"
+            "Pozastavené (mimo programu)"
         );
     }
 
@@ -400,7 +583,7 @@ mod tests {
         );
         assert_eq!(
             player_state_label(true, PlaybackState::WaitingForScene, PAUSED, false),
-            "Čaká na scénu"
+            "Pozastavené (mimo programu)"
         );
         assert_eq!(
             player_state_label(false, PlaybackState::Idle, IDLE, false),
@@ -526,3 +709,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "player_view_tests_status.rs"]
+mod status_tests;

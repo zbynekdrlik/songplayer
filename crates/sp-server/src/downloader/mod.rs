@@ -508,7 +508,7 @@ impl DownloadWorker {
 pub(crate) const DOWNLOAD_DUE: &str = concat!(
     "v.normalized = 0 AND p.is_active = 1 \
      AND (v.next_attempt_at IS NULL OR v.next_attempt_at <= ?) AND ",
-    crate::test_item::not_test_item!() // #228: the test item is imported, never downloaded
+    crate::db::queue_row!() // #228 the test item (imported), #260 a song that left its playlist
 );
 
 /// Fetch the next video that needs processing ([`DOWNLOAD_DUE`]). Rows with

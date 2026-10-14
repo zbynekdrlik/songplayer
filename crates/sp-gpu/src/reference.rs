@@ -11,9 +11,14 @@
 //! (`sp-server`'s `nv12_mix`, which writes NV12 at the canvas's resolution):
 //!
 //! - **Coverage.** A quad covers the pixels whose centres lie inside its
-//!   `aspect_fit` rectangle (its edges are on pixel edges, `quad::ndc_rect`).
-//! - **Texture coordinates.** At pixel `x` the quad's u is `(x − x0 + ½) / w`
-//!   (the rasterizer interpolates at the pixel centre), v alike.
+//!   place (`Layer::place`, inside the target; its edges are on pixel edges,
+//!   `quad::ndc_rect`).
+//! - **Texture coordinates.** At pixel `x` the quad's u is
+//!   `left + t·(right − left)` with `t = (x − x0 + ½) / w` (the rasterizer
+//!   interpolates the corners' values at the pixel centre) and `left`,
+//!   `right` the layer's `uv_rect` (#267: the part of the picture the quad
+//!   shows, the same f32 values the shader gets; the whole picture
+//!   `[0, 0, 1, 1]` gives exactly `t`), v alike.
 //! - **Sampling.** Direct3D 11's bilinear filter on a texture of `size`
 //!   texels: texel coordinate `u·size − ½`, the floor and the next texel
 //!   weighted by the fraction, both clamped to the edge (CLAMP addressing).
@@ -74,8 +79,9 @@ pub fn pixel(layers: &[Layer<'_>], x: u32, y: u32) -> [u8; 4] {
 pub fn layer_rgb(layer: &Layer<'_>, x: u32, y: u32) -> Option<[f64; 3]> {
     let (dx, dy) = offset_in(layer, x, y)?;
     let place = layer.place;
-    let u = (f64::from(dx) + 0.5) / f64::from(place.w);
-    let v = (f64::from(dy) + 0.5) / f64::from(place.h);
+    let [left, top, right, bottom] = layer.uv_rect;
+    let u = between(left, right, (f64::from(dx) + 0.5) / f64::from(place.w));
+    let v = between(top, bottom, (f64::from(dy) + 0.5) / f64::from(place.h));
     let picture = &layer.picture;
     let planes = picture.planes().ok()?;
     let (data, pitch) = (picture.data, planes.pitch);
@@ -83,6 +89,15 @@ pub fn layer_rgb(layer: &Layer<'_>, x: u32, y: u32) -> Option<[f64; 3]> {
     let cb = sample(data, planes.chroma, pitch, 2, 0, u, v);
     let cr = sample(data, planes.chroma, pitch, 2, 1, u, v);
     Some(yuv_to_rgb(luma, cb, cr))
+}
+
+/// The texture coordinate a fraction `t` of the way across a quad whose
+/// edges carry `start` and `end` (#267: a side of its `uv_rect`): the
+/// rasterizer's linear interpolation of the two corners, `start +
+/// t·(end − start)`.
+fn between(start: f32, end: f32, t: f64) -> f64 {
+    let start = f64::from(start);
+    start + t * (f64::from(end) - start)
 }
 
 /// Where canvas pixel (`x`, `y`) lies inside `layer`'s quad, or `None`
@@ -98,7 +113,7 @@ fn offset_in(layer: &Layer<'_>, x: u32, y: u32) -> Option<(u32, u32)> {
 }
 
 /// Whether `layer`'s quad covers canvas pixel (`x`, `y`): the pixel's centre
-/// is inside its `aspect_fit` rectangle.
+/// is inside its place.
 pub fn covers(layer: &Layer<'_>, x: u32, y: u32) -> bool {
     offset_in(layer, x, y).is_some()
 }

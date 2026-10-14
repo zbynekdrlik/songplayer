@@ -1,26 +1,38 @@
 //! #165: selection-state helpers for the redesigned dashboard — which playlist
-//! the single work area shows, ordering + glyphs for the selector, and the
-//! URL-query + localStorage persistence.
+//! the single work area shows, ordering + the state word for the selector, and
+//! the URL-query + localStorage persistence.
 
 use std::collections::HashMap;
 
-use leptos::prelude::Set;
+use leptos::prelude::{Set, With};
 use sp_core::models::Playlist;
 use sp_core::playback::PlaybackState;
+use sp_core::player_view::{self, PlaylistStatus};
 use wasm_bindgen::JsValue;
 
 use crate::store::{DashboardStore, NowPlayingInfo};
 
 const STORAGE_KEY: &str = "sp_selected_playlist";
 
-/// Playback glyph for a selector row: ▶ Playing, ⏸ WaitingForScene
-/// ("Paused — waiting for scene"), – idle / unknown.
-pub fn playback_glyph(np: &HashMap<i64, NowPlayingInfo>, id: i64) -> &'static str {
-    match np.get(&id).map(|i| i.state) {
-        Some(PlaybackState::Playing) => "▶",
-        Some(PlaybackState::WaitingForScene) => "⏸",
-        _ => "–",
-    }
+/// #266: a selector row's state in words (`sp_core::player_view::
+/// playlist_status`: "NA PROGRAME" / "hrá mimo programu" / "pozastavené" /
+/// "nehrá"), from the playlist's WS state + transport and its health row's
+/// retry of SP-program's source — the Player badge's own facts, so a row and
+/// the Player never disagree. Replaces the ▶ / ⏸ / – glyph, which read as a
+/// button (the owner's ROZHODNUTÉ 13.10.2026). Reads the signals tracked:
+/// call it inside a `Memo`.
+pub fn playlist_status(store: DashboardStore, id: i64) -> PlaylistStatus {
+    let (known, state, transport) = store
+        .now_playing
+        .with(|np| np.get(&id).map(|i| (i.state_known, i.state, i.transport)))
+        .unwrap_or_default();
+    let retry_on_program = store.ndi_health.with(|rows| {
+        rows.iter()
+            .find(|o| o.playlist_id == id)
+            .and_then(|o| o.open_failures.as_ref())
+            .is_some_and(|f| f.retry_on_program())
+    });
+    player_view::playlist_status(known, state, transport, retry_on_program)
 }
 
 /// #225 review rounds 2-4: has the server told EVERY listed playlist's state
@@ -53,13 +65,22 @@ pub fn ordered(playlists: &[Playlist]) -> Vec<Playlist> {
     v
 }
 
-/// The INITIAL default selection: the currently-playing playlist (first by
-/// name if several), else the first playlist alphabetically. #170: the
-/// selector order is no longer playing-first, so this preserves "preselect
-/// what's playing on a fresh load" explicitly via `first_playing`. `None`
-/// only for an empty list.
-pub fn choose_default(playlists: &[Playlist], np: &HashMap<i64, NowPlayingInfo>) -> Option<i64> {
-    first_playing(playlists, np).or_else(|| ordered(playlists).first().map(|p| p.id))
+/// The auto-follow's selection (the Dashboard, while the operator has not
+/// clicked a playlist this session): the playlist on program (first by name
+/// if several), else `shown` — what the work area shows now (#266: the
+/// persisted pick a load seeds, or the playlist followed last; with nothing
+/// on program the work area stays put) — else the first playlist
+/// alphabetically. #170: the selector order is no longer playing-first, so
+/// this preselects what plays explicitly via `first_playing`. `None` only for
+/// an empty list.
+pub fn choose_default(
+    playlists: &[Playlist],
+    np: &HashMap<i64, NowPlayingInfo>,
+    shown: Option<i64>,
+) -> Option<i64> {
+    first_playing(playlists, np)
+        .or(shown)
+        .or_else(|| ordered(playlists).first().map(|p| p.id))
 }
 
 /// The first currently-playing playlist id (first by name if several).

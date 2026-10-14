@@ -12,6 +12,8 @@
 //! Slovak everywhere; the only fixed English is the proper names (OBS,
 //! Resolume, WS) — per `.claude/rules/sp-ui-frontend.md`.
 
+use std::collections::BTreeMap;
+
 /// Colour family for a health segment. sp-ui maps each to one CSS class.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HealthTone {
@@ -50,17 +52,93 @@ pub fn obs_label(connected: bool, scene: Option<&str>) -> (HealthTone, String) {
     }
 }
 
-/// Resolume segment from the push-chain health snapshot: how many hosts are
-/// configured and how many have a problem.
-/// `Resolume: —` (no hosts) / `Resolume: OK` / `Resolume: neodpovedá`.
-pub fn resolume_label(host_count: usize, problem_count: usize) -> (HealthTone, String) {
+/// #262: one Resolume host as the health bar reads it. A PROBLEM is only a
+/// host that does not answer; a SongPlayer token the composition has no clip
+/// for is a NOTE: the operator's setup (PP shows no English line), never an
+/// error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolumeHostView {
+    /// Why the host does not answer, or `None`.
+    pub problem: Option<String>,
+    /// The SongPlayer tokens the composition has no clip for, or `None`.
+    pub note: Option<String>,
+    /// The composition has a SongPlayer clip (or was not read yet).
+    pub has_clips: bool,
+}
+
+/// #262: a host's view from its `GET /api/v1/resolume/health` row. An empty
+/// token map is a host not read yet: no note, and not counted as clipless.
+pub fn resolume_host_view(
+    circuit_open: bool,
+    consecutive_failures: u32,
+    clips_by_token: &BTreeMap<String, usize>,
+) -> ResolumeHostView {
+    let problem = if circuit_open {
+        Some("okruh otvorený — Resolume nedostupné".to_string())
+    } else if consecutive_failures > 0 {
+        Some(format!("obnova zlyháva ({consecutive_failures} po sebe)"))
+    } else {
+        None
+    };
+    let missing: Vec<&str> = clips_by_token
+        .iter()
+        .filter(|(_, n)| **n == 0)
+        .map(|(token, _)| token.as_str())
+        .collect();
+    let has_clips = clips_by_token.is_empty() || missing.len() < clips_by_token.len();
+    let note = if !has_clips {
+        Some("v kompozícii nie je žiadny klip SongPlayera".to_string())
+    } else if missing.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "v kompozícii nie sú klipy {} (nastavenie Resolume, nie chyba)",
+            missing.join(", ")
+        ))
+    };
+    ResolumeHostView {
+        problem,
+        note,
+        has_clips,
+    }
+}
+
+/// Resolume segment from the hosts' views: how many hosts are configured,
+/// how many do not answer and how many have no SongPlayer clip.
+/// `Resolume: —` (no hosts) / `Resolume: neodpovedá` / `Resolume: bez klipov
+/// SongPlayera` (every host answers, none has a clip) / `Resolume: OK`.
+pub fn resolume_label(
+    host_count: usize,
+    unreachable_count: usize,
+    clipless_count: usize,
+) -> (HealthTone, String) {
     if host_count == 0 {
         (HealthTone::Off, "Resolume: —".to_string())
-    } else if problem_count == 0 {
-        (HealthTone::Ok, "Resolume: OK".to_string())
-    } else {
+    } else if unreachable_count > 0 {
         (HealthTone::Warn, "Resolume: neodpovedá".to_string())
+    } else if clipless_count == host_count {
+        (
+            HealthTone::Off,
+            "Resolume: bez klipov SongPlayera".to_string(),
+        )
+    } else {
+        (HealthTone::Ok, "Resolume: OK".to_string())
     }
+}
+
+/// #262: the segment's tooltip: `host: problem` or `host: note` per host
+/// that has one (a problem wins), ` | ` between.
+pub fn resolume_title(hosts: &[(String, ResolumeHostView)]) -> String {
+    hosts
+        .iter()
+        .filter_map(|(host, view)| {
+            view.problem
+                .as_ref()
+                .or(view.note.as_ref())
+                .map(|text| format!("{host}: {text}"))
+        })
+        .collect::<Vec<_>>()
+        .join(" | ")
 }
 
 /// Tools segment from the `ToolsStatus` payload. `known == false` means no
@@ -198,35 +276,181 @@ mod tests {
 
     #[test]
     fn resolume_no_hosts() {
-        let (tone, text) = resolume_label(0, 0);
+        let (tone, text) = resolume_label(0, 0, 0);
         assert_eq!(tone, HealthTone::Off);
         assert_eq!(text, "Resolume: —");
     }
 
     #[test]
     fn resolume_all_healthy() {
-        let (tone, text) = resolume_label(2, 0);
+        let (tone, text) = resolume_label(2, 0, 0);
         assert_eq!(tone, HealthTone::Ok);
         assert_eq!(text, "Resolume: OK");
     }
 
     #[test]
     fn resolume_one_host_healthy_boundary() {
-        assert_eq!(resolume_label(1, 0).1, "Resolume: OK");
+        assert_eq!(resolume_label(1, 0, 0).1, "Resolume: OK");
     }
 
     #[test]
     fn resolume_one_problem() {
-        let (tone, text) = resolume_label(2, 1);
+        let (tone, text) = resolume_label(2, 1, 0);
         assert_eq!(tone, HealthTone::Warn);
         assert_eq!(text, "Resolume: neodpovedá");
     }
 
     #[test]
     fn resolume_all_problems() {
-        let (tone, text) = resolume_label(3, 3);
+        let (tone, text) = resolume_label(3, 3, 3);
         assert_eq!(tone, HealthTone::Warn);
-        assert_eq!(text, "Resolume: neodpovedá");
+        assert_eq!(text, "Resolume: neodpovedá", "not answering wins");
+    }
+
+    /// #262: every host answers but none has a SongPlayer clip: grey, never
+    /// amber; one host with a clip makes it OK.
+    #[test]
+    fn resolume_with_no_songplayer_clip_is_grey() {
+        let (tone, text) = resolume_label(1, 0, 1);
+        assert_eq!(tone, HealthTone::Off);
+        assert_eq!(text, "Resolume: bez klipov SongPlayera");
+        assert_eq!(
+            resolume_label(2, 0, 2).1,
+            "Resolume: bez klipov SongPlayera"
+        );
+        assert_eq!(
+            resolume_label(2, 0, 1),
+            (HealthTone::Ok, "Resolume: OK".to_string())
+        );
+    }
+
+    // ---- resolume_host_view (#262) ----
+
+    fn tokens(counts: &[(&str, usize)]) -> BTreeMap<String, usize> {
+        counts.iter().map(|(t, n)| (t.to_string(), *n)).collect()
+    }
+
+    /// PP's live row (13.10.2026): Arena answers, its composition has no
+    /// English-line clips. Not a problem — a note naming the tokens.
+    #[test]
+    fn pp_s_composition_without_english_lines_answers_with_a_note() {
+        let view = resolume_host_view(
+            false,
+            0,
+            &tokens(&[
+                ("#sp-subs", 0),
+                ("#sp-subs-next", 0),
+                ("#sp-subssk", 3),
+                ("#sp-title", 4),
+            ]),
+        );
+        assert_eq!(
+            view,
+            ResolumeHostView {
+                problem: None,
+                note: Some(
+                    "v kompozícii nie sú klipy #sp-subs, #sp-subs-next (nastavenie Resolume, nie chyba)"
+                        .to_string()
+                ),
+                has_clips: true,
+            }
+        );
+    }
+
+    #[test]
+    fn a_composition_with_every_token_has_no_note() {
+        let view = resolume_host_view(
+            false,
+            0,
+            &tokens(&[
+                ("#sp-subs", 4),
+                ("#sp-subs-next", 1),
+                ("#sp-subssk", 5),
+                ("#sp-title", 5),
+            ]),
+        );
+        assert_eq!(
+            (view.problem, view.note, view.has_clips),
+            (None, None, true)
+        );
+    }
+
+    #[test]
+    fn a_composition_with_no_songplayer_clip_is_clipless_not_a_problem() {
+        let view = resolume_host_view(false, 0, &tokens(&[("#sp-subs", 0), ("#sp-title", 0)]));
+        assert_eq!(
+            view,
+            ResolumeHostView {
+                problem: None,
+                note: Some("v kompozícii nie je žiadny klip SongPlayera".to_string()),
+                has_clips: false,
+            }
+        );
+    }
+
+    /// One token with one clip is enough to have clips.
+    #[test]
+    fn one_clip_of_one_token_counts_as_clips() {
+        let view = resolume_host_view(false, 0, &tokens(&[("#sp-subs", 0), ("#sp-title", 1)]));
+        assert!(view.has_clips);
+        assert_eq!(
+            view.note.as_deref(),
+            Some("v kompozícii nie sú klipy #sp-subs (nastavenie Resolume, nie chyba)")
+        );
+    }
+
+    /// A host not read yet (no token map): neither a note nor clipless.
+    #[test]
+    fn a_host_not_read_yet_has_no_note() {
+        let view = resolume_host_view(false, 0, &BTreeMap::new());
+        assert_eq!(
+            (view.problem, view.note, view.has_clips),
+            (None, None, true)
+        );
+    }
+
+    #[test]
+    fn only_a_host_that_does_not_answer_is_a_problem() {
+        let some = tokens(&[("#sp-title", 2)]);
+        assert_eq!(
+            resolume_host_view(true, 0, &some).problem.as_deref(),
+            Some("okruh otvorený — Resolume nedostupné")
+        );
+        assert_eq!(
+            resolume_host_view(true, 3, &some).problem.as_deref(),
+            Some("okruh otvorený — Resolume nedostupné"),
+            "the open breaker is named first"
+        );
+        assert_eq!(
+            resolume_host_view(false, 2, &some).problem.as_deref(),
+            Some("obnova zlyháva (2 po sebe)")
+        );
+        assert_eq!(resolume_host_view(false, 0, &some).problem, None);
+    }
+
+    // ---- resolume_title (#262) ----
+
+    #[test]
+    fn the_title_names_each_host_s_problem_or_note() {
+        let pp = resolume_host_view(
+            false,
+            0,
+            &tokens(&[("#sp-subs", 0), ("#sp-subssk", 3), ("#sp-title", 4)]),
+        );
+        let down = resolume_host_view(false, 1, &tokens(&[("#sp-subs", 0), ("#sp-title", 2)]));
+        let fine = resolume_host_view(false, 0, &tokens(&[("#sp-title", 2)]));
+        let hosts = vec![
+            ("127.0.0.1".to_string(), pp),
+            ("10.0.0.2".to_string(), down),
+            ("10.0.0.3".to_string(), fine),
+        ];
+        assert_eq!(
+            resolume_title(&hosts),
+            "127.0.0.1: v kompozícii nie sú klipy #sp-subs (nastavenie Resolume, nie chyba) \
+             | 10.0.0.2: obnova zlyháva (1 po sebe)"
+        );
+        assert_eq!(resolume_title(&hosts[2..]), "", "nothing to say");
+        assert_eq!(resolume_title(&[]), "");
     }
 
     // ---- tools_label ----

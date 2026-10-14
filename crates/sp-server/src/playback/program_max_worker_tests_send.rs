@@ -223,3 +223,47 @@ fn the_loop_sends_on_the_refresh_grid_it_is_given() {
     wait_until("the loop exits on stop", || thread.is_finished());
     thread.join().expect("the loop");
 }
+
+/// A refresh source whose output the test moves (#259: the vblank thread
+/// moves to the new primary when Windows re-lays the displays).
+struct MovingVblank(Arc<Mutex<String>>);
+
+impl VblankSource for MovingVblank {
+    fn grid(&self, _now: Instant) -> Option<VblankGrid> {
+        None
+    }
+
+    fn state(&self, _now: Instant) -> VblankState {
+        VblankState::Measuring
+    }
+
+    fn output(&self) -> String {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+/// #259: the telemetry's `vblank_output` names the output the source
+/// measures NOW, not the one it was given with (SNV 13.10.2026: the VDD
+/// was detached and the span became the primary for a minute).
+#[test]
+fn the_paced_output_is_named_as_it_moves() {
+    let max = MaxOut::new();
+    let gpu = FakeGpu::default();
+    let name = Arc::new(Mutex::new(r"\\.\DISPLAY5 3840x2160".to_string()));
+    let offered = Instant::now();
+    let (clock, _list) = FakeClock::at(offered + 4 * MS);
+    let mut worker = MaxWorker::new(&max, gpu.clone())
+        .with_clock(Box::new(clock))
+        .with_vblank(Box::new(MovingVblank(name.clone())));
+    assert_eq!(
+        max.status().vblank_output.as_deref(),
+        Some(r"\\.\DISPLAY5 3840x2160")
+    );
+    *name.lock().unwrap() = r"\\.\DISPLAY1 7680x1080".to_string();
+    worker.serve_offered(&job(1), offered, offered + 4 * MS);
+    assert_eq!(
+        max.status().vblank_output.as_deref(),
+        Some(r"\\.\DISPLAY1 7680x1080"),
+        "named at the boundary after the move"
+    );
+}

@@ -2,6 +2,7 @@
 
 pub mod models;
 pub mod models_dabing; // #180 dubbing D1 queries (own module, 1000-line cap)
+pub mod models_membership; // #260 a row's membership in its YouTube playlist (V40)
 pub mod models_peer; // #229 the node exchange's tables (own module, models.rs is at the cap)
 pub mod models_playlist_fx; // #242 a playlist's own volume + EQ (V33 columns)
 pub mod models_playlists; // #225 every playlist id, for the WS on-connect replay (own module, 1000-line cap)
@@ -14,6 +15,22 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, S
 use sqlx::{Row, SqlitePool};
 use std::str::FromStr;
 use std::time::Duration;
+
+/// The row filter of every worker queue — download, stems, lyrics, dub,
+/// metadata repair, video upgrade — and of the dashboard counts of those
+/// queues: never the #228 test item (`test_item::not_test_item!`), never a
+/// row whose song left its YouTube playlist (#260, V40 `removed_at`). An
+/// unqualified fragment like the test item's: both columns are only on
+/// `videos`. A macro so a queue's `concat!` takes it.
+macro_rules! queue_row {
+    () => {
+        concat!(
+            crate::test_item::not_test_item!(),
+            " AND removed_at IS NULL"
+        )
+    };
+}
+pub(crate) use queue_row;
 
 /// All migrations as (version, SQL) tuples.
 /// Each SQL string may contain multiple statements separated by semicolons.
@@ -57,6 +74,8 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (37, MIGRATION_V37),
     (38, MIGRATION_V38),
     (39, MIGRATION_V39),
+    (40, MIGRATION_V40),
+    (41, MIGRATION_V41),
 ];
 
 const MIGRATION_V1: &str = "
@@ -609,6 +628,30 @@ CREATE INDEX IF NOT EXISTS idx_audio_faults_severity_path_ts
     ON audio_faults (severity, path, ts_ms);
 ";
 
+/// #260: when a row's song left its YouTube playlist (UTC ms; NULL = it is
+/// in it). The playlist sync sets it and clears it again for a song put back
+/// (`playlist::membership`); a marked row is never picked, listed or
+/// processed, and the retention deletes it a year later
+/// (`playlist::retention`, which reads the marked rows by this index).
+const MIGRATION_V40: &str = "
+ALTER TABLE videos ADD COLUMN removed_at INTEGER;
+CREATE INDEX IF NOT EXISTS idx_videos_removed_at ON videos (removed_at)
+    WHERE removed_at IS NOT NULL;
+";
+
+/// #263: an error on a row that serves no lyrics is a deferral now
+/// (`lyrics::worker_outcome::fail_song`); it used to park the row
+/// `no_source` at the current pipeline version, which no lyrics queue takes
+/// until a bump (SNV: Joy since 15.9.2026, I Gotta Praise since 25.9.2026).
+/// Every such row gets one more pass, on every node: its sentinel, attempts
+/// and backoff cleared, nothing else. Never `unsupported_source` (the 30-min
+/// policy), `asr_gap` (an empty transcript), the older `failed` / `empty`,
+/// or a row that serves lyrics.
+const MIGRATION_V41: &str = "
+UPDATE videos SET lyrics_source = NULL, lyrics_attempts = 0, lyrics_next_attempt_at = NULL
+WHERE lyrics_source = 'no_source' AND COALESCE(has_lyrics, 0) = 0
+";
+
 /// Connection-pool tuning for the FILE-backed pool (#184 round A).
 ///
 /// WAL + NORMAL synchronous remove reader/writer blocking for this
@@ -799,6 +842,12 @@ mod tests_v38;
 #[path = "mod_tests_v39.rs"]
 #[cfg(test)]
 mod tests_v39;
+#[path = "mod_tests_v40.rs"]
+#[cfg(test)]
+mod tests_v40;
+#[path = "mod_tests_v41.rs"]
+#[cfg(test)]
+mod tests_v41;
 
 #[path = "mod_tests_pool.rs"]
 #[cfg(test)]

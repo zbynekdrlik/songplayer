@@ -1,0 +1,79 @@
+{
+  "_comment": "PP (RESOLUME-PP) as #255 lane 1 read it live on 13.10.2026 (dev 3b0b22d4): every value already the production one. The adapter GUIDs are placeholders (the status shows them truncated).",
+  "registry": [
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU", "name": "NoAutoUpdate", "kind": "DWord", "value": 1 },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate", "name": "ExcludeWUDriversInQualityUpdate", "kind": "DWord", "value": 1 },
+    { "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", "name": "SystemResponsiveness", "kind": "DWord", "value": 0 },
+    { "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", "name": "NetworkThrottlingIndex", "kind": "DWord", "value": 4294967295 },
+    { "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Pro Audio", "name": "Priority", "kind": "DWord", "value": 6 },
+    { "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Pro Audio", "name": "Scheduling Category", "kind": "String", "value": "High" },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection", "name": "DisableRealtimeMonitoring", "kind": "DWord", "value": 1 },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection", "name": "DisableBehaviorMonitoring", "kind": "DWord", "value": 1 },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection", "name": "DisableOnAccessProtection", "kind": "DWord", "value": 1 },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection", "name": "DisableScanOnRealtimeEnable", "kind": "DWord", "value": 1 },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection", "name": "DisableIOAVProtection", "kind": "DWord", "value": 1 }
+  ],
+  "soundgrid": {
+    "installed": true,
+    "preferences_user": "newlevel (the SongPlayer task's user)",
+    "preferences_path": "C:\\Users\\newlevel\\AppData\\Roaming\\Waves Audio\\Preferences\\SoundGrid.Driver.preferences",
+    "preferences": "<?xml version=\"1.0\"?>\n<Preferences>\n    <FileFormatVersion>2</FileFormatVersion>\n    <Configuration>\n        <LocalLanPort>6c:24:08:e5:9c:91</LocalLanPort>\n        <IOMode>0</IOMode>\n        <NativeDevice></NativeDevice>\n        <WdmChannelCount>0</WdmChannelCount>\n        <BlockSize>256</BlockSize>\n        <ProToolsBufferSize>1024</ProToolsBufferSize>\n    </Configuration>\n</Preferences>\n",
+    "preferences_error": null,
+    "adapters": [
+      {
+        "name": "soundgrid-pcie",
+        "guid": "{DBFC2CF4-0000-4000-8000-000000000001}",
+        "description": "Realtek PCIe GbE Family Controller",
+        "mac": "6C-24-08-E5-9C-91",
+        "permanent_mac": "6C2408E59C91",
+        "class_key": "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e972-e325-11ce-bfc1-08002be10318}\\0007",
+        "settings": {
+          "*InterruptModeration": "0",
+          "*FlowControl": "0",
+          "*EEE": "0",
+          "EnableGreenEthernet": "0",
+          "PowerSavingMode": "0",
+          "GigaLite": "0",
+          "PnPCapabilities": "24"
+        }
+      },
+      {
+        "name": "Ethernet 4",
+        "guid": "{0B5E0000-0000-4000-8000-000000000002}",
+        "description": "Realtek Gaming USB 2.5GbE Family Controller",
+        "mac": "6C-1F-F7-73-C7-D9",
+        "permanent_mac": "6C1FF773C7D9",
+        "class_key": "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e972-e325-11ce-bfc1-08002be10318}\\0012",
+        "settings": {
+          "*InterruptModeration": "1",
+          "*FlowControl": "3",
+          "*EEE": "1"
+        }
+      },
+      {
+        "name": "Wi-Fi",
+        "guid": "{1F1F0000-0000-4000-8000-000000000003}",
+        "description": "Intel(R) Wi-Fi 6 AX201 160MHz",
+        "mac": "A0-B1-C2-D3-E4-F5",
+        "permanent_mac": "A0B1C2D3E4F5",
+        "class_key": null,
+        "settings": null
+      }
+    ]
+  },
+  "power": { "scheme_guid": "e9a42b02-d5df-448d-aa00-03f14749eb61", "scheme_name": "Bitsum Highest Performance", "cpmincores_ac": 100 },
+  "defender": {
+    "service": "Running",
+    "realtime_enabled": false,
+    "tamper_protected": false,
+    "preferences": {
+      "DisableRealtimeMonitoring": true,
+      "DisableBehaviorMonitoring": true,
+      "DisableIOAVProtection": true,
+      "DisableScriptScanning": true,
+      "MAPSReporting": 0,
+      "SubmitSamplesConsent": 2
+    }
+  },
+  "firewall": { "Domain": false, "Private": false, "Public": false }
+}

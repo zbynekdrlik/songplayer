@@ -191,12 +191,13 @@ pub struct DashboardStore {
     /// (previously discarded). Read by the `HealthBar` tools segment.
     pub tools: RwSignal<Option<ToolsInfo>>,
     /// #165: which playlist the single dashboard work area shows. `None` until
-    /// the first playlist load resolves it (persisted → playing → first).
+    /// the first playlist load resolves it. #266: seeded with the persisted
+    /// pick (URL / localStorage) until the replay tells what is on program.
     pub selected_playlist: RwSignal<Option<i64>>,
-    /// #165: `true` once the selection is user-driven (a click / `<select>` /
-    /// "Prejsť") or restored from the URL/localStorage — the auto-follow Effect
-    /// then stops tracking the playing playlist so a reload keeps the operator's
-    /// choice instead of snapping back to whatever is playing.
+    /// #165: `true` once the selection is user-driven (a click / `<select>`)
+    /// — the auto-follow Effect then stops following the playlist on program
+    /// for the rest of the session. #266: a persisted pick no longer pins, so
+    /// a page load (a reload too) opens on the playlist on program.
     pub selection_pinned: RwSignal<bool>,
 }
 

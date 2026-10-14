@@ -244,6 +244,40 @@ pub fn access_held(streak: u32, held_elsewhere: bool, send_us: u64) -> AccessHel
     }
 }
 
+/// #243 (SNV 13.10.2026): how often a confirmed sender looks at Spout's
+/// list. Any Spout program's clean-up (`CleanSenders`, a receiver's sender
+/// check) drops a listed name whose info map it cannot read at that very
+/// instant; the sender keeps sending, unseen by every receiver (Arena's
+/// layer went black for 3 min). Every 30th send (1 s at 30 fps) the sender
+/// checks its name and puts it back ([`list_check`]).
+pub const RELIST_EVERY: u64 = 30;
+
+/// What a confirmed sender's look at Spout's list leads to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListCheck {
+    /// Not this send.
+    Skip,
+    /// Listed, or the list could not be read now (the next check reads it
+    /// again).
+    Fine,
+    /// The list lost the name: register it again (same sender, same shared
+    /// texture).
+    Relist,
+}
+
+/// After the `sends`-th send of a confirmed sender: every
+/// [`RELIST_EVERY`]th send asks `listed` (only then: the list's lock is
+/// never taken per frame).
+pub fn list_check(sends: u64, listed: impl FnOnce() -> Listed) -> ListCheck {
+    if !sends.is_multiple_of(RELIST_EVERY) {
+        return ListCheck::Skip;
+    }
+    match listed() {
+        Listed::No => ListCheck::Relist,
+        Listed::Yes | Listed::Unknown => ListCheck::Fine,
+    }
+}
+
 #[cfg(test)]
 #[path = "spout_state_tests.rs"]
 mod tests;

@@ -199,7 +199,8 @@ included, is comment 5872871751).
   1920×1080 song decoded on a 1920 stride are all canvas pictures.
 - **The fit.** Any other picture is fitted into the canvas: placed by
   `nv12_fit::aspect_fit` (aspect kept, centred on even offsets, bars Y 16 /
-  UV 128), scaled bilinear by the #215 fused kernel as a plain fit
+  UV 128; #267: `SP-program-MAX`, the wall's feed, fills its width instead,
+  `gpu-max.md` — this canvas keeps the bars), scaled bilinear by the #215 fused kernel as a plain fit
   (`mix_nv12_into` with `Paint::Fit(Side::Fitted)`: ONE side, every byte the
   fitted picture's, nothing else read — #223 follow-up; before, it also
   read the 3.1 MB canvas black as an unused second side) — in the sender's
@@ -558,7 +559,8 @@ itself: the OBS client no longer reads cg OBS's program at all
   `Start`). Off air the playlist plays OFF program: `scene_active` stays
   false, no title goes to the wall, the WS state is `WaitingForScene` with
   transport `Playing`, which the Player labels "Hrá mimo programu"
-  (`sp-ui` `player.rs`; "Čaká na scénu" otherwise). The mock's `/play`
+  (`sp-ui` `player.rs`; "Pozastavené (mimo programu)" otherwise, #266 —
+  it read "Čaká na scénu"). The mock's `/play`
   models it from its program source (`e2e/player-off-program.spec.ts`).
   An off-air ▶ on a playlist with no normalized video yet parks it in
   WaitingForScene, and `on_video_processed` wakes only on-program

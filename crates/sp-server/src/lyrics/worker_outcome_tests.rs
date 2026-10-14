@@ -9,8 +9,12 @@
 //! the attempt: attempts + the `lyrics_next_attempt_at` backoff, which the
 //! manual bucket waits out (no loop). ROZHODNUTÉ 5908227646: it stays in the
 //! manual queue until its 3rd failed attempt clears the manual priority. Its
-//! `has_lyrics`, `lyrics_source` and file stay. A row with no served lyrics
-//! takes the terminal states as before.
+//! `has_lyrics`, `lyrics_source` and file stay.
+//!
+//! #263: an ERROR on a row with no served lyrics is a deferral, never a
+//! terminal state: the attempt and its backoff on every row of the video,
+//! the row otherwise as it was, picked again once due. Its empty
+//! transcript is still quarantined as `asr_gap`.
 
 use std::path::PathBuf;
 
@@ -19,6 +23,7 @@ use sqlx::SqlitePool;
 use crate::db::models::SERVED_RERUN_MAX_ATTEMPTS;
 use crate::lyrics::LYRICS_PIPELINE_VERSION;
 use crate::lyrics::worker::LyricsWorker;
+use crate::test_log::{Captured, capturing};
 
 /// What the served song's `<yt>_lyrics.json` holds before the re-run.
 const SERVED_BYTES: &[u8] = br#"{"version":22,"source":"gemini-3-5-transcribe","lines":[]}"#;
@@ -261,9 +266,12 @@ async fn an_empty_transcript_never_deletes_the_file_a_sibling_row_serves() {
     );
 }
 
-/// Pin: a song with NO served lyrics still takes today's terminal state.
+/// #263 (re-pinned: this was the `no_source` pin): a song queued by hand
+/// that the wall does not serve is DEFERRED by an error. It records the
+/// attempt with its backoff, stays in the manual queue as it was, and the
+/// manual bucket picks it again once due, never before.
 #[tokio::test]
-async fn a_failing_run_of_an_unserved_song_is_marked_no_source() {
+async fn a_failing_run_of_an_unserved_queued_song_is_deferred() {
     let rig = rig().await;
     queued_song(&rig, 3, "yt_unserved3", 0, 1).await;
 
@@ -272,10 +280,188 @@ async fn a_failing_run_of_an_unserved_song_is_marked_no_source() {
 
     assert_eq!(
         row(&rig.pool, 3).await,
-        (0, Some("no_source".to_string()), 0, 0),
-        "an unserved song is parked as no_source, as before"
+        (0, None, 1, 2),
+        "the row as it was, still queued, its second attempt recorded"
     );
-    assert_eq!(backoff_secs(&rig.pool, 3).await, None);
+    // A second attempt: `retry_backoff(2)` = 10 min.
+    assert_backoff(&rig.pool, 3, 600).await;
+    assert_eq!(next_pick(&rig).await, None, "not before its backoff");
+    make_due(&rig, 3).await;
+    assert_eq!(
+        next_pick(&rig).await,
+        Some(3),
+        "due: the manual bucket picks it again"
+    );
+}
+
+/// A song no row serves, outside the manual queue, in `playlist`: no lyrics,
+/// `lyrics_source` and the pipeline version as given, no attempt yet.
+async fn unserved_song(
+    rig: &Rig,
+    id: i64,
+    playlist: i64,
+    youtube_id: &str,
+    source: Option<&str>,
+    version: i64,
+) {
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+         lyrics_source, lyrics_pipeline_version) VALUES (?, ?, ?, 1, 0, ?, ?)",
+    )
+    .bind(id)
+    .bind(playlist)
+    .bind(youtube_id)
+    .bind(source)
+    .bind(version)
+    .execute(&rig.pool)
+    .await
+    .unwrap();
+}
+
+/// The row's next attempt is `backoff` seconds ahead (`downloader::retry_backoff`).
+async fn assert_backoff(pool: &SqlitePool, id: i64, backoff: i64) {
+    let secs = backoff_secs(pool, id).await.expect("a backoff is set");
+    assert!(
+        (backoff - 10..=backoff).contains(&secs),
+        "row {id}: the next attempt is {secs} s ahead, expected ~{backoff} s"
+    );
+}
+
+/// `(lyrics_source, lyrics_pipeline_version)`.
+async fn source_and_version(pool: &SqlitePool, id: i64) -> (Option<String>, i64) {
+    sqlx::query_as("SELECT lyrics_source, lyrics_pipeline_version FROM videos WHERE id = ?")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// #263: SNV's Joy (`vh70Rbmcg8g`) hit one error on 15.9.2026, was parked
+/// `no_source` at the current pipeline version, and no queue took it again.
+/// An error on a song no row serves is a DEFERRAL now: the attempt with the
+/// downloader's backoff (5 min, then 10 min, …, capped at 24 h), the row as
+/// it was, and the null bucket picks it again once due, never before.
+#[tokio::test]
+async fn an_unserved_songs_error_is_retried_after_its_backoff() {
+    let rig = rig().await;
+    let current = LYRICS_PIPELINE_VERSION as i64;
+    unserved_song(&rig, 10, 1, "yt_unserv10", None, current).await;
+    assert_eq!(next_pick(&rig).await, Some(10), "a new song is due");
+    let error = anyhow::anyhow!("gather: lrclib-plain cleanup failed for yt_unserv10: 502");
+
+    rig.worker.fail_song(10, "yt_unserv10", &error).await;
+    assert_eq!(
+        row(&rig.pool, 10).await,
+        (0, None, 0, 1),
+        "the row as it was, its first attempt recorded"
+    );
+    assert_eq!(source_and_version(&rig.pool, 10).await, (None, current));
+    // A first attempt: `retry_backoff(1)` = 5 min.
+    assert_backoff(&rig.pool, 10, 300).await;
+    assert_eq!(next_pick(&rig).await, None, "not before its backoff");
+
+    make_due(&rig, 10).await;
+    assert_eq!(
+        next_pick(&rig).await,
+        Some(10),
+        "due: the null bucket picks it again"
+    );
+
+    rig.worker.fail_song(10, "yt_unserv10", &error).await;
+    assert_eq!(row(&rig.pool, 10).await, (0, None, 0, 2));
+    // The backoff grows: `retry_backoff(2)` = 10 min.
+    assert_backoff(&rig.pool, 10, 600).await;
+    assert_eq!(next_pick(&rig).await, None, "not before its longer backoff");
+}
+
+/// #263: the deferral leaves `lyrics_source` and the version as they were.
+/// A song parked at an OLDER pipeline version (due again by the version
+/// rule) keeps its sentinel at that version, so an error never re-parks it
+/// at the current one, and it is picked again once its backoff ran out.
+#[tokio::test]
+async fn an_error_never_re_parks_a_stale_sentinel_at_the_current_version() {
+    let rig = rig().await;
+    let older = LYRICS_PIPELINE_VERSION as i64 - 1;
+    unserved_song(&rig, 11, 1, "yt_stale011", Some("no_source"), older).await;
+    assert_eq!(
+        next_pick(&rig).await,
+        Some(11),
+        "an older version's sentinel is due"
+    );
+
+    let error = anyhow::anyhow!("gather: genius fallback cleanup failed: CLIProxy unreachable");
+    rig.worker.fail_song(11, "yt_stale011", &error).await;
+
+    assert_eq!(
+        source_and_version(&rig.pool, 11).await,
+        (Some("no_source".to_string()), older),
+        "the sentinel stays at its older version"
+    );
+    assert_eq!(row(&rig.pool, 11).await.3, 1, "the attempt is recorded");
+    assert_backoff(&rig.pool, 11, 300).await;
+    assert_eq!(next_pick(&rig).await, None, "not before its backoff");
+    make_due(&rig, 11).await;
+    assert_eq!(next_pick(&rig).await, Some(11), "picked again once due");
+}
+
+/// #263 + #144 F1 (one lyrics state per VIDEO): a video in two playlists
+/// has two rows and one `{yt}_lyrics.json`; the error of one row defers
+/// every row of it, so no sibling is picked during the backoff.
+#[tokio::test]
+async fn every_row_of_the_video_takes_the_deferral() {
+    let rig = rig().await;
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (2, 'q', 'u2', 'SP-other', 1)",
+    )
+    .execute(&rig.pool)
+    .await
+    .unwrap();
+    let current = LYRICS_PIPELINE_VERSION as i64;
+    unserved_song(&rig, 12, 1, "yt_shared12", None, current).await;
+    unserved_song(&rig, 13, 2, "yt_shared12", None, current).await;
+
+    let error = anyhow::anyhow!("gather: lrclib-plain cleanup failed for yt_shared12: 502");
+    rig.worker.fail_song(12, "yt_shared12", &error).await;
+
+    for id in [12, 13] {
+        assert_eq!(row(&rig.pool, id).await, (0, None, 0, 1), "row {id}");
+        assert_backoff(&rig.pool, id, 300).await;
+    }
+    assert_eq!(
+        next_pick(&rig).await,
+        None,
+        "no row of the video before its backoff"
+    );
+    make_due(&rig, 13).await;
+    assert_eq!(next_pick(&rig).await, Some(13), "picked again once due");
+}
+
+/// #263: one WARN per failed attempt, naming the song and the error (the
+/// text `process_song` returned; a Gemini error is redacted where it is
+/// made, `gemini_api::redact_keys`).
+#[tokio::test]
+async fn an_unserved_songs_error_is_one_warn_naming_it() {
+    let rig = rig().await;
+    let current = LYRICS_PIPELINE_VERSION as i64;
+    unserved_song(&rig, 14, 1, "yt_unserv14", None, current).await;
+    let cap = Captured::default();
+    let _log = tracing::subscriber::set_default(capturing(&cap));
+    let error = anyhow::anyhow!("gather: genius fallback cleanup failed: 503");
+
+    rig.worker.fail_song(14, "yt_unserv14", &error).await;
+    rig.worker.fail_song(14, "yt_unserv14", &error).await;
+
+    let warns: Vec<String> = cap
+        .lines_with(" WARN ")
+        .into_iter()
+        .filter(|l| l.contains("process_error: gather: genius fallback cleanup failed: 503"))
+        .collect();
+    assert_eq!(warns.len(), 2, "one WARN per failed attempt: {warns:?}");
+    assert!(
+        warns.iter().all(|l| l.contains("yt_unserv14")),
+        "each names the song: {warns:?}"
+    );
 }
 
 /// Pin: an empty transcript on a song with NO served lyrics is still
@@ -303,20 +489,28 @@ async fn an_empty_transcript_on_an_unserved_song_quarantines_it_as_asr_gap() {
 }
 
 /// Pin: `has_lyrics = 1` with the file gone is not served (the wall has
-/// nothing to show), so the failure takes the terminal state.
+/// nothing to show), so a failure takes the unserved path: since #263 a
+/// deferral, which keeps the song in the manual queue, where a served
+/// song leaves it on its `SERVED_RERUN_MAX_ATTEMPTS`th failed attempt.
 #[tokio::test]
 async fn a_row_whose_lyrics_file_is_gone_is_not_served() {
     let rig = rig().await;
     queued_song(&rig, 5, "yt_nofile05", 1, 0).await;
 
     let error = anyhow::anyhow!("gather: lrclib-plain candidate present but ai_client is None");
-    rig.worker.fail_song(5, "yt_nofile05", &error).await;
+    for _ in 0..SERVED_RERUN_MAX_ATTEMPTS {
+        rig.worker.fail_song(5, "yt_nofile05", &error).await;
+    }
 
-    let (has_lyrics, source, _, _) = row(&rig.pool, 5).await;
     assert_eq!(
-        (has_lyrics, source.as_deref()),
-        (0, Some("no_source")),
-        "no file on disk = nothing served = the terminal state"
+        row(&rig.pool, 5).await,
+        (
+            1,
+            Some(SERVED_SOURCE.to_string()),
+            1,
+            i64::from(SERVED_RERUN_MAX_ATTEMPTS)
+        ),
+        "no file on disk = nothing served = the unserved deferral, still queued"
     );
 }
 

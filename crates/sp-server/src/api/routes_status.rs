@@ -79,6 +79,12 @@ pub async fn environment() -> axum::Json<sp_core::prod_env::EnvironmentStatus> {
     axum::Json(crate::prod_env::global().current())
 }
 
+/// #259: `GET /api/v1/wall` — the LED wall report the health bar polls
+/// (`crate::wall`: Arena's own output setup against the box, read only).
+pub async fn wall() -> axum::Json<sp_core::wall::WallStatus> {
+    axum::Json(crate::wall::global().current())
+}
+
 #[cfg(test)]
 #[path = "routes_status_tests.rs"]
 mod tests;

@@ -9,7 +9,8 @@
 /// (#182: a dubbed talk gets its EN/SK subtitles from the Live-session
 /// transcript, `dabing::subtitles`, not the song-lyrics pipeline) — #144 F1:
 /// no row of it, as the catalog's rule: the video's one `{yt}_lyrics.json`
-/// is the dub's — nor the #228 test item (`test_item::not_test_item!`). A macro so
+/// is the dub's — nor the #228 test item, nor a row whose song left its
+/// YouTube playlist (#260; both `db::queue_row!`). A macro so
 /// [`LYRICS_ELIGIBLE`] and [`LYRICS_DUE`] are built from one text.
 macro_rules! lyrics_eligible {
     () => {
@@ -17,7 +18,7 @@ macro_rules! lyrics_eligible {
             "p.is_active = 1 AND v.normalized = 1 \
              AND NOT EXISTS (SELECT 1 FROM videos dub WHERE dub.youtube_id = v.youtube_id \
              AND dub.dub_requested = 1) AND ",
-            crate::test_item::not_test_item!()
+            crate::db::queue_row!()
         )
     };
 }

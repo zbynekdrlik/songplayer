@@ -21,6 +21,8 @@ pub use models_lyrics_backoff::*;
 #[path = "models_translation.rs"] // #152 translation gender/version queries
 mod models_translation;
 pub use models_translation::*;
+// #260: moved with the V40 mark (its home, `models_membership.rs`).
+pub use super::models_membership::video_playlist_membership;
 
 // ---------------------------------------------------------------------------
 // Playlists
@@ -104,7 +106,7 @@ pub async fn get_videos_for_playlist(
                 duration_ms, file_path, normalized, gemini_failed,
                 suppress_resolume_en, spotify_track_id,
                 download_attempts, last_download_error, dub_requested, dub_status
-         FROM videos WHERE playlist_id = ? ORDER BY id",
+         FROM videos WHERE playlist_id = ? AND removed_at IS NULL ORDER BY id",
     )
     .bind(playlist_id)
     .fetch_all(pool)
@@ -227,7 +229,7 @@ pub async fn get_unplayed_video_ids(
         "SELECT v.youtube_id
          FROM videos v
          LEFT JOIN play_history ph ON ph.video_id = v.id
-         WHERE v.playlist_id = ? AND ph.id IS NULL
+         WHERE v.playlist_id = ? AND v.removed_at IS NULL AND ph.id IS NULL
          ORDER BY v.id",
     )
     .bind(playlist_id)
@@ -242,11 +244,13 @@ pub async fn get_normalized_video_ids(
     pool: &SqlitePool,
     playlist_id: i64,
 ) -> Result<Vec<i64>, sqlx::Error> {
-    let rows =
-        sqlx::query("SELECT id FROM videos WHERE playlist_id = ? AND normalized = 1 ORDER BY id")
-            .bind(playlist_id)
-            .fetch_all(pool)
-            .await?;
+    let rows = sqlx::query(
+        "SELECT id FROM videos WHERE playlist_id = ? AND normalized = 1 AND removed_at IS NULL \
+         ORDER BY id",
+    )
+    .bind(playlist_id)
+    .fetch_all(pool)
+    .await?;
 
     Ok(rows.iter().map(|r| r.get("id")).collect())
 }
@@ -260,7 +264,7 @@ pub async fn get_unplayed_normalized_video_ids(
         "SELECT v.id
          FROM videos v
          LEFT JOIN play_history ph ON ph.video_id = v.id
-         WHERE v.playlist_id = ? AND v.normalized = 1 AND ph.id IS NULL
+         WHERE v.playlist_id = ? AND v.normalized = 1 AND v.removed_at IS NULL AND ph.id IS NULL
          ORDER BY v.id",
     )
     .bind(playlist_id)
@@ -576,7 +580,7 @@ pub async fn get_next_video_missing_translation(
         "SELECT v.id, v.youtube_id \
          FROM videos v \
          JOIN playlists p ON p.id = v.playlist_id \
-         WHERE v.has_lyrics = 1 AND p.is_active = 1 \
+         WHERE v.has_lyrics = 1 AND p.is_active = 1 AND v.removed_at IS NULL \
          ORDER BY v.id",
     )
     .fetch_all(pool)
@@ -824,26 +828,6 @@ pub async fn position_for_playlist_item(
     .bind(video_id)
     .fetch_optional(pool)
     .await
-}
-
-/// Membership + readiness check for the `videos.playlist_id` model used by
-/// youtube-kind playlists (issue #134) — the direct-link counterpart of
-/// `position_for_playlist_item`'s `playlist_items` set-list model that only
-/// custom-kind playlists use. Returns `Some(normalized)` when `video_id`
-/// belongs to `playlist_id`, `None` when it doesn't exist or belongs to a
-/// different playlist (prevents a client from triggering playback of an
-/// arbitrary video via another playlist's URL — same protection
-/// `position_for_playlist_item` gives the custom-playlist path).
-pub async fn video_playlist_membership(
-    pool: &SqlitePool,
-    playlist_id: i64,
-    video_id: i64,
-) -> Result<Option<bool>, sqlx::Error> {
-    sqlx::query_scalar("SELECT normalized FROM videos WHERE id = ? AND playlist_id = ?")
-        .bind(video_id)
-        .bind(playlist_id)
-        .fetch_optional(pool)
-        .await
 }
 
 /// Outcome of a successful `quarantine_video_lyrics` call. Surfaced through

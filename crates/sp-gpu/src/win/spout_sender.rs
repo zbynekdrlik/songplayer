@@ -27,8 +27,8 @@ use crate::spout::{
 };
 use crate::spout_lock::access_mutex_name;
 use crate::spout_state::{
-    AccessHeld, AfterSend, BeforeSend, FirstSendFacts, Listed, Registration, UNREADABLE,
-    access_held, after_send, before_send, claim,
+    AccessHeld, AfterSend, BeforeSend, FirstSendFacts, ListCheck, Listed, Registration, UNREADABLE,
+    access_held, after_send, before_send, claim, list_check,
 };
 use crate::stats::SpoutSendStats;
 
@@ -42,6 +42,7 @@ unsafe extern "C" {
     fn spout_sender_listed(sender: *mut c_void) -> c_int;
     fn spout_sender_claim_name(sender: *mut c_void) -> c_int;
     fn spout_sender_send(sender: *mut c_void, texture: *mut c_void) -> c_int;
+    fn spout_sender_relist(sender: *mut c_void) -> c_int;
     fn spout_sender_state(sender: *mut c_void, initialized: *mut c_int, name_matches: *mut c_int);
     fn spout_sender_refuse(sender: *mut c_void) -> c_int;
     fn spout_sender_size(sender: *mut c_void, width: *mut u32, height: *mut u32);
@@ -142,6 +143,9 @@ pub struct SpoutSender {
     /// #243: sends in a row after which another program held the sender's
     /// texture lock (`spout_state::access_held`).
     access_held: u32,
+    /// #243: sends since the sender was confirmed (`spout_state::list_check`
+    /// looks at Spout's list every `RELIST_EVERY`th).
+    confirmed_sends: u64,
     device: ID3D11Device,
     texture: ID3D11Texture2D,
     /// The compositor's immediate context and an event query: each send
@@ -209,6 +213,7 @@ impl SpoutSender {
             name: name.to_owned(),
             registration: Registration::Fresh,
             access_held: 0,
+            confirmed_sends: 0,
             device,
             texture,
             context,
@@ -266,8 +271,10 @@ impl SpoutSender {
                 if next == Registration::Confirmed && self.registration != next {
                     info!(name = %self.name, "sp-gpu: Spout lists the sender");
                 }
+                let was_confirmed = self.registration == Registration::Confirmed;
                 self.registration = next;
-                Ok(SpoutSendStats { send_us })
+                let relisted = was_confirmed && self.relist_if_dropped();
+                Ok(SpoutSendStats { send_us, relisted })
             }
             AfterSend::Lost { code, next } => {
                 self.check_texture_lock(send_us)?;
@@ -280,6 +287,38 @@ impl SpoutSender {
             AfterSend::Refuse(why) => {
                 let holder = self.list_holder(why);
                 Err(self.refuse(why, holder))
+            }
+        }
+    }
+
+    /// #243 (SNV 13.10.2026): after a send of a confirmed sender, every
+    /// `spout_state::RELIST_EVERY`th one looks at Spout's list and puts the
+    /// name back when another program's clean-up dropped it (the same
+    /// sender and shared texture: receivers find it again by its name).
+    /// Whether it was put back. A failed attempt is tried again at the next
+    /// check, 1 s later.
+    fn relist_if_dropped(&mut self) -> bool {
+        self.confirmed_sends += 1;
+        match list_check(self.confirmed_sends, || listed_now(&self.shim)) {
+            ListCheck::Skip | ListCheck::Fine => false,
+            ListCheck::Relist => {
+                let raw = self.shim.raw();
+                // SAFETY: the shim sender is live until Drop.
+                let code = sdk(&self.name, || unsafe { spout_sender_relist(raw) });
+                if code == 0 {
+                    warn!(
+                        name = %self.name,
+                        "sp-gpu: Spout's list had lost the sender (another program's clean-up); listed again"
+                    );
+                    true
+                } else {
+                    warn!(
+                        name = %self.name,
+                        code,
+                        "sp-gpu: Spout's list lost the sender and it could not be listed again now; next check in 1 s"
+                    );
+                    false
+                }
             }
         }
     }

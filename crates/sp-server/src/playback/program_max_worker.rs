@@ -73,8 +73,8 @@
 use std::time::{Duration, Instant};
 
 use sp_gpu::{
-    ComposeStats, Composition, FHD_HEIGHT, FHD_WIDTH, GpuError, Nv12Picture, SpoutSendStats,
-    VblankGrid,
+    ComposeStats, Composition, FHD_FIT, FHD_HEIGHT, FHD_WIDTH, GpuError, Nv12Picture,
+    SpoutSendStats, VblankGrid,
 };
 use tracing::{info, warn};
 
@@ -172,8 +172,10 @@ pub trait MaxGpu {
 }
 
 /// The production GPU: `sp_gpu::Compositor::new` (the largest hardware
-/// adapter, never WARP) and the sender `SP-program-MAX`; #239: a 1920×1080
-/// compositor on the same adapter and the sender `SP-program`.
+/// adapter, never WARP; #267: each picture fills the wall's width,
+/// `MAX_FIT`) and the sender `SP-program-MAX`; #239: a 1920×1080
+/// compositor on the same adapter (aspect-fitted like the NDI `SP-program`,
+/// `FHD_FIT`) and the sender `SP-program`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SpoutGpu;
 
@@ -193,7 +195,7 @@ impl MaxGpu for SpoutGpu {
     }
 
     fn fhd_compositor(&mut self) -> Result<sp_gpu::Compositor, GpuError> {
-        sp_gpu::Compositor::with_size(FHD_WIDTH, FHD_HEIGHT)
+        sp_gpu::Compositor::with_size(FHD_WIDTH, FHD_HEIGHT, FHD_FIT)
     }
 
     /// `mutants::skip`: as `sender`.
@@ -793,6 +795,8 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     fn pace(&mut self, offered: Instant) -> (Due, Option<VblankGrid>) {
         let now = self.clock.as_mut().now();
         let grid = self.vblank.as_ref().and_then(|v| {
+            // #259: the source moves to a new primary when Windows re-lays.
+            self.out.record_vblank_output(v.output());
             log_vblank(self.out.record_vblank_state(v.state(now)), &**v);
             v.grid(now)
         });

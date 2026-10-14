@@ -14,11 +14,20 @@
 //!
 //! #170: both the desktop list and the mobile `<select>` use a keyed `<For>`
 //! whose `each` reads ONLY `store.playlists` (never `store.now_playing`), so a
-//! 500 ms position tick does NOT recreate/re-order the rows — the glyph +
+//! 500 ms position tick does NOT recreate/re-order the rows — the state word +
 //! `selected` class are per-row reactive and update in place.
+//!
+//! #266: a row says its playlist's state in WORDS (`playlist-picker-status`,
+//! `data-status`: "NA PROGRAME" in the PROGRAM row's red, "hrá mimo
+//! programu", "pozastavené", "nehrá"; nothing until the state is known), and
+//! the mobile `<option>` carries the same word — never a ▶ / ⏸ glyph, which
+//! reads as the button that does that action (the owner's ROZHODNUTÉ
+//! 13.10.2026). Each row's word is a `Memo` (`selection::playlist_status`), so
+//! a position tick touches no row.
 
 use leptos::prelude::*;
 use sp_core::models::Playlist;
+use sp_core::player_view;
 
 use crate::components::{ndi_health, selection};
 use crate::store::DashboardStore;
@@ -72,18 +81,14 @@ pub fn PlaylistPicker(
                         let pid = p.id;
                         let name = p.name.clone();
                         let ndi = p.ndi_output_name.clone();
+                        let status = Memo::new(move |_| selection::playlist_status(store, pid));
                         view! {
                             <option
                                 value=pid.to_string()
                                 selected=move || store.selected_playlist.get() == Some(pid)
+                                data-status=move || status.get().code()
                             >
-                                {move || {
-                                    let glyph = selection::playback_glyph(
-                                        &store.now_playing.get(),
-                                        pid,
-                                    );
-                                    format!("{glyph} {name} ({ndi})")
-                                }}
+                                {move || player_view::picker_option_text(&name, &ndi, status.get())}
                             </option>
                         }
                     }
@@ -100,6 +105,7 @@ pub fn PlaylistPicker(
                         let name = p.name.clone();
                         let ndi = p.ndi_output_name.clone();
                         let ndi_name = p.ndi_output_name.clone();
+                        let status = Memo::new(move |_| selection::playlist_status(store, pid));
                         view! {
                             <button
                                 class="playlist-selector-row"
@@ -110,10 +116,17 @@ pub fn PlaylistPicker(
                                 }
                                 on:click=move |_| selection::select(store, pid)
                             >
-                                <span class="sel-glyph">
-                                    {move || selection::playback_glyph(&store.now_playing.get(), pid)}
+                                // #266: the name, and under it the state in words.
+                                <span class="sel-main">
+                                    <span class="sel-name">{name}</span>
+                                    <span
+                                        class=move || format!("sel-status status-{}", status.get().code())
+                                        data-testid="playlist-picker-status"
+                                        data-status=move || status.get().code()
+                                    >
+                                        {move || status.get().label()}
+                                    </span>
                                 </span>
-                                <span class="sel-name">{name}</span>
                                 <span class="sel-ndi">{ndi}</span>
                                 {
                                     let ndi_name = ndi_name.clone();

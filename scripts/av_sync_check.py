@@ -62,6 +62,18 @@ Method (automates the manual 24.9.2026 measurement, A/V +13 ms, 0 dropouts):
   picture: the drift slope in ms per 10 s, and the largest step between
   neighbouring windows. A steady clock drift reads as a slope, a jump/resync
   as one step with a flat slope.
+* **Analysed part** (``--analysis-start-s``, #268): cg OBS's probe input is
+  pointed at SP-program right before a take, and its audio hold then slews
+  at 1000 ppm until the genlock shallow lock has settled (camera-box 1367:
+  one frame of depth = 33 ms = 33 s). The gate records past that settle and
+  passes the time the settled part starts. Everything before it (the "head")
+  is cut from EVERY verdict input: the audio alignment, the warp, the
+  dropout scan, the picture and the segment profile. 0 (the default)
+  analyses the whole recording, as before. A ``settle`` diagnostic profiles
+  the WHOLE recording per 2 s (``settle_profile``): where its audio sat
+  against the analysed part's alignment, and how fast it moved, so a kept
+  take shows where the slew ended. A smooth rate past the warp's bound in the
+  analysed part is named in the reasons (``audio_slew_note``).
 
 Verdict, in order (see ``verdict``):
 1. ``cannot_measure`` (exit 2) when the AUDIO is unmeasurable or the analysis
@@ -102,7 +114,7 @@ import traceback
 
 import numpy as np
 from av_sync_drift import drift_and_step
-from av_sync_warp import compensate
+from av_sync_warp import MAX_FIT_RESIDUAL_MS, MAX_WARP_PPM, compensate, local_lags
 
 SR = 8000
 GRID_W = 64
@@ -127,6 +139,14 @@ MAX_REPORTED_TIMES = 20
 SEGMENT_S = 2.0
 SEGMENT_SEARCH_S = 0.3  # +- around the global audio / video offset
 SEGMENT_MAX_PLATEAU_FRAMES = 1.5  # a wider video plateau (a still) is not ok
+# The analysed part (#268): what must be left after --analysis-start-s.
+MIN_ANALYSED_S = 10.0
+# The settle profile (diagnostics only) over the WHOLE recording, head
+# included: 2 s rows of the warp's 0.25 s local lags, searched +-100 ms (three
+# frames of a 30 fps depth, slewed) around the analysed part's alignment.
+SETTLE_WINDOW_S = 2.0
+SETTLE_SEARCH_S = 0.1
+SETTLE_MIN_WINDOWS = 3  # 0.25 s windows a row needs for its rate
 
 EXIT_CODES = {"pass": 0, "fail": 1, "cannot_measure": 2}
 
@@ -516,6 +536,7 @@ def verdict(
     dropouts: int,
     max_av_ms: float = DEFAULT_MAX_AV_MS,
     video_error: str | None = None,
+    audio_note: str | None = None,
 ) -> tuple[str, list[str], list[str]]:
     """``(status, reasons, unmeasurable_sides)`` from the measured numbers.
 
@@ -534,11 +555,15 @@ def verdict(
     picture step raised: a probe, decode or crop bug) sits at step 3 too, but
     is deterministic and never retaken. Its reason is the error alone, not
     NaN thresholds.
+    ``audio_note`` (``audio_slew_note``) says WHY the audio did not correlate
+    when the analysis can tell; it follows the audio reason and is never
+    given without one. It changes no status.
     """
     audio_bad = (
         []
         if audio_corr >= MIN_AUDIO_CORR
         else [f"audio correlation {audio_corr:.3f} < {MIN_AUDIO_CORR}"]
+        + ([audio_note] if audio_note else [])
     )
     video_bad = []
     video_side = "video"
@@ -593,6 +618,7 @@ def analyze_audio(
     aud.update(
         rate_ppm=comp["rate_ppm"],
         fit_residual_ms=comp["fit_residual_ms"],
+        fit_residual_median_ms=comp["fit_residual_median_ms"],
         fit_windows=comp["fit_windows"],
         warped=comp["warped"],
         corr_unwarped=aud["corr"],
@@ -703,6 +729,132 @@ def segment_profile(
     return out
 
 
+def analysed_part(
+    audio: np.ndarray,
+    t0: float,
+    start_s: float,
+    sr: int = SR,
+    min_s: float = MIN_ANALYSED_S,
+) -> tuple[np.ndarray, float, int]:
+    """The recording's audio from ``start_s`` (its own timeline) on (#268).
+
+    Returns ``(part, part_t0, cut)``: the samples at or after ``start_s``,
+    the time of the part's sample 0, and the number of samples cut. A
+    ``start_s`` of 0 (or less) keeps the whole recording, exactly as before
+    the option existed (sample 0 may then sit at the AAC priming's -0.021 s).
+    Less than ``min_s`` left is an error that names the numbers.
+    """
+    if start_s <= 0.0:
+        return audio, t0, 0
+    cut = max(0, int(np.ceil((start_s - t0) * sr - 1e-6)))
+    part = audio[cut:]
+    if len(part) < min_s * sr:
+        raise ValueError(
+            f"--analysis-start-s {start_s:g} leaves {len(part) / sr:.2f} s of the "
+            f"{len(audio) / sr:.2f} s recording; at least {min_s:g} s must be analysed"
+        )
+    return part, t0 + cut / sr, cut
+
+
+def analysed_frames(
+    frames: np.ndarray, pts: np.ndarray, start_s: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """The recording's frames whose pts is at or after ``start_s`` (#268).
+
+    An ffmpeg input seek also returns the frame ON SCREEN at the seek point
+    (its pts a few ms before it): it is dropped, so the picture and the audio
+    start at the same time. A ``start_s`` of 0 (or less) keeps every frame.
+    """
+    if start_s <= 0.0:
+        return frames, pts
+    keep = pts >= start_s - 1e-9
+    if not keep.any():
+        raise ValueError(f"video: no recording frame at or after {start_s:g} s")
+    return frames[keep], pts[keep]
+
+
+def audio_slew_note(
+    rate_ppm: float | None, residual_median_ms: float | None, windows: int
+) -> str | None:
+    """Name a smooth audio slew the warp cannot take (#268), else None.
+
+    cg OBS's probe audio hold slews at 1000 ppm while camera-box's genlock
+    shallow lock settles: a perfectly straight line (median fit residual
+    < 0.1 ms) far past the warp's ``MAX_WARP_PPM``. The one-lag correlation
+    then reads ~0.1-0.3, which alone does not say why. A step leaves half its
+    windows off any line (median residual ~ step / 4), so it is not named; a
+    rate within the bound is warped, so it never reaches here. With no fit
+    (too few windows, e.g. when the slew smeared the global lag onto a noise
+    peak) nothing can be told.
+    """
+    if rate_ppm is None or residual_median_ms is None:
+        return None
+    if abs(rate_ppm) <= MAX_WARP_PPM or residual_median_ms > MAX_FIT_RESIDUAL_MS:
+        return None
+    return (
+        f"the audio slews smoothly at {rate_ppm:+.0f} ppm through the analysed part "
+        f"(median fit residual {residual_median_ms:.3f} ms over {windows} windows; the "
+        f"warp takes <= {MAX_WARP_PPM:g} ppm): the recorded audio had not settled"
+    )
+
+
+def settle_rows(
+    t: np.ndarray,
+    dev: np.ndarray,
+    sr: int,
+    rec_t0: float,
+    n: int,
+    window_s: float = SETTLE_WINDOW_S,
+) -> list[dict]:
+    """One row per whole ``window_s`` window of an ``n``-sample recording.
+
+    ``t`` / ``dev`` are the warp's local lags (``av_sync_warp.local_lags``):
+    the centre of every matched 0.25 s window and its deviation from the
+    reference alignment, both in samples. Each row has the window
+    (``t_s`` / ``t_end_s``, recording time), ``windows`` (matched 0.25 s
+    windows in it), ``dev_ms`` (their mean deviation) and ``rate_ppm`` (the
+    slope of their deviation; needs ``SETTLE_MIN_WINDOWS``).
+    """
+    win = int(round(window_s * sr))
+    t = np.asarray(t, dtype=np.float64)
+    dev = np.asarray(dev, dtype=np.float64)
+    rows = []
+    for i0 in range(0, n - win + 1, win):
+        sel = (t >= i0) & (t < i0 + win)
+        k = int(sel.sum())
+        dev_ms = rate = None
+        if k >= 1:
+            dev_ms = round(float(np.mean(dev[sel])) * 1000.0 / sr, 2)
+        if k >= SETTLE_MIN_WINDOWS:
+            rate = round(float(np.polyfit(t[sel], dev[sel], 1)[0]) * 1e6, 0)
+        rows.append(
+            {
+                "t_s": round(rec_t0 + i0 / sr, 3),
+                "t_end_s": round(rec_t0 + (i0 + win) / sr, 3),
+                "windows": k,
+                "dev_ms": dev_ms,
+                "rate_ppm": rate,
+            }
+        )
+    return rows
+
+
+def settle_profile(
+    rec: np.ndarray,
+    orig: np.ndarray,
+    lag: int,
+    sr: int = SR,
+    rec_t0: float = 0.0,
+) -> list[dict]:
+    """Where the WHOLE recording's audio sat, per ``SETTLE_WINDOW_S`` row,
+    against the alignment ``lag`` (recording sample 0 = original sample
+    ``lag``; the analysed part's, extended back over the head), and how fast
+    it moved (diagnostics only, #268). A slewing head reads ~+-1000 ppm and a
+    settled part ~0; ``dev_ms`` shows how far off the head still was."""
+    t, dev, _ = local_lags(rec, orig, lag, sr, search_s=SETTLE_SEARCH_S)
+    return settle_rows(t, dev, sr, rec_t0, len(rec))
+
+
 # ---------------------------------------------------------------------------
 # ffmpeg I/O. Thin, untested by design (no ffmpeg in Eval Checks CI).
 # Exercised on the box by e2e/post-deploy-av-sync.spec.ts.
@@ -801,9 +953,17 @@ def decode_video(
 
 
 def _measure_video(
-    ffmpeg: str, recording: str, orig_video: str, center_s: float
+    ffmpeg: str,
+    recording: str,
+    orig_video: str,
+    center_s: float,
+    analysis_start_s: float = 0.0,
 ) -> dict:
-    """Decode both pictures around ``center_s`` (the audio offset) and align them."""
+    """Decode both pictures around ``center_s`` (the audio offset) and align them.
+
+    The recording is decoded from ``analysis_start_s`` on (an input seek: the
+    settle head is never decoded) and cut there by pts (``analysed_frames``).
+    """
     canvas_w, canvas_h = probe_video_size(ffmpeg, recording)
     grid_h = max(1, round(GRID_W * canvas_h / canvas_w))
     src_w, src_h = probe_video_size(ffmpeg, orig_video)
@@ -813,7 +973,14 @@ def _measure_video(
     )
     if [round(v) for v in crop] == [0, 0, src_w, src_h]:
         crop = None  # the whole source is kept: no crop filter
-    rec_f, rec_pts = decode_video(ffmpeg, recording, GRID_W, grid_h)
+    rec_f, rec_pts = decode_video(
+        ffmpeg,
+        recording,
+        GRID_W,
+        grid_h,
+        start=analysis_start_s if analysis_start_s > 0.0 else None,
+    )
+    rec_f, rec_pts = analysed_frames(rec_f, rec_pts, analysis_start_s)
     rec_f = rec_f[:, y0:y1, x0:x1]
     span = float(rec_pts.max() - rec_pts.min())
     start = max(0.0, center_s + float(rec_pts.min()) - VIDEO_WINDOW_S - 0.5)
@@ -852,18 +1019,24 @@ def measure(
     orig_video: str,
     ffmpeg: str = "ffmpeg",
     max_av_ms: float = DEFAULT_MAX_AV_MS,
+    analysis_start_s: float = 0.0,
 ) -> dict:
-    """Full analysis of one recording. An AUDIO-step error propagates (the
-    caller reports cannot_measure). A PICTURE-step error becomes a video-side
+    """Full analysis of one recording, from ``analysis_start_s`` on (#268:
+    the probe's settle head before it is cut from every verdict input; 0 =
+    the whole recording). An AUDIO-step error propagates (the caller reports
+    cannot_measure). A PICTURE-step error becomes a video-side
     cannot-measure, so dropouts already found still fail the run."""
-    rec_a, rec_a_t0 = decode_audio(ffmpeg, recording)
+    rec_whole, rec_whole_t0 = decode_audio(ffmpeg, recording)
+    rec_a, rec_a_t0, cut = analysed_part(rec_whole, rec_whole_t0, analysis_start_s)
     orig_a, orig_a_t0 = decode_audio(ffmpeg, orig_audio)
     aud, drops = analyze_audio(rec_a, orig_a, SR, rec_a_t0, orig_a_t0)
 
     video_error = None
     frames = video_off = None
     try:
-        video = _measure_video(ffmpeg, recording, orig_video, aud["offset_s"])
+        video = _measure_video(
+            ffmpeg, recording, orig_video, aud["offset_s"], analysis_start_s
+        )
         frames = video.pop("_frames", None)
         match, contrast = video.pop("_match_exact"), video.pop("_contrast_exact")
         video_off = video.pop("_offset_exact")
@@ -883,6 +1056,9 @@ def measure(
         drops["dropout_count"],
         max_av_ms,
         video_error,
+        audio_note=audio_slew_note(
+            aud["rate_ppm"], aud["fit_residual_median_ms"], aud["fit_windows"]
+        ),
     )
     try:  # diagnostics only: the verdict above is already final
         segments = segment_profile(
@@ -892,13 +1068,26 @@ def measure(
     except Exception as exc:  # noqa: BLE001 - reported loudly in the JSON and stderr
         traceback.print_exc(file=sys.stderr)
         segments, drift = [], {"error": f"profile error: {type(exc).__name__}: {exc}"}
+    try:  # diagnostics only: the whole recording, the settle head included
+        settle: dict = {
+            "window_s": SETTLE_WINDOW_S,
+            "search_ms": round(SETTLE_SEARCH_S * 1000.0),
+            "rows": settle_profile(
+                rec_whole, orig_a, aud["lag"] - cut, SR, rec_whole_t0
+            ),
+        }
+    except Exception as exc:  # noqa: BLE001 - reported loudly in the JSON and stderr
+        traceback.print_exc(file=sys.stderr)
+        settle = {"error": f"settle error: {type(exc).__name__}: {exc}"}
     return {
         "status": status,
         "reasons": reasons,
         "unmeasurable_sides": sides,
         "av_ms": None if av_ms is None else round(av_ms, 1),
         "max_av_ms": max_av_ms,
-        "recording_s": round(len(rec_a) / SR, 2),
+        "analysis_start_s": float(analysis_start_s),
+        "recording_s": round(len(rec_whole) / SR, 2),
+        "analysed_s": round(len(rec_a) / SR, 2),
         "audio": {
             "offset_s": round(aud["offset_s"], 4),
             "corr": round(aud["corr"], 4),
@@ -906,6 +1095,7 @@ def measure(
             "min_corr": MIN_AUDIO_CORR,
             "rate_ppm": _round_or_none(aud["rate_ppm"], 2),
             "fit_residual_ms": _round_or_none(aud["fit_residual_ms"], 3),
+            "fit_residual_median_ms": _round_or_none(aud["fit_residual_median_ms"], 3),
             "fit_windows": aud["fit_windows"],
             "warped": aud["warped"],
             "second_corr": None
@@ -918,6 +1108,7 @@ def measure(
         "dropouts": drops,
         "segments": segments,
         "drift": drift,
+        "settle": settle,
         "inputs": {
             "recording": recording,
             "orig_audio": orig_audio,
@@ -936,7 +1127,8 @@ def summary_line(result: dict) -> str:
     drops = result.get("dropouts", {})
     drift = result.get("drift", {})
     return (
-        f"AV-SYNC status={result['status']} av_ms={result.get('av_ms')} "
+        f"AV-SYNC status={result['status']} "
+        f"analysed_from_s={result.get('analysis_start_s')} av_ms={result.get('av_ms')} "
         f"audio_corr={audio.get('corr')} rate_ppm={audio.get('rate_ppm')} "
         f"fit_residual_ms={audio.get('fit_residual_ms')} warped={audio.get('warped')} "
         f"video_match={video.get('match')} "
@@ -951,6 +1143,13 @@ def summary_line(result: dict) -> str:
     )
 
 
+def _analysis_start(text: str) -> float:
+    value = float(text)
+    if not value >= 0.0:  # also refuses NaN
+        raise argparse.ArgumentTypeError(f"--analysis-start-s must be >= 0, got {text}")
+    return value
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument(
@@ -962,6 +1161,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--ffmpeg", default="ffmpeg", help="ffmpeg binary (default: on PATH)"
     )
+    ap.add_argument(
+        "--analysis-start-s",
+        type=_analysis_start,
+        default=0.0,
+        help="analyse the recording from this time on (#268: the probe's settle "
+        "head before it is cut from every verdict input; 0 = the whole recording)",
+    )
     args = ap.parse_args(argv)
     try:
         result = measure(
@@ -970,6 +1176,7 @@ def main(argv: list[str] | None = None) -> int:
             args.orig_video,
             args.ffmpeg,
             args.max_av_ms,
+            analysis_start_s=args.analysis_start_s,
         )
     except Exception as exc:  # noqa: BLE001 - reported loudly as cannot_measure, never swallowed
         traceback.print_exc(file=sys.stderr)

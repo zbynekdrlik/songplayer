@@ -17,6 +17,11 @@
 //! verify"), never fine. Off Windows nothing is checked: the status says so
 //! (`note`) and holds. The vocabulary (codes, Slovak texts, the wire shape)
 //! is `sp_core::prod_env`.
+//!
+//! #255 adds the production PC's audio profile ([`audio`]): the adapters the
+//! SoundGrid Protocol is bound to on an NDIS driver with Waves' settings,
+//! Windows Update's automatic updates off, MMCSS set for Pro Audio; the
+//! Dante adapter, the driver exclusion and power are reported only.
 
 use std::sync::{LazyLock, RwLock};
 use std::time::Duration;
@@ -85,6 +90,8 @@ pub struct EnvFacts {
     /// The domain, private and public firewall profile (the active policy
     /// store, `read::active_firewall`; the registry when it cannot be read).
     pub firewall: [Option<bool>; 3],
+    /// #255: the audio profile (`audio::read::read_audio`).
+    pub audio: audio::AudioFacts,
     /// Why a fact could not be read.
     pub read_errors: Vec<String>,
 }
@@ -110,7 +117,7 @@ pub struct EnvVerdict {
     /// edition needs, was not read).
     pub edition_allowed: Option<bool>,
     /// Every problem: the edition, Defender, the other antivirus products,
-    /// then each firewall profile.
+    /// each firewall profile, then the audio profile's (`audio::problems`).
     pub problems: Vec<EnvProblem>,
 }
 
@@ -188,6 +195,7 @@ pub fn verdict(facts: &EnvFacts) -> EnvVerdict {
             Some(false) => {}
         }
     }
+    problems.extend(audio::problems(&facts.audio));
     EnvVerdict {
         ok: problems.is_empty(),
         ltsc: edition.map(is_ltsc),
@@ -197,6 +205,9 @@ pub fn verdict(facts: &EnvFacts) -> EnvVerdict {
 }
 
 /// One check's input.
+// #255: `EnvFacts` carries the audio profile (~500 bytes); one value a
+// minute, never on a hot path, so boxing it would only add an allocation.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Check {
     /// Off Windows: nothing to check.
@@ -241,6 +252,7 @@ pub fn status_of(check: &Check, now_ms: i64) -> (EnvironmentStatus, Vec<EnvProbl
             private,
             public,
         },
+        audio: audio::view(&facts.audio),
         problems: v.problems.iter().map(EnvProblem::view).collect(),
         read_errors: facts.read_errors.clone(),
         checked_at_ms: Some(now_ms),
@@ -338,7 +350,8 @@ fn log_step(step: LogStep, status: &EnvironmentStatus, problems: &[EnvProblem]) 
             Some(note) => info!(note = %note, "production environment: not checked"),
             None => info!(
                 edition = ?status.edition_id,
-                "production environment: holds (edition allowed, Defender and firewall off)"
+                "production environment: holds (edition allowed, Defender and firewall off, \
+                 audio profile set)"
             ),
         },
         LogStep::Problems => {
@@ -369,17 +382,27 @@ fn log_step(step: LogStep, status: &EnvironmentStatus, problems: &[EnvProblem]) 
 /// instead of starting another (a hung read never piles up threads). A read
 /// that finished only after its call gave up is stale by then (up to a whole
 /// check period old): the next call drops it and reads afresh, so a late
-/// read is never published as a fresh one.
+/// read is never published as a fresh one. #259: the wall check reads the
+/// box through one too (`wall::run`).
 pub struct Reader<T> {
     read: fn() -> T,
+    /// What is read, in the errors ("WMI check", "wall read").
+    what: &'static str,
     pending: Option<tokio::task::JoinHandle<T>>,
 }
 
 impl<T: Send + 'static> Reader<T> {
-    /// A reader of `read`, run on the blocking pool.
+    /// A reader of the WMI facts `read`, run on the blocking pool.
     pub fn new(read: fn() -> T) -> Self {
+        Self::named(read, "WMI check")
+    }
+
+    /// #259: a reader of `read`, run on the blocking pool, whose errors name
+    /// `what`.
+    pub fn named(read: fn() -> T, what: &'static str) -> Self {
         Self {
             read,
+            what,
             pending: None,
         }
     }
@@ -393,10 +416,10 @@ impl<T: Send + 'static> Reader<T> {
         };
         match tokio::time::timeout(bound, &mut handle).await {
             Ok(Ok(value)) => Ok(value),
-            Ok(Err(e)) => Err(format!("the WMI check failed: {e}")),
+            Ok(Err(e)) => Err(format!("the {} failed: {e}", self.what)),
             Err(_) => {
                 self.pending = Some(handle);
-                Err(format!("the WMI check did not finish within {bound:?}"))
+                Err(format!("the {} did not finish within {bound:?}", self.what))
             }
         }
     }
@@ -465,6 +488,9 @@ pub async fn run(mut shutdown: tokio::sync::broadcast::Receiver<()>) {
 
 #[path = "prod_env_read.rs"]
 pub mod read;
+
+#[path = "prod_env_audio.rs"]
+pub mod audio;
 pub use read::{
     AvProduct, DefenderRow, DirectRead, FirewallRow, RegDword, RegString, ServiceRead, WmiRead,
     active_firewall, defender_realtime, facts_from, firewall_from_registry,

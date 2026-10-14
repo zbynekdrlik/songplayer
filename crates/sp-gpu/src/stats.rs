@@ -25,4 +25,7 @@ pub struct SpoutSendStats {
     /// finish it (#223 follow-up); at the first send also the shared
     /// texture's creation and the registration.
     pub send_us: u64,
+    /// #243: Spout's list had lost the sender's name and this send put it
+    /// back (`spout_state::list_check`).
+    pub relisted: bool,
 }

@@ -1,8 +1,12 @@
-//! Tests for a composition's layers (#223 S1a; #239: in a given target).
+//! Tests for a composition's layers (#223 S1a; #239: in a given target;
+//! #267: placed by the target's rule, MAX filling its width).
 
-use sp_core::fit::Placement;
+use sp_core::fit::{Fill, Placement, aspect_fit, fill_width};
 
-use super::{CANVAS_HEIGHT, CANVAS_WIDTH, Composition, FHD_HEIGHT, FHD_WIDTH, Layer, Slot};
+use super::{
+    CANVAS_HEIGHT, CANVAS_WIDTH, Composition, FHD_FIT, FHD_HEIGHT, FHD_WIDTH, Fit, Layer, MAX_FIT,
+    Slot,
+};
 use crate::picture::Nv12Picture;
 
 fn picture(id: u64, width: u32, height: u32) -> Nv12Picture<'static> {
@@ -15,11 +19,11 @@ fn picture(id: u64, width: u32, height: u32) -> Nv12Picture<'static> {
     }
 }
 
-/// (slot, picture id, place, weight) of each layer, in draw order.
-fn summary(layers: &[Layer<'_>]) -> Vec<(Slot, u64, Placement, f32)> {
+/// (slot, picture id, place, uv_rect, weight) of each layer, in draw order.
+fn summary(layers: &[Layer<'_>]) -> Vec<(Slot, u64, Placement, [f32; 4], f32)> {
     layers
         .iter()
-        .map(|l| (l.slot, l.picture.id, l.place, l.weight))
+        .map(|l| (l.slot, l.picture.id, l.place, l.uv_rect, l.weight))
         .collect()
 }
 
@@ -30,12 +34,20 @@ const FULL: Placement = Placement {
     off_y: 0,
 };
 
+/// A 4:3 picture aspect-fitted into 3840×2160: columns 480..3360.
 const PILLARBOX: Placement = Placement {
     w: 2880,
     h: 2160,
     off_x: 480,
     off_y: 0,
 };
+
+/// The whole picture.
+const WHOLE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
+
+/// #267: a 4:3 picture filling a 16:9 target's width: scaled to 4/3 of the
+/// target's height, the middle three quarters of its rows shown.
+const CROP_4_3: [f32; 4] = [0.0, 0.125, 1.0, 0.875];
 
 #[test]
 fn the_canvas_is_fixed_at_3840_by_2160() {
@@ -51,7 +63,19 @@ fn the_black_has_no_layer() {
 #[test]
 fn a_plain_picture_is_one_outgoing_layer_at_full_weight() {
     let layers = Composition::Picture(picture(7, 2560, 1440)).layers();
-    assert_eq!(summary(&layers), [(Slot::Outgoing, 7, FULL, 1.0)]);
+    assert_eq!(summary(&layers), [(Slot::Outgoing, 7, FULL, WHOLE, 1.0)]);
+}
+
+/// #267: MAX is the LED wall's feed: a 4:3 picture fills its whole width,
+/// cropped top and bottom, never pillarboxed (Arena's Fill would carry the
+/// bars onto the wall).
+#[test]
+fn a_4_by_3_picture_fills_max_s_whole_width() {
+    let layers = Composition::Picture(picture(7, 1440, 1080)).layers();
+    assert_eq!(summary(&layers), [(Slot::Outgoing, 7, FULL, CROP_4_3, 1.0)]);
+    // The PP song's own size (`MO3ucp2mBnM`, 2880×2160).
+    let layers = Composition::Picture(picture(9, 2880, 2160)).layers();
+    assert_eq!(summary(&layers), [(Slot::Outgoing, 9, FULL, CROP_4_3, 1.0)]);
 }
 
 #[test]
@@ -65,8 +89,8 @@ fn a_fade_draws_the_outgoing_side_first_at_one_minus_the_weight() {
     assert_eq!(
         summary(&layers),
         [
-            (Slot::Outgoing, 7, FULL, 0.75),
-            (Slot::Incoming, 8, PILLARBOX, 0.25),
+            (Slot::Outgoing, 7, FULL, WHOLE, 0.75),
+            (Slot::Incoming, 8, FULL, CROP_4_3, 0.25),
         ]
     );
 }
@@ -78,15 +102,18 @@ fn a_side_of_weight_zero_is_not_drawn() {
         to: Some(picture(8, 1440, 1080)),
         weight_q8,
     };
-    assert_eq!(summary(&fade(0).layers()), [(Slot::Outgoing, 7, FULL, 1.0)]);
+    assert_eq!(
+        summary(&fade(0).layers()),
+        [(Slot::Outgoing, 7, FULL, WHOLE, 1.0)]
+    );
     assert_eq!(
         summary(&fade(256).layers()),
-        [(Slot::Incoming, 8, PILLARBOX, 1.0)]
+        [(Slot::Incoming, 8, FULL, CROP_4_3, 1.0)]
     );
     // A weight past 256 is all of the incoming side.
     assert_eq!(
         summary(&fade(300).layers()),
-        [(Slot::Incoming, 8, PILLARBOX, 1.0)]
+        [(Slot::Incoming, 8, FULL, CROP_4_3, 1.0)]
     );
 }
 
@@ -99,7 +126,7 @@ fn a_missing_side_is_the_black() {
     };
     assert_eq!(
         summary(&up_from_black.layers()),
-        [(Slot::Incoming, 8, PILLARBOX, 0.5)]
+        [(Slot::Incoming, 8, FULL, CROP_4_3, 0.5)]
     );
     let down_to_black = Composition::Fade {
         from: Some(picture(7, 2560, 1440)),
@@ -108,7 +135,7 @@ fn a_missing_side_is_the_black() {
     };
     assert_eq!(
         summary(&down_to_black.layers()),
-        [(Slot::Outgoing, 7, FULL, 0.25)]
+        [(Slot::Outgoing, 7, FULL, WHOLE, 0.25)]
     );
 }
 
@@ -138,8 +165,8 @@ fn the_fhd_target_is_fixed_at_1920_by_1080() {
 fn layers_in_place_each_picture_in_the_given_target() {
     let plain = Composition::Picture(picture(7, 2560, 1440));
     assert_eq!(
-        summary(&plain.layers_in(FHD_WIDTH, FHD_HEIGHT)),
-        [(Slot::Outgoing, 7, FHD_FULL, 1.0)]
+        summary(&plain.layers_in(FHD_WIDTH, FHD_HEIGHT, FHD_FIT)),
+        [(Slot::Outgoing, 7, FHD_FULL, WHOLE, 1.0)]
     );
     // 21:9 in 1920×1080: 810 rows, centred on even rows 134..944.
     let wide = Composition::Picture(picture(9, 2560, 1080));
@@ -150,20 +177,49 @@ fn layers_in_place_each_picture_in_the_given_target() {
         off_y: 134,
     };
     assert_eq!(
-        summary(&wide.layers_in(FHD_WIDTH, FHD_HEIGHT)),
-        [(Slot::Outgoing, 9, letterbox, 1.0)]
+        summary(&wide.layers_in(FHD_WIDTH, FHD_HEIGHT, FHD_FIT)),
+        [(Slot::Outgoing, 9, letterbox, WHOLE, 1.0)]
     );
     // A target taller than wide: the width binds, the rows are centred
-    // (253 rows floored to even, 274 = (800 − 252) / 2).
+    // (253 rows floored to even, 274 = (800 − 252) / 2). Wider than its
+    // target, the picture is placed alike by both rules.
     let tall = Placement {
         w: 600,
         h: 252,
         off_x: 0,
         off_y: 274,
     };
+    for fit in [Fit::Aspect, Fit::FillWidth] {
+        assert_eq!(
+            summary(&wide.layers_in(600, 800, fit)),
+            [(Slot::Outgoing, 9, tall, WHOLE, 1.0)],
+            "{fit:?}"
+        );
+    }
+}
+
+/// #267: the `SP-program` sender carries the NDI `SP-program`'s picture, so
+/// a 4:3 picture keeps its bars there while MAX fills its width with it.
+#[test]
+fn the_fhd_target_keeps_the_bars_max_fills_the_width() {
+    let narrow = Composition::Picture(picture(8, 1440, 1080));
     assert_eq!(
-        summary(&wide.layers_in(600, 800)),
-        [(Slot::Outgoing, 9, tall, 1.0)]
+        summary(&narrow.layers_in(FHD_WIDTH, FHD_HEIGHT, FHD_FIT)),
+        [(Slot::Outgoing, 8, FHD_PILLARBOX, WHOLE, 1.0)]
+    );
+    assert_eq!(
+        summary(&narrow.layers()),
+        [(Slot::Outgoing, 8, FULL, CROP_4_3, 1.0)]
+    );
+    // The fill rule in the 1920×1080 target: the same crop, FHD's place.
+    assert_eq!(
+        summary(&narrow.layers_in(FHD_WIDTH, FHD_HEIGHT, Fit::FillWidth)),
+        [(Slot::Outgoing, 8, FHD_FULL, CROP_4_3, 1.0)]
+    );
+    // And the aspect rule in MAX's canvas: the pillarbox MAX no longer has.
+    assert_eq!(
+        summary(&narrow.layers_in(CANVAS_WIDTH, CANVAS_HEIGHT, Fit::Aspect)),
+        [(Slot::Outgoing, 8, PILLARBOX, WHOLE, 1.0)]
     );
 }
 
@@ -175,20 +231,23 @@ fn a_fade_in_the_fhd_target_has_maxs_weights_and_fhds_places() {
         weight_q8: 64,
     };
     assert_eq!(
-        summary(&fade.layers_in(FHD_WIDTH, FHD_HEIGHT)),
+        summary(&fade.layers_in(FHD_WIDTH, FHD_HEIGHT, FHD_FIT)),
         [
-            (Slot::Outgoing, 7, FHD_FULL, 0.75),
-            (Slot::Incoming, 8, FHD_PILLARBOX, 0.25),
+            (Slot::Outgoing, 7, FHD_FULL, WHOLE, 0.75),
+            (Slot::Incoming, 8, FHD_PILLARBOX, WHOLE, 0.25),
         ]
     );
     assert!(
         Composition::Black
-            .layers_in(FHD_WIDTH, FHD_HEIGHT)
+            .layers_in(FHD_WIDTH, FHD_HEIGHT, FHD_FIT)
             .is_empty(),
         "the black has no layer in any target"
     );
 }
 
+/// `layers()` is MAX's canvas by MAX's rule: a fade from a 21:9 picture
+/// (wider: its letterbox, rows 270..1890) to a 4:3 one (narrower: the whole
+/// width, cropped), each side placed by the rule.
 #[test]
 fn layers_is_layers_in_the_max_canvas() {
     let fade = Composition::Fade {
@@ -198,7 +257,7 @@ fn layers_is_layers_in_the_max_canvas() {
     };
     assert_eq!(
         summary(&fade.layers()),
-        summary(&fade.layers_in(CANVAS_WIDTH, CANVAS_HEIGHT))
+        summary(&fade.layers_in(CANVAS_WIDTH, CANVAS_HEIGHT, MAX_FIT))
     );
     assert_eq!(
         summary(&fade.layers()),
@@ -212,11 +271,37 @@ fn layers_is_layers_in_the_max_canvas() {
                     off_x: 0,
                     off_y: 270,
                 },
+                WHOLE,
                 156.0 / 256.0
             ),
-            (Slot::Incoming, 8, PILLARBOX, 100.0 / 256.0),
+            (Slot::Incoming, 8, FULL, CROP_4_3, 100.0 / 256.0),
         ]
     );
+}
+
+/// A portrait (9:16) picture in MAX: the whole width, 2332 of its 6826
+/// scaled rows cut off the top (`sp_core::fit::fill_width`).
+#[test]
+fn a_portrait_picture_fills_max_s_width_showing_its_middle() {
+    let layers = Composition::Picture(picture(5, 1080, 1920)).layers();
+    let crop = [0.0, 0.341_634_93, 1.0, 0.658_072_05];
+    assert_eq!(summary(&layers), [(Slot::Outgoing, 5, FULL, crop, 1.0)]);
+}
+
+#[test]
+fn each_rule_places_by_its_sp_core_function() {
+    for (w, h) in [(1440, 1080), (2560, 1080), (1080, 1920), (2560, 1440)] {
+        assert_eq!(
+            Fit::Aspect.place(w, h, CANVAS_WIDTH, CANVAS_HEIGHT),
+            Fill::whole(aspect_fit(w, h, CANVAS_WIDTH, CANVAS_HEIGHT)),
+            "{w}x{h}"
+        );
+        assert_eq!(
+            Fit::FillWidth.place(w, h, CANVAS_WIDTH, CANVAS_HEIGHT),
+            fill_width(w, h, CANVAS_WIDTH, CANVAS_HEIGHT),
+            "{w}x{h}"
+        );
+    }
 }
 
 #[test]

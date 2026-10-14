@@ -419,13 +419,10 @@ impl Exchange {
         Some(recheck)
     }
 
-    /// `job` is done with what `peer` had: the wait ends, a stand-in of it
-    /// is over (`peer::standin`), and each artifact's origin is recorded
-    /// (`source = peer:<node>`).
+    /// `job` is done with what `peer` had ([`Self::took`]), logged with
+    /// `source = peer:<node>`.
     pub async fn fetched(&self, job: Job, youtube_id: &str, peer: &str, artifacts: &[Artifact]) {
-        self.end_wait(job, youtube_id).await;
-        self.drop_standin(job, youtube_id).await;
-        self.record_origins(youtube_id, peer, artifacts).await;
+        self.took(job, youtube_id, peer, artifacts).await;
         info!(
             youtube_id,
             job = job.as_str(),
@@ -433,6 +430,22 @@ impl Exchange {
             artifacts = artifacts.len(),
             "exchange: done with a peer's copy"
         );
+    }
+
+    /// `job` of `youtube_id` took `peer`'s `artifacts`: the wait ends, a
+    /// stand-in of it is over (`peer::standin`), and each artifact's origin
+    /// is recorded. Silent: the caller logs it ([`Self::fetched`], or the
+    /// lyrics follow's own line, `peer::follow`).
+    pub(crate) async fn took(
+        &self,
+        job: Job,
+        youtube_id: &str,
+        peer: &str,
+        artifacts: &[Artifact],
+    ) {
+        self.end_wait(job, youtube_id).await;
+        self.drop_standin(job, youtube_id).await;
+        self.record_origins(youtube_id, peer, artifacts).await;
     }
 
     /// Each of `artifacts` of `youtube_id` came from `peer` (`peer_fetches`,

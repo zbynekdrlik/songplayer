@@ -1,0 +1,56 @@
+{
+  "_comment": "A freshly installed PC with SoundGrid, nothing of the profile set: every value the setup applies differs (the Windows Update policies and Defender's policy keys are missing, MMCSS at Windows' values, the Realtek adapter at its driver's defaults with no PnPCapabilities, core parking on, Defender on, every firewall profile on).",
+  "registry": [
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU", "name": "NoAutoUpdate", "kind": null, "value": null },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate", "name": "ExcludeWUDriversInQualityUpdate", "kind": null, "value": null },
+    { "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", "name": "SystemResponsiveness", "kind": "DWord", "value": 20 },
+    { "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", "name": "NetworkThrottlingIndex", "kind": "DWord", "value": 10 },
+    { "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Pro Audio", "name": "Priority", "kind": "DWord", "value": 1 },
+    { "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Pro Audio", "name": "Scheduling Category", "kind": "String", "value": "Medium" },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection", "name": "DisableRealtimeMonitoring", "kind": null, "value": null },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection", "name": "DisableBehaviorMonitoring", "kind": null, "value": null },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection", "name": "DisableOnAccessProtection", "kind": null, "value": null },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection", "name": "DisableScanOnRealtimeEnable", "kind": null, "value": null },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection", "name": "DisableIOAVProtection", "kind": null, "value": null }
+  ],
+  "soundgrid": {
+    "installed": true,
+    "preferences_user": "operator (no SongPlayer task yet: the user running this script)",
+    "preferences_path": "C:\\Users\\operator\\AppData\\Roaming\\Waves Audio\\Preferences\\SoundGrid.Driver.preferences",
+    "preferences": "<?xml version=\"1.0\"?>\n<Preferences>\n    <FileFormatVersion>2</FileFormatVersion>\n    <Configuration>\n        <LocalLanPort>00:e0:4c:68:00:01</LocalLanPort>\n        <IOMode>0</IOMode>\n    </Configuration>\n</Preferences>\n",
+    "preferences_error": null,
+    "adapters": [
+      {
+        "name": "Ethernet",
+        "guid": "{5A5A0000-0000-4000-8000-000000000004}",
+        "description": "Realtek PCIe GbE Family Controller",
+        "mac": "00-E0-4C-68-00-01",
+        "permanent_mac": "00E04C680001",
+        "class_key": "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e972-e325-11ce-bfc1-08002be10318}\\0001",
+        "settings": {
+          "*InterruptModeration": "1",
+          "*FlowControl": "3",
+          "*EEE": "1",
+          "EnableGreenEthernet": "1",
+          "PowerSavingMode": "1",
+          "GigaLite": "1"
+        }
+      }
+    ]
+  },
+  "power": { "scheme_guid": "381b4222-f694-41f0-9685-ff5bb260df2e", "scheme_name": "Balanced", "cpmincores_ac": 10 },
+  "defender": {
+    "service": "Running",
+    "realtime_enabled": true,
+    "tamper_protected": false,
+    "preferences": {
+      "DisableRealtimeMonitoring": false,
+      "DisableBehaviorMonitoring": false,
+      "DisableIOAVProtection": false,
+      "DisableScriptScanning": false,
+      "MAPSReporting": 2,
+      "SubmitSamplesConsent": 1
+    }
+  },
+  "firewall": { "Domain": true, "Private": true, "Public": true }
+}

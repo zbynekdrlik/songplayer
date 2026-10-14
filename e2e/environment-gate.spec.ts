@@ -1,14 +1,58 @@
 import { test, expect } from "@playwright/test";
 import {
   FIRST_CHECK_WAIT_MS,
+  MMCSS_PRODUCTION,
   environmentChecked,
   environmentFailures,
+  environmentNotes,
+  type AudioProfile,
   type EnvironmentStatus,
 } from "./environment-gate";
 
 // #233: the post-deploy production-environment gate's pure decision
 // (`environment-gate.ts`), run in the mock suite. The box gate itself is
 // `post-deploy-environment.spec.ts` (SNV and PP).
+
+/** #255: PP's audio profile as it must be: the adapter the SoundGrid driver
+ * chose (soundgrid-pcie) on its NDIS driver with every setting off,
+ * automatic updates off and drivers excluded from Windows Update, MMCSS for
+ * Pro Audio; the Dante adapter on NetAdapterCx is a report-only note. */
+const DVS_NOTE =
+  "sieťová karta Dante (DVS) „Ethernet 4“ beží na ovládači NetAdapterCx (vplyv sa ešte meria)";
+const PARKING_NOTE = "parkovanie jadier je zapnuté (minimum 50 % jadier)";
+const audioHolds = (over: Partial<AudioProfile> = {}): AudioProfile => ({
+  soundgrid: "found",
+  soundgrid_port_mac: "6c2408e59c91",
+  soundgrid_nic: {
+    guid: "{DBFC2CF4-C91F-4C0C-A2D8-042330E1CD05}",
+    name: "soundgrid-pcie",
+    service: "rt640x64",
+    driver_model: "ndis",
+    kmdf_library_version: null,
+    settings_ok: true,
+    settings: [],
+  },
+  dante: {
+    installed: true,
+    interface_address: "6c1ff773c7d9",
+    interface_name: "Ethernet 4",
+    nic: { guid: "{0B5E1C2D-3E4F-4A5B-9C6D-7E8F90A1B2C3}", name: "Ethernet 4", driver_model: "netadaptercx" },
+  },
+  windows_update: { no_auto_update: true, drivers_excluded: true },
+  mmcss: {
+    system_responsiveness: 0,
+    network_throttling_index: 4294967295,
+    pro_audio_priority: 6,
+    pro_audio_scheduling_category: "High",
+  },
+  power: {
+    scheme_guid: "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c",
+    scheme_name: "High performance",
+    core_parking_min_cores_pct: 100,
+  },
+  notes: [DVS_NOTE],
+  ...over,
+});
 
 /** PP as it must be: IoT Enterprise LTSC, Defender real-time and passive
  * mode off, no other antivirus, every firewall profile off. */
@@ -27,6 +71,7 @@ const holds = (over: Partial<EnvironmentStatus> = {}): EnvironmentStatus => ({
   defender_antivirus_enabled: true,
   antivirus_on: [],
   firewall: { domain: false, private: false, public: false },
+  audio: audioHolds(),
   problems: [],
   read_errors: [],
   checked_at_ms: 1791608681366,
@@ -162,6 +207,118 @@ test.describe("production environment gate (#233)", () => {
 
   test("read errors are listed only next to a failure", () => {
     expect(environmentFailures(holds({ read_errors: ["ProductName is missing"] }))).toEqual([]);
+  });
+
+  test("#255: a box with no SoundGrid adapter holds (SNV)", () => {
+    expect(
+      environmentFailures(
+        holds({ audio: audioHolds({ soundgrid: "not_installed", soundgrid_port_mac: null, soundgrid_nic: null }) }),
+      ),
+    ).toEqual([]);
+    expect(MMCSS_PRODUCTION).toEqual({
+      system_responsiveness: 0,
+      network_throttling_index: 0xffffffff,
+      pro_audio_priority: 6,
+    });
+  });
+
+  test("#255: every audio-profile violation fails, named by its fact", () => {
+    const sg = audioHolds().soundgrid_nic!;
+    const env = holds({
+      audio: audioHolds({
+        soundgrid_nic: { ...sg, driver_model: "netadaptercx", settings_ok: false },
+        windows_update: { no_auto_update: false, drivers_excluded: false },
+        mmcss: {
+          system_responsiveness: 20,
+          network_throttling_index: 10,
+          pro_audio_priority: 1,
+          pro_audio_scheduling_category: "Medium",
+        },
+      }),
+    });
+    expect(environmentFailures(env)).toEqual([
+      'audio.soundgrid_nic.driver_model is "netadaptercx", not "ndis"',
+      "audio.soundgrid_nic.settings_ok is false, not true",
+      "audio.windows_update.no_auto_update is false, not true",
+      "audio.windows_update.drivers_excluded is false, not true",
+      "audio.mmcss.system_responsiveness is 20, not 0",
+      "audio.mmcss.network_throttling_index is 10, not 4294967295",
+      "audio.mmcss.pro_audio_priority is 1, not 6",
+      'audio.mmcss.pro_audio_scheduling_category is "Medium", not "High"',
+    ]);
+    // The scheduling category is compared as Windows does: case and padding
+    // ignored.
+    const relaxed = audioHolds({
+      mmcss: { ...audioHolds().mmcss, pro_audio_scheduling_category: " high " },
+    });
+    expect(environmentFailures(holds({ audio: relaxed }))).toEqual([]);
+    // A model or settings that could not be read fail too.
+    expect(
+      environmentFailures(holds({ audio: audioHolds({ soundgrid_nic: { ...sg, driver_model: null, settings_ok: null } }) })),
+    ).toEqual([
+      "audio.soundgrid_nic.driver_model is null, not \"ndis\"",
+      "audio.soundgrid_nic.settings_ok is null, not true",
+    ]);
+  });
+
+  test("#255: SoundGrid installed with no port chosen, a missing port or an unreadable one fails", () => {
+    for (const soundgrid of ["port_unset", "port_missing", "unreadable"] as const) {
+      expect(
+        environmentFailures(holds({ audio: audioHolds({ soundgrid, soundgrid_nic: null }) })),
+        soundgrid,
+      ).toEqual([`audio.soundgrid is "${soundgrid}", not "found" or "not_installed"`]);
+    }
+    // Found with no adapter on the status (a server bug) fails on the adapter.
+    expect(environmentFailures(holds({ audio: audioHolds({ soundgrid_nic: null }) }))).toEqual([
+      'audio.soundgrid_nic.driver_model is null, not "ndis"',
+      "audio.soundgrid_nic.settings_ok is null, not true",
+    ]);
+  });
+
+  test("#255: a status from before the audio profile fails on it", () => {
+    const old = holds();
+    delete old.audio;
+    expect(environmentFailures(old)).toEqual([
+      'audio.soundgrid is null, not "found" or "not_installed"',
+      "audio.windows_update.no_auto_update is null, not true",
+      "audio.windows_update.drivers_excluded is null, not true",
+      "audio.mmcss.system_responsiveness is null, not 0",
+      "audio.mmcss.network_throttling_index is null, not 4294967295",
+      "audio.mmcss.pro_audio_priority is null, not 6",
+      'audio.mmcss.pro_audio_scheduling_category is null, not "High"',
+    ]);
+    // An older server without SoundGrid's state: null, never "not installed".
+    expect(environmentFailures(holds({ audio: audioHolds({ soundgrid: null }) }))).toEqual([
+      'audio.soundgrid is null, not "found" or "not_installed"',
+    ]);
+  });
+
+  test("#255 lane 2: the Windows Update driver exclusion gates, missing or unread", () => {
+    // SNV before its first deploy with scripts/setup-prod-pc.ps1: the
+    // exclusion missing fails; the deploy applies it before the start.
+    for (const drivers_excluded of [false, null] as const) {
+      expect(
+        environmentFailures(
+          holds({ audio: audioHolds({ windows_update: { no_auto_update: true, drivers_excluded } }) }),
+        ),
+        String(drivers_excluded),
+      ).toEqual([`audio.windows_update.drivers_excluded is ${String(drivers_excluded)}, not true`]);
+    }
+  });
+
+  test("#255: the report-only facts never fail and are listed as notes", () => {
+    const env = holds({
+      audio: audioHolds({
+        power: { scheme_guid: null, scheme_name: null, core_parking_min_cores_pct: 50 },
+        dante: { installed: null },
+        notes: [DVS_NOTE, PARKING_NOTE],
+      }),
+    });
+    expect(environmentFailures(env)).toEqual([]);
+    expect(environmentNotes(holds())).toEqual([DVS_NOTE]);
+    expect(environmentNotes(env)).toEqual([DVS_NOTE, PARKING_NOTE]);
+    expect(environmentNotes(undefined)).toEqual([]);
+    expect(environmentNotes(holds({ audio: undefined }))).toEqual([]);
   });
 
   test("the gate waits for the first check", () => {

@@ -13,6 +13,7 @@ pub mod config;
 pub mod decide;
 pub mod download;
 pub mod fetch;
+pub mod follow;
 pub mod hash;
 pub mod hasher;
 pub mod kind;
@@ -50,6 +51,8 @@ pub struct Exchange {
     pub(crate) client: client::PeerClient,
     /// Held while a transfer probe runs (`transfer_probe`): one at a time.
     pub(crate) transfer_probe: tokio::sync::Mutex<()>,
+    /// #264: the lyrics follow's memory and status (`follow`).
+    pub(crate) follow: std::sync::Mutex<follow::FollowState>,
 }
 
 impl Exchange {
@@ -60,6 +63,7 @@ impl Exchange {
             board: Arc::new(board::JobBoard::default()),
             client: client::PeerClient::new(),
             transfer_probe: tokio::sync::Mutex::new(()),
+            follow: std::sync::Mutex::new(follow::FollowState::default()),
         })
     }
 

@@ -22,15 +22,19 @@ export interface HealthRow {
   transport?: string;
 }
 
+/** Every playlist pipeline's health row (`/api/v1/ndi/health`). */
+export async function healthRows(request: APIRequestContext): Promise<HealthRow[]> {
+  const resp = await request.get("/api/v1/ndi/health");
+  expect(resp.status(), "GET /api/v1/ndi/health").toBe(200);
+  return (await resp.json()) as HealthRow[];
+}
+
 /** The health row of playlist `pid`, or `undefined` when it has none yet. */
 export async function healthRow(
   request: APIRequestContext,
   pid: number,
 ): Promise<HealthRow | undefined> {
-  const resp = await request.get("/api/v1/ndi/health");
-  expect(resp.status(), "GET /api/v1/ndi/health").toBe(200);
-  const rows = (await resp.json()) as HealthRow[];
-  return rows.find((r) => r.playlist_id === pid);
+  return (await healthRows(request)).find((r) => r.playlist_id === pid);
 }
 
 /**

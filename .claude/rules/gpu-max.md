@@ -1,6 +1,7 @@
 ---
 paths:
   - "crates/sp-gpu/**"
+  - "crates/sp-core/src/fit*.rs"
   - "crates/sp-server/src/playback/program_max*.rs"
   - "crates/sp-server/src/playback/program_output_tests_max.rs"
   - "crates/sp-server/src/api/program_tests_max.rs"
@@ -31,17 +32,87 @@ Spout sender `SP-program` (1920×1080), "The FHD Spout sender" below.
   `Outgoing`) at `(256 − w)/256`, then the incoming one (slot `Incoming`) at
   `w/256`. A plain picture is one `Outgoing` quad at 1. A side of weight 0 is
   neither drawn nor uploaded.
-- Placement: `sp_core::fit::aspect_fit` into 3840×2160. This is the same
-  function `SP-program`'s canvas fit and the preview use. #223 S1a moved it
-  from sp-server, and `playback::nv12_fit` re-exports it. Never copy the math.
-- #239: the target is the compositor's own size. `layers()` is
-  `layers_in(CANVAS_WIDTH, CANVAS_HEIGHT)` (MAX); `layers_in(w, h)` places
-  into any target (`FHD_WIDTH` × `FHD_HEIGHT` = 1920×1080 for
-  `SP-program`), and so do `QuadConstants::new(place, weight, w, h)`, the
-  viewport, the render target, the staging copy and the readback.
-  `reference.rs` needs no size: each layer carries its place in its own
-  target; its pins run at both sizes (a scratch model of `pixel` that
-  reproduces the 4K pins derived the FHD ones).
+- **Placement: each target's rule, named ONCE** (#267, design: #267
+  comment 6149987923). `composition.rs` has `Fit::{Aspect, FillWidth}`,
+  `MAX_FIT = FillWidth` and `FHD_FIT = Aspect`. `Fit::place` returns
+  `sp_core::fit::Fill { place, scaled_h, crop_top }`.
+  - **MAX fills the wall's width.** MAX is the LED wall's feed: Arena's
+    clip scaling Fill scales it to the composition's width.
+    `sp_core::fit::fill_width` scales EVERY picture to the canvas's whole
+    width, `scaled_h = ⌊sh·3840/sw⌋` (even, ≥ 2, capped at `u32::MAX`),
+    and centres it.
+  - A picture narrower than 16:9 covers the whole canvas, and its rows past
+    2160 are cut off top and bottom. The top count is floored to even, so
+    the two ends differ by at most 2 rows. PP's `MO3ucp2mBnM` (2880×2160,
+    4:3) scales to 2880 rows with 360 cut off each end; 1:1 and 9:16 work
+    the same way.
+  - Such a picture is NEVER pillarboxed. Before #267 the bars were part of
+    MAX's picture, so Arena's Fill put them on both sides of the wall, a
+    regression since #223.
+  - A 16:9 or wider picture gets EXACTLY `aspect_fit`'s letterbox. It is
+    the same formula, with no branch on the aspect: a `<` / `<=` branch
+    would have an equivalent mutant at exactly 16:9.
+    `fit_tests.rs::fill_width_is_aspect_fit_unless_the_picture_is_narrower`
+    sweeps the claim.
+  - **`SP-program` (FHD, #239) keeps `sp_core::fit::aspect_fit`.** It
+    carries the NDI `SP-program`'s picture, bars included, so a local Spout
+    consumer gets the same program. `aspect_fit` is also the function
+    `SP-program`'s CPU canvas fit and the preview use; #223 S1a moved it
+    from sp-server, and `playback::nv12_fit` re-exports it. Never copy the
+    math, and never change `aspect_fit` for MAX's sake.
+  - **A crop lives in the texture coordinates, never in a quad past the
+    target.** `Layer::place` (the part of the target the quad covers)
+    stays inside the target.
+  - `Layer::uv_rect` = `quad::uv_rect(fill)` =
+    `[0, crop_top/scaled_h, 1, (crop_top + h)/scaled_h]`, as f32. A whole
+    picture gives exactly `[0, 0, 1, 1]`; a degenerate one gives
+    `[0, 0, 1, 0]`, and its quad covers nothing.
+  - Each corner of the vertex shader takes `uv_rect`'s edge on its side,
+    from the 6th cbuffer register. `reference.rs` interpolates the SAME
+    f32 values (`between`), so the shader and the reference follow one
+    rule.
+  - For `[0, 0, 1, 1]` the reference is bit-identical to the old
+    `(dx + ½)/w`. The tolerance argument below is unchanged: the crop only
+    moves where an output pixel samples, through an f32 attribute with
+    about 1e-4 texel of error.
+  - **Rejected:** a quad that extends past the target, or a scissor. Either
+    needs a signed `Placement` through the layers, the reference's coverage
+    and the WARP edge points.
+- #239 / #267: the target AND its rule belong to the compositor and are
+  fixed for its life.
+  - `Compositor::new()` / `new_warp()` / `new_on_listed_adapter(i)` build
+    MAX's: `CANVAS_*` with `MAX_FIT`.
+  - `with_size(w, h, fit)` / `new_warp_with_size(w, h, fit)` name the rule.
+    sp-server builds the FHD side with
+    `with_size(FHD_WIDTH, FHD_HEIGHT, FHD_FIT)`.
+  - `layers()` is `layers_in(CANVAS_WIDTH, CANVAS_HEIGHT, MAX_FIT)`.
+    `layers_in(w, h, fit)` places into any target (`FHD_WIDTH` ×
+    `FHD_HEIGHT` = 1920×1080 for `SP-program`).
+  - The target size also drives `QuadConstants::new(place, uv_rect,
+    weight, w, h)`, the viewport, the render target, the staging copy and
+    the readback.
+  - `reference.rs` needs no size: each layer carries its place and its crop
+    in its own target. Its pins run at both sizes; a scratch model of
+    `pixel` that reproduces the 4K pins derived the FHD ones, and the #267
+    crop pins too.
+- #267 pins:
+  - sp-core `fit_tests.rs`: 4:3, 1:1, 9:16, 16:9, 21:9, odd, tiny, zero,
+    and the u32 cap.
+  - sp-gpu `composition_tests.rs`: MAX fills, the FHD target keeps its
+    bars, and a fade places each side by the rule. `quad_tests.rs`:
+    `uv_rect`, the six registers, and the HLSL cbuffer's order read from
+    the source. `reference_tests.rs`: a cropped quad (each axis), and a
+    1:1 picture filling MAX.
+  - WARP `tests/warp.rs`: a 4:3 and a 9:16 picture fill MAX's width.
+    `assert_edge_columns_lit` checks that every pixel of both edge columns
+    is lit and within the reference's tolerance; the scratch model puts
+    the reference ≥ 3 codes from black there. The 50 % fade covers the
+    canvas with both sides. The 21:9 letterbox and the FHD 4:3 bars are
+    unchanged.
+  - `tests/spout.rs`: the MAX second-device test reads its bar at (0, 0)
+    off a 21:9 picture.
+  - sp-server `program_max_tests_warp.rs`: a 4:3 boundary through the real
+    loop.
 - The draw:
   - clear to (0, 0, 0, 1);
   - each quad ADDS `saturate(rgb) · weight`: blend one/one, write mask RGB
@@ -58,13 +129,18 @@ Spout sender `SP-program` (1920×1080), "The FHD Spout sender" below.
   the constant buffer (`quad.rs`). The CPU reference uses the same f32 values,
   so a matrix change is made ONCE. `color_tests.rs` recomputes the rows from
   Kr/Kb and pins BT.709's colour bars (each within ±1 of the ideal).
-- The constant buffer (`QuadConstants::to_bytes`) is 5 float4 registers:
-  `rect` (NDC), `to_r`, `to_g`, `to_b`, `weight`. `compose.hlsl`'s
-  `cbuffer Quad` must match it register for register.
+- The constant buffer (`QuadConstants::to_bytes`) is 6 float4 registers
+  (96 bytes): `rect` (NDC), `uv_rect` (texture coordinates, #267), `to_r`,
+  `to_g`, `to_b`, `weight`. `compose.hlsl`'s `cbuffer Quad` must match it
+  register for register. The shader compiles only on Windows, so
+  `quad_tests.rs::the_hlsl_cbuffer_has_the_registers_in_the_same_order`
+  reads the HLSL source on Linux: the declarations in this order, and each
+  corner's `uv` from `uv_rect`.
 - Sampling is D3D11's bilinear (`MIN_MAG_MIP_LINEAR`, CLAMP). The texel
   coordinate is `u·size − ½`, the pixel-centre rule of
-  `program_transition::tap`. Luma is sampled on its grid, the UV texture
-  (R8G8, ⌈w/2⌉×⌈h/2⌉) on its own, both at every output pixel.
+  `program_transition::tap`, with u interpolated across the quad from its
+  `uv_rect` edges. Luma is sampled on its grid, the UV texture (R8G8,
+  ⌈w/2⌉×⌈h/2⌉) on its own, both at every output pixel.
 - `reference.rs` is the CPU model of exactly that. It quantizes the render
   target between draws, `c = unorm8(c/255 + rgb·w)`. The WARP pins compare
   with it, not with `nv12_mix` (which outputs NV12 at canvas resolution).
@@ -731,6 +807,33 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   30 s**: the default. The same 8-vs-14 contrast is the causal check that
   Arena shows MAX at all: after an Arena relaunch (its clips reconnected)
   16 + 39 vs 5 + 0, after a forced SongPlayer kill 25 + 41 vs 0 + 0.
+- **A dropped Spout name is put back** (#243, SNV 13.10.2026 ~12:52):
+  ANY Spout program that lists or checks senders (vendored
+  `SpoutSenderNames.cpp`: `GetSenderNames` + `getSharedInfo` in the
+  receiver paths, `CheckSender`, `CleanSenders`) RELEASES a name whose info
+  map it cannot read at that instant. `SP-program-MAX` vanished from the
+  list while SongPlayer kept sending (no error, no log); Arena lost the
+  source and the wall's video went black for 3 min (here my probe receiving
+  `SP-program-MAX` at ~1 kHz raised the odds; Arena's own per-frame checks
+  can trigger it too). Now a confirmed sender looks at the list every
+  `RELIST_EVERY` (30th) send after the send (`spout_state::list_check`, the
+  list's lock never taken per frame) and, when the name is gone, puts it
+  back with `RegisterSenderName(name, false)` (shim `spout_sender_relist`:
+  the same sender and shared texture, no `_1`), one WARN, counted as
+  `max.spout_relists` / `max.fhd.spout_relists`. Never run a probe that
+  RECEIVES `SP-program-MAX` on a production box; the access-mutex reads
+  (`NtQueryMutant`, read-only) do not touch the list.
+- **The vblank thread follows the primary** (#259, SNV 13.10.2026:
+  re-forming the wall's Surround detached the VDD for a minute; the thread
+  stayed on its DXGI output, `not_ticking`, and MAX sent at the constant
+  lead, `send_off_grid` +2768). Every `VBLANK_RECHECK` (2 s, `recheck_due`)
+  `win/vblank.rs` lists the outputs again (quietly; the full list is
+  logged only at the first open) and, when `pick_output` chooses an output
+  that differs in name, place or size (`repick`), moves to it with the fit
+  booted afresh and one INFO naming both; a recheck with no primary keeps
+  the last output (one WARN per streak). `VblankTracker::output` returns
+  the output measured NOW, and the worker records it with the state at
+  every boundary, so `max.vblank_output` names it.
 - **A dark output never spins the thread** (#243, PP 9.10.2026: the laptop
   panel DISPLAY1 stopped presenting while still attached, `WaitForVBlank`
   returned at once, the fit's boot never ended and the time-critical
@@ -850,7 +953,10 @@ doc-hidden, `win/receiver.rs`) matches S1a's reference within its tolerance;
 after the stop the sender is unlisted. Each picture is served TWICE and read
 after the second went out: the readback takes no Spout mutex, and the second
 draw's wait for the GPU proves the first send's copy done (the second copy
-writes the same bytes).
+writes the same bytes). #267: then a 4:3 Source boundary (960×720). MAX
+fills its width: the layer covers columns 0..3840, and no pixel of either
+edge column is black. The FHD sender keeps its bars, black at columns 239
+and 1680.
 
 ### The FHD Spout sender `SP-program` (#239)
 
@@ -864,6 +970,12 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   `SP-program` (Arena: `SPOUT_SP-program`). The sender shares whatever its
   compositor draws: pair `new_fhd` with a 1920×1080 compositor.
   `read_shared_texture` reads at the size the sender's map lists.
+- #267: its compositor places by `FHD_FIT` (`aspect_fit`, bars included),
+  never MAX's fill. It is the same program as the NDI `SP-program`, which
+  OBS, the Presenter and the stream take; the wall's Spout feed is MAX.
+  Making the FHD feeds fill too would be one constant, but the NDI canvas
+  (`program_canvas.rs`, CPU) would then have to follow, to stay one
+  program.
 - The `program-max` thread (`program_max_worker.rs`): while
   `MaxOut::fhd_wanted` (the setting AND MAX on), each job also goes to a
   second `Side` (compositor + sender, `MaxGpu::fhd_compositor` /

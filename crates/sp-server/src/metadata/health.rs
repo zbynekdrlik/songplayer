@@ -20,10 +20,10 @@ use sqlx::{Row, SqlitePool};
 /// the worker repairs them. A row the operator corrected on the dashboard
 /// (`metadata_source = 'manual'`, set by `PATCH /api/v1/videos/{id}`) is
 /// never in it: the repair would write over the correction (#136), nor is
-/// the #228 test item.
+/// the #228 test item or a row whose song left its playlist (#260).
 pub const REPAIR_QUEUE_WHERE: &str = concat!(
     "gemini_failed = 1 AND normalized = 1 AND metadata_source IS NOT 'manual' AND ",
-    crate::test_item::not_test_item!()
+    crate::db::queue_row!()
 );
 
 /// Characters of a provider error kept on the status / in a probe answer: a

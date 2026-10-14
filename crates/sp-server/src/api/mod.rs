@@ -147,6 +147,8 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/environment",
             axum::routing::get(routes_status::environment),
         )
+        // #259: the LED wall report (Arena's own output setup vs the box)
+        .route("/api/v1/wall", axum::routing::get(routes_status::wall))
         // #136: run each metadata provider of the production chain on one video
         .route(
             "/api/v1/metadata/probe",

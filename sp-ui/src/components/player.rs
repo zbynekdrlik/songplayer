@@ -12,8 +12,8 @@
 
 use leptos::prelude::*;
 use serde::Serialize;
-use sp_core::playback::{PlaybackMode, PlaybackState, TransportState};
-use sp_core::player_view::{self, NowPlayingView};
+use sp_core::playback::{PlaybackMode, TransportState};
+use sp_core::player_view::{self, NowPlayingView, PreviewView};
 use sp_core::preview_lag::preview_lag_display;
 use sp_core::seek_model::{PendingSeek, format_position, seek_display_ms, seek_target_ms};
 
@@ -83,15 +83,16 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     // /pause. On/off-program shows only in the badge (the WS state, #225).
     let is_playing = Memo::new(move |_| matches!(transport(), TransportState::Playing));
 
-    // The pipeline is DECODING when it is Playing OR waiting off-program for its
-    // scene with a real current video. Preparing a dub on the Dabing page before
-    // cutting it in is exactly this off-program decoding state, so the preview +
-    // mixer follow "is decoding", not "is on the program".
-    let is_decoding = Memo::new(move |_| {
-        matches!(
-            state(),
-            PlaybackState::Playing | PlaybackState::WaitingForScene
-        ) && has_content.get()
+    // #266: what the live-preview slot may do — ONE pure rule
+    // (`sp_core::player_view::preview_slot`): a preview is offered only while
+    // the pipeline DECODES a song (its own transport plays, #201, on program
+    // or off — preparing a dub on the Dabing page before cutting it in
+    // included). It read the scene-aware `state` (`Playing | WaitingForScene`
+    // + a song), so a PAUSED playlist off program offered a preview that could
+    // only stay black (the owner's ytslow at PP). A Memo (Rule 1): a position
+    // tick never re-runs the slot.
+    let preview_slot = Memo::new(move |_| {
+        player_view::preview_slot(state_known.get(), has_content.get(), state(), transport())
     });
 
     // Playback-command errors (play / pause / skip / prev / seek / mode) surface
@@ -264,8 +265,21 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     let seek_back = move |_| do_seek(seek_target_ms(position(), -10_000, duration()));
     let seek_fwd = move |_| do_seek(seek_target_ms(position(), 10_000, duration()));
 
-    // --- preview (click-to-start; torn down when the pipeline stops decoding) ---
+    // --- preview (click-to-start; offered only while the pipeline decodes) ---
     let preview_on = RwSignal::new(false);
+    // #266: what the slot shows (`player_view::preview_view`), a Memo over its
+    // own last value: a NEW preview mounts only where one is offered; a
+    // preview the operator started stays mounted through a pause — the same
+    // element holds its last picture (#221 A1, the #184 owner path) and plays
+    // on at the resume, never re-created; a paused card never mounts one (it
+    // would get no picture: black).
+    let preview_view = Memo::new(move |shown: Option<&PreviewView>| {
+        player_view::preview_view(
+            preview_slot.get(),
+            preview_on.get(),
+            matches!(shown, Some(PreviewView::Video)),
+        )
+    });
     // #184 round F/G: the latest picture lag (seconds behind the wall) the
     // preview shim reported (beacon lag or ping/pong transport lag, whichever is
     // worse); the readout shows only at ≥ 3 s.
@@ -275,19 +289,20 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     // changes, so the span re-renders on a real change, not on every tick — the
     // shared sp-ui rule that a slot closure reads a Memo, not a chatty signal.
     let preview_lag_readout = Memo::new(move |_| {
-        if preview_on.get() {
+        if preview_view.get() == PreviewView::Video {
             preview_lag_display(preview_lag.get())
         } else {
             None
         }
     });
-    // #225 review round 3: only once the server TOLD this playlist's state. A
-    // reconnect forgets every playlist until its replay lands (and the replay
-    // tells a playing one's song a message before its state), so a running
-    // preview is kept through it and comes back by itself, instead of the
-    // operator clicking "▶ Živý náhľad" again after every deploy.
+    // The operator's preview ends only when its playlist plays nothing any
+    // more (`PreviewSlot::ends_preview`). #225 review round 3: never while the
+    // state is unknown — a reconnect forgets every playlist until its replay
+    // lands, so a running preview comes back by itself instead of the
+    // operator clicking "▶ Živý náhľad" again after every deploy. #266: nor
+    // at a pause — it plays on at the resume.
     Effect::new(move |_| {
-        if state_known.get() && !is_decoding.get() {
+        if preview_slot.get().ends_preview() {
             preview_on.set(false);
         }
     });
@@ -496,18 +511,12 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                 </select>
             </div>
 
-            // --- live A/V preview slot (click-to-start; available whenever the
-            // pipeline is decoding, incl. an off-program dub on the Dabing page) ---
+            // --- live A/V preview slot (click-to-start; offered only while the
+            // pipeline decodes, incl. an off-program dub on the Dabing page; a
+            // paused or idle playlist's slot says why it offers none, #266) ---
             <div class="player-preview">
-                {move || {
-                    if !is_decoding.get() {
-                        view! {
-                            <div class="preview-placeholder" data-testid="preview-placeholder">
-                                "Bez náhľadu"
-                            </div>
-                        }
-                            .into_any()
-                    } else if preview_on.get() {
+                {move || match preview_view.get() {
+                    PreviewView::Video => {
                         view! {
                             <PreviewVideo
                                 playlist_id=pid
@@ -516,7 +525,8 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                             />
                         }
                             .into_any()
-                    } else {
+                    }
+                    PreviewView::Start => {
                         view! {
                             <div class="preview-placeholder" data-testid="preview-placeholder">
                                 <button
@@ -530,6 +540,14 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                                 >
                                     "▶ Živý náhľad"
                                 </button>
+                            </div>
+                        }
+                            .into_any()
+                    }
+                    PreviewView::Placeholder => {
+                        view! {
+                            <div class="preview-placeholder" data-testid="preview-placeholder">
+                                {move || preview_slot.get().text()}
                             </div>
                         }
                             .into_any()

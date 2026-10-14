@@ -5,6 +5,7 @@
 use sp_core::prod_env::FirewallProfile;
 
 use super::*;
+use crate::prod_env::audio::production_example;
 use crate::prod_env::{EnvFacts, WBEM_E_INVALID_CLASS, WBEM_E_INVALID_NAMESPACE};
 
 // ---- the firewall: the active store decides ----
@@ -212,6 +213,7 @@ fn direct() -> DirectRead {
         firewall_legacy_policy: RegDword::Absent,
         firewall_local: [RegDword::Value(0); 3],
         defender_service: ServiceRead::State(4),
+        audio: production_example(),
     }
 }
 
@@ -241,8 +243,36 @@ fn a_production_box_reads_as_its_facts() {
             defender_antivirus_enabled: Some(true),
             antivirus_on: Some(Vec::new()),
             firewall: [Some(false); 3],
+            audio: production_example(),
             read_errors: Vec::new(),
         }
+    );
+}
+
+/// #255: the audio profile's facts are taken as walked, and why one could
+/// not be read follows the #233 reasons, each once.
+#[test]
+fn the_audio_profile_is_taken_and_its_reasons_follow_once() {
+    let mut audio = production_example();
+    audio.no_auto_update = None;
+    audio.errors = vec![
+        "Windows Update's NoAutoUpdate could not be read (error 5)".to_string(),
+        "EditionID is missing".to_string(),
+        "Windows Update's NoAutoUpdate could not be read (error 5)".to_string(),
+    ];
+    let read = DirectRead {
+        edition_id: Ok(None),
+        audio: audio.clone(),
+        ..direct()
+    };
+    let facts = facts_from(&read, &Ok(wmi()));
+    assert_eq!(facts.audio, audio);
+    assert_eq!(
+        facts.read_errors,
+        [
+            "EditionID is missing",
+            "Windows Update's NoAutoUpdate could not be read (error 5)",
+        ]
     );
 }
 
