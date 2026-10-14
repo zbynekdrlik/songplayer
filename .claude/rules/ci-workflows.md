@@ -164,6 +164,9 @@ message to worker` before blaming a person.
 - Guards: `scripts/tests/test_runner_autostart.py` (the wiring, the vbs
   guard, ASCII) and `scripts/tests/runner-autostart.Tests.ps1` (Pester, in
   the "Production PC setup" job with PSScriptAnalyzer).
+- Format `scripts/tests/*.py` with CI's pinned **ruff 0.5.7** (a venv:
+  `pip install ruff==0.5.7`), never a newer local ruff: 0.16 joins wrapped
+  asserts that 0.5.7 splits, and "Eval Checks" fails on the format check.
 
 ## Mutation gate (`.cargo/mutants.toml` + ci.yml `mutation-testing`)
 

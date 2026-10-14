@@ -93,13 +93,13 @@ def test_the_installer_holds_no_copy_and_runs_the_script_on_every_path():
     configured = s.index("Runner already configured")
     assert s.index("function Install-RunnerAutostart") < configured
     returned = s.index("return", configured)
-    assert call in s[configured:returned], (
-        "a box that already has a runner must get the files too"
-    )
+    assert (
+        call in s[configured:returned]
+    ), "a box that already has a runner must get the files too"
     task = s.index("Register-ScheduledTask")
-    assert call in s[returned:task], (
-        "a new install writes the files before its task runs them"
-    )
+    assert (
+        call in s[returned:task]
+    ), "a new install writes the files before its task runs them"
 
 
 def test_snvs_deploy_delivers_it_before_songplayer_stops():
@@ -132,9 +132,9 @@ def test_each_deploy_runs_it_as_a_child_and_fails_the_step_on_its_exit_code():
 
 def test_the_script_is_ascii_and_never_exits_inside_an_iex_run():
     text = _script()
-    assert text.isascii(), (
-        "Windows PowerShell 5.1 reads a script without a BOM as cp1252"
-    )
+    assert (
+        text.isascii()
+    ), "Windows PowerShell 5.1 reads a script without a BOM as cp1252"
     assert (
         "$ErrorActionPreference = 'Stop'" in text
         or '$ErrorActionPreference = "Stop"' in text
@@ -152,6 +152,6 @@ def test_ci_runs_its_pester_tests_and_analyzes_it():
 
 def test_the_workflow_steps_stay_ascii():
     for workflow in (_CI, _PP):
-        assert ps_ascii.violations(workflow.read_text(encoding="utf-8")) == [], (
-            workflow.name
-        )
+        assert (
+            ps_ascii.violations(workflow.read_text(encoding="utf-8")) == []
+        ), workflow.name
