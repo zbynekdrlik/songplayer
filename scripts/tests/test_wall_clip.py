@@ -205,10 +205,12 @@ def test_a_failed_encode_leaves_no_partial_file(tmp_path):
     assert not (tmp_path / "clip.mp4.partial").exists()
 
 
-def test_an_ffmpeg_that_stops_reading_is_killed_and_cleaned_up(tmp_path):
-    ffmpeg = fake_ffmpeg(tmp_path, 'echo half > "$last"\nexit 1\n')
+def test_an_ffmpeg_that_stops_reading_names_why_and_leaves_nothing(tmp_path):
+    body = 'echo half > "$last"\necho "Unknown encoder libx264" >&2\nexit 1\n'
+    ffmpeg = fake_ffmpeg(tmp_path, body)
     out = tmp_path / "clip.mp4"
-    with pytest.raises(BrokenPipeError):
+    stopped = "ffmpeg stopped reading frames: Unknown encoder libx264"
+    with pytest.raises(RuntimeError, match=stopped):
         clip.write_clip(30, 960, 540, 1, out, ffmpeg)
     assert not out.exists()
     assert not (tmp_path / "clip.mp4.partial").exists()

@@ -337,24 +337,28 @@ def write_clip(
     with tempfile.TemporaryFile() as log:
         proc = subprocess.Popen(args, stdin=subprocess.PIPE, stderr=log)
         assert proc.stdin is not None
+        stopped = False
         try:
             for index in range(frame_count(fps, seconds)):
                 proc.stdin.write(draw_frame(index, fps, lay, base).data)
                 proc.stdin.write(chroma)
             proc.stdin.close()
-            code = proc.wait()
+        except BrokenPipeError:
+            stopped = True  # ffmpeg quit early: its own message says why
         except BaseException:
-            # Any failure (ffmpeg gone, Ctrl-C): no ffmpeg left running, no
-            # partial file left behind.
+            # Any other failure (Ctrl-C): no ffmpeg left running, no partial
+            # file left behind.
             proc.kill()
             proc.wait()
             temp.unlink(missing_ok=True)
             raise
+        code = proc.wait()
         log.seek(0)
         err = log.read().decode(errors="replace").strip()
-    if code != 0:
+    if stopped or code != 0:
         temp.unlink(missing_ok=True)
-        raise RuntimeError(f"ffmpeg exited {code}: {err}")
+        why = "stopped reading frames" if stopped else f"exited {code}"
+        raise RuntimeError(f"ffmpeg {why}: {err}")
     temp.replace(out)
 
 
