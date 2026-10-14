@@ -43,7 +43,7 @@ Describe 'The files every deploy delivers' {
 
     It 'both files are ASCII (WScript and cmd read them in the ANSI code page)' {
         foreach ($text in @((Get-RunnerStartBat -RunnerDir 'C:\actions-runner'), (Get-RunnerStartVbs -RunnerDir 'C:\actions-runner'))) {
-            ($text.ToCharArray() | Where-Object { [int]$_ -gt 127 }).Count | Should -Be 0
+            @($text.ToCharArray() | Where-Object { [int]$_ -gt 127 }).Count | Should -Be 0
         }
     }
 }
