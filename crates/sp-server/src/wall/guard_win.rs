@@ -45,11 +45,11 @@ impl Drop for Opened {
 pub fn end(order: &EndOrder) -> Result<(), String> {
     let mut failed = Vec::new();
     for monitor in &order.monitors {
-        if let Err(why) = end_process(monitor.pid, CRASH_MONITOR_IMAGE, None) {
+        if let Err(why) = end_process(monitor.pid, CRASH_MONITOR_IMAGE, monitor.created_100ns) {
             failed.push(why);
         }
     }
-    if let Err(why) = end_process(order.pid, ARENA_IMAGE, Some(order.created_100ns)) {
+    if let Err(why) = end_process(order.pid, ARENA_IMAGE, order.created_100ns) {
         failed.push(why);
     }
     if failed.is_empty() {
@@ -62,7 +62,7 @@ pub fn end(order: &EndOrder) -> Result<(), String> {
 /// Ends process `pid` when its image is `image` and it was started at
 /// `created_100ns`; a process that is gone already is ended.
 #[cfg_attr(test, mutants::skip)] // Windows glue
-fn end_process(pid: u32, image: &str, created_100ns: Option<u64>) -> Result<(), String> {
+fn end_process(pid: u32, image: &str, created_100ns: u64) -> Result<(), String> {
     // SAFETY: opens the process to read its image and times and to end it;
     // closed by `Opened`.
     let handle = unsafe {
@@ -87,13 +87,11 @@ fn end_process(pid: u32, image: &str, created_100ns: Option<u64>) -> Result<(), 
             "process {pid} is {path}, not {image}: left running"
         ));
     }
-    if let Some(created) = created_100ns {
-        let times = super::win::process_times(opened.0, pid)?;
-        if times.created_100ns != created {
-            return Err(format!(
-                "process {pid} is another {image} (started since the read): left running"
-            ));
-        }
+    let times = super::win::process_times(opened.0, pid)?;
+    if times.created_100ns != created_100ns {
+        return Err(format!(
+            "process {pid} is another {image} (started since the read): left running"
+        ));
     }
     // SAFETY: `opened` holds the process with PROCESS_TERMINATE.
     if unsafe { TerminateProcess(opened.0, END_EXIT_CODE) } == 0 {

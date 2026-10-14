@@ -266,9 +266,11 @@ fn follow(guard: &mut Guard, arenas: &[ArenaProcess], now_ms: i64, events: &mut 
     let Some(last) = guard.record.last.clone() else {
         return;
     };
-    let back = arenas
-        .iter()
-        .find(|a| a.key().is_some_and(|key| !guard.ended.contains(&key)));
+    let back = arenas.iter().find(|a| match a.key() {
+        Some(key) => !guard.ended.contains(&key),
+        // Its start unread: new when no process ended had its id.
+        None => !guard.ended.iter().any(|k| k.pid == a.pid),
+    });
     if let Some(back) = back {
         guard.record.phase = GuardPhase::Idle;
         events.push(GuardEvent::Back { pid: back.pid });

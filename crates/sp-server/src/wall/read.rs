@@ -226,7 +226,7 @@ fn reporters_of(
     reader: &dyn WallReader,
     processes: &[ProcessEntry],
     pid: u32,
-    _arena_created_100ns: u64,
+    arena_created_100ns: u64,
 ) -> Vec<ProcessKey> {
     processes
         .iter()
@@ -238,6 +238,7 @@ fn reporters_of(
                 created_100ns: times.created_100ns,
             })
         })
+        .filter(|m| m.created_100ns >= arena_created_100ns)
         .collect()
 }
 
