@@ -44,7 +44,7 @@ def test_a_clean_25_on_30_capture_through_a_loop_is_clean():
     report = wa.analyse(readings, 25, frames=60, refresh_hz=60, min_boundaries=1)
     assert report["samples"] == report["decoded"] == 120
     assert report["boundaries"] == 60
-    assert report["refreshes_per_boundary"] == {"2": 60}
+    assert report["pictures_per_boundary"] == {"2": 60}
     assert report["loops"] == 1
     assert report["lost_frames"] == 0
     assert report["lost_boundaries"] == 0
@@ -58,10 +58,11 @@ def test_a_clean_25_on_30_capture_through_a_loop_is_clean():
     assert weights["expected_cycle_fitted"] == [0, 213, 170, 128, 85, 42]
     assert weights["phase_frames"] == [pytest.approx(0, abs=0.002)] * 2
     assert weights["mismatches"] == 0
-    # At the seam: the song's last boundary holds frame 59 (no next frame
-    # to blend: a short step, and the 42 it would show), then the new play
-    # starts frame 0 one step later (a 1-frame step on a 5/6 grid).
-    assert report["loop_seams"] == {"steps": 3, "errors": 3, "hold_s": 0.033}
+    # At the seam: the song's last boundary holds frame 59 plain (no next
+    # frame to blend: a short step into it, and no weight), then the new
+    # play starts frame 0 one step later (a 1-frame step on a 5/6 grid):
+    # the clamp, so no loss and no cadence error.
+    assert report["loop_seams"] == {"steps": 3, "weight_mismatches": 1, "hold_s": 0.033}
     assert report["verdict"] == "clean"
 
 
@@ -79,7 +80,7 @@ def test_a_30_on_30_loop_is_a_seamless_wrap():
     report = wa.analyse(readings, 30, frames=60, refresh_hz=60, min_boundaries=1)
     assert report["loops"] == 2
     assert report["frames_seen"] == 80
-    assert report["loop_seams"] == {"steps": 6, "errors": 0, "hold_s": 0.033}
+    assert report["loop_seams"] == {"steps": 6, "weight_mismatches": 0, "hold_s": 0.033}
     assert report["verdict"] == "clean"
 
 
@@ -170,7 +171,7 @@ def test_a_repeated_boundary_is_judder_at_a_known_refresh_rate():
     readings = pacer_readings(30, Fraction(0), 10, frames=1800)
     readings[4:4] = readings[4:6]  # boundary 2 shown for 4 refreshes
     report = wa.analyse(readings, 30)
-    assert report["refreshes_per_boundary"] == {"2": 9, "4": 1}
+    assert report["pictures_per_boundary"] == {"2": 9, "4": 1}
     assert report["boundaries"] == 10
     assert report["refreshes"] is None, "no refresh rate, no refresh check"
     assert report["verdict"] == "incomplete", "clean needs the judder check"
@@ -196,7 +197,7 @@ def test_uneven_refreshes_are_judder():
         readings += [reading_at(Fraction(b), 30, 1800)] * (3 if b % 2 == 0 else 1)
     report = wa.analyse(readings, 30, refresh_hz=60)
     assert report["lost_frames"] == report["cadence_errors"] == 0
-    assert report["refreshes_per_boundary"] == {"1": 10, "3": 10}
+    assert report["pictures_per_boundary"] == {"1": 10, "3": 10}
     # Every boundary, the capture's first one held 3 (too long) included;
     # its last one, shown 1, may have gone on after the capture.
     assert report["refreshes"]["uneven"] == 19
@@ -255,23 +256,25 @@ def test_a_capture_that_read_too_little_is_incomplete_never_clean():
     assert report["verdict"] == "incomplete"
 
 
-def test_the_loop_seam_s_boundaries_are_not_judged_for_judder():
+def test_the_loop_seam_spares_only_the_new_play_s_open():
     readings = pacer_readings(30, Fraction(55), 60, frames=60)
-    # The wrap is from 59 (boundary 4) to 0 (boundary 5): seam steps 3, 4
-    # and 5 lead to boundaries 4, 5 and 6. The song's end holds 59 longer and
-    # the new play's second boundary comes late: neither is judged.
+    # The wrap is from 59 (boundary 4) to 0 (boundary 5). The song's end
+    # holds 59 and the new play's first boundary comes late: the new play's
+    # open, spared up to SEAM_HOLD_S.
     readings[8:10] = readings[8:10] * 3  # 59 for 6 refreshes
-    readings[16:18] = readings[16:18] * 2  # 1 (boundary 6) for 4
+    readings[14:16] = readings[14:16] * 2  # 0 (boundary 5) for 4
     report = wa.analyse(readings, 30, frames=60, refresh_hz=60, min_boundaries=1)
     assert report["loops"] == 1
     assert report["refreshes"]["uneven"] == 0
     assert report["loop_seams"]["hold_s"] == 0.1, "59 held 6 refreshes"
     assert report["verdict"] == "clean"
-    # Judder on the boundary BEFORE the song's last one is judged.
+    # The new play's second boundary is the cadence again (review round 6:
+    # a long stall there read clean), and so is the one before the song's
+    # last.
+    readings[18:20] = readings[18:20] * 2  # 1 (boundary 6) for 4
     readings[6:8] = readings[6:8] * 2  # 58 (boundary 3) for 4
     report = wa.analyse(readings, 30, frames=60, refresh_hz=60)
-    assert report["refreshes"]["uneven"] == 1
-    assert report["refreshes"]["uneven_samples"] == [6]
+    assert report["refreshes"]["uneven_samples"] == [6, 20]
     # A hold at the seam over SEAM_HOLD_S is a stall (review round 5: a 5 s
     # freeze on the song's last boundary read clean).
     assert wa.SEAM_HOLD_S == 1.0
@@ -282,14 +285,44 @@ def test_the_loop_seam_s_boundaries_are_not_judged_for_judder():
         assert report["refreshes"]["uneven"] == uneven, held
 
 
-def test_a_frame_missing_at_the_loop_seam_is_a_seam_error_not_a_loss():
+def test_a_frame_missing_at_the_loop_seam_is_a_loss():
+    # Review round 6: the seam excused one lost boundary. At 30 fps the seam
+    # is regular (59, then 0): a 59 never shown is lost like any frame.
     readings = pacer_readings(30, Fraction(54), 5, frames=60)  # 54..58
     readings += pacer_readings(30, Fraction(0), 50, frames=60)  # 59 never shown
     report = wa.analyse(readings, 30, frames=60, refresh_hz=60, min_boundaries=1)
     assert report["loops"] == 1
-    assert report["lost_frames"] == 0
-    assert report["loop_seams"]["errors"] == 2, "the 2-step wrap + frame 59"
-    assert report["verdict"] == "clean"
+    assert report["lost_frame_list"] == [59] and report["lost_boundaries"] == 1
+    assert report["verdict"] == "defects"
+    # At 25 fps the new play's second boundary lost: lost, not the seam's.
+    readings = pacer_readings(25, Fraction(40), 30, frames=60)
+    del readings[50:52]  # 0.833, boundary 25
+    report = wa.analyse(readings, 25, frames=60, refresh_hz=60, min_boundaries=1)
+    assert report["loops"] == 1 and report["lost_boundaries"] == 1
+    assert report["verdict"] == "defects"
+
+
+def test_the_song_end_clamp_is_no_loss_and_no_cadence_error():
+    # Review round 6: at 24 / 25 fps the song's last boundary shows the last
+    # frame plain wherever it is in it; one boundary the capture could not
+    # read beside the seam then read as a cadence error.
+    for fps in (24, 25):
+        for sixth in range(36):  # every phase a sixth of a frame apart
+            readings = pacer_readings(fps, Fraction(180 + sixth, 6), 60, frames=60)
+            report = wa.analyse(
+                readings, fps, frames=60, refresh_hz=60, min_boundaries=1
+            )
+            assert report["loops"] == 1, (fps, sixth)
+            assert report["lost_boundaries"] == report["cadence_errors"] == 0
+            assert report["jumps_back"] == 0 and report["verdict"] == "clean"
+            seam = next(n for n, r in enumerate(readings) if r.index == 0)
+            for gone in (seam - 2, seam):  # the song's last / the new play's first
+                unread = [wa.Reading("no_strip")] * 2
+                hidden = readings[:gone] + unread + readings[gone + 2 :]
+                report = wa.analyse(hidden, fps, frames=60, refresh_hz=60)
+                assert report["cadence_errors"] == report["lost_boundaries"] == 0
+                assert report["jumps_back"] == 0, (fps, sixth, gone)
+                assert report["verdict"] != "defects", (fps, sixth, gone)
 
 
 def test_an_empty_capture_is_not_clean():
@@ -424,14 +457,11 @@ def test_a_seam_never_hides_a_skip_into_or_out_of_it():
     assert report["lost_boundaries"] == 29
     assert report["verdict"] == "defects"
 
-    # The seam's own steps: forward, at most two grid steps.
-    def seam(before: float, after: float) -> set[int]:
-        steps = [wa.Step(0, d, 1, False, 0, None) for d in (1.0, before, after, 1.0)]
-        steps.insert(2, wa.Step(0, 1.0, 1, True, 0, None))
-        return wa.seam_steps(steps, 30)
-
-    assert seam(0.5, 2.0) == {1, 2, 3}
-    assert seam(-0.2, 2.2) == {2}
+    # The seam: the wrap and the step on each side.
+    steps = [wa.Step(0, 1.0, 1, False, 0, None) for _ in range(5)]
+    steps[2] = wa.Step(0, 1.0, 1, True, 0, None)
+    assert wa.seam_steps(steps) == {1, 2, 3}
+    assert wa.seam_steps(steps[2:]) == {0, 1}
 
 
 def test_a_refresh_rate_below_the_grid_is_refused():
@@ -441,3 +471,59 @@ def test_a_refresh_rate_below_the_grid_is_refused():
     assert wa.expected_refreshes(50, 30) == [1, 2]
     with pytest.raises(ValueError, match="give the wall's --refresh-hz"):
         wa.analyse(pacer_readings(30, Fraction(0), 5, frames=1800), 30, refresh_hz=25)
+
+
+def test_a_seam_boundary_shown_too_short_is_judder():
+    # Review round 6: a 1 + 3 pair on the new play's first boundary read
+    # clean; the seam may hold a boundary longer, never show it shorter.
+    readings = pacer_readings(30, Fraction(55), 60, frames=60)
+    first = next(n for n, r in enumerate(readings) if r.index == 0)
+    short = (
+        readings[: first + 1]
+        + readings[first + 2 : first + 4] * 2
+        + readings[first + 4 :]
+    )
+    report = wa.analyse(short, 30, frames=60, refresh_hz=60, min_boundaries=1)
+    assert report["refreshes"]["uneven_samples"][:1] == [first]
+    assert report["verdict"] == "defects"
+
+
+def test_a_capture_blind_across_the_loop_still_sees_the_loop():
+    # 30 fps: 50..56 read, then 4 boundaries (57, 58, 59 and the new play's
+    # 0) unreadable, then 1..: further from the end than WRAP_FRAMES, but
+    # within what the capture could have missed: a loop, those 4 unverified.
+    # Long enough that coverage passes, and both sides of the blind step are
+    # seam boundaries (never unresolved): only the unverified step itself
+    # keeps the verdict from clean.
+    readings = pacer_readings(30, Fraction(0), 57, frames=60)
+    readings += [wa.Reading("no_strip")] * 8
+    readings += pacer_readings(30, Fraction(1), 40, frames=60)
+    report = wa.analyse(readings, 30, frames=60, refresh_hz=60, min_boundaries=1)
+    assert report["loops"] == 1 and report["jumps_back"] == 0
+    assert report["unverified"] == {"steps": 1, "boundaries": 4, "frames": 4}
+    assert report["decoded"] / report["samples"] >= wa.MIN_COVERAGE
+    assert report["refreshes"]["unresolved"] == 0
+    assert report["verdict"] == "incomplete"
+
+
+def test_the_new_play_must_sit_on_its_own_grid():
+    # The whole new play 0.4 of a frame off its grid: every step inside it
+    # is a whole step, so only the loop's own step can name the cadence.
+    readings = pacer_readings(30, Fraction(55), 30, frames=60)
+    first = next(n for n, r in enumerate(readings) if r.index == 0)
+    readings[first:] = [
+        wa.Reading("ok", r.index, r.index + 1, 102, 8) for r in readings[first:]
+    ]
+    report = wa.analyse(readings, 30, frames=60, refresh_hz=60, min_boundaries=1)
+    assert report["loops"] == 1 and report["cadence_errors"] == 1
+    assert report["verdict"] == "defects"
+
+
+def test_a_capture_ending_on_the_song_s_last_frame_has_no_weight_there():
+    # 25 fps: the capture ends on the song's last boundary (59 plain, the
+    # clamp), with no loop after it: no weight is expected of it.
+    readings = pacer_readings(25, Fraction(40), 24, frames=60)
+    assert readings[-1] == wa.Reading("ok", 59, None, 0, 8)
+    report = wa.analyse(readings, 25, frames=60, refresh_hz=60, min_boundaries=1)
+    assert report["loops"] == 0 and report["weights"]["mismatches"] == 0
+    assert report["verdict"] == "clean"

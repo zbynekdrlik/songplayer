@@ -204,66 +204,96 @@ def test_a_refresh_the_capture_was_blind_to_can_hide_one_boundary():
 
 
 def test_hidden_refreshes_are_all_a_blind_span_can_hold_but_one():
+    # The wall's period is known to RATE_TOLERANCE (0.1 %): a span of a
+    # whole nominal period may hold two refreshes of a faster wall.
     p = 1 / 60
-    cases = [(0.6, 0), (1.0, 0), (1.0001, 1), (2.0, 1), (2.02, 2), (3.0, 2)]
+    cases = [(0.6, 0), (0.998, 0), (1.0, 1), (1.99, 1), (2.0, 2), (2.02, 2), (2.99, 2)]
     for span, hidden in cases:
         assert wa.hidden_refreshes(span * p, p) == hidden, span
+    # The instants' own error lengthens it too.
+    assert wa.hidden_refreshes(0.99 * p, p, error=0.0002) == 1
 
 
 def test_unseen_refreshes_add_the_unread_pictures_and_the_blind_ones():
     reading = wa.Reading("ok", 10, None, 0, 8)
     prev, run = wa.Boundary(0, 0, reading), wa.Boundary(3, 3, reading)
     p = 1 / 60
-    assert wa.unseen_refreshes(prev, run, None, p) == 2, "two unread pictures"
-    assert wa.unseen_refreshes(prev, run, [math.inf, p, p, p], p) == 2
-    assert wa.unseen_refreshes(prev, run, [math.inf, p, 3 * p, 2.5 * p], p) == 6
-    assert wa.unseen_refreshes(prev, run, [math.inf, p, p, p], None) == 2
+
+    def unseen(blind, period=p):
+        return wa.unseen_refreshes(
+            prev, run, wa.Timing([0.0] * 4, blind, period, False, None)
+        )
+
+    assert unseen(None) == 2, "two unread pictures"
+    assert unseen([math.inf, 0.5 * p, 0.5 * p, 0.5 * p]) == 2
+    assert unseen([math.inf, 0.9 * p, 3.01 * p, 2.5 * p]) == 7
+    assert unseen([math.inf, p, p, p], None) == 2
 
 
 def test_held_range_brackets_a_boundary_by_what_the_capture_saw():
     def ranges(readings, times, blind=None, lock=False, span=None):
         runs = wa.boundaries(readings)
         blind = wa.capture_blind(times, blind)
-        steps = wa.steps_between(runs, 1800, 30, 30, blind, 1 / 60, 2)
         timing = wa.Timing(times, blind, 1 / 60, lock, span)
-        return [wa.held_range(n, runs, steps, timing) for n in range(len(runs))]
+        return [wa.held_range(n, runs, timing) for n in range(len(runs))]
 
     readings = pacer_readings(30, Fraction(0), 4, frames=1800)
     exact = at_60_hz(readings)
     inf = math.inf
     assert ranges(readings, exact, lock=True) == [(2, inf), (2, 2), (2, 2), (2, inf)]
-    # A recording at the wall's rate, unlocked: its pictures drift 0.3 of a
-    # period against the refreshes before boundary 1, so that transition
-    # can lie anywhere in 1.3 periods: 2 or 3; boundary 2's are timed.
+    # A recording at the wall's rate, unlocked: each transition anywhere in
+    # the period before the picture that shows it, the period itself known
+    # to 0.1 %: 1..3 refreshes.
     off = [t + 0.4 / 60 for t in exact]
     off[2:] = [t + 0.3 / 60 for t in off[2:]]
-    assert ranges(readings, off)[1:3] == [(2, 3), (2, 2)]
+    assert ranges(readings, off)[1:3] == [(1, 3), (1, 3)]
     # A partly read boundary: on screen at 0 and 2 periods: 3 refreshes.
     part = [readings[0], wa.Reading("no_strip"), readings[1]] + readings[2:]
     times = at_60_hz(part)
-    assert ranges(part, times)[0][0] == 3
+    # Unlocked, two instants a nominal 2 periods apart may lie in only 2
+    # refreshes of a wall 0.1 % slower; locked, they are 3 refreshes.
+    assert ranges(part, times)[0][0] == 2
     assert ranges(part, times, lock=True)[0][0] == 3
-    assert ranges(part, times)[1] == (2, 2)
+    assert ranges(part, times, lock=True)[1] == (2, 2)
     # Read at 0, 1, 3 and 4 periods with an unreadable one between: 5.
     hold = readings[:2] + [wa.Reading("no_strip"), readings[1], readings[1]]
-    assert ranges(hold + readings[2:], at_60_hz(hold + readings[2:]))[0][0] == 5
+    hold += readings[2:]
+    assert ranges(hold, at_60_hz(hold))[0][0] == 4
+    assert ranges(hold, at_60_hz(hold), lock=True)[0][0] == 5
     # The capture's last boundary (from 0.1 s), held to the capture's end
     # (1.0 s): 54 periods, so 55 refreshes.
     assert ranges(readings, exact, lock=True, span=(0, 1.0))[3] == (55, inf)
 
 
 def test_a_frozen_wall_is_never_clean():
+    # dxcam's pictures are the wall's presents: few of them = a stopped wall.
     readings = [pacer_readings(30, Fraction(100), 1, frames=1800)[0]]
-    report = wa.analyse(readings, 30, times=[0.0], refresh_hz=60, span=(0.0, 20.0))
+    report = wa.analyse(
+        readings, 30, times=[0.0], refresh_hz=60, blind=[math.inf], span=(0.0, 20.0)
+    )
     assert report["frozen"] is True and report["verdict"] == "defects"
     two = pacer_readings(30, Fraction(100), 2, frames=1800)[::2]
-    report = wa.analyse(two, 30, times=[0.0, 10.0], refresh_hz=60, span=(0.0, 20.0))
+    report = wa.analyse(
+        two, 30, times=[0.0, 10.0], refresh_hz=60, blind=[math.inf, 0.001],
+        span=(0.0, 20.0),
+    )  # fmt: skip
     assert report["frozen"] is True and report["verdict"] == "defects"
     readings = pacer_readings(30, Fraction(0), 320, frames=1800, refreshes=1)
+    presents = [math.inf] + [0.001] * 319
     times = [n / 14 for n in range(280)]
-    assert wa.analyse(readings[:280], 30, times=times, refresh_hz=60)["frozen"]
+    report = wa.analyse(
+        readings[:280], 30, times=times, refresh_hz=60, blind=presents[:280]
+    )
+    assert report["frozen"]
     times = [n / 16 for n in range(320)]
-    assert not wa.analyse(readings, 30, times=times, refresh_hz=60)["frozen"]
+    assert not wa.analyse(readings, 30, times=times, refresh_hz=60, blind=presents)[
+        "frozen"
+    ]
+    # A recording keeps its frames whatever the wall does (review round 6:
+    # a 14 fps camera read as a stopped wall): never frozen, just coarse.
+    times = [n / 14 for n in range(280)]
+    report = wa.analyse(readings[:280], 30, times=times, refresh_hz=60)
+    assert report["frozen"] is False and report["verdict"] != "clean"
 
 
 def test_too_few_boundaries_judged_is_incomplete():
@@ -341,7 +371,7 @@ def test_capture_blind_is_the_time_since_the_picture_before():
 
 def test_a_frozen_wall_is_a_defect_even_with_no_rate():
     readings = pacer_readings(30, Fraction(100), 1, frames=1800)[:1]
-    report = wa.analyse(readings, 30, times=[0.0], span=(0.0, 20.0))
+    report = wa.analyse(readings, 30, times=[0.0], blind=[math.inf], span=(0.0, 20.0))
     assert report["refreshes"] is None
     assert report["frozen"] is True and report["verdict"] == "defects"
 
@@ -361,4 +391,79 @@ def test_a_recording_s_pts_quantization_is_never_a_hidden_refresh():
     kept = times[:100] + times[101:]
     report = wa.analyse(keep, 30, times=kept, refresh_hz=60, locked=True)
     assert report["capture"]["blind_pictures"] == 1
-    assert wa.pts_jitter([0.0, 1.0]) == 0.0
+    assert wa.pts_jitter([0.0, 1.0]) == wa.pts_jitter([0.0]) == 0.0
+
+
+# Review round 6: real captures' timing is never exact.
+
+
+def test_unreadable_pictures_after_the_last_boundary_do_not_stretch_it():
+    readings = pacer_readings(30, Fraction(0), 40, frames=1800)
+    report = dxcam(readings + [wa.Reading("no_strip")] * 2, min_boundaries=1)
+    assert report["refreshes"]["uneven"] == 0, "the trailing presents are others"
+
+
+@pytest.mark.parametrize(
+    ("cam_fps", "timebase"), [(120.02, 90000), (119.9, 1000), (240.05, 90000)]
+)
+def test_a_camera_s_quantized_pts_never_read_a_clean_wall_as_judder(cam_fps, timebase):
+    wall = wall_refreshes([2] * 400, 25)
+    readings, times = camera(wall, 60, cam_fps, offset=0.0037)
+    times = [round(t * timebase) / timebase for t in times]
+    report = wa.analyse(readings, 25, times=times, refresh_hz=60)
+    assert report["refreshes"]["uneven"] == report["lost_boundaries"] == 0
+    assert report["cadence_errors"] == 0 and report["verdict"] != "defects"
+
+
+def test_a_slow_camera_s_quantized_pts_never_read_as_a_loss():
+    wall = wall_refreshes([2] * 400, 25)
+    readings, times = camera(wall, 60, 29.97, offset=0.0037)
+    for timebase in (90000, 10000, 1000, 600):
+        quantized = [round(t * timebase) / timebase for t in times]
+        report = wa.analyse(readings, 25, times=quantized, refresh_hz=60)
+        assert report["lost_boundaries"] == 0, timebase
+        assert report["verdict"] != "defects", timebase
+
+
+@pytest.mark.parametrize(("true_hz", "given"), [(60, 59.979), (60, 59.94), (59.94, 60)])
+def test_a_rate_within_its_tolerance_never_reads_a_clean_wall_as_judder(true_hz, given):
+    readings = pacer_readings(30, Fraction(0), 400, frames=1800)
+    times = [n / true_hz + 0.0005 for n in range(len(readings))]
+    blind = [math.inf] + [0.001] * (len(readings) - 1)
+    wa.check_present_rate(times, given, blind)
+    report = wa.analyse(readings, 30, times=times, refresh_hz=given, blind=blind)
+    assert report["refreshes"]["uneven"] == 0 and report["verdict"] == "clean"
+
+
+def test_judder_dxcam_was_blind_to_is_never_clean():
+    # Review round 6: a stall of the box hid each judder from dxcam too
+    # (49 ms with no poll), and the open boundaries beside it read clean.
+    counts = judder(420, every=40)
+    readings = wall_refreshes(counts, 30, start=Fraction(0))
+    times = [n / 60 + 0.0005 for n in range(len(readings))]
+    blind = [math.inf] + [0.001] * (len(readings) - 1)
+    drop = set()
+    refresh = 0
+    for k, count in enumerate(counts):
+        if count == 1 and 0 < k:
+            drop |= {refresh, refresh + 1}  # the 1-refresh one, the 3's first
+            blind[refresh + 2] = 0.049
+        refresh += count
+    keep = [n for n in range(len(readings)) if n not in drop]
+    report = wa.analyse(
+        [readings[n] for n in keep], 30, times=[times[n] for n in keep],
+        refresh_hz=60, blind=[blind[n] for n in keep],
+    )  # fmt: skip
+    assert report["refreshes"]["unresolved"] > 0
+    assert report["verdict"] != "clean"
+
+
+def test_each_capture_s_instants_carry_their_own_error():
+    readings = pacer_readings(30, Fraction(0), 40, frames=1800)
+    report = dxcam(readings, min_boundaries=1)
+    assert report["capture"]["time_error_ms"] == 0.5, "dxcam: POLL_TIME_ERROR"
+    times = [round(n / 60, 4) for n in range(len(readings))]
+    report = wa.analyse(readings, 30, times=times, refresh_hz=60, locked=True)
+    assert 0.03 <= report["capture"]["time_error_ms"] <= 0.1, "the pts' jitter"
+    report = wa.analyse(readings, 30, times=at_60_hz(readings), refresh_hz=60)
+    assert report["capture"]["time_error_ms"] == 0.001, "exact pts: PTS_TIME_ERROR"

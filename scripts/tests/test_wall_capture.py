@@ -73,10 +73,13 @@ def test_main_reads_a_video_and_exits_by_the_verdict(monkeypatch, capsys):
     assert wf.main([*base, "--video", "clean.mp4"]) == 3
     assert json.loads(capsys.readouterr().out)["min_boundaries"] == 300
     args = [*base, "--min-boundaries", "28", "--video"]
-    for extra in ([], ["--locked"]):
-        assert wf.main([*extra, *args, "clean.mp4"]) == 0, extra
+    # Each picture one refresh (--locked): every count proven. Unlocked, a
+    # camera at the wall's rate known to 0.1 % cannot tell 1 from 2.
+    for extra, code, judged in (([], 3, 0), (["--locked"], 0, 28)):
+        assert wf.main([*extra, *args, "clean.mp4"]) == code, extra
         report = json.loads(capsys.readouterr().out)
-        assert report["boundaries"] == 30 and report["refreshes"]["judged"] == 28
+        assert report["boundaries"] == 30
+        assert report["refreshes"]["judged"] == judged, extra
     # The same 30 fps recording of a 60 Hz wall saw every other refresh: a
     # refresh hidden before each picture, so nothing can be judged.
     slow = ["--refresh-hz", "60", "--min-boundaries", "28", "--video"]
@@ -84,7 +87,8 @@ def test_main_reads_a_video_and_exits_by_the_verdict(monkeypatch, capsys):
     report = json.loads(capsys.readouterr().out)
     assert report["capture"]["blind_pictures"] == 29
     assert report["refreshes"]["judged"] == 0
-    # A frame missing while the pts run on: the wall lost it.
+    # Locked: a frame missing while the pts run on: the wall lost it.
+    args = ["--locked", *args]
     assert wf.main([*args, "lost.mp4"]) == 1
     assert json.loads(capsys.readouterr().out)["lost_frame_list"] == [2]
     # A frame missing with its pts: the recorder dropped it (unverified).
@@ -204,7 +208,7 @@ def test_main_reads_a_dxcam_capture_by_its_polls(monkeypatch, capsys):
     # given rate is not the wall's.
     asked.append("clean")
     assert wf.main([*args[:-1], "45"]) == 5
-    assert "no whole number of 45 Hz refreshes" in capsys.readouterr().err
+    assert "not in whole 45 Hz refreshes" in capsys.readouterr().err
     assert wf.main([*args, "--region", "0,0,64,32"]) == 0
     capsys.readouterr()
     expected = {"clean": 0, "late": 3, "slow": 3, "stopped": 1, "half": 0, "lag": 0}
@@ -232,15 +236,23 @@ def test_a_dxcam_picture_s_blind_span_is_since_the_poll_before_it():
 
 def test_a_dxcam_present_rate_must_be_whole_refreshes():
     every = [n / 60 for n in range(30)]
-    timed = [math.inf] + [0.001] * 29
+    timed = [math.inf] + [0.0005] * 29  # each poll 0.5 ms after the last
     wa.check_present_rate(every, 60, timed)
     wa.check_present_rate(every[::2], 60, timed[:15])  # Arena at 30 Hz
-    with pytest.raises(ValueError, match="every 16.667 ms"):
+    with pytest.raises(ValueError, match="presents at 60.000 Hz"):
         wa.check_present_rate(every, 45, timed)
-    with pytest.raises(ValueError, match="no whole number of 120 Hz"):
+    with pytest.raises(ValueError, match="not in whole 120 Hz"):
         wa.check_present_rate([n / 80 for n in range(30)], 120, timed)
-    # Only intervals between pictures timed within half a refresh count,
-    # and too few are no check.
+    # The rate measured over the whole capture must match to RATE_TOLERANCE:
+    # 0.2 % off reads as whole numbers interval by interval, not overall.
+    with pytest.raises(ValueError, match="59.880 Hz"):
+        wa.check_present_rate([n / 59.88 for n in range(300)], 60, [0.0005] * 300)
+    wa.check_present_rate([n / 59.94 for n in range(300)], 60, [0.0005] * 300)
+    # Only pictures timed within TIMED_SHARE of a refresh count (successive
+    # ones, untimed between), and too few are no check.
     wa.check_present_rate(every, 45, [0.02] * 30)
-    wa.check_present_rate(every, 45, [0.02, 0.001] * 15)  # no pair timed
+    wa.check_present_rate(every, 45, [0.003] * 30)  # 0.18 of a refresh: untimed
+    wa.check_present_rate(every, 60, [0.02, 0.0005] * 15)
+    with pytest.raises(ValueError):
+        wa.check_present_rate(every, 45, [0.02, 0.0005] * 15)
     wa.check_present_rate(every[: wa.MIN_TIMED], 45, timed[: wa.MIN_TIMED])
