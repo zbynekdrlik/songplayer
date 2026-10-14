@@ -36,18 +36,18 @@ use sp_core::wall::{GuardEnd, GuardPhase, GuardWhy, WallGuard};
 
 /// How long an Arena that does not answer must keep its CPU time still
 /// before it is ended.
-pub const HUNG_FOR_MS: i64 = 3_000_000;
+pub const HUNG_FOR_MS: i64 = 30_000;
 
 /// How long after an end a new Arena is waited for before the status says
 /// it did not come back.
-pub const RELAUNCH_WAIT_MS: i64 = 6_000_000;
+pub const RELAUNCH_WAIT_MS: i64 = 60_000;
 
 /// Arena's crash reporter (BugSplat's monitor; Arena starts it as its
 /// child).
 pub const CRASH_MONITOR_IMAGE: &str = "BugSplatMonitor.exe";
 
 /// The title of the crash reporter's window that waits for a click.
-pub const CRASH_REPORT_TITLE: &str = "Crash Reporter";
+pub const CRASH_REPORT_TITLE: &str = "Crash Report";
 
 /// A process's times (`GetProcessTimes`), in 100 ns units: when it started
 /// (its identity next to its id) and the CPU time it used so far (kernel +
