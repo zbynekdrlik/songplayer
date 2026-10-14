@@ -27,6 +27,10 @@
 //! - **Not an operator playlist.** `GET /api/v1/playlists` leaves it out
 //!   (the dashboard, the Program control and the Live page never list it);
 //!   `/api/v1/test-item` serves its ids, start and stop.
+//! - **#272: a pinned clip LIST** (`test_item_clips.rs`): camera-box's clip
+//!   (the default) and SongPlayer's wall measurement clips, each a row of
+//!   the same test playlist, each imported by the steps above under its own
+//!   names ([`Clip`]).
 
 use std::ffi::OsString;
 use std::future::Future;
@@ -38,6 +42,12 @@ use serde::Serialize;
 use sqlx::{Row, SqlitePool};
 
 use crate::downloader::cache;
+
+#[path = "test_item_clips.rs"]
+mod clips;
+pub use clips::{
+    CAMERA_BOX, CLIPS, Clip, WALL_24, WALL_25, WALL_30, WALL_ARTIST, WALL_DURATION_MS, clip_named,
+};
 
 /// The playlist kind of the test item.
 pub const TEST_KIND: &str = "test";
@@ -108,9 +118,14 @@ pub struct TestItem {
     pub duration_ms: Option<i64>,
 }
 
-/// The imported test item (its playlist and its downloaded video), or
-/// `None` before the import.
+/// The imported test item — camera-box's clip, the default (its playlist
+/// and its downloaded video) — or `None` before its import.
 pub async fn find(pool: &SqlitePool) -> Result<Option<TestItem>, sqlx::Error> {
+    find_clip(pool, &CAMERA_BOX).await
+}
+
+/// `clip`'s imported row in the test playlist, or `None` before its import.
+pub async fn find_clip(pool: &SqlitePool, clip: &Clip) -> Result<Option<TestItem>, sqlx::Error> {
     let row = sqlx::query(
         "SELECT p.id AS playlist_id, p.ndi_output_name, v.id AS video_id, v.duration_ms \
          FROM playlists p JOIN videos v ON v.playlist_id = p.id \
@@ -118,7 +133,7 @@ pub async fn find(pool: &SqlitePool) -> Result<Option<TestItem>, sqlx::Error> {
          ORDER BY p.id LIMIT 1",
     )
     .bind(TEST_KIND)
-    .bind(TEST_YOUTUBE_ID)
+    .bind(clip.youtube_id)
     .fetch_optional(pool)
     .await?;
     Ok(row.map(|r| {
@@ -126,12 +141,23 @@ pub async fn find(pool: &SqlitePool) -> Result<Option<TestItem>, sqlx::Error> {
         TestItem {
             playlist_id: r.get("playlist_id"),
             video_id: r.get("video_id"),
-            youtube_id: TEST_YOUTUBE_ID.to_string(),
+            youtube_id: clip.youtube_id.to_string(),
             scene: ndi_output_name.to_ascii_lowercase(),
             ndi_output_name,
             duration_ms: r.get("duration_ms"),
         }
     }))
+}
+
+/// The first listed clip that is imported (any of them puts the test
+/// playlist on the box), or `None` while none is.
+pub async fn find_any(pool: &SqlitePool) -> Result<Option<TestItem>, sqlx::Error> {
+    for clip in &CLIPS {
+        if let Some(item) = find_clip(pool, clip).await? {
+            return Ok(Some(item));
+        }
+    }
+    Ok(None)
 }
 
 /// The test playlist's id, made when there is none: kind `test`, mode
@@ -154,31 +180,23 @@ pub async fn ensure_playlist(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
         .await
 }
 
-/// Where the test item's video and audio live in the cache: the split
-/// layout's names (`cache::video_filename` / `audio_filename`).
-pub fn final_paths(cache_dir: &Path) -> (PathBuf, PathBuf) {
+/// Where `clip`'s video and audio live in the cache: the split layout's
+/// names (`cache::video_filename` / `audio_filename`).
+pub fn final_paths(cache_dir: &Path, clip: &Clip) -> (PathBuf, PathBuf) {
+    let (song, artist, id) = (clip.song, clip.artist, clip.youtube_id);
     (
-        cache_dir.join(cache::video_filename(
-            TEST_SONG,
-            TEST_ARTIST,
-            TEST_YOUTUBE_ID,
-            false,
-        )),
-        cache_dir.join(cache::audio_filename(
-            TEST_SONG,
-            TEST_ARTIST,
-            TEST_YOUTUBE_ID,
-            false,
-        )),
+        cache_dir.join(cache::video_filename(song, artist, id, false)),
+        cache_dir.join(cache::audio_filename(song, artist, id, false)),
     )
 }
 
-/// The temp names ffmpeg writes into (in the cache, so the rename never
-/// crosses a volume; no cache scan reads them as a song's file).
-pub fn temp_paths(cache_dir: &Path) -> (PathBuf, PathBuf) {
+/// The temp names ffmpeg writes `clip` into (in the cache, so the rename
+/// never crosses a volume; no cache scan reads them as a song's file).
+pub fn temp_paths(cache_dir: &Path, clip: &Clip) -> (PathBuf, PathBuf) {
+    let id = clip.youtube_id;
     (
-        cache_dir.join(format!("test-item-{TEST_YOUTUBE_ID}.importing-video")),
-        cache_dir.join(format!("test-item-{TEST_YOUTUBE_ID}.importing-audio")),
+        cache_dir.join(format!("test-item-{id}.importing-video")),
+        cache_dir.join(format!("test-item-{id}.importing-audio")),
     )
 }
 
@@ -276,7 +294,7 @@ pub enum ImportOutcome {
 /// Why an import wrote nothing (or, past the transcode, not all of it).
 #[derive(Debug)]
 pub enum ImportError {
-    /// The file is not the pinned clip: its sha256 (hex).
+    /// The file is none of the clips it may be: its sha256 (hex).
     WrongFile(String),
     /// The file could not be read.
     Read(std::io::Error),
@@ -301,11 +319,12 @@ impl std::fmt::Display for ImportError {
     }
 }
 
-/// Whether the test row already records both files under their names, and
-/// both are on disk.
+/// Whether `clip`'s test row already records both files under their names,
+/// and both are on disk.
 async fn is_imported(
     pool: &SqlitePool,
     playlist_id: i64,
+    clip: &Clip,
     video: &Path,
     audio: &Path,
 ) -> Result<bool, sqlx::Error> {
@@ -314,7 +333,7 @@ async fn is_imported(
          WHERE playlist_id = ? AND youtube_id = ? AND normalized = 1",
     )
     .bind(playlist_id)
-    .bind(TEST_YOUTUBE_ID)
+    .bind(clip.youtube_id)
     .fetch_optional(pool)
     .await?;
     let records = |column: &Option<String>, path: &Path| {
@@ -323,10 +342,11 @@ async fn is_imported(
     Ok(row.is_some_and(|(v, a)| records(&v, video) && records(&a, audio)))
 }
 
-/// Record the test item's row: downloaded, its files, its manual title.
+/// Record `clip`'s row: downloaded, its files, its manual title.
 async fn record(
     pool: &SqlitePool,
     playlist_id: i64,
+    clip: &Clip,
     video: &Path,
     audio: &Path,
 ) -> Result<i64, sqlx::Error> {
@@ -342,11 +362,11 @@ async fn record(
          RETURNING id",
     )
     .bind(playlist_id)
-    .bind(TEST_YOUTUBE_ID)
-    .bind(TEST_TITLE)
-    .bind(TEST_SONG)
-    .bind(TEST_ARTIST)
-    .bind(TEST_DURATION_MS)
+    .bind(clip.youtube_id)
+    .bind(clip.title)
+    .bind(clip.song)
+    .bind(clip.artist)
+    .bind(clip.duration_ms)
     .bind(video.to_string_lossy().into_owned())
     .bind(audio.to_string_lossy().into_owned())
     .fetch_one(pool)
@@ -361,13 +381,14 @@ pub(crate) fn remove_temp(path: &Path) -> std::io::Result<()> {
     }
 }
 
-/// The two ffmpeg runs into the temp names, then (under
-/// `cache::SONG_FILES`) both renamed to their cache names and the row
+/// The two ffmpeg runs of `file` into `clip`'s temp names, then (under
+/// `cache::SONG_FILES`) both renamed to its cache names and its row
 /// recorded.
 async fn transcode_and_place(
     pool: &SqlitePool,
     playlist_id: i64,
-    clip: &Path,
+    clip: &Clip,
+    file: &Path,
     temps: &(PathBuf, PathBuf),
     finals: &(PathBuf, PathBuf),
     transcoder: &dyn Transcoder,
@@ -375,50 +396,50 @@ async fn transcode_and_place(
     let (video_tmp, audio_tmp) = temps;
     let (video, audio) = finals;
     transcoder
-        .run(video_args(clip, video_tmp))
+        .run(video_args(file, video_tmp))
         .await
         .map_err(ImportError::Transcode)?;
     transcoder
-        .run(audio_args(clip, audio_tmp))
+        .run(audio_args(file, audio_tmp))
         .await
         .map_err(ImportError::Transcode)?;
     let _files = cache::SONG_FILES.lock().await;
     std::fs::rename(video_tmp, video).map_err(ImportError::Place)?;
     std::fs::rename(audio_tmp, audio).map_err(ImportError::Place)?;
-    record(pool, playlist_id, video, audio)
+    record(pool, playlist_id, clip, video, audio)
         .await
         .map_err(ImportError::Store)?;
     Ok(())
 }
 
-/// Import the clip at `clip` as the test item (see the module doc), when
-/// its sha256 is `expected_sha256` (hex; production: [`clip_sha256`]).
-/// The temp files are removed whatever the transcode did (a removal that
-/// fails is WARNed).
+/// Import the file at `file` as the listed clip whose sha256 it has (see
+/// the module doc): `clips` are the ones it may be (production:
+/// [`CLIPS`]; one clip for the list import). The temp files are removed
+/// whatever the transcode did (a removal that fails is WARNed).
 pub async fn import(
     pool: &SqlitePool,
     cache_dir: &Path,
-    clip: &Path,
-    expected_sha256: &str,
+    file: &Path,
+    clips: &[Clip],
     transcoder: &dyn Transcoder,
-) -> Result<(ImportOutcome, TestItem), ImportError> {
-    let found = crate::peer::hash::sha256_file(clip, 0)
+) -> Result<(ImportOutcome, Clip, TestItem), ImportError> {
+    let found = crate::peer::hash::sha256_file(file, 0)
         .await
         .map_err(ImportError::Read)?;
-    if found != expected_sha256 {
+    let Some(clip) = clips.iter().find(|clip| clip.sha256_hex() == found) else {
         return Err(ImportError::WrongFile(found));
-    }
+    };
     let playlist_id = ensure_playlist(pool).await.map_err(ImportError::Store)?;
-    let finals = final_paths(cache_dir);
-    let outcome = if is_imported(pool, playlist_id, &finals.0, &finals.1)
+    let finals = final_paths(cache_dir, clip);
+    let outcome = if is_imported(pool, playlist_id, clip, &finals.0, &finals.1)
         .await
         .map_err(ImportError::Store)?
     {
         ImportOutcome::Already
     } else {
-        let temps = temp_paths(cache_dir);
+        let temps = temp_paths(cache_dir, clip);
         let placed =
-            transcode_and_place(pool, playlist_id, clip, &temps, &finals, transcoder).await;
+            transcode_and_place(pool, playlist_id, clip, file, &temps, &finals, transcoder).await;
         for temp in [&temps.0, &temps.1] {
             if let Err(e) = remove_temp(temp) {
                 tracing::warn!(%e, path = %temp.display(), "test item: a temp file could not be removed");
@@ -427,11 +448,81 @@ pub async fn import(
         placed?;
         ImportOutcome::Imported
     };
-    let item = find(pool)
+    let item = find_clip(pool, clip)
         .await
         .map_err(ImportError::Store)?
         .ok_or(ImportError::Store(sqlx::Error::RowNotFound))?;
-    Ok((outcome, item))
+    Ok((outcome, *clip, item))
+}
+
+/// What the list import did with one listed clip.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipOutcome {
+    /// Its files were made and its row recorded.
+    Imported,
+    /// Its row already recorded both files on disk.
+    Already,
+    /// No file of its name in the sample dir: nothing done, no error.
+    Absent,
+    /// A file of its name that is not it: nothing written.
+    WrongFile,
+    /// ffmpeg, the cache or the store failed.
+    Failed,
+}
+
+/// One listed clip in the answer of the list import.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ClipImport {
+    pub name: &'static str,
+    pub file: &'static str,
+    pub outcome: ClipOutcome,
+    /// `wrong_file`: the sha256 of the file found.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub found: Option<String>,
+    /// `failed`: why.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Import every clip of `clips` whose file is in `bench_dir` (its own file
+/// name, its own sha256), in order; a clip whose file is not there is
+/// `absent`, never an error. Each clip is imported as [`import`] does.
+pub async fn import_listed(
+    pool: &SqlitePool,
+    cache_dir: &Path,
+    bench_dir: &Path,
+    clips: &[Clip],
+    transcoder: &dyn Transcoder,
+) -> Vec<ClipImport> {
+    let mut answers = Vec::with_capacity(clips.len());
+    for clip in clips {
+        let path = bench_dir.join(clip.file);
+        let mut answer = ClipImport {
+            name: clip.name,
+            file: clip.file,
+            outcome: ClipOutcome::Absent,
+            found: None,
+            error: None,
+        };
+        if path.is_file() {
+            let one = std::slice::from_ref(clip);
+            match import(pool, cache_dir, &path, one, transcoder).await {
+                Ok((ImportOutcome::Imported, ..)) => answer.outcome = ClipOutcome::Imported,
+                Ok((ImportOutcome::Already, ..)) => answer.outcome = ClipOutcome::Already,
+                Err(ImportError::WrongFile(found)) => {
+                    answer.outcome = ClipOutcome::WrongFile;
+                    answer.found = Some(found);
+                }
+                Err(e) => {
+                    answer.outcome = ClipOutcome::Failed;
+                    answer.error = Some(e.to_string());
+                }
+            }
+        }
+        answers.push(answer);
+    }
+    answers
 }
 
 #[cfg(test)]
