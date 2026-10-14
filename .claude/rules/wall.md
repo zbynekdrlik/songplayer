@@ -54,8 +54,13 @@ wall report read `ok`. Design: comment 6169337303.
   `PROCESS_QUERY_LIMITED_INFORMATION` only), whether a VISIBLE top-level
   window of it is `IsHungAppWindow` (sends nothing to it), and its crash
   reporters = each `BugSplatMonitor.exe` whose Toolhelp PARENT is that
-  Arena (Arena-Bridge's BugSplat window never counts) and whether one shows
-  a visible window titled exactly `Crash Report`. Each read keeps its own
+  Arena AND that started no earlier than it (review round 1: a parent id
+  is never updated and outlives its parent, ids are reused, so a reporter
+  Arena-Bridge left up could read as the child of a later Songs Arena with
+  the Bridge's old id; a child is never older than its parent; a reporter
+  whose start is unread, or any reporter of an Arena whose start is unread,
+  is not counted), and whether one shows a visible window titled exactly
+  `Crash Report`. Each read keeps its own
   error (`read_errors` lists them; never a state change).
 - **The rule** (`guard::decide`, pure): its crash reporter's window → end
   at once; hung AND its CPU time unchanged since the check that first saw
@@ -68,11 +73,12 @@ wall report read `ok`. Design: comment 6169337303.
   `TerminateProcess`, pinned by the source scan in `mod_tests.rs`, which
   also bans Arena's clip routes `/clips/`, `/connect`, `/trigger` in every
   wall file): each crash reporter, then Arena; each opened by id and
-  checked first (its image's file name, Arena's start time too); a process
+  checked first (its image's file name AND its start time, as read); a process
   gone already counts as ended; exit code 1. Failures are joined into the
   end's `error`, never retried (once per process).
 - **After an end** (`guard::follow`): `relaunching` until a NEW Arena (a key
-  not ended) runs → `idle` + one INFO; none `RELAUNCH_WAIT_MS` 60 s after
+  not ended; one whose start is unread: an id no ended process had) runs →
+  `idle` + one INFO; none `RELAUNCH_WAIT_MS` 60 s after
   the end → `not_back` + one WARN (the state itself is `arena_off`). One
   ERROR per end naming why (`wall guard: ended …` / `could not end …`).
 - **Status:** `GET /api/v1/wall` `guard: {ends, last: {at_ms, why:
@@ -97,13 +103,15 @@ wall report read `ok`. Design: comment 6169337303.
 - **Tests:** `guard_tests.rs` (every branch: the crash window, a hang still
   30 s at its boundary, a hang while the CPU time moves, an answer in
   between, reads that fail, once per process, a reused id, the relaunch
-  wait at 59 999 / 60 000 ms, the lingering old process, a failed end),
-  `read_tests.rs` (the parent rule, a hidden or other-titled window, each
+  wait at 59 999 / 60 000 ms, the lingering old process, a failed end, an
+  unread relaunch), `read_tests.rs` (the parent rule, a reporter older than
+  Arena or with its start unread, a hidden or other-titled window, each
   read's error), `mod_tests.rs` (the check over a recorder, the status's
   `guard`, the incident end to end from a scripted box), `win_tests.rs`
   (Windows job: a copy of the test binary run as `Arena.exe` /
-  `Arena-Bridge.exe` — its parent, times, no hung window, ended only when
-  the image and start time match, exit code 1), `sp-core wall_tests.rs`
+  `Arena-Bridge.exe` / `BugSplatMonitor.exe` — its parent, times, no hung
+  window, ended only when the image and start time match, the reporter
+  first, exit code 1), `sp-core wall_tests.rs`
   (texts, label, wire), `e2e/health-wall.spec.ts` (red until it runs
   again, console clean), `e2e/wall-gate.spec.ts` (the summary).
 
