@@ -123,4 +123,7 @@ a real soundfile mix. Its gotchas:
 - **The CI ruff list must include every script you change.** It is not the
   whole of `scripts/` (`.github/workflows/ci.yml` "Eval Checks"). From a
   worktree lane, run that list from a small script file: the worktree Bash
-  guard rejects a command line containing the `eval/` path.
+  guard rejects a command line containing the `eval/` path. Never `ruff
+  format scripts/` as a whole: scripts outside the list are not formatted
+  and get reformatted into unrelated churn (#272: five files) — format the
+  files you changed.
