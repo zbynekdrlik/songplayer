@@ -55,6 +55,9 @@ fn the_compose_offset_runs_from_the_compose_phase_to_the_send_phase() {
     assert_eq!(k(ms(50), ms(24), ms(10)), ms(14), "exactly the budget");
     assert_eq!(k(ms(4), ms(1), ms(2)), ms(15), "3 ms + three periods");
     assert_eq!(k(p, ms(19), ns(29_666_667)), ns(22_666_667), "13 ms modulo");
+    // A compose phase past the send phase plus a period: only its modulo
+    // keeps the subtraction from underflowing (CI 38660773271's survivor).
+    assert_eq!(k(p, ms(2), ms(30)), ns(22_000_001), "13.333 ms modulo");
     assert_eq!(
         k(ms(16), ms(13), ms(13)),
         ms(16),
