@@ -1047,7 +1047,8 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   the thread:
   `running` (it
   takes jobs and its last boundary went out), `error: <why>` (its last
-  boundary did not; `error: the program-max thread is not running` before
+  boundary did not, or #251 step 2 the device was lost after it went out,
+  `MaxOut::record_lost`; `error: the program-max thread is not running` before
   it attached or after it ended). `submitted + failed` = the jobs it took
   (an `unsupported` platform counts neither). The p99s
   cover the last 900 sent frames (30 s). The mock (`e2e/mock-api.mjs`)

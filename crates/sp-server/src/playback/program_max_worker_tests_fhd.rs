@@ -63,8 +63,8 @@ fn lost_frame() -> GpuError {
 }
 
 /// #239: MAX goes first, whole: the FHD output is built AFTER MAX's send
-/// (its Spout open never delays MAX's compose or send) and drawn from the
-/// next compose. From then on ONE compose draws both targets from the same
+/// (its Spout open never delays this boundary's MAX, at most the next
+/// compose: `compose_late`) and drawn from the next compose. From then on ONE compose draws both targets from the same
 /// pictures, and MAX is sent before the FHD target.
 #[test]
 fn the_fhd_output_is_built_after_max_s_send_then_drawn_by_the_same_compose() {

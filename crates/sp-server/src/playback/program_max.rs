@@ -192,7 +192,8 @@ pub enum MaxNext {
 pub enum MaxPhase {
     /// It takes jobs and its last boundary went out (or none came yet).
     Running,
-    /// Its last boundary did not go out, and why.
+    /// Its last boundary did not go out, or (#251 step 2) the device was
+    /// lost after it went out (`MaxOut::record_lost`), and why.
     Failed(String),
     /// No Direct3D / Spout here (off Windows): it does nothing.
     Unsupported,
