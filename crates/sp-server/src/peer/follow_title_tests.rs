@@ -409,6 +409,34 @@ async fn a_correction_made_here_during_the_take_stays() {
     assert_eq!(took(&pp, YT).await, None);
 }
 
+/// The take renames and writes only while it holds `cache::SONG_FILES` (a
+/// title PATCH, the repair and the re-link hold it too): with the lock held
+/// nothing moves and no title is written; once it is free the look ends
+/// with the peer's title in every row. The 300 ms window can only fail a
+/// take that writes without the lock.
+#[tokio::test]
+async fn the_take_waits_for_the_song_files_lock() {
+    let (snv, pp) = snv_and_pp(&[YT]).await;
+    second_row(&pp, YT).await;
+    correct(&snv, YT, LIVE).await;
+
+    let held = crate::downloader::cache::SONG_FILES.lock().await;
+    let ex = pp.ex.clone();
+    let run = tokio::spawn(async move { follow_next(Some(&ex)).await });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!run.is_finished(), "the take waits for the lock");
+    every_row_named(&pp, YT, SONG, "gemini").await;
+    assert_eq!(took(&pp, YT).await, None);
+    drop(held);
+    let rows = tokio::time::timeout(Duration::from_secs(30), run)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(rows, rows_of(&pp, YT).await);
+    every_row_named(&pp, YT, LIVE, "manual").await;
+}
+
 /// The peer's row must be the title its catalog lists: a read between two
 /// corrections there is not taken (a failure, retried); a fresh catalog
 /// lists the newer title, taken at once.
@@ -511,7 +539,7 @@ type WantsCase = (HeldTitle, Artifact, Option<TitleWhy>);
 fn wants_follows_a_higher_rank_or_the_peers_newer_copy_never_a_correction_made_here() {
     let h = |version, seed, took| held_of(YT, version, seed, took);
     let t = |version, seed| title_of(YT, version, seed);
-    let cases: [WantsCase; 12] = [
+    let cases: [WantsCase; 13] = [
         // A higher rank: a provider's over a parser's, an operator's over a
         // provider's.
         (h(0, "mine", None), t(1, "snv"), Some(TitleWhy::Higher)),
@@ -531,6 +559,9 @@ fn wants_follows_a_higher_rank_or_the_peers_newer_copy_never_a_correction_made_h
         (h(2, "mine", None), t(2, "snv"), None),
         (h(2, "mine", Some(("snv", "was"))), t(2, "now"), None),
         (h(2, "was", Some(("pp2", "was"))), t(2, "now"), None),
+        // Even under a rank a newer peer may list one day above an
+        // operator's.
+        (h(2, "mine", None), t(3, "snv"), None),
         // An operator's title that IS the recorded copy follows.
         (
             h(2, "was", Some(("snv", "was"))),
@@ -595,10 +626,11 @@ fn candidates_come_from_the_first_peer_listing_a_title_this_node_takes() {
     assert_eq!(found[0].artifact, title_of(YT, 2, "operator"));
 }
 
-/// The title follow's memory is the lyrics follow's machinery: one taken,
-/// the rest counted, and a failure named.
+/// The title follow's memory is the lyrics follow's machinery over
+/// `TitleWhy`: one taken, the rest counted, a failure named and its video
+/// passed over.
 #[test]
-fn the_title_follow_keeps_its_own_memory_and_status() {
+fn a_follow_state_of_titles_takes_one_and_counts_the_rest() {
     let mut state = crate::peer::follow::FollowState::<TitleWhy>::default();
     let one = Candidate {
         youtube_id: YT.into(),
