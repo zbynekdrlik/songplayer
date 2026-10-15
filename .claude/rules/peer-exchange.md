@@ -807,9 +807,13 @@ wait for a peer that has the song", below).
     (`Exchange::forget_origins`, `models_peer::forget_fetches`) on EVERY
     Local it answers, the no-peers and bad-settings paths included (they
     never go through `run_here`): a download here writes this node's own
-    audio under the names a fetched pair had. On SNV (no peers) that is
-    three no-op DELETEs per download (video, audio, metadata);
-  - `run_here` forgets the records of what its job makes, for any job;
+    audio under the names a fetched pair had. The title's record stays
+    while this node's title is still that copy (#269, "The titles follow
+    the peer's" below). On SNV (no peers) that is one read of the title's
+    record (none there) and three no-op DELETEs per download (video,
+    audio, metadata);
+  - `run_here` forgets the records of what its job makes, for any job (the
+    title's kept as above);
   - `peer::download::adopt` records the pair's origin BEFORE
     `record_download` makes the row playable (a stems or lyrics ask in
     between would otherwise find no record); `fetched` records the same
@@ -1209,6 +1213,16 @@ Design record: #269 comment 6190388058.
   `peer_fetches` metadata record; per video the first listed peer whose
   catalog lists its title at a version this node takes (≥ 1, a parser's
   never). `wants`, in order:
+  - `same` (ROZHODNUTÉ on #269, the last comment there): this node's title
+    is byte for byte the one the peer lists (the same sha256, so the same
+    rank) and is not yet recorded as that peer's copy (no record, another
+    peer's, a record of an older title): the look records the origin
+    (`peer_fetches` kind `metadata`, that peer, that sha) and takes nothing
+    — no `/videos` read, no rename, no row written. A phase-0 copy of
+    SNV's operator title then follows SNV's later corrections. Trade-off,
+    accepted: an identical correction made independently here follows SNV
+    from then on (PP takes its titles and lyrics from SNV only, and an
+    identical title is no loss);
   - never over a correction made here: a `'manual'` title that is not the
     copy recorded from that peer (no record, another peer's, or a record
     whose sha256 is not this node's title's own: an operator here corrected
@@ -1238,23 +1252,38 @@ Design record: #269 comment 6190388058.
   recorded where they are: the next look after `FOLLOW_RETRY` tries again.
   Written the other way round, the next look would read the title as the
   copy already taken (or, for a `'manual'` title with no record, as this
-  node's own correction) and never rename the files again.
+  node's own correction) and never rename the files again. A `same` is
+  only recorded (`record_same`), also under the lock after the same
+  re-check (a title changed here meanwhile → nothing recorded, passed
+  over `FOLLOW_RETRY`).
+- **A download run here keeps the title's record** (ROZHODNUTÉ on #269):
+  `Exchange::forget_origins` drops the records of everything the job
+  makes (`ask::forgotten`), but the metadata one while this node's title
+  is still the recorded copy (`follow_title::title_is_recorded_copy`: the
+  record's sha256 = this node's own title's; a failed read WARNs and
+  drops it, as before). A local re-download (the 48 kHz reset, a fetch
+  given up) keeps a `'manual'` title (`download_title`), so the peer's
+  later corrections still follow; a title already changed here loses it.
+  The download then writes its own title: one that changes it leaves a
+  record whose sha256 no longer matches, which `is_copy_of` reads as no
+  copy (inert) until the title is the peer's bytes again.
 - **`apply_to_video` is the same two steps** (`spread_title` with
   `'manual'`, then `rename_rows` after each row's own title): one rename
   and record path for an operator's correction and a peer's title.
 - **Visible:** the DEBUG `exchange: followed the peer's title` (`why`,
-  `rows`); a failed take WARNs (`exchange: a peer's newer title was not
-  taken - asking again later`); `GET /api/v1/exchange/status` →
-  `title_follow`, the shape of `follow` with `why` `higher` | `changed`.
+  `rows`); a `same` logs one INFO `exchange: this node's title is the
+  peer's - its origin recorded`; a failed take WARNs (`exchange: a peer's
+  newer title was not taken - asking again later`); `GET
+  /api/v1/exchange/status` → `title_follow`, the shape of `follow` with
+  `why` `higher` | `changed` | `same` (a `same` counts in `followed`). PP's
+  phase-0 titles that equal SNV's are recorded one per lyrics tick after
+  the release (`why: same`).
 - **Known limits:** a peer's `'manual'` row with `gemini_failed = 1` (none
   is written since #136's PATCH) is taken with `gemini_failed = 0`, so this
-  node's own bytes differ from the recorded ones and the title then reads
-  as a correction made here: not followed again. A local re-download of a
-  video forgets its metadata record (`forget_origins(Download)`) while
-  `download_title` keeps a `'manual'` title: a peer's operator title taken
-  before then reads as this node's own. A failed `record_title` (WARNed)
-  leaves the same. A `'manual'` title PP took before #269 (phase 0, a
-  download) with no record is likewise PP's own.
+  node's own bytes differ from the peer's and the title then reads as a
+  correction made here: not followed again. A failed `record_title`
+  (WARNed) leaves the title with no record; the next look then finds it
+  byte for byte the peer's and records it (`same`).
 - OPEN for phase 2 (SNV listing PP): which node's titles may replace which
   is the phase-2 tie-break ("Kinds, versions, jobs").
 - Tests: `peer/follow_title_tests.rs` (two real nodes: an operator's
@@ -1265,9 +1294,14 @@ Design record: #269 comment 6190388058.
   the pause and the hold; a node with no peer; one video per look and the
   idle wait; the repair queue left to the repair; a correction made during
   the take; the take waiting for the song-files lock; a row that no longer
-  matches the catalog; `held_titles`' rows; the pure `wants` (an operator's
-  title here stays even under a rank above 2), `candidates` and
-  `FollowState<TitleWhy>`),
+  matches the catalog; `held_titles`' rows; a byte-identical title recorded
+  then followed, not recorded when changed meanwhile; a download run here
+  keeping the record of the title it keeps, forgetting it for a changed
+  title; the pure `wants` (an operator's title here stays even under a rank
+  above 2; `same` for every unrecorded identical title above a parser's),
+  `candidates` and `FollowState<TitleWhy>`),
+  `ask_tests.rs::a_run_here_keeps_only_the_record_of_a_title_still_the_peers`
+  (`forgotten`), `wire_tests.rs::a_titles_sha256_is_the_one_of_its_bytes`,
   `lyrics/worker_tests_peer.rs::the_worker_follows_the_peers_corrected_title`.
 
 ## PP's workers on (MAIN SESSION OPS, after the release with lanes 7–9 reaches PP)
@@ -1323,7 +1357,10 @@ Design record: #269 comment 6190388058.
    uses); within one look (≤ 15 min) PP's rows read it with
    `metadata_source = 'manual'`, PP's log shows `exchange: a peer's title
    was taken` for it, `title_follow.last` names it (`why: higher`). Revert
-   it at SNV: PP follows back (`why: changed`).
+   it at SNV: PP follows back (`why: changed`). Before that, right after
+   the release, PP's titles equal to SNV's are recorded one per lyrics
+   tick (`why: same`, INFO `exchange: this node's title is the peer's - its
+   origin recorded`), `title_follow.wanted` falling to 0.
 
 ## Tests
 
