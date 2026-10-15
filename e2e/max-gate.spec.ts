@@ -6,6 +6,7 @@
 
 import { test, expect } from "@playwright/test";
 import {
+  COMPOSE_PHASE_SLACK_US,
   FhdStatus,
   MAX_SLOT_REPICKS,
   MIN_BOUNDARIES,
@@ -55,9 +56,13 @@ function running(submitted: number): MaxStatus {
     vblank_state: "ticking",
     vblank_period_ns: 16_666_700,
     vblank_phase_us: 8_000,
+    compose_phase_us: 13_000,
     send_off_grid: 40,
     send_phase_us_p50: 8_003,
     send_phase_us_p99: 8_090,
+    compose_phase_us_p50: 13_004,
+    compose_phase_us_p99: 13_200,
+    compose_late: 5,
     slot_repicks: 2,
     device_resets: 1,
     sender_backoffs: 0,
@@ -158,6 +163,51 @@ test.describe("SP-program-MAX post-deploy gate (#223 S2)", () => {
     expect(maxGateFailures(running(100), at(3_834))).toEqual([
       "the Spout sends start 3834 us after the vblank (median), not at the 19000 us phase (2333 us into the refresh)",
     ]);
+  });
+
+  test("the median compose must start at the compose phase while the grid ticks (#251)", () => {
+    expect(COMPOSE_PHASE_SLACK_US).toBe(1_500);
+    const at = (compose_phase_us_p50: number, compose_phase_us = 13_000) => ({
+      ...running(160),
+      compose_phase_us_p50,
+      compose_phase_us,
+    });
+    expect(maxGateFailures(running(100), at(13_000))).toEqual([]);
+    expect(maxGateFailures(running(100), at(14_500))).toEqual([]);
+    expect(maxGateFailures(running(100), at(11_200, 11_000))).toEqual([]);
+    expect(maxGateFailures(running(100), at(12_999))).toEqual([
+      "the MAX composes start 12999 us after the vblank (median), not at the 13000 us compose phase",
+    ]);
+    expect(maxGateFailures(running(100), at(14_501))).toEqual([
+      "the MAX composes start 14501 us after the vblank (median), not at the 13000 us compose phase",
+    ]);
+    // Composing at the offer again (SNV, 15.10.2026: the worst minutes had
+    // the compose start 6.7-8.9 ms after the vblank) fails the gate.
+    expect(maxGateFailures(running(100), at(7_800))).toEqual([
+      "the MAX composes start 7800 us after the vblank (median), not at the 13000 us compose phase",
+    ]);
+  });
+
+  test("a compose phase of a refresh or more is read modulo the refresh (#251)", () => {
+    // 29 ms on a 16 666.728 us refresh is 12 333 us into it.
+    const at = (compose_phase_us_p50: number) => ({
+      ...running(160),
+      vblank_period_ns: 16_666_728,
+      compose_phase_us: 29_000,
+      compose_phase_us_p50,
+    });
+    expect(maxGateFailures(running(100), at(12_333))).toEqual([]);
+    expect(maxGateFailures(running(100), at(13_833))).toEqual([]);
+    expect(maxGateFailures(running(100), at(12_332))).toEqual([
+      "the MAX composes start 12332 us after the vblank (median), not at the 29000 us compose phase (12333 us into the refresh)",
+    ]);
+  });
+
+  test("the compose phase is not judged while the grid does not tick (#251)", () => {
+    for (const vblank_state of ["measuring", "not_ticking", null]) {
+      const off = { ...running(160), vblank_state, compose_phase_us_p50: 2_000 };
+      expect(maxGateFailures(running(100), off).join("\n")).not.toContain("compose");
+    }
   });
 
   test("every boundary between the reads must go on the display's refresh grid", () => {
