@@ -290,3 +290,90 @@ async fn a_stand_in_past_the_bound_is_held() {
     );
     assert!(pp.ex.board.snapshot("pp").is_empty());
 }
+
+/// Row `id` with `columns` (an SQL `SET` list).
+async fn mark(node: &TestNode, id: i64, columns: &str) {
+    sqlx::query(&format!("UPDATE videos SET {columns} WHERE id = ?"))
+        .bind(id)
+        .execute(node.pool())
+        .await
+        .unwrap();
+}
+
+async fn kept_here(node: &TestNode) -> bool {
+    crate::peer::lyrics::kept_local(node.pool(), YT)
+        .await
+        .unwrap()
+}
+
+/// #264 (ROZHODNUTÉ 6185176417): an operator's reprocess flag asks for a
+/// new run HERE, which paid AI off cannot make, so with paid AI off it no
+/// longer keeps the video's lyrics local; with paid AI on it does, as
+/// before.
+#[tokio::test]
+async fn a_reprocess_flag_keeps_the_lyrics_here_only_while_paid_ai_is_on() {
+    let (pp, id) = pp_alone_off().await;
+    mark(&pp, id, "lyrics_manual_priority = 1").await;
+    assert!(
+        !kept_here(&pp).await,
+        "paid AI off: the flag cannot run here"
+    );
+    set(pp.pool(), SETTING_PAID_AI_ENABLED, "true").await;
+    assert!(kept_here(&pp).await, "paid AI on: a new run here is asked");
+}
+
+/// #264: with paid AI off an operator's text, a dub and a Live-Translate
+/// track still keep the lyrics local: they are this node's own content,
+/// not a run of the shared pipeline.
+#[tokio::test]
+async fn an_operators_text_or_a_dub_keeps_the_lyrics_here_while_paid_ai_is_off() {
+    for owner in [
+        "lyrics_override_text = 'Moj text'",
+        "dub_requested = 1",
+        "lyrics_source = 'gemini-live-translate'",
+    ] {
+        let (pp, id) = pp_alone_off().await;
+        mark(&pp, id, owner).await;
+        assert!(kept_here(&pp).await, "{owner}");
+    }
+}
+
+/// `lyrics_manual_priority` of every row of `YT` at `node`, by id.
+async fn flags(node: &TestNode) -> Vec<i64> {
+    sqlx::query_scalar("SELECT lyrics_manual_priority FROM videos WHERE youtube_id = ? ORDER BY id")
+        .bind(YT)
+        .fetch_all(node.pool())
+        .await
+        .unwrap()
+}
+
+/// #264, PP's rows 166, 225, 11 and 39: an operator's Reprocess made at a
+/// node with paid AI off was held every 30 min for good. The hook now takes
+/// the peer's copy for it (the same audio rule), and the take clears the
+/// flag on every row of the video, as a finished local run does.
+#[tokio::test]
+async fn an_operators_reprocess_takes_the_peers_copy_while_paid_ai_is_off() {
+    let (_snv, pp, id) = snv_lyrics_pp_off(true).await;
+    let two = pp.add_video_to(2, YT).await;
+    pp.give_song(two, YT, "Way Maker", "Sinach").await;
+    for row in [id, two] {
+        mark(&pp, row, "lyrics_manual_priority = 1").await;
+    }
+    let row = lyrics_row(&pp, id).await;
+    let step = crate::peer::lyrics::first(Some(&pp.ex), &row).await;
+    assert!(matches!(step, PeerStep::Done), "the peer's copy is taken");
+    assert!(json_at(&pp).is_some());
+    for row in [id, two] {
+        assert_eq!(lyrics_state(&pp, row).await, (1, 0, false), "row {row}");
+    }
+    assert_eq!(
+        flags(&pp).await,
+        vec![0, 0],
+        "the flag cleared on every row"
+    );
+    let (node, _, _) = crate::db::models_peer::fetch_record(pp.pool(), YT, "lyrics")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(node, "snv");
+}

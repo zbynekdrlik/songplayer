@@ -431,6 +431,21 @@ async fn an_operators_ask_here_ends_an_earlier_wait() {
     assert_eq!(waits, 0);
 }
 
+/// #264: `kept_local` binds four values in text order (the YouTube id, the
+/// Live-Translate source, the paid-AI switch, the pipeline version), so its
+/// SQL holds exactly four bare `?` and no numbered one: sqlx-sqlite binds a
+/// bare `?` that follows a `?1` from the FIRST value (`rust-workspace.md`).
+#[test]
+fn the_kept_local_sql_binds_four_bare_parameters_in_text_order() {
+    let sql = local_only_sql();
+    assert_eq!(sql.matches('?').count(), 4, "{sql}");
+    let numbered = sql
+        .split('?')
+        .skip(1)
+        .any(|rest| rest.starts_with(|c: char| c.is_ascii_digit()));
+    assert!(!numbered, "{sql}");
+}
+
 /// A peer's lyrics part is read whole: one over 16 MiB is refused before any
 /// transfer.
 #[test]
