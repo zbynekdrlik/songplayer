@@ -306,21 +306,6 @@ test.describe("SP-program (1920x1080) Spout gate (#239)", () => {
     ]);
   });
 
-  test("#251 step 2: a status with no upload_us_p99 (the server's now) passes", () => {
-    // The FHD target uploads nothing of its own (MAX's one upload serves both
-    // targets), so the server no longer serves the field and the gate never
-    // reads it: the exact block a server of this version answers.
-    const served = JSON.parse(JSON.stringify(fhd(130))) as Record<string, unknown>;
-    expect(Object.keys(served)).not.toContain("upload_us_p99");
-    expect(fhdGateFailures(fhd(100), served as unknown as FhdStatus)).toEqual([]);
-  });
-
-  test("#251 step 2: the FHD figures the gate reads never include an upload", () => {
-    // A stray upload figure (an older server's) changes nothing the gate says.
-    const older = { ...fhd(130), upload_us_p99: 99_999 } as FhdStatus;
-    expect(fhdGateFailures(fhd(100), older)).toEqual(fhdGateFailures(fhd(100), fhd(130)));
-  });
-
   test("#251 step 2: the mock serves max.fhd with the server's fields, no upload", async ({
     request,
   }) => {

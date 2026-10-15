@@ -14,11 +14,13 @@
 //! width (no black column at either side), while the FHD sender keeps the
 //! NDI `SP-program`'s bars.
 //!
-//! The readback takes no Spout mutex, so each picture is served TWICE and
-//! read after the second one went out: its draw waited for the GPU, which
-//! ran the first send's copy before it, and the second copy writes the same
-//! bytes. Spout's list is machine-wide; this is the only Spout test in the
-//! sp-server binary, and cargo runs test binaries one at a time.
+//! The readback takes no Spout mutex, so each picture is served until both
+//! senders sent it TWICE (the run's first picture one boundary more: the
+//! FHD output is built after MAX's first send) and read after that: the
+//! last draw waited for the GPU, which ran the earlier send's copy before
+//! it, and the last copy writes the same bytes. Spout's list is
+//! machine-wide; this is the only Spout test in the sp-server binary, and
+//! cargo runs test binaries one at a time.
 //! Wired via `#[cfg(test)] #[cfg(windows)] #[path = "program_max_tests_warp.rs"] mod tests_warp;`.
 
 use std::sync::Arc;
@@ -222,21 +224,30 @@ fn assert_matches(frame: &[u8], layers: &[Layer<'_>], (w, h): (u32, u32), what: 
     );
 }
 
-/// Serve `job` on boundaries `first` and `first + 1`, each once MAX and
-/// the FHD sender sent the one before (so the 2-deep queue never drops one).
+/// Serve `job` from boundary `*next` on until the FHD sender sent two of
+/// its boundaries (and MAX at least as many), each boundary once the one
+/// before went out (so the 2-deep queue never drops one). The run's first
+/// boundary goes out on MAX alone: the FHD output is built after MAX's
+/// send and goes out from the next boundary on (#239: MAX first, whole).
 fn serve_twice(
     out: &mut ProgramOutput<MockNdiBackend>,
     max: &MaxOut,
     job: impl Fn(i64) -> ProgramJob,
-    first: usize,
+    next: &mut usize,
 ) {
-    for k in [first, first + 1] {
+    let start = max.status();
+    loop {
         let before = max.status();
+        let k = *next;
         out.submit(job(at(k)));
-        wait_until("MAX and the FHD sender sent the boundary", || {
+        *next += 1;
+        wait_until("the boundary went out", || {
             let now = max.status();
-            now.submitted > before.submitted && now.fhd.submitted > before.fhd.submitted
+            now.submitted > before.submitted && (k == 0 || now.fhd.submitted > before.fhd.submitted)
         });
+        if max.status().fhd.submitted >= start.fhd.submitted + 2 {
+            break;
+        }
     }
     let status = max.status();
     assert_eq!((status.failed, status.fhd.failed), (0, 0), "{status:?}");
@@ -269,8 +280,13 @@ fn the_program_output_composes_on_warp_and_shares_it_over_spout() {
             ..one.clone()
         })
     };
-    serve_twice(&mut out, &max, plain, 0);
-    assert_eq!(max.status().submitted, 2);
+    let mut next = 0;
+    serve_twice(&mut out, &max, plain, &mut next);
+    assert_eq!(
+        (max.status().submitted, next),
+        (3, 3),
+        "the first boundary on MAX alone"
+    );
     let info = spout_sender_info(TEST_SENDER)
         .expect("Spout's registry reads")
         .expect("the sender is listed after its first send");
@@ -324,8 +340,8 @@ fn the_program_output_composes_on_warp_and_shares_it_over_spout() {
             n_slots: 9,
         })
     };
-    serve_twice(&mut out, &max, mix, 2);
-    assert_eq!(max.status().submitted, 4);
+    serve_twice(&mut out, &max, mix, &mut next);
+    assert_eq!(max.status().submitted, 5);
     let frame = read_shared_texture(&info).expect("a second WARP device reads Spout's texture");
     let fade = Composition::Fade {
         from: Some(nv12(&wide)),
@@ -347,8 +363,8 @@ fn the_program_output_composes_on_warp_and_shares_it_over_spout() {
             ..four_three.clone()
         })
     };
-    serve_twice(&mut out, &max, narrow, 4);
-    assert_eq!(max.status().submitted, 6);
+    serve_twice(&mut out, &max, narrow, &mut next);
+    assert_eq!(max.status().submitted, 7);
     let narrow = Composition::Picture(nv12(&four_three));
     let frame = read_shared_texture(&info).expect("a second WARP device reads Spout's texture");
     let layers = narrow.layers();

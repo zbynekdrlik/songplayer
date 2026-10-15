@@ -1,8 +1,9 @@
 //! #239 + #251 step 2: the `SP-program` Spout sender on the `program-max`
 //! thread, on the fake GPU. Its target is a SECOND target of MAX's one
-//! compositor, added (with its sender) only while it is wanted: one compose
-//! at the compose instant draws both targets from the same pictures, MAX is
-//! sent at the due instant and the FHD target right after it. Its sender
+//! compositor, added (with its sender) only while it is wanted, AFTER MAX's
+//! send (MAX goes first, whole); from the next boundary one compose at the
+//! compose instant draws both targets from the same pictures, MAX is sent
+//! at the due instant and the FHD target right after it. Its sender
 //! keeps its own refusals, backoff, telemetry and log, never MAX's; a lost
 //! device is one event for both; switched off or refused, its target is
 //! taken off the compositor (nothing drawn for it).
@@ -40,6 +41,9 @@ fn black(stamp: i64) -> MaxJob {
 /// then MAX's send, then the FHD one's.
 const BOUNDARY: [&str; 4] = ["max draw", "fhd draw", "max send", "fhd send"];
 
+/// A boundary of MAX alone (the FHD output not built yet, or off).
+const MAX_ALONE: [&str; 2] = ["max draw", "max send"];
+
 /// The FHD output's build: its target on the compositor, then its sender.
 const FHD_BUILD: [&str; 2] = ["fhd target", "fhd sender built"];
 
@@ -58,8 +62,12 @@ fn lost_frame() -> GpuError {
     }
 }
 
+/// #239: MAX goes first, whole: the FHD output is built AFTER MAX's send
+/// (its Spout open never delays MAX's compose or send) and drawn from the
+/// next compose. From then on ONE compose draws both targets from the same
+/// pictures, and MAX is sent before the FHD target.
 #[test]
-fn one_compose_draws_both_targets_and_max_is_sent_before_the_fhd_target() {
+fn the_fhd_output_is_built_after_max_s_send_then_drawn_by_the_same_compose() {
     let max = fhd_on();
     let gpu = FakeGpu::default();
     let mut worker = MaxWorker::new(&max, gpu.clone());
@@ -94,16 +102,17 @@ fn one_compose_draws_both_targets_and_max_is_sent_before_the_fhd_target() {
     ];
     assert_eq!(log.drawn, drawn, "one compose per boundary");
     assert_eq!(
-        log.fhd_drawn, drawn,
-        "the FHD target drawn by the same composes: the same pictures, ids and weight"
+        log.fhd_drawn,
+        drawn[1..],
+        "the FHD target drawn by the same composes from the next one on: the same pictures, ids and weight"
     );
-    let mut want = FHD_BUILD.to_vec();
-    for _ in 0..3 {
-        want.extend(BOUNDARY);
-    }
+    let mut want = MAX_ALONE.to_vec();
+    want.extend(FHD_BUILD);
+    want.extend(BOUNDARY);
+    want.extend(BOUNDARY);
     assert_eq!(
         log.order, want,
-        "built first, then each boundary, MAX first"
+        "MAX whole first, the FHD build after its send, then both"
     );
     assert_eq!(log.listed_reads, 1, "the registry is read once");
     drop(log);
@@ -117,12 +126,13 @@ fn one_compose_draws_both_targets_and_max_is_sent_before_the_fhd_target() {
     let fhd = status.fhd;
     assert_eq!(
         (fhd.state.as_str(), fhd.reason, fhd.submitted, fhd.failed),
-        ("running", None, 3, 0)
+        ("running", None, 2, 0),
+        "the build's boundary is neither sent nor failed"
     );
     assert_eq!(
         (fhd.draw_us_p99, fhd.send_us_p99),
         (FHD_DRAW_US, FHD_SEND_US),
-        "the FHD target's own draw and its send"
+        "the FHD target's own draw (never MAX's share) and its send"
     );
     assert_eq!((fhd.listed_width, fhd.listed_height), FAKE_LISTED);
 }
@@ -172,40 +182,56 @@ fn orders(at_wait: &Orders) -> Vec<Vec<&'static str>> {
     at_wait.lock().unwrap_or_else(|p| p.into_inner()).clone()
 }
 
-/// #251 step 2, the fix: on the grid (a vblank 1 ms before the offer, 16 ms
-/// apart, send phase 5 ms, compose phase 13 ms) BOTH targets are composed at
-/// the compose instant (12 ms after the offer), in one compose; at the due
-/// instant (36 ms) MAX's send runs, then the FHD one's: plain copies, no
-/// GPU work of the FHD side left for the send window.
+/// Forget what the clock and the fake recorded so far (the boundary that
+/// built the FHD output).
+fn clear(list: &Waits, at_wait: &Orders, gpu: &FakeGpu) {
+    list.lock().unwrap_or_else(|p| p.into_inner()).clear();
+    at_wait.lock().unwrap_or_else(|p| p.into_inner()).clear();
+    gpu.log().order.clear();
+}
+
+/// #251 step 2, the fix: on the grid (a vblank 1 ms before the first offer,
+/// 16 ms apart, send phase 5 ms, compose phase 13 ms, K = 24 ms) BOTH
+/// targets are composed at the compose instant, in one compose; at the due
+/// instant MAX's send runs, then the FHD one's: plain copies, no GPU work
+/// of the FHD side left for the send window.
 #[test]
 fn both_targets_are_composed_at_the_compose_instant_then_sent_max_first() {
     let max = fhd_on();
     max.set_vblank_phase_us(5_000);
     let gpu = FakeGpu::default();
     let offered = Instant::now();
-    let now = offered + 4 * MS;
-    let (worker, list, at_wait) = on_clock(&max, &gpu, now);
+    let (worker, list, at_wait) = on_clock(&max, &gpu, offered + 4 * MS);
     let grid = VblankGrid {
         at: offered - MS,
         period: 16 * MS,
     };
     let mut worker = worker.with_vblank(Box::new(Grid(grid)));
-    worker.serve_offered(&black(1), offered, now);
-
-    let (compose_at, due) = (offered + 12 * MS, offered + 36 * MS);
+    worker.serve_offered(&black(1), offered, offered + 4 * MS);
+    let mut built = MAX_ALONE.to_vec();
+    built.extend(FHD_BUILD);
     assert_eq!(
-        waits(&list),
-        [compose_at, due, due],
-        "the compose waits for its instant, MAX's send for the due one, the FHD send for nothing more"
+        gpu.log().order,
+        built,
+        "the FHD output built after MAX's send"
     );
-    let built = FHD_BUILD.to_vec();
-    let mut drawn = built.clone();
-    drawn.extend(["max draw", "fhd draw"]);
+    clear(&list, &at_wait, &gpu);
+
+    let next = offered + 33 * MS;
+    worker.serve_offered(&black(2), next, next + MS);
+    let waited = waits(&list);
+    assert_eq!(waited.len(), 3, "{waited:?}");
+    assert_eq!(waited[1] - waited[0], 24 * MS, "composed K before the send");
+    assert_eq!(
+        waited[2], waited[1],
+        "the FHD send waits for no instant past MAX's"
+    );
+    let drawn = vec!["max draw", "fhd draw"];
     let mut max_sent = drawn.clone();
     max_sent.push("max send");
     assert_eq!(
         orders(&at_wait),
-        [built, drawn, max_sent],
+        [vec![], drawn, max_sent],
         "nothing drawn before the compose instant; both targets drawn before the sends"
     );
     let status = max.status();
@@ -218,7 +244,7 @@ fn both_targets_are_composed_at_the_compose_instant_then_sent_max_first() {
         ),
         (13_000, 5_000, 0, 0)
     );
-    assert_eq!((status.submitted, status.fhd.submitted), (1, 1));
+    assert_eq!((status.submitted, status.fhd.submitted), (2, 1));
 }
 
 /// Off the grid the compose runs at once and MAX is sent at its due
@@ -230,11 +256,13 @@ fn off_the_grid_the_fhd_send_follows_max_s_at_the_due_instant() {
     let offered = Instant::now();
     let (mut worker, list, at_wait) = on_clock(&max, &gpu, offered + 4 * MS);
     worker.serve_offered(&black(1), offered, offered + 4 * MS);
+    clear(&list, &at_wait, &gpu);
 
-    let due = offered + 12 * MS;
+    let next = offered + 33 * MS;
+    worker.serve_offered(&black(2), next, next + MS);
+    let due = next + 12 * MS;
     assert_eq!(waits(&list), [due, due], "no FHD wait past MAX's instant");
-    let mut drawn = FHD_BUILD.to_vec();
-    drawn.extend(["max draw", "fhd draw"]);
+    let drawn = vec!["max draw", "fhd draw"];
     let mut max_sent = drawn.clone();
     max_sent.push("max send");
     assert_eq!(orders(&at_wait), [drawn, max_sent]);
@@ -246,9 +274,33 @@ fn off_the_grid_the_fhd_send_follows_max_s_at_the_due_instant() {
     );
 }
 
+/// The FHD build (a Spout open) runs AFTER MAX's send: MAX's boundary is
+/// sent at its due instant before the FHD output even exists.
+#[test]
+fn the_fhd_build_never_delays_max_s_send() {
+    let max = fhd_on();
+    let gpu = FakeGpu::default();
+    let offered = Instant::now();
+    let (mut worker, list, at_wait) = on_clock(&max, &gpu, offered + 4 * MS);
+    worker.serve_offered(&black(1), offered, offered + 4 * MS);
+    assert_eq!(waits(&list), [offered + 12 * MS], "only MAX's send waited");
+    assert_eq!(
+        orders(&at_wait),
+        [vec!["max draw"]],
+        "nothing of the FHD output before MAX's send"
+    );
+    let mut want = MAX_ALONE.to_vec();
+    want.extend(FHD_BUILD);
+    assert_eq!(gpu.log().order, want);
+    let status = max.status();
+    assert_eq!((status.send_at_us_max, status.send_late), (12_000, 0));
+    assert_eq!((status.fhd.submitted, status.fhd.failed), (0, 0));
+}
+
 /// MAX's sender refused at create (its own backoff) never holds the FHD
-/// target back: both targets are still composed, and the FHD one goes out
-/// at the due instant, boundary after boundary, while MAX waits.
+/// target back: with MAX's boundary not drawn the FHD output is built
+/// first, both targets are composed, and the FHD one goes out at the due
+/// instant, boundary after boundary, while MAX waits.
 #[test]
 fn with_max_s_sender_refused_the_fhd_target_still_goes_out_at_the_due_instant() {
     let max = fhd_on();
@@ -294,11 +346,13 @@ fn with_max_s_sender_refused_the_fhd_target_still_goes_out_at_the_due_instant() 
 fn a_lost_max_frame_never_stops_the_fhd_send() {
     let max = fhd_on();
     let gpu = FakeGpu::default();
-    gpu.script().send.push_back(lost_frame());
     let mut worker = MaxWorker::new(&max, gpu.clone());
-    worker.serve(&black(1), Instant::now());
+    let t0 = Instant::now();
+    worker.serve(&black(1), t0);
+    gpu.script().send.push_back(lost_frame());
+    worker.serve(&black(2), t0);
     let log = gpu.log();
-    assert_eq!((log.sent, log.fhd_sent), (0, 1));
+    assert_eq!((log.sent, log.fhd_sent), (1, 1));
     assert!(log.drops.is_empty(), "nothing dropped");
     drop(log);
     let status = max.status();
@@ -328,8 +382,9 @@ fn a_failed_compositor_build_fails_both_outputs_and_waits_one_backoff() {
     let status = max.status();
     assert_eq!((status.failed, status.fhd.failed), (2, 2), "both skipped");
     worker.serve(&black(3), t0 + MAX_RETRY_BACKOFF);
+    worker.serve(&black(4), t0 + MAX_RETRY_BACKOFF);
     let log = gpu.log();
-    assert_eq!((log.compositors_built, log.sent, log.fhd_sent), (2, 1, 1));
+    assert_eq!((log.compositors_built, log.sent, log.fhd_sent), (2, 2, 1));
 }
 
 /// A lost device while MAX's sender is built is the device's: the FHD
@@ -357,6 +412,66 @@ fn a_lost_device_while_building_max_s_sender_fails_the_fhd_output_too() {
     assert_eq!(status.fhd.state, why, "the same error on the FHD output");
 }
 
+/// With MAX's sender waiting out its backoff the FHD output is built first;
+/// a device lost there is the device's: MAX names it too, nothing is drawn,
+/// one reset, and both wait the backoff.
+#[test]
+fn a_lost_device_while_building_the_fhd_output_first_fails_max_too() {
+    let max = fhd_on();
+    let gpu = FakeGpu::default();
+    gpu.script().sender.push_back(name_taken());
+    gpu.script().add_target.push_back(device_lost());
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    let t0 = Instant::now();
+    worker.serve(&black(1), t0);
+    let log = gpu.log();
+    assert_eq!(log.drops, ["compositor"]);
+    assert!(log.drawn.is_empty(), "nothing drawn on a lost device");
+    drop(log);
+    let status = max.status();
+    let why = format!("error: {}", device_lost());
+    assert_eq!(
+        (
+            status.state.as_str(),
+            status.device_resets,
+            status.sender_backoffs
+        ),
+        (why.as_str(), 1, 1),
+        "MAX names the device, never its own refusal alone"
+    );
+    assert_eq!(status.fhd.state, why);
+    worker.serve(&black(2), t0);
+    assert_eq!(
+        gpu.log().compositors_built,
+        1,
+        "lost while building: the backoff"
+    );
+}
+
+/// A device lost while the FHD output is built after MAX's send: MAX's
+/// boundary had gone out; the FHD output fails with the loss, one reset,
+/// and the rebuild waits the backoff (a loss while building).
+#[test]
+fn a_lost_device_while_building_the_fhd_output_after_max_s_send_waits_the_backoff() {
+    let max = fhd_on();
+    let gpu = FakeGpu::default();
+    gpu.script().fhd_sender.push_back(device_lost());
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    let t0 = Instant::now();
+    worker.serve(&black(1), t0);
+    let log = gpu.log();
+    assert_eq!(log.sent, 1, "MAX's boundary went out before the build");
+    assert_eq!(log.drops, ["sender", "compositor"]);
+    drop(log);
+    let status = max.status();
+    assert_eq!((status.submitted, status.device_resets), (1, 1));
+    assert_eq!(status.fhd.state, format!("error: {}", device_lost()));
+    worker.serve(&black(2), t0);
+    assert_eq!(gpu.log().compositors_built, 1, "inside the backoff");
+    let status = max.status();
+    assert_eq!((status.failed, status.fhd.failed), (1, 2), "both skipped");
+}
+
 #[test]
 fn a_failed_fhd_target_waits_its_own_backoff_and_never_stops_max() {
     let max = fhd_on();
@@ -382,9 +497,11 @@ fn a_failed_fhd_target_waits_its_own_backoff_and_never_stops_max() {
     drop(log);
     assert_eq!(max.status().fhd.failed, 2, "a skipped boundary counts");
     worker.serve(&black(3), t0 + MAX_RETRY_BACKOFF);
+    assert_eq!(gpu.log().targets_added.len(), 2, "built after MAX's send");
+    worker.serve(&black(4), t0 + MAX_RETRY_BACKOFF);
     let log = gpu.log();
-    assert_eq!((log.targets_added.len(), log.fhd_sent), (2, 1));
-    assert_eq!((log.compositors_built, log.sent), (1, 3), "MAX every time");
+    assert_eq!(log.fhd_sent, 1, "drawn and sent from the next boundary");
+    assert_eq!((log.compositors_built, log.sent), (1, 4), "MAX every time");
     drop(log);
     let status = max.status();
     assert_eq!((status.state.as_str(), status.failed), ("running", 0));
@@ -418,9 +535,10 @@ fn a_refused_fhd_sender_is_dropped_with_its_target_and_a_new_one_waits_its_own_b
     let mut worker = MaxWorker::new(&max, gpu.clone());
     let t0 = Instant::now();
     worker.serve(&black(1), t0);
+    worker.serve(&black(2), t0);
     assert_eq!(max.fhd_listed(), Some(FAKE_LISTED));
     gpu.script().fhd_send.push_back(not_registered());
-    worker.serve(&black(2), t0);
+    worker.serve(&black(3), t0);
     let log = gpu.log();
     assert_eq!(log.drops, ["fhd sender"], "the compositor stays");
     assert_eq!(
@@ -439,12 +557,13 @@ fn a_refused_fhd_sender_is_dropped_with_its_target_and_a_new_one_waits_its_own_b
         (0, 0),
         "a dropped sender is listed nowhere"
     );
-    worker.serve(&black(3), t0 + MAX_RETRY_BACKOFF - MS);
+    worker.serve(&black(4), t0 + MAX_RETRY_BACKOFF - MS);
     let log = gpu.log();
     assert_eq!(log.fhd_senders_built, 1, "inside its backoff");
     assert_eq!(log.fhd_drawn.len(), 2, "nothing drawn for it meanwhile");
     drop(log);
-    worker.serve(&black(4), t0 + MAX_RETRY_BACKOFF);
+    worker.serve(&black(5), t0 + MAX_RETRY_BACKOFF);
+    worker.serve(&black(6), t0 + MAX_RETRY_BACKOFF);
     let log = gpu.log();
     assert_eq!(
         (
@@ -455,7 +574,7 @@ fn a_refused_fhd_sender_is_dropped_with_its_target_and_a_new_one_waits_its_own_b
         (1, 2, 2),
         "a new target and sender on the same compositor"
     );
-    assert_eq!((log.fhd_sent, log.sent), (2, 4), "MAX every boundary");
+    assert_eq!((log.fhd_sent, log.sent), (2, 6), "MAX every boundary");
     assert_eq!(log.listed_reads, 2, "the new sender's listing is read");
     drop(log);
     assert_eq!(max.fhd_listed(), Some(FAKE_LISTED));
@@ -468,16 +587,17 @@ fn a_refused_fhd_sender_is_dropped_with_its_target_and_a_new_one_waits_its_own_b
 fn a_lost_device_drops_both_senders_and_the_compositor_and_rebuilds_both() {
     let max = fhd_on();
     let gpu = FakeGpu::default();
-    gpu.script().fhd_send.push_back(device_lost());
     let mut worker = MaxWorker::new(&max, gpu.clone());
     let t0 = Instant::now();
     worker.serve(&black(1), t0);
+    gpu.script().fhd_send.push_back(device_lost());
+    worker.serve(&black(2), t0);
     assert!(!worker.holds_gpu());
     assert_eq!(gpu.log().drops, ["sender", "fhd sender", "compositor"]);
     let status = max.status();
-    assert_eq!((status.device_resets, status.submitted), (1, 1));
+    assert_eq!((status.device_resets, status.submitted), (1, 2));
     assert_eq!(status.fhd.state, format!("error: {}", device_lost()));
-    worker.serve(&black(2), t0);
+    worker.serve(&black(3), t0);
     let log = gpu.log();
     assert_eq!(
         (
@@ -489,7 +609,10 @@ fn a_lost_device_drops_both_senders_and_the_compositor_and_rebuilds_both() {
         (2, 2, 2, 2),
         "both rebuilt at once"
     );
-    assert_eq!((log.sent, log.fhd_sent), (2, 1));
+    drop(log);
+    worker.serve(&black(4), t0);
+    let log = gpu.log();
+    assert_eq!((log.sent, log.fhd_sent), (4, 1));
     drop(log);
     assert_eq!(max.status().fhd.state, "running");
 }
@@ -501,19 +624,20 @@ fn a_lost_device_drops_both_senders_and_the_compositor_and_rebuilds_both() {
 fn a_boundary_sent_before_the_loss_does_not_count_as_one_after_it() {
     let max = fhd_on();
     let gpu = FakeGpu::default();
-    gpu.script().fhd_send.push_back(device_lost());
     let mut worker = MaxWorker::new(&max, gpu.clone());
     let t0 = Instant::now();
     worker.serve(&black(1), t0);
-    assert_eq!(gpu.log().sent, 1, "MAX went out, then the FHD send lost it");
-    gpu.script().compose.push_back(device_lost());
+    gpu.script().fhd_send.push_back(device_lost());
     worker.serve(&black(2), t0);
+    assert_eq!(gpu.log().sent, 2, "MAX went out, then the FHD send lost it");
+    gpu.script().compose.push_back(device_lost());
+    worker.serve(&black(3), t0);
     assert_eq!(
         gpu.log().compositors_built,
         2,
         "the first loss rebuilds at once"
     );
-    worker.serve(&black(3), t0);
+    worker.serve(&black(4), t0);
     assert_eq!(
         gpu.log().compositors_built,
         2,
@@ -528,11 +652,12 @@ fn a_boundary_sent_before_the_loss_does_not_count_as_one_after_it() {
 fn a_lost_device_at_max_s_send_fails_the_fhd_output_with_it() {
     let max = fhd_on();
     let gpu = FakeGpu::default();
-    gpu.script().send.push_back(device_lost());
     let mut worker = MaxWorker::new(&max, gpu.clone());
     worker.serve(&black(1), Instant::now());
+    gpu.script().send.push_back(device_lost());
+    worker.serve(&black(2), Instant::now());
     let log = gpu.log();
-    assert_eq!((log.sent, log.fhd_sent), (0, 0));
+    assert_eq!((log.sent, log.fhd_sent), (1, 0));
     assert_eq!(log.drops, ["sender", "fhd sender", "compositor"]);
     drop(log);
     let status = max.status();
@@ -573,8 +698,9 @@ fn a_second_lost_device_at_the_compose_waits_the_backoff_for_both() {
         "one reset per loss; both outputs fail and skip"
     );
     worker.serve(&black(4), t0 + MAX_RETRY_BACKOFF);
+    worker.serve(&black(5), t0 + MAX_RETRY_BACKOFF);
     let log = gpu.log();
-    assert_eq!((log.compositors_built, log.sent, log.fhd_sent), (3, 1, 1));
+    assert_eq!((log.compositors_built, log.sent, log.fhd_sent), (3, 2, 1));
 }
 
 /// A boundary of EITHER output proves the rebuilt device: with MAX's sender
@@ -609,24 +735,27 @@ fn switching_the_fhd_sender_off_takes_its_target_off_at_the_next_boundary() {
     let mut worker = MaxWorker::new(&max, gpu.clone());
     let t0 = Instant::now();
     worker.serve(&black(1), t0);
-    max.set_fhd_enabled(false);
     worker.serve(&black(2), t0);
+    max.set_fhd_enabled(false);
+    worker.serve(&black(3), t0);
     let log = gpu.log();
     assert_eq!(log.drops, ["fhd sender"]);
     assert_eq!(log.targets_removed, 1);
-    let mut want = FHD_BUILD.to_vec();
+    let mut want = MAX_ALONE.to_vec();
+    want.extend(FHD_BUILD);
     want.extend(BOUNDARY);
-    want.extend(["fhd target removed", "max draw", "max send"]);
+    want.push("fhd target removed");
+    want.extend(MAX_ALONE);
     assert_eq!(log.order, want, "FHD off: its target is drawn no more");
-    assert_eq!((log.fhd_drawn.len(), log.drawn.len()), (1, 2));
-    assert_eq!((log.fhd_sent, log.sent), (1, 2), "MAX goes on");
+    assert_eq!((log.fhd_drawn.len(), log.drawn.len()), (1, 3));
+    assert_eq!((log.fhd_sent, log.sent), (1, 3), "MAX goes on");
     drop(log);
     let fhd = max.status().fhd;
     assert_eq!(
         (fhd.state.as_str(), fhd.reason, fhd.listed_width),
         ("off", Some(FHD_OFF_SETTING), 0)
     );
-    worker.serve(&black(3), t0);
+    worker.serve(&black(4), t0);
     let log = gpu.log();
     assert_eq!(log.targets_added.len(), 1, "not added while off");
     assert_eq!(log.fhd_senders_built, 1);
@@ -647,6 +776,7 @@ fn switching_the_fhd_sender_off_forgets_its_backoff() {
     worker.serve(&black(2), t0);
     max.set_fhd_enabled(true);
     worker.serve(&black(3), t0);
+    worker.serve(&black(4), t0);
     let log = gpu.log();
     assert_eq!(
         (
@@ -670,7 +800,7 @@ fn not_wanted_the_fhd_target_is_never_added() {
     let log = gpu.log();
     assert!(log.targets_added.is_empty());
     assert_eq!((log.fhd_senders_built, log.sent), (0, 1));
-    assert_eq!(log.order, ["max draw", "max send"]);
+    assert_eq!(log.order, MAX_ALONE);
     assert!(log.fhd_drawn.is_empty());
     drop(log);
     let fhd = max.status().fhd;
@@ -687,6 +817,22 @@ fn not_wanted_the_fhd_target_is_never_added() {
     let log = gpu.log();
     assert!(log.targets_added.is_empty());
     assert!(log.order.is_empty());
+    drop(log);
+    let fhd = max.status().fhd;
+    assert_eq!(
+        (fhd.submitted, fhd.failed),
+        (0, 0),
+        "not wanted: not counted"
+    );
+
+    // Nor while MAX's boundary is not drawn (its sender refused).
+    let gpu = FakeGpu::default();
+    gpu.script().sender.push_back(name_taken());
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    worker.serve(&black(3), Instant::now());
+    let log = gpu.log();
+    assert!(log.targets_added.is_empty());
+    assert_eq!(log.fhd_senders_built, 0);
     drop(log);
     let fhd = max.status().fhd;
     assert_eq!(
@@ -714,16 +860,25 @@ fn release_drops_both_senders_then_the_compositor() {
 fn the_fhd_sender_logs_its_own_failure_and_recovery() {
     let max = fhd_on();
     let gpu = FakeGpu::default();
-    gpu.script().fhd_send.push_back(lost_frame());
     let mut worker = MaxWorker::new(&max, gpu.clone());
     let t0 = Instant::now();
     let lines = worker.serve_lines(&black(1), t0, t0);
+    assert_eq!(
+        lines,
+        Lines {
+            max: None,
+            fhd: None
+        },
+        "built: nothing to say"
+    );
+    gpu.script().fhd_send.push_back(lost_frame());
+    let lines = worker.serve_lines(&black(2), t0, t0);
     assert_eq!(lines.max, None, "MAX's boundary went out");
     assert_eq!(lines.fhd, Some(LogLine::Failing { held_back: 0 }));
-    let lines = worker.serve_lines(&black(2), t0 + MS, t0 + MS);
+    let lines = worker.serve_lines(&black(3), t0 + MS, t0 + MS);
     assert_eq!(lines.fhd, None, "recovered inside the window: held back");
     let later = t0 + Duration::from_secs(5);
-    let lines = worker.serve_lines(&black(3), later, later);
+    let lines = worker.serve_lines(&black(4), later, later);
     assert_eq!(lines.fhd, Some(LogLine::Recovered { held_back: 1 }));
     assert_eq!(lines.max, None);
     assert_eq!(max.status().fhd.failed, 1, "one lost frame, no backoff");
@@ -739,13 +894,15 @@ fn an_unreadable_listing_is_read_again_until_it_answers() {
     let mut worker = MaxWorker::new(&max, gpu.clone());
     let t0 = Instant::now();
     worker.serve(&black(1), t0);
-    assert_eq!((max.fhd_listed(), gpu.log().listed_reads), (None, 1));
+    assert_eq!(gpu.log().listed_reads, 0, "not sent yet: not read");
     worker.serve(&black(2), t0);
+    assert_eq!((max.fhd_listed(), gpu.log().listed_reads), (None, 1));
+    worker.serve(&black(3), t0);
     assert_eq!(
         (max.fhd_listed(), gpu.log().listed_reads),
         (Some(FAKE_LISTED), 2)
     );
-    worker.serve(&black(3), t0);
+    worker.serve(&black(4), t0);
     assert_eq!(gpu.log().listed_reads, 2, "not read again");
 }
 
@@ -756,8 +913,12 @@ fn the_loop_releases_both_while_max_is_off() {
     let thread = spawn_loop(&max, &gpu);
     wait_until("the loop takes jobs", || max.accepting());
     max.offer_with(|| black(1));
+    wait_until("MAX went out, the FHD output built", || {
+        gpu.log().fhd_senders_built == 1
+    });
+    max.offer_with(|| black(2));
     wait_until("both went out", || max.status().fhd.submitted == 1);
-    assert_eq!(max.status().submitted, 1);
+    assert_eq!(max.status().submitted, 2);
     max.set_enabled(false);
     wait_until("off releases both", || gpu.log().drops.len() == 3);
     assert_eq!(gpu.log().drops, ["sender", "fhd sender", "compositor"]);
@@ -780,7 +941,9 @@ fn a_quiesce_drops_both_senders_and_reports_quiesced() {
     let _consumer = max.attach();
     let gpu = FakeGpu::default();
     let mut worker = MaxWorker::new(&max, gpu.clone());
-    worker.serve(&plain(1, &picture(4, 2)), Instant::now());
+    let a = picture(4, 2);
+    worker.serve(&plain(1, &a), Instant::now());
+    worker.serve(&plain(2, &a), Instant::now());
     assert_eq!(max.status().fhd.submitted, 1, "both went out");
     worker.quiesce();
     assert!(!worker.holds_gpu());
@@ -795,7 +958,7 @@ fn a_quiesce_drops_both_senders_and_reports_quiesced() {
 
 /// #243 follow-up: the quiesce expired with the process alive: the resume
 /// reads `running` again for both senders before any boundary, and the
-/// next job builds the compositor, its FHD target and both senders anew.
+/// next jobs build the compositor, its FHD target and both senders anew.
 #[test]
 fn a_resume_reads_running_and_the_next_job_builds_both_senders_anew() {
     let max = fhd_on();
@@ -804,6 +967,7 @@ fn a_resume_reads_running_and_the_next_job_builds_both_senders_anew() {
     let mut worker = MaxWorker::new(&max, gpu.clone());
     let a = picture(4, 2);
     worker.serve(&plain(1, &a), Instant::now());
+    worker.serve(&plain(2, &a), Instant::now());
     worker.quiesce();
     worker.resume();
     let status = max.status();
@@ -812,9 +976,10 @@ fn a_resume_reads_running_and_the_next_job_builds_both_senders_anew() {
         ("running", "running"),
         "resumed: no longer quiesced"
     );
-    worker.serve(&plain(2, &a), Instant::now());
+    worker.serve(&plain(3, &a), Instant::now());
+    worker.serve(&plain(4, &a), Instant::now());
     let status = max.status();
-    assert_eq!((status.submitted, status.fhd.submitted), (2, 2));
+    assert_eq!((status.submitted, status.fhd.submitted), (4, 2));
     let log = gpu.log();
     assert_eq!(
         (

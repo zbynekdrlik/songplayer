@@ -337,8 +337,14 @@ impl MaxCompositor for FakeCompositor {
         log.order.push("fhd target removed");
     }
 
+    /// Each target its own figure (MAX's primary `DRAW_US`, an added one
+    /// `FHD_DRAW_US`), so a worker reading the wrong target's share fails.
     fn draw_us(&self, target: TargetId) -> u64 {
-        self.targets.get(target).map_or(0, |_| FHD_DRAW_US)
+        match self.targets.get(target) {
+            Some(_) if target == TargetId::PRIMARY => DRAW_US,
+            Some(_) => FHD_DRAW_US,
+            None => 0,
+        }
     }
 }
 

@@ -33,7 +33,10 @@
 //! upload, in Arena's window, carried a large part of the wall's residual
 //! jumps, #251 comment 6192123775). The FHD target is on the compositor only
 //! while its sender lives: switched off, refused or waiting out its
-//! backoff, nothing is drawn for it.
+//! backoff, nothing is drawn for it. MAX goes first, whole (#239): an FHD
+//! output still to build (its target, its Spout open) is built after MAX's
+//! send and drawn from the next compose, unless MAX's boundary is not drawn
+//! at all (then it is built first and goes out alone, at the due instant).
 //!
 //! Failures never panic the thread and never reach the program:
 //!
@@ -436,7 +439,7 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     /// target.
     pub fn serve_lines(&mut self, job: &MaxJob, offered: Instant, now: Instant) -> Lines {
         let fhd_wanted = self.out.fhd_wanted();
-        if !fhd_wanted {
+        if !fhd_wanted && (self.fhd.target.is_some() || self.fhd.retry_at.is_some()) {
             self.release_fhd();
         }
         let went = self.attempt(job, offered, now, fhd_wanted);
@@ -537,12 +540,12 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     }
 
     /// Build what is missing, each unless its backoff runs (the compositor,
-    /// MAX's sender, then while wanted the FHD target and its sender), then,
-    /// when an output can go out: pace `job` FIRST, compose it into every
-    /// target at its compose instant (#251, [`draw`](Self::draw): one
-    /// upload of each picture) and send it when it is due, MAX's first,
-    /// then the FHD one's right after (alone, at the due instant). A lost
-    /// device fails both outputs with it.
+    /// MAX's sender; while wanted the FHD target and its sender, after MAX's
+    /// send unless MAX's boundary is not drawn), then, when an output can go
+    /// out: pace `job` FIRST, compose it into every target at its compose
+    /// instant (#251, [`draw`](Self::draw): one upload of each picture) and
+    /// send it when it is due, MAX's first, then the FHD one's right after
+    /// (alone, at the due instant). A lost device fails both outputs with it.
     fn attempt(&mut self, job: &MaxJob, offered: Instant, now: Instant, fhd_wanted: bool) -> Went {
         if self.unsupported {
             return Went {
@@ -558,10 +561,21 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
             };
         }
         let max_built = self.build(Which::Max, now);
-        let fhd_built = fhd_wanted.then(|| match device_lost(&max_built) {
+        // #239: MAX goes first, whole. An FHD output still to build (a
+        // target, a Spout open) is built AFTER MAX's send and drawn from
+        // the next compose, so its cost never delays MAX's compose or send;
+        // only when MAX's boundary is not drawn at all is it built first.
+        let fhd_first = fhd_wanted && (max_built.is_err() || self.fhd.sender.is_some());
+        let fhd_built = fhd_first.then(|| match device_lost(&max_built) {
             Some(error) => Err(Skip::Failed(error)),
             None => self.build(Which::Fhd, now),
         });
+        // A device lost while building the FHD output is the device's: MAX
+        // fails with it too, and nothing is drawn.
+        let max_built = match fhd_built.as_ref().and_then(device_lost) {
+            Some(error) => Err(Skip::Failed(error)),
+            None => max_built,
+        };
         let fhd_ready = matches!(fhd_built, Some(Ok(())));
         // The pictures are labelled, paced and drawn only for a boundary
         // that can go out on some output.
@@ -573,14 +587,33 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
             (Ok(()), None) => Err(Skip::Failed(NO_COMPOSITOR)),
         };
         let lost = device_lost(&max);
-        let fhd = fhd_built.map(|built| match (built, &composed, lost) {
-            (Err(skip), _, _) => Err(skip),
-            (Ok(()), _, Some(error)) => Err(Skip::Failed(error)),
-            (Ok(()), Some(Ok(drawn)), None) => self.send_fhd(drawn, offered, now),
-            (Ok(()), Some(Err(skip)), None) => Err(skip.clone()),
-            (Ok(()), None, None) => Err(Skip::Failed(NO_COMPOSITOR)),
-        });
+        let fhd = match fhd_built {
+            Some(built) => Some(match (built, &composed, lost) {
+                (Err(skip), _, _) => Err(skip),
+                (Ok(()), _, Some(error)) => Err(Skip::Failed(error)),
+                (Ok(()), Some(Ok(drawn)), None) => self.send_fhd(drawn, offered, now),
+                (Ok(()), Some(Err(skip)), None) => Err(skip.clone()),
+                (Ok(()), None, None) => Err(Skip::Failed(NO_COMPOSITOR)),
+            }),
+            None if fhd_wanted => self.build_fhd_after(lost, now),
+            None => None,
+        };
         Went { max, fhd }
+    }
+
+    /// #239: MAX went first: build the FHD output now (its target and its
+    /// sender), drawn from the next compose. A built output reports nothing
+    /// for this boundary (its target was not drawn); a failure, a backoff or
+    /// the device MAX's boundary lost is reported as usual.
+    fn build_fhd_after(
+        &mut self,
+        lost: Option<GpuError>,
+        now: Instant,
+    ) -> Option<Result<FhdSent, Skip>> {
+        if let Some(error) = lost {
+            return Some(Err(Skip::Failed(error)));
+        }
+        self.build(Which::Fhd, now).err().map(Err)
     }
 
     /// Build the compositor unless it is there or its backoff runs (it
