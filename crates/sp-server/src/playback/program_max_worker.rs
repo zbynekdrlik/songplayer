@@ -17,7 +17,10 @@
 //!   refresh Arena renders in, when a [`VblankSource`] measures it
 //!   (`program_max_vblank.rs`),
 //!   else `MAX_SEND_LEAD` after the program offered it
-//!   (`program_max_send.rs`).
+//!   (`program_max_send.rs`); #251: on the refresh grid the compose itself
+//!   waits for its own instant, a fixed phase of that grid (the setting
+//!   `program_max_compose_phase_ms`), so its GPU work never drifts into the
+//!   instants Arena renders and reads Spout in (off the grid: at once).
 //!
 //! Failures never panic the thread and never reach the program:
 //!
@@ -81,9 +84,11 @@ use tracing::{info, warn};
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_max::{MaxJob, MaxNext, MaxOut, MaxPicture};
 use crate::playback::program_max_list::{ListSide, SpoutList};
-use crate::playback::program_max_send::{NoWait, SendClock, SendTiming, SpinClock, send_at};
+use crate::playback::program_max_send::{
+    NoWait, SendClock, SendTiming, SpinClock, send_at, wait_for,
+};
 use crate::playback::program_max_vblank::{
-    Aligned, Due, VblankLog, VblankPacer, VblankSource, phase_after_vblank,
+    Aligned, Due, VblankLog, VblankPacer, VblankSource, phase_after_vblank_us,
 };
 use crate::playback::stat_window::WarnLimiter;
 
@@ -697,9 +702,11 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         line
     }
 
-    /// Build what is missing (unless a backoff runs), compose `job` and send
-    /// it when it is due: in the slot [`VblankPacer`] picks on the refresh
-    /// grid (with the phase setting), else at the constant lead
+    /// Build what is missing (unless a backoff runs), pace `job` FIRST, then
+    /// compose it and send it when it is due: in the slot [`VblankPacer`]
+    /// picks on the refresh grid (with the phase setting), composed (#251)
+    /// at its own instant K before that slot ([`compose_wait`](Self::compose_wait)),
+    /// else composed at once and sent at the constant lead
     /// (`program_max_send::send_at`). MAX first, whole; then (#239) the FHD
     /// sender ([`fhd_boundary`](Self::fhd_boundary)), built only after MAX's
     /// send too, unless MAX's boundary is not drawn at all.
@@ -723,14 +730,13 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
             Composition::Black
         };
         let mut paced = None;
-        let max = match max_built.and_then(|()| self.compose(Output::Max, &composition)) {
-            Ok(compose) => {
-                let pace = self.pace(offered);
-                paced = Some(pace);
-                self.send_max(compose, pace, offered)
-            }
-            Err(skip) => Err(skip),
-        };
+        let max = max_built.and_then(|()| {
+            let pace = self.pace(offered);
+            paced = Some(pace);
+            let composing = self.compose_wait(pace.0.compose_at);
+            let compose = self.compose(Output::Max, &composition)?;
+            self.send_max(compose, pace, composing, offered)
+        });
         // MAX is out: the FHD sender's build, upload and draw come after it.
         let fhd_built = fhd_first.or_else(|| fhd_wanted.then(|| self.build(Output::Fhd, now)));
         let fhd = match fhd_built {
@@ -791,7 +797,8 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     }
 
     /// When the boundary offered at `offered` is due: [`VblankPacer`]'s slot
-    /// on the refresh grid, else the constant lead; and that grid.
+    /// on the refresh grid and (#251) its compose instant, else the
+    /// constant lead; and that grid.
     fn pace(&mut self, offered: Instant) -> (Due, Option<VblankGrid>) {
         let now = self.clock.as_mut().now();
         let grid = self.vblank.as_ref().and_then(|v| {
@@ -800,16 +807,29 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
             log_vblank(self.out.record_vblank_state(v.state(now)), &**v);
             v.grid(now)
         });
-        let due = self.pacer.due(offered, grid, self.out.vblank_phase());
+        let send_phase = self.out.vblank_phase();
+        let compose_phase = self.out.compose_phase();
+        let due = self.pacer.due(offered, grid, send_phase, compose_phase);
         (due, grid)
     }
 
-    /// Send MAX's composed boundary at its due instant, and how it was
-    /// paced on the grid.
+    /// #251: wait on the clock for the boundary's compose instant (`None`
+    /// off the grid: at once); when the compose starts, and whether the job
+    /// came after that instant (composed at once: `compose_late`).
+    fn compose_wait(&mut self, compose_at: Option<Instant>) -> (Instant, bool) {
+        match compose_at {
+            Some(at) => wait_for(self.clock.as_mut(), at),
+            None => (self.clock.as_mut().now(), false),
+        }
+    }
+
+    /// Send MAX's boundary, composed at `composing` (its start, late or
+    /// not), at its due instant, and how both were paced on the grid.
     fn send_max(
         &mut self,
         compose: ComposeStats,
         (due, grid): (Due, Option<VblankGrid>),
+        (composed, compose_late): (Instant, bool),
         offered: Instant,
     ) -> Result<Sent, Skip> {
         let Some(sender) = self.max.sender.as_mut() else {
@@ -819,8 +839,9 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
             send_at(self.clock.as_mut(), due.at, offered, || sender.send()).map_err(Skip::frame)?;
         let aligned = grid.map(|grid| Aligned {
             period: grid.period,
-            phase_us: u64::try_from(phase_after_vblank(&grid, timing.started).as_micros())
-                .unwrap_or(u64::MAX),
+            phase_us: phase_after_vblank_us(&grid, timing.started),
+            compose_phase_us: phase_after_vblank_us(&grid, composed),
+            compose_late,
             repicked: due.repicked,
         });
         Ok((compose, send, timing, aligned))

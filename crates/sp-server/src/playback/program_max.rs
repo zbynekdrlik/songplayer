@@ -30,10 +30,11 @@
 //! `"false"`) is read before the thread starts ([`start_max`]) and every
 //! [`MAX_SETTINGS_POLL`] after ([`run_max_settings_task`]). While it is off
 //! the program offers nothing and the thread holds no compositor and no
-//! sender (the Spout name is unregistered). The setting
+//! sender (the Spout name is unregistered). The settings
 //! `program_max_vblank_phase_ms` (where after each vblank of the primary
-//! display, DWM's clock, a send starts, `program_max_vblank.rs`) is read
-//! with it.
+//! display, DWM's clock, a send starts, `program_max_vblank.rs`) and (#251)
+//! `program_max_compose_phase_ms` (where its compose starts) are read with
+//! it (the child module `program_max_phase.rs`).
 //!
 //! Telemetry: [`MaxStatus`], served as `max` on `GET /api/v1/program`.
 //!
@@ -57,8 +58,8 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use sp_core::config::{
-    DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US, SETTING_PROGRAM_MAX_ENABLED,
-    SETTING_PROGRAM_MAX_VBLANK_PHASE_MS, program_max_enabled, program_max_vblank_phase_us,
+    DEFAULT_PROGRAM_MAX_COMPOSE_PHASE_US, DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US,
+    SETTING_PROGRAM_MAX_ENABLED, program_max_enabled,
 };
 use sp_gpu::{
     CANVAS_HEIGHT, CANVAS_WIDTH, ComposeStats, Nv12Picture, SPOUT_SENDER_NAME, SpoutSendStats,
@@ -81,6 +82,9 @@ pub use fhd::{FHD_OFF_MAX, FHD_OFF_SETTING, FhdStatus, fhd_off_reason, load_fhd_
 #[path = "program_max_quiesce.rs"]
 mod quiesce;
 pub use quiesce::{MAX_STOP_WAIT, QUIESCE_EXPIRY, stop_and_wait};
+#[path = "program_max_phase.rs"]
+mod phase;
+pub use phase::{load_max_compose_phase_us, load_max_vblank_phase_us};
 
 /// How many MAX jobs wait for the `program-max` thread: two, then the oldest
 /// is dropped (coalesced) — revision 2's D4 hand-off.
@@ -236,7 +240,7 @@ pub struct MaxStatus {
     /// When the frames were in Spout's shared texture after the program
     /// offered them (the GPU's copy done), µs, over the last
     /// [`MAX_STAT_WINDOW`] sent frames. On the refresh grid the lead
-    /// moves slowly over a window (`program_max_vblank::LEAD_MIN` + up to
+    /// moves slowly over a window (#251: from K, `compose_offset`, up to K +
     /// one period + `LEAD_HYSTERESIS`); without it each frame is sent at the
     /// constant `program_max_send::MAX_SEND_LEAD`.
     pub send_at_us_p50: u64,
@@ -262,12 +266,23 @@ pub struct MaxStatus {
     /// The setting `program_max_vblank_phase_ms`, µs: where after each
     /// vblank a send starts.
     pub vblank_phase_us: u64,
+    /// #251: the setting `program_max_compose_phase_ms`, µs: where after
+    /// each vblank a compose starts.
+    pub compose_phase_us: u64,
     /// Boundaries sent off the grid, at the constant lead (none measured).
     pub send_off_grid: u64,
     /// Where after the vblank those sends started, µs, over the last
     /// [`MAX_STAT_WINDOW`] of them: the setting, unless a compose was late.
     pub send_phase_us_p50: u64,
     pub send_phase_us_p99: u64,
+    /// #251: where after the vblank those boundaries' composes started, µs,
+    /// over the same window: the compose phase setting, unless the job came
+    /// after its compose instant.
+    pub compose_phase_us_p50: u64,
+    pub compose_phase_us_p99: u64,
+    /// #251: boundaries on the grid whose job came after their compose
+    /// instant (composed at once).
+    pub compose_late: u64,
     /// Times a boundary's slot was picked anew (its lead left the window: one
     /// picture shown one refresh more or less); about one per drift cycle
     /// between the display's clock and SongPlayer's, hours apart.
@@ -303,8 +318,10 @@ struct Queue {
     jobs: SubmitQueue<(MaxJob, Instant)>,
     /// The setting, as last applied.
     enabled: bool,
-    /// The setting `program_max_vblank_phase_ms`, as last applied, µs.
+    /// The settings `program_max_vblank_phase_ms` and (#251)
+    /// `program_max_compose_phase_ms`, as last applied, µs.
     vblank_phase_us: u64,
+    compose_phase_us: u64,
     /// #239: the setting `program_spout_fhd_enabled`, as last applied.
     fhd_enabled: bool,
     /// A `program-max` thread takes jobs.
@@ -391,6 +408,8 @@ struct Stats {
     vblank_period_ns: u64,
     off_grid: u64,
     send_phase: Window,
+    compose_phase: Window,
+    compose_late: u64,
     repicks: u64,
     list_holder: Option<ListHolderStatus>,
 }
@@ -449,6 +468,7 @@ impl MaxOut {
                 jobs: SubmitQueue::new(MAX_HANDOFF_BOUND),
                 enabled: false,
                 vblank_phase_us: DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US,
+                compose_phase_us: DEFAULT_PROGRAM_MAX_COMPOSE_PHASE_US,
                 fhd_enabled: false,
                 consumer: false,
                 stop: false,
@@ -478,6 +498,8 @@ impl MaxOut {
                 vblank_period_ns: 0,
                 off_grid: 0,
                 send_phase: Window::default(),
+                compose_phase: Window::default(),
+                compose_late: 0,
                 repicks: 0,
                 list_holder: None,
             }),
@@ -528,19 +550,6 @@ impl MaxOut {
     /// The setting, as last applied.
     pub fn enabled(&self) -> bool {
         self.lock_queue().enabled
-    }
-
-    /// Apply `program_max_vblank_phase_ms` (µs); returns whether it changed.
-    pub fn set_vblank_phase_us(&self, us: u64) -> bool {
-        let mut queue = self.lock_queue();
-        let changed = queue.vblank_phase_us != us;
-        queue.vblank_phase_us = us;
-        changed
-    }
-
-    /// Where after each vblank a send starts (the setting).
-    pub fn vblank_phase(&self) -> Duration {
-        Duration::from_micros(self.lock_queue().vblank_phase_us)
     }
 
     /// Whether an offer now would be taken: on, a thread takes jobs, not
@@ -702,8 +711,8 @@ impl MaxOut {
         log
     }
 
-    /// How a sent boundary was paced: on the grid (`Some`), or at the
-    /// constant lead (counted off the grid).
+    /// How a sent boundary was paced: on the grid (`Some`: its send and,
+    /// #251, its compose), or at the constant lead (counted off the grid).
     pub fn record_vblank(&self, aligned: Option<Aligned>) {
         let mut stats = self.lock_stats();
         stats.vblank_tracking = aligned.is_some();
@@ -713,6 +722,10 @@ impl MaxOut {
         };
         stats.vblank_period_ns = u64::try_from(aligned.period.as_nanos()).unwrap_or(u64::MAX);
         stats.send_phase.push(aligned.phase_us);
+        stats.compose_phase.push(aligned.compose_phase_us);
+        if aligned.compose_late {
+            stats.compose_late += 1;
+        }
         if aligned.repicked {
             stats.repicks += 1;
         }
@@ -721,16 +734,17 @@ impl MaxOut {
     /// The telemetry. The windows are copied under the lock and sorted
     /// after it, so the thread's next record never waits for a sort.
     pub fn status(&self) -> MaxStatus {
-        let (enabled, coalesced, vblank_phase_us, fhd_enabled) = {
+        let (enabled, coalesced, phases, fhd_enabled) = {
             let queue = self.lock_queue();
             (
                 queue.enabled,
                 queue.coalesced,
-                queue.vblank_phase_us,
+                (queue.vblank_phase_us, queue.compose_phase_us),
                 queue.fhd_enabled,
             )
         };
-        let (phase, names, tracking, counts, upload, draw, send, send_at, send_phase) = {
+        let (vblank_phase_us, compose_phase_us) = phases;
+        let (phase, names, tracking, counts, upload, draw, send, send_at, windows) = {
             let stats = self.lock_stats();
             (
                 (stats.phase.clone(), stats.list_holder.clone()),
@@ -746,14 +760,16 @@ impl MaxOut {
                     stats.off_grid,
                     stats.repicks,
                     stats.relists,
+                    stats.compose_late,
                 ],
                 stats.upload.clone(),
                 stats.draw.clone(),
                 stats.send.clone(),
                 stats.send_at.clone(),
-                stats.send_phase.clone(),
+                (stats.send_phase.clone(), stats.compose_phase.clone()),
             )
         };
+        let (send_phase, compose_phase) = windows;
         let ((phase, list_holder), [adapter, vblank_output]) = (phase, names);
         let (tracking, vblank_state) = tracking;
         let [
@@ -766,6 +782,7 @@ impl MaxOut {
             send_off_grid,
             slot_repicks,
             spout_relists,
+            compose_late,
         ] = counts;
         MaxStatus {
             enabled,
@@ -787,9 +804,13 @@ impl MaxOut {
             vblank_tracking: tracking,
             vblank_period_ns,
             vblank_phase_us,
+            compose_phase_us,
             send_off_grid,
             send_phase_us_p50: send_phase.p50(),
             send_phase_us_p99: send_phase.p99(),
+            compose_phase_us_p50: compose_phase.p50(),
+            compose_phase_us_p99: compose_phase.p99(),
+            compose_late,
             slot_repicks,
             device_resets,
             sender_backoffs,
@@ -808,12 +829,6 @@ pub async fn load_max_enabled(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
     Ok(program_max_enabled(raw.as_deref()))
 }
 
-/// Read `program_max_vblank_phase_ms`, µs (`sp_core::config`'s rule).
-pub async fn load_max_vblank_phase_us(pool: &SqlitePool) -> Result<u64, sqlx::Error> {
-    let raw = crate::db::models::get_setting(pool, SETTING_PROGRAM_MAX_VBLANK_PHASE_MS).await?;
-    Ok(program_max_vblank_phase_us(raw.as_deref()))
-}
-
 /// Apply the stored settings to `max` (an unreadable one changes nothing).
 async fn apply_max_setting(pool: &SqlitePool, max: &MaxOut) {
     match load_max_enabled(pool).await {
@@ -824,14 +839,7 @@ async fn apply_max_setting(pool: &SqlitePool, max: &MaxOut) {
         }
         Err(e) => warn!(%e, "program max: reading the setting failed"),
     }
-    match load_max_vblank_phase_us(pool).await {
-        Ok(us) => {
-            if max.set_vblank_phase_us(us) {
-                info!(phase_us = us, "program max: vblank phase applied");
-            }
-        }
-        Err(e) => warn!(%e, "program max: reading the vblank phase failed"),
-    }
+    phase::apply_phase_settings(pool, max).await;
     fhd::apply_fhd_setting(pool, max).await;
 }
 

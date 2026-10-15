@@ -141,11 +141,32 @@ pub const DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US: u64 = 14_000;
 /// (missing, not a number, negative, too large) is
 /// [`DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US`].
 pub fn program_max_vblank_phase_us(raw: Option<&str>) -> u64 {
+    phase_ms_as_us(raw, DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US)
+}
+
+/// #251: where after each vblank of the primary display a `SP-program-MAX`
+/// boundary is COMPOSED, in ms (decimals allowed): the GPU work (the 4K
+/// uploads, the blend draw) must keep clear of the instants Arena renders
+/// and reads Spout in ([`program_max_compose_phase_us`]).
+pub const SETTING_PROGRAM_MAX_COMPOSE_PHASE_MS: &str = "program_max_compose_phase_ms";
+/// #251: the default compose phase, µs: 13 ms after the vblank, inside the
+/// band measured clean on SNV's wall (compose start +10.4 … +15.2 ms:
+/// 0–2 jumps back a minute, against 7–30 at +4.4 … +9 ms; 15.10.2026).
+pub const DEFAULT_PROGRAM_MAX_COMPOSE_PHASE_US: u64 = 13_000;
+
+/// #251: a stored `program_max_compose_phase_ms` in µs, by the rule of
+/// [`program_max_vblank_phase_us`]; else
+/// [`DEFAULT_PROGRAM_MAX_COMPOSE_PHASE_US`].
+pub fn program_max_compose_phase_us(raw: Option<&str>) -> u64 {
+    phase_ms_as_us(raw, DEFAULT_PROGRAM_MAX_COMPOSE_PHASE_US)
+}
+
+/// A stored phase in ms as µs: from 0 up to (not including) 1000 ms,
+/// rounded to the µs; anything else is `default`.
+fn phase_ms_as_us(raw: Option<&str>, default: u64) -> u64 {
     raw.and_then(|v| v.trim().parse::<f64>().ok())
         .filter(|ms| (0.0..1000.0).contains(ms))
-        .map_or(DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US, |ms| {
-            (ms * 1000.0).round() as u64
-        })
+        .map_or(default, |ms| (ms * 1000.0).round() as u64)
 }
 
 /// #223 S3b: hardware video decode for playback — Media Foundation's decoder
@@ -549,6 +570,25 @@ mod tests {
         assert_eq!(program_max_vblank_phase_us(Some("NaN")), 14_000);
         assert_eq!(program_max_vblank_phase_us(Some("8ms")), 14_000);
         assert_eq!(program_max_vblank_phase_us(Some("")), 14_000);
+    }
+
+    /// #251: the compose phase takes the same rule, its own 13 ms default
+    /// (inside the band measured clean on SNV's wall, 15.10.2026).
+    #[test]
+    fn the_max_compose_phase_is_ms_from_zero_to_under_a_second() {
+        assert_eq!(
+            SETTING_PROGRAM_MAX_COMPOSE_PHASE_MS,
+            "program_max_compose_phase_ms"
+        );
+        assert_eq!(DEFAULT_PROGRAM_MAX_COMPOSE_PHASE_US, 13_000);
+        assert_eq!(program_max_compose_phase_us(None), 13_000);
+        assert_eq!(program_max_compose_phase_us(Some("11")), 11_000);
+        assert_eq!(program_max_compose_phase_us(Some(" 12.25\n")), 12_250);
+        assert_eq!(program_max_compose_phase_us(Some("0")), 0, "0 is a phase");
+        assert_eq!(program_max_compose_phase_us(Some("999.9")), 999_900);
+        assert_eq!(program_max_compose_phase_us(Some("1000")), 13_000);
+        assert_eq!(program_max_compose_phase_us(Some("-1")), 13_000);
+        assert_eq!(program_max_compose_phase_us(Some("13ms")), 13_000);
     }
 
     /// #223 S3b: hardware decode is OFF unless the setting says exactly
