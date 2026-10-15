@@ -181,8 +181,19 @@ test.describe("#200: real mouse drags commit exactly once", () => {
     await expect(player).toBeVisible({ timeout: 15000 });
     const box = page.locator(".player-preview .preview-video-box, .player-preview .preview-placeholder").first();
     await expect(box).toBeVisible({ timeout: 10000 });
-    const pw = (await player.boundingBox())!.width;
-    const bw = (await box.boundingBox())!.width;
-    expect(bw).toBeGreaterThan(pw * 0.9);
+    // The placeholder and the video box swap when the transport state
+    // arrives (#266), so the box seen visible above can be gone at the next
+    // read (CI 38808897308: boundingBox null). Read both widths together,
+    // again until the box present then fills the Player.
+    await expect
+      .poll(
+        async () => {
+          const p = await player.boundingBox();
+          const b = await box.boundingBox();
+          return p && b ? b.width / p.width : 0;
+        },
+        { timeout: 10000 },
+      )
+      .toBeGreaterThan(0.9);
   });
 });
