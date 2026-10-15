@@ -8,6 +8,8 @@
 //! then the pick ([`next_song`]), then S11's [`super::run`]. A failure whose
 //! text names YouTube's bot check pauses every upgrade for [`BOT_PAUSE_MS`].
 //! `GET /api/v1/video-upgrade` reads [`counts`] and the [`WorkerState`].
+//! #277: before the upgrade, each tick runs one repair a play asked for
+//! (`repair::tick`), whatever the switch says.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
@@ -339,6 +341,10 @@ pub(crate) async fn run(
             None => Ticked::Skipped(Skip::NoTools),
             Some(tools) => {
                 let steps = super::steps::Real::new(&tools, &cache_dir);
+                // #277: a repair a play asked for first, switch on or off.
+                let now = crate::peer::wire::now_ms();
+                super::repair::tick(&pool, &cache_dir, super::repair::requests(), &steps, now)
+                    .await;
                 let free = super::disk::free_bytes(&cache_dir);
                 tick(
                     &pool,

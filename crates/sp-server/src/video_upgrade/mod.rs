@@ -20,8 +20,10 @@
 //! The steps that run yt-dlp and the readers are a [`Steps`]: production's
 //! is `steps::Real`, the tests script one. S12: `worker` runs this by
 //! itself, `retention` deletes a `.prev` once it is not needed, `rollback`
-//! puts it back after a failed open.
+//! puts it back after a failed open. #277: `repair` remuxes a video Media
+//! Foundation stops on (late SEI) through the same checks and swap.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -31,6 +33,7 @@ use sqlx::SqlitePool;
 use crate::downloader::format::{self, DownloadedFormat};
 
 pub(crate) mod disk;
+pub(crate) mod repair;
 pub(crate) mod retention;
 pub(crate) mod rollback;
 pub(crate) mod steps;
@@ -46,6 +49,9 @@ pub(crate) const ROW_PAD: u32 = 16;
 pub(crate) const DURATION_SLACK_MS: u64 = 1000;
 /// The near-end picture is read this long before the end.
 pub(crate) const NEAR_END_MS: u64 = 2000;
+/// [`facts_of`]'s error when the reader opens the file but hands out no
+/// picture at all (#277: a file Media Foundation stops on at once).
+pub(crate) const NO_PICTURE: &str = "no picture";
 
 /// What the reader that plays a video file reads of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -69,7 +75,7 @@ pub(crate) fn facts_of<V: VideoStream + ?Sized>(video: &mut V) -> Result<VideoFa
     let first = video
         .next_frame()
         .map_err(|e| format!("the first picture: {e}"))?
-        .ok_or("no picture")?;
+        .ok_or(NO_PICTURE)?;
     let duration_ms = video.duration_ms();
     let (num, den) = video.frame_rate();
     let frame_us = if num == 0 {
@@ -119,6 +125,35 @@ pub(crate) fn verify(
             new.height, old.height
         ));
     }
+    plays_like(old.first_ms, new, audio_ms)
+}
+
+/// #277: whether a repaired (remuxed) video may replace the cached one, else
+/// why not. `old` = the cached video's facts when the reader reads a picture
+/// of it at all; a file it stops on at once has none, and its first picture
+/// is then expected at the stream's start (0).
+pub(crate) fn verify_repair(
+    old: Option<&VideoFacts>,
+    new: &VideoFacts,
+    audio_ms: u64,
+) -> Result<(), String> {
+    if let Some(old) = old
+        && new.height != old.height
+    {
+        return Err(format!(
+            "it reads {} rows, the cached video {}",
+            new.height, old.height
+        ));
+    }
+    plays_like(old.map_or(0, |old| old.first_ms), new, audio_ms)
+}
+
+/// The checks a replacement video shares (S11's step 5, #277): a length
+/// within [`DURATION_SLACK_MS`] of the audio's, a picture [`NEAR_END_MS`]
+/// before its end, and its first picture within one frame period of
+/// `first_ms`, the cached video's (lyrics and the title follow the audio
+/// clock).
+fn plays_like(first_ms: u64, new: &VideoFacts, audio_ms: u64) -> Result<(), String> {
     if new.duration_ms.abs_diff(audio_ms) > DURATION_SLACK_MS {
         return Err(format!(
             "it is {} ms long, the audio {audio_ms} ms",
@@ -130,11 +165,11 @@ pub(crate) fn verify(
             "no picture {NEAR_END_MS} ms before its end decoded"
         ));
     }
-    let shift_us = new.first_ms.abs_diff(old.first_ms) * 1000;
+    let shift_us = new.first_ms.abs_diff(first_ms) * 1000;
     if shift_us > new.frame_us {
         return Err(format!(
-            "its first picture is at {} ms, the cached one's at {} ms",
-            new.first_ms, old.first_ms
+            "its first picture is at {} ms, the cached one's at {first_ms} ms",
+            new.first_ms
         ));
     }
     Ok(())
@@ -215,6 +250,11 @@ pub(crate) trait Steps {
     ) -> Result<Option<DownloadedFormat>, String>;
     /// The length of the audio file at `path`.
     async fn audio_ms(&self, path: &Path) -> Result<u64, String>;
+    /// #277: the video codec of the file at `path` as the reader that plays
+    /// it names it (Media Foundation's subtype: `H264`, `AV01`, `VP90`).
+    async fn codec(&self, path: &Path) -> Result<String, String>;
+    /// #277: run the box's ffmpeg with `args` (`repair::remux_args`).
+    async fn ffmpeg(&self, args: &[OsString]) -> Result<(), String>;
 }
 
 /// How one upgrade ended.

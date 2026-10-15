@@ -888,3 +888,7 @@ async fn a_failed_open_of_an_upgraded_song_puts_its_old_video_back() {
     assert_eq!(std::fs::read_to_string(&video).unwrap(), "old");
     assert!(!prev.exists());
 }
+
+/// #277: an early end of the video (a child module over this rig).
+#[path = "failure_retry_tests_early_end.rs"]
+mod ended_early;

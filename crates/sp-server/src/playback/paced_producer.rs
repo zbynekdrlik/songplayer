@@ -16,12 +16,18 @@
 //! steps stop when the audio ended, or at `AUDIO_PAST_VIDEO_MAX_MS` (the rest
 //! is cut and the song's end counts one `underrun_end`).
 //!
+//! #277: a video whose picture stops long before the video reader's own
+//! duration has no held tail: the song ends there as a FAILURE
+//! ([`DecodeProducer::early_end`], `playback::early_end`), never as its
+//! natural end.
+//!
 //! The Windows producer thread (`pipeline_paced::run_decode_producer`) only
 //! opens the readers and pushes what this hands it, so every item is built
 //! and tested here, on Linux.
 
 use sp_decoder::{DecodedAudioFrame, DecodedVideoFrame, DecoderError, SplitSyncedDecoder};
 
+use crate::playback::early_end::EarlyEnd;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::pacer::PacedFrame;
 use crate::playback::pipeline::real_seek_ms;
@@ -67,6 +73,9 @@ pub struct DecodeProducer {
     epoch: u64,
     /// The last picture handed on: what the held steps show (#257).
     held: Option<Held>,
+    /// #277: the video ended long before its own duration (since the start
+    /// or the last seek): the song failed.
+    early: Option<EarlyEnd>,
 }
 
 impl DecodeProducer {
@@ -78,6 +87,7 @@ impl DecodeProducer {
             current_ms: start_ms,
             epoch: 0,
             held: None,
+            early: None,
         }
     }
 
@@ -86,10 +96,20 @@ impl DecodeProducer {
         self.epoch
     }
 
+    /// #277: the video ended long before its own duration since the start
+    /// or the last seek: the song is a failure, not over.
+    pub fn early_end(&self) -> Option<EarlyEnd> {
+        self.early
+    }
+
     /// The next item for the queue, offered to the preview taps on the way
     /// (`preview.md`): the next decoded frame, or past the video's end a held
     /// step (#257). `Ok(None)` at the song's end: the audio ended, the held
     /// steps reached their bound, or no picture was ever decoded to hold.
+    /// #277: also when the video ended early ([`Self::early_end`]), with no
+    /// held step: measured at the last picture handed out (or the last frame
+    /// a seek's fast-forward decoded, else where the song plays from)
+    /// against the video reader's own duration.
     pub fn next_item(
         &mut self,
         decoder: &mut SplitSyncedDecoder,
@@ -105,7 +125,15 @@ impl DecodeProducer {
         }
         // A seek to or past the last frame: the last frame its fast-forward
         // decoded is the picture to hold.
-        if let Some(last) = decoder.take_frame_before_end() {
+        let before_end = decoder.take_frame_before_end();
+        let at_ms = before_end
+            .as_ref()
+            .map_or(self.current_ms, |last| last.timestamp_ms);
+        if let Some(early) = EarlyEnd::of(at_ms, decoder.video_duration_ms()) {
+            self.early = Some(early);
+            return Ok(None);
+        }
+        if let Some(last) = before_end {
             self.held = Some(Held::of(&to_paced_frame(last, Vec::new(), 0)));
         }
         let Some(held) = &self.held else {
@@ -156,6 +184,8 @@ impl DecodeProducer {
         if moved {
             self.held = None;
         }
+        // #277: the video plays again from here.
+        self.early = None;
         self.pts_offset_ms = real;
         self.current_ms = real;
         self.epoch = epoch;

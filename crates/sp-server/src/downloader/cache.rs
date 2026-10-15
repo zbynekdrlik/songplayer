@@ -71,8 +71,9 @@ pub struct ScanResult {
     /// [`remove_duplicates`] at startup.
     pub duplicates: Vec<CachedSong>,
     /// #223 S9b (D8): a crashed download's temps (`{id}_video_temp.mp4`,
-    /// `{id}_audio_temp.*`, `{id}_video_upgrade_temp.*`), removed at startup
-    /// before the download worker runs.
+    /// `{id}_audio_temp.*`, `{id}_video_upgrade_temp.*`,
+    /// `{id}_video_repair_temp.*`), removed at startup before the download
+    /// worker runs.
     pub temps: Vec<PathBuf>,
 }
 
@@ -93,7 +94,8 @@ static VOCALS_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^([a-zA-Z0-9_-]{11})_vocals16k\.wav$").unwrap());
 
 /// A download's temp (`downloader::DownloadWorker`'s `{id}_video_temp.mp4`
-/// and `{id}_audio_temp.%(ext)s`, and the in-place upgrade's).
+/// and `{id}_audio_temp.%(ext)s`, the in-place upgrade's and, #277, the
+/// repair's `{id}_video_repair_temp.mp4`).
 static TEMP_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^[a-zA-Z0-9_-]{11}_(?:video|audio)(?:_upgrade)?_temp(?:\..+)?$").unwrap()
 });
