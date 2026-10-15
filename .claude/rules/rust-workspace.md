@@ -933,6 +933,13 @@ the test that kills each one BEFORE CI's mutation gate runs.
   and survives. Subtract ONCE into a local (`let offset = …; (offset / ds,
   offset % ds)`), so the mutant also moves the quotient, which a test sees
   (#215 addendum 3, `nv12_mix.rs`).
+- The same trap inside a modular difference (#251, `compose_offset`):
+  `(a % p + p - b % p) % p` lists `a % p` → `a + p`, and the outer `% p`
+  makes it EQUIVALENT (it adds a whole p). Do not reduce a term the outer
+  `% p` reduces anyway: write `(a + p - b % p) % p` (the same value, no
+  underflow as `a + p > b % p`). The `b % p` that stays must be reduced,
+  and its `b + p` mutant then underflows on a test with `b > a`, so keep
+  one such case in the pins.
 - **Key the harness by `line:col`, not by hand-named switches (#233 lane
   2).** Write every operator of the model as a call carrying its Rust site
   (`B("142:30", "-", a, b)`, comparisons, compound assignments, `delete !` /
