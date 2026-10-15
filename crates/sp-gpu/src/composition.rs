@@ -15,6 +15,13 @@
 //! result is the CPU fade's `from·(1 − w) + to·w` with each side's bars
 //! black.
 //!
+//! #251 step 2: both targets are drawn by ONE compositor from ONE upload of
+//! each picture. A compositor holds several render targets ([`Target`]:
+//! [`MAX_TARGET`], [`FHD_TARGET`]); [`Composition::pictures`] are what one
+//! compose uploads, and each target draws [`Composition::layers_on`] it:
+//! the same pictures in the same slots at the same weights, placed by that
+//! target's rule.
+//!
 //! #267: the two targets place a picture differently, each rule named once
 //! here. MAX is the LED wall's feed: [`MAX_FIT`] fills the canvas's whole
 //! width (`sp_core::fit::fill_width`; a 4:3 picture is cropped top and
@@ -81,6 +88,31 @@ pub const MAX_FIT: Fit = Fit::FillWidth;
 /// the whole picture with its bars, as the NDI `SP-program` carries it.
 pub const FHD_FIT: Fit = Fit::Aspect;
 
+/// #251 step 2: a render target a compositor draws: its size and the rule
+/// that places each picture in it, fixed for the target's life.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Target {
+    pub width: u32,
+    pub height: u32,
+    pub fit: Fit,
+}
+
+/// `SP-program-MAX`'s target: the fixed 3840×2160 canvas, each picture
+/// filling its width ([`MAX_FIT`]).
+pub const MAX_TARGET: Target = Target {
+    width: CANVAS_WIDTH,
+    height: CANVAS_HEIGHT,
+    fit: MAX_FIT,
+};
+
+/// The `SP-program` Spout sender's target (#239): the FHD program's
+/// 1920×1080, each picture with its bars ([`FHD_FIT`]).
+pub const FHD_TARGET: Target = Target {
+    width: FHD_WIDTH,
+    height: FHD_HEIGHT,
+    fit: FHD_FIT,
+};
+
 /// What one boundary of `SP-program-MAX` shows.
 #[derive(Debug, Clone, Copy)]
 pub enum Composition<'a> {
@@ -137,17 +169,50 @@ pub struct Layer<'a> {
 
 impl<'a> Composition<'a> {
     /// The quads that draw it into `SP-program-MAX`'s 3840×2160 canvas:
-    /// [`layers_in`](Self::layers_in) [`CANVAS_WIDTH`] × [`CANVAS_HEIGHT`]
-    /// by [`MAX_FIT`].
+    /// [`layers_on`](Self::layers_on) [`MAX_TARGET`].
     pub fn layers(&self) -> Vec<Layer<'a>> {
-        self.layers_in(CANVAS_WIDTH, CANVAS_HEIGHT, MAX_FIT)
+        self.layers_on(MAX_TARGET)
+    }
+
+    /// #251 step 2: the quads that draw it into `target`:
+    /// [`layers_in`](Self::layers_in) its size by its rule.
+    pub fn layers_on(&self, target: Target) -> Vec<Layer<'a>> {
+        self.layers_in(target.width, target.height, target.fit)
     }
 
     /// The quads to draw over a black `width`×`height` target, in draw
     /// order: the outgoing side, then the incoming one, each placed into
     /// that target by `fit`. A side of weight 0 is not drawn (and not
     /// uploaded): the black has no layer, a plain picture one at weight 1.
+    /// Whatever the target, the layers carry [`pictures`](Self::pictures):
+    /// the same slots and pictures.
     pub fn layers_in(&self, width: u32, height: u32, fit: Fit) -> Vec<Layer<'a>> {
+        self.sides()
+            .map(|(slot, picture, q8)| {
+                let fill = fit.place(picture.width, picture.height, width, height);
+                Layer {
+                    slot,
+                    picture,
+                    place: fill.place,
+                    uv_rect: uv_rect(fill),
+                    weight: q8 as f32 / Q8_ONE as f32,
+                }
+            })
+            .collect()
+    }
+
+    /// #251 step 2: the pictures it draws, each in its texture slot, in
+    /// draw order: what ONE compose uploads, whatever targets it draws
+    /// (each target's [`layers_on`](Self::layers_on) samples exactly these).
+    pub fn pictures(&self) -> Vec<(Slot, Nv12Picture<'a>)> {
+        self.sides()
+            .map(|(slot, picture, _)| (slot, picture))
+            .collect()
+    }
+
+    /// The drawn sides: slot, picture and Q8 weight, in draw order. A side
+    /// of weight 0, or with no picture, is not drawn.
+    fn sides(&self) -> impl Iterator<Item = (Slot, Nv12Picture<'a>, u32)> {
         let (from, to, to_q8) = match *self {
             Composition::Black => (None, None, 0),
             Composition::Picture(picture) => (Some(picture), None, 0),
@@ -163,19 +228,7 @@ impl<'a> Composition<'a> {
         ]
         .into_iter()
         .filter(|&(_, _, q8)| q8 > 0)
-        .filter_map(|(slot, picture, q8)| {
-            picture.map(|picture| {
-                let fill = fit.place(picture.width, picture.height, width, height);
-                Layer {
-                    slot,
-                    picture,
-                    place: fill.place,
-                    uv_rect: uv_rect(fill),
-                    weight: q8 as f32 / Q8_ONE as f32,
-                }
-            })
-        })
-        .collect()
+        .filter_map(|(slot, picture, q8)| picture.map(|picture| (slot, picture, q8)))
     }
 }
 

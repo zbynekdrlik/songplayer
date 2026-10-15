@@ -27,13 +27,15 @@ use crate::quad::{QUAD_CONSTANTS_BYTES, QuadConstants};
 /// The compositor's HLSL: one quad per picture (`compose.hlsl`).
 const SHADER: &str = include_str!("../compose.hlsl");
 
-/// How long [`Pipeline::wait_until_done`] waits for the GPU before it reports
+/// How long [`wait_until_each_done`] waits for the GPU before it reports
 /// [`GpuError::Timeout`]. A frame takes milliseconds; a hung GPU is reset by
 /// Windows after 2 s (TDR) and then reports the device removed, so this only
 /// bounds a driver that never answers.
 const FRAME_WAIT_LIMIT: Duration = Duration::from_secs(10);
 
-/// What the compositor draws with: created once per device.
+/// What the compositor draws with: created once per device, shared by
+/// every target (#251 step 2: a target only brings its render target and
+/// its event query).
 pub(super) struct Pipeline {
     vertex: ID3D11VertexShader,
     pixel: ID3D11PixelShader,
@@ -41,7 +43,6 @@ pub(super) struct Pipeline {
     blend: ID3D11BlendState,
     raster: ID3D11RasterizerState,
     constants: ID3D11Buffer,
-    done: ID3D11Query,
 }
 
 /// One quad to draw: its constants and the plane textures it samples.
@@ -126,7 +127,6 @@ impl Pipeline {
             blend: blend(device)?,
             raster: raster(device)?,
             constants: constants(device)?,
-            done: query(device)?,
         })
     }
 
@@ -181,48 +181,59 @@ impl Pipeline {
             context.PSSetShaderResources(0, Some(&[None, None]));
         }
     }
-
-    /// Flush the queued work and wait until the GPU has finished it (an
-    /// event query), yielding the thread between polls.
-    pub fn wait_until_done(&self, context: &ID3D11DeviceContext) -> Result<(), GpuError> {
-        wait_until_done_on(context, &self.done)
-    }
 }
 
 /// Flush the work queued on `context` and wait until the GPU has finished
 /// it, through the event query `done`, yielding the thread between polls:
-/// the compositor's frame wait, and the Spout sender's wait for its copy
-/// into Spout's shared texture (#223 follow-up).
+/// the Spout sender's wait for its copy into Spout's shared texture (#223
+/// follow-up).
 pub(super) fn wait_until_done_on(
     context: &ID3D11DeviceContext,
     done: &ID3D11Query,
 ) -> Result<(), GpuError> {
+    unsafe { context.End(done) };
+    wait_until_each_done(context, &[done]).map(|_| ())
+}
+
+/// #251 step 2: flush the work queued on `context` ONCE and wait until the
+/// GPU has finished each of `done` (event queries the caller ended in draw
+/// order: the compositor's one per target), yielding the thread between
+/// polls; the instant each was seen finished. The whole wait is bounded by
+/// [`FRAME_WAIT_LIMIT`].
+pub(super) fn wait_until_each_done(
+    context: &ID3D11DeviceContext,
+    done: &[&ID3D11Query],
+) -> Result<Vec<Instant>, GpuError> {
     let start = Instant::now();
+    unsafe { context.Flush() };
+    let mut seen = Vec::with_capacity(done.len());
+    for query in done {
+        while !finished(context, query)? {
+            if start.elapsed() > FRAME_WAIT_LIMIT {
+                return Err(GpuError::Timeout(FRAME_WAIT_LIMIT.as_millis() as u64));
+            }
+            std::thread::yield_now();
+        }
+        seen.push(Instant::now());
+    }
+    Ok(seen)
+}
+
+/// Whether the GPU has passed the event query `done`.
+fn finished(context: &ID3D11DeviceContext, done: &ID3D11Query) -> Result<bool, GpuError> {
+    let mut finished = FALSE;
+    // SAFETY: an event query's data is one BOOL, written into `finished`
+    // (S_FALSE leaves it FALSE: not done yet).
     unsafe {
-        context.End(done);
-        context.Flush();
+        context.GetData(
+            done,
+            Some((&mut finished as *mut BOOL).cast::<c_void>()),
+            std::mem::size_of::<BOOL>() as u32,
+            0,
+        )
     }
-    loop {
-        let mut finished = FALSE;
-        // SAFETY: an event query's data is one BOOL, written into
-        // `finished` (S_FALSE leaves it FALSE: not done yet).
-        unsafe {
-            context.GetData(
-                done,
-                Some((&mut finished as *mut BOOL).cast::<c_void>()),
-                std::mem::size_of::<BOOL>() as u32,
-                0,
-            )
-        }
-        .map_err(|e| failed("GetData", &e))?;
-        if finished.as_bool() {
-            return Ok(());
-        }
-        if start.elapsed() > FRAME_WAIT_LIMIT {
-            return Err(GpuError::Timeout(FRAME_WAIT_LIMIT.as_millis() as u64));
-        }
-        std::thread::yield_now();
-    }
+    .map_err(|e| failed("GetData", &e))?;
+    Ok(finished.as_bool())
 }
 
 /// Bilinear, clamped at the edges (the reference's `taps`), no mips.
@@ -307,7 +318,8 @@ fn constants(device: &ID3D11Device) -> Result<ID3D11Buffer, GpuError> {
     created(buffer, "CreateBuffer")
 }
 
-/// The event query that tells when the GPU has finished a frame.
+/// The event query that tells when the GPU has finished a target's draw,
+/// or a Spout copy.
 pub(super) fn query(device: &ID3D11Device) -> Result<ID3D11Query, GpuError> {
     let desc = D3D11_QUERY_DESC {
         Query: D3D11_QUERY_EVENT,

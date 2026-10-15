@@ -4,8 +4,8 @@
 use sp_core::fit::{Fill, Placement, aspect_fit, fill_width};
 
 use super::{
-    CANVAS_HEIGHT, CANVAS_WIDTH, Composition, FHD_FIT, FHD_HEIGHT, FHD_WIDTH, Fit, Layer, MAX_FIT,
-    Slot,
+    CANVAS_HEIGHT, CANVAS_WIDTH, Composition, FHD_FIT, FHD_HEIGHT, FHD_TARGET, FHD_WIDTH, Fit,
+    Layer, MAX_FIT, MAX_TARGET, Slot, Target,
 };
 use crate::picture::Nv12Picture;
 
@@ -308,4 +308,112 @@ fn each_rule_places_by_its_sp_core_function() {
 fn each_slot_has_its_own_texture_index() {
     assert_eq!(Slot::Outgoing.index(), 0);
     assert_eq!(Slot::Incoming.index(), 1);
+}
+
+/// #251 step 2: each target is its size and its rule, named once.
+#[test]
+fn the_two_targets_are_max_s_canvas_and_sp_program_s() {
+    assert_eq!(
+        (MAX_TARGET.width, MAX_TARGET.height, MAX_TARGET.fit),
+        (3840, 2160, MAX_FIT)
+    );
+    assert_eq!(
+        (FHD_TARGET.width, FHD_TARGET.height, FHD_TARGET.fit),
+        (1920, 1080, FHD_FIT)
+    );
+}
+
+/// (slot, picture id) of each picture one compose uploads.
+fn uploads(composition: &Composition<'_>) -> Vec<(Slot, u64)> {
+    composition
+        .pictures()
+        .iter()
+        .map(|(slot, picture)| (*slot, picture.id))
+        .collect()
+}
+
+/// (slot, picture id) of each layer a target draws.
+fn sampled(layers: &[Layer<'_>]) -> Vec<(Slot, u64)> {
+    layers.iter().map(|l| (l.slot, l.picture.id)).collect()
+}
+
+/// #251 step 2: ONE compose uploads `pictures()`, and EVERY target's
+/// layers sample exactly those (the same slots, the same pictures): MAX and
+/// the FHD program are drawn from one upload.
+#[test]
+fn every_target_draws_the_pictures_one_compose_uploads() {
+    let fade = |weight_q8| Composition::Fade {
+        from: Some(picture(7, 2560, 1440)),
+        to: Some(picture(8, 1440, 1080)),
+        weight_q8,
+    };
+    let cases = [
+        (Composition::Black, vec![]),
+        (
+            Composition::Picture(picture(5, 1280, 720)),
+            vec![(Slot::Outgoing, 5)],
+        ),
+        (fade(64), vec![(Slot::Outgoing, 7), (Slot::Incoming, 8)]),
+        (fade(0), vec![(Slot::Outgoing, 7)]),
+        (fade(256), vec![(Slot::Incoming, 8)]),
+        (
+            Composition::Fade {
+                from: None,
+                to: Some(picture(8, 1440, 1080)),
+                weight_q8: 128,
+            },
+            vec![(Slot::Incoming, 8)],
+        ),
+    ];
+    for (composition, want) in cases {
+        assert_eq!(uploads(&composition), want, "{composition:?}");
+        for target in [MAX_TARGET, FHD_TARGET] {
+            assert_eq!(
+                sampled(&composition.layers_on(target)),
+                want,
+                "{composition:?} on {target:?}"
+            );
+        }
+    }
+}
+
+/// #251 step 2: one composition, both targets: the same weights, each
+/// side placed by its target's rule (MAX fills the width, the FHD program
+/// keeps its bars).
+#[test]
+fn one_composition_is_placed_on_each_target_by_its_rule() {
+    let fade = Composition::Fade {
+        from: Some(picture(7, 2560, 1440)),
+        to: Some(picture(8, 1440, 1080)),
+        weight_q8: 64,
+    };
+    assert_eq!(
+        summary(&fade.layers_on(MAX_TARGET)),
+        [
+            (Slot::Outgoing, 7, FULL, WHOLE, 0.75),
+            (Slot::Incoming, 8, FULL, CROP_4_3, 0.25),
+        ]
+    );
+    assert_eq!(
+        summary(&fade.layers_on(FHD_TARGET)),
+        [
+            (Slot::Outgoing, 7, FHD_FULL, WHOLE, 0.75),
+            (Slot::Incoming, 8, FHD_PILLARBOX, WHOLE, 0.25),
+        ]
+    );
+    assert_eq!(
+        summary(&fade.layers()),
+        summary(&fade.layers_on(MAX_TARGET)),
+        "layers() is MAX's target"
+    );
+    let small = Target {
+        width: 640,
+        height: 480,
+        fit: Fit::FillWidth,
+    };
+    assert_eq!(
+        summary(&fade.layers_on(small)),
+        summary(&fade.layers_in(640, 480, Fit::FillWidth)),
+        "any target: its own size and rule"
+    );
 }

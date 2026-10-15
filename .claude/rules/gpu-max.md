@@ -20,7 +20,9 @@ the GPU. This crate is the compositor (device, upload, draw, readback) and,
 since S1b, its Spout sender (below); S2 wires both into the program output
 (sp-server `playback/program_max.rs` + `program_max_worker.rs`, "Runtime
 wiring" below). #239: the same thread also sends the FHD program as the
-Spout sender `SP-program` (1920×1080), "The FHD Spout sender" below.
+Spout sender `SP-program` (1920×1080), "The FHD Spout sender" below; #251
+step 2: from a SECOND TARGET of the same compositor (one device, one upload
+of each picture, both targets drawn at the compose phase).
 
 ## What one boundary draws (`composition.rs`)
 
@@ -78,16 +80,25 @@ Spout sender `SP-program` (1920×1080), "The FHD Spout sender" below.
   - **Rejected:** a quad that extends past the target, or a scissor. Either
     needs a signed `Placement` through the layers, the reference's coverage
     and the WARP edge points.
-- #239 / #267: the target AND its rule belong to the compositor and are
-  fixed for its life.
+- #239 / #267 / #251 step 2: a TARGET is a size and its rule
+  (`Target { width, height, fit }`, `MAX_TARGET` = 3840×2160 `MAX_FIT`,
+  `FHD_TARGET` = 1920×1080 `FHD_FIT`), fixed for the target's life.
   - `Compositor::new()` / `new_warp()` / `new_on_listed_adapter(i)` build
-    MAX's: `CANVAS_*` with `MAX_FIT`.
-  - `with_size(w, h, fit)` / `new_warp_with_size(w, h, fit)` name the rule.
-    sp-server builds the FHD side with
-    `with_size(FHD_WIDTH, FHD_HEIGHT, FHD_FIT)`.
-  - `layers()` is `layers_in(CANVAS_WIDTH, CANVAS_HEIGHT, MAX_FIT)`.
-    `layers_in(w, h, fit)` places into any target (`FHD_WIDTH` ×
-    `FHD_HEIGHT` = 1920×1080 for `SP-program`).
+    a compositor whose PRIMARY target is MAX's; `with_size(w, h, fit)` /
+    `new_warp_with_size(w, h, fit)` name another primary (tests). The
+    primary is the compositor's for its life (`TargetId::PRIMARY`).
+  - #251 step 2: `add_target(target) -> Result<TargetId, GpuError>` adds a
+    target (a shared BGRA render target + its own event query) drawn by
+    every later compose; `remove_target(id)` stops it (never the
+    primary). sp-server adds `FHD_TARGET` to MAX's compositor. The ids and
+    the draw order (primary first, then as added; an id never reused) are
+    the pure `targets.rs` `Targets<T>`, which `win/mod.rs` holds its
+    targets in.
+  - `layers()` is `layers_on(MAX_TARGET)`; `layers_on(target)` =
+    `layers_in(w, h, fit)`, which places into any target.
+  - `pictures()` = the (slot, picture) pairs one compose UPLOADS, in draw
+    order, whatever the targets; every target's layers sample exactly
+    those (`composition_tests.rs::every_target_draws_the_pictures_one_compose_uploads`).
   - The target size also drives `QuadConstants::new(place, uv_rect,
     weight, w, h)`, the viewport, the render target, the staging copy and
     the readback.
@@ -181,6 +192,18 @@ Spout sender `SP-program` (1920×1080), "The FHD Spout sender" below.
   is drawn as a plain picture from the `Outgoing` slot, so a held incoming
   picture is uploaded once more (one upload; a live song brings a new id
   every boundary anyway).
+- #251 step 2: the slots belong to the COMPOSITOR, not to a target.
+  `compose` checks and uploads `pictures()` once, then draws every target
+  from those textures (each through its own viewport, `QuadConstants` and
+  render target), ends each target's event query after its draw, flushes
+  ONCE and waits for them in order (`pipeline::wait_until_each_done`).
+  `ComposeStats::draw_us` covers every target; `draw_us(id)` is a target's
+  OWN part (from the end of the target before, the first draw command for
+  the first, until its query passed: the pure `stats::target_draws_us`).
+  WARP pins: `tests/warp.rs` "one compose fills both targets", "each
+  picture is uploaded once for both targets" (the same `uploads` as MAX
+  alone), "a 4:3 picture fills MAX's width and keeps FHD's bars in one
+  compose", "a removed target is no longer drawn".
 
 ## Device, render target, Spout facts
 
@@ -295,6 +318,12 @@ anchors are on #223 (comment 5984577044).
 - `SpoutSender::new(&Compositor)` → `send()` after each `compose()`, on the
   same thread → `SpoutSendStats { send_us }`. `with_name` is doc-hidden, for
   tests. `registration()` says where it is (`spout_state::Registration`).
+  #251 step 2: `for_target(&c, target, name)` sends a given target (its
+  own reference to that texture; an id the compositor does not hold is
+  `GpuError::NoObject` before Spout); `new` = the primary,
+  `new_fhd(&c, target)` = `SP-program` of the FHD target. Two senders on
+  one compositor share its immediate context and each waits for its own
+  copy (`tests/spout.rs::two_senders_on_one_compositor_are_listed_with_their_own_sizes`).
 - **Neither the sender nor the `Compositor` is `Send` (nor `Sync`).** The
   sender drives the compositor's immediate context (spoutDX takes it with
   `GetImmediateContext`), which is not thread-safe; if either could cross
@@ -498,7 +527,7 @@ abandoned 41 ms later and released it). A receiver cannot be fixed, so:
    offered while it holds, and the `program-max` thread's next step is
    `MaxNext::Quiesce` (after a stop, before everything else, whatever the
    setting), once per quiesce. `MaxWorker::quiesce` drops both senders
-   (MAX, then `SP-program`, each before its compositor), stops the list
+   (MAX, then `SP-program`; #251 step 2: then their one compositor), stops the list
    sentinel and reports `quiesced`; the thread then waits: no Spout call
    runs when the kill lands. Every workflow step that kills SongPlayer
    runs `scripts/spout-quiesce.ps1` first (`ci-workflows.md`). Not limited
@@ -680,16 +709,44 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
 ### The `program-max` thread (`program_max_worker.rs`)
 
 - `run_max_loop(out, gpu)`: `attach`, then `next` → `serve` / `release` /
-  exit. The GPU is the `MaxGpu` trait (`compositor()`, `sender(&c)`, each
-  object `MaxCompositor::compose` / `MaxSender::send`), so every decision is
-  Linux-tested on a fake (`program_max_worker_tests.rs`). Production is
-  `SpoutGpu` (`Compositor::new()` on the picked adapter, `SpoutSender::new`
-  = `SP-program-MAX`), spawned by `start_max` on Windows as thread
-  `program-max`.
-- Both objects are built ON the thread at the first job (neither is `Send`)
-  and dropped sender first (it holds references into the compositor's
-  device and render target).
-- **Picture ids (`PictureIds`).** S1a's residency skips the upload of an id
+  exit. The GPU is the `MaxGpu` trait (`compositor()`, `sender(&c)`,
+  `fhd_sender(&c, target)`; `MaxCompositor::{compose, adapter, add_target,
+  remove_target, draw_us}`, `MaxSender::{send, listed_size}`; since #251
+  step 2 in `program_max_gpu.rs`, re-exported by the worker), so every
+  decision is Linux-tested on a fake (`program_max_worker_tests.rs`: ONE
+  `FakeCompositor` minting target ids with the real `sp_gpu::Targets`).
+  Production is `SpoutGpu` (`Compositor::new()` on the picked adapter,
+  `SpoutSender::new` = `SP-program-MAX`), spawned by `start_max` on Windows
+  as thread `program-max`.
+- The objects are built ON the thread at the first job (none is `Send`)
+  and dropped senders first (MAX's, then the FHD one), then the compositor
+  (they hold references into its device and targets).
+- #251 step 2, the per-job order (`attempt`): build what is missing, each
+  unless its own backoff runs (the compositor = `Device`; MAX's sender),
+  pace, wait for `compose_at`, ONE compose (every target the compositor
+  holds), MAX's send at `due`, then the FHD one's. **MAX goes first, whole
+  (#239):** an FHD output still to build (its target, its sender: a Spout
+  open with `CleanSenders`, up to 67 ms per kept lock) is built AFTER MAX's
+  send (`build_fhd_after`) and drawn from the next compose; its build
+  boundary reports nothing for it. So the build never delays THIS
+  boundary's MAX; it still runs on the thread before the next job, so an
+  open longer than the wait to the next compose instant (33.3 ms − K)
+  makes that compose late (`compose_late`), longer by K its send too
+  (`send_late`). Only when MAX's boundary is not drawn at all (its build
+  failed, lost the device or waits a backoff, `fhd_first`) is the FHD
+  output built first and sent alone at the due instant. A device lost
+  while building the FHD output first fails MAX with it, nothing drawn. A
+  device the FHD side loses AFTER MAX's boundary went out (its send, or its
+  build after MAX's send) is MAX's too: the boundary stays counted as sent,
+  never failed, and MAX's state (`MaxOut::record_lost`) and log name the
+  loss, so MAX never reads `running` while it waits for the device. Every failure
+  is recovered from where it happens (`output_failed`, `lose_device`),
+  once: a lost device is ONE event for both outputs (`device_resets` +1,
+  both fail with it, `device_lost` hands MAX's to the FHD side), and
+  `lost_unsent` is cleared by a send of EITHER output that went out (in
+  `send_max` / `send_fhd`, so a MAX boundary sent before the FHD send lost
+  the device never counts as one after it).
+- **Picture ids (`PictureIds`, `program_max_ids.rs`).** S1a's residency skips the upload of an id
   the slot holds, so an id must never name other bytes: ids come from a
   counter. A picture that is the same allocation (`SharedFrame::ptr_eq`) as
   one of the last composed boundary's keeps its id; those `Arc`s are held
@@ -699,7 +756,8 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   the outgoing slot when the fade ends and is uploaded there once). Never
   key an id on an address or on address + stamp (the latter re-uploads
   every held picture).
-- **Failures** (`serve` → `recover`, never a panic):
+- **Failures** (recovered where they happen, `output_failed` /
+  `lose_device`, never a panic):
   - a lost device at compose or send drops both; rebuilt at once on the
     next job (`device_resets`), unless the rebuilt pair is lost again
     before a boundary went out (`lost_unsent`): then the rebuild waits the
@@ -846,8 +904,18 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   - the worker paces FIRST, waits on its `SendClock` until `compose_at`
     (`program_max_send::wait_for`, the wait `send_at` shares: a job taken
     after that instant composes at once and counts `compose_late`),
-    composes MAX, then sends at `due` as before; the FHD sender stays after
-    MAX's send, unchanged (its compose lands right after the send phase);
+    composes, then sends at `due` as before. Step 1 left the FHD side
+    (its own device: a second upload, its draw and GPU wait) right after
+    MAX's send, in Arena's window, and that carried a large part of the
+    residual jumps (A/B on SNV, comment 6192123775: FHD on 5.35 jumps back
+    per minute, off 3.09, the difference in the offer band ~14 → 4 ms).
+    **Step 2** (design comment 6192134240, Approach 1): ONE compose at
+    `compose_at` draws BOTH targets of the one compositor from one upload;
+    at `due` MAX's send runs, then the FHD one's (plain copies, its
+    `send_at` meets a passed instant). Rejected: pacing a second device's
+    compose to the compose phase too (two uploads and two contexts at
+    13 ms), and switching the FHD sender off (doing less, #239 asked for
+    it);
   - setting `program_max_compose_phase_ms` (`sp_core::config`, default 13,
     `program_max_compose_phase_us`, the send phase's parse rule), read
     with MAX's settings every 5 s (`program_max_phase.rs`, a child of
@@ -979,7 +1047,8 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   the thread:
   `running` (it
   takes jobs and its last boundary went out), `error: <why>` (its last
-  boundary did not; `error: the program-max thread is not running` before
+  boundary did not, or #251 step 2 the device was lost after it went out,
+  `MaxOut::record_lost`; `error: the program-max thread is not running` before
   it attached or after it ended). `submitted + failed` = the jobs it took
   (an `unsupported` platform counts neither). The p99s
   cover the last 900 sent frames (30 s). The mock (`e2e/mock-api.mjs`)
@@ -1021,13 +1090,17 @@ A 1280×720 Source boundary, then a 21:9 → 720p Mix boundary (slot 4 of 9):
 Spout's registry lists the sender at 3840×2160 format 87, and its shared
 texture read on a SECOND WARP device (`sp_gpu::read_shared_texture`,
 doc-hidden, `win/receiver.rs`) matches S1a's reference within its tolerance;
-after the stop the sender is unlisted. Each picture is served TWICE and read
-after the second went out: the readback takes no Spout mutex, and the second
-draw's wait for the GPU proves the first send's copy done (the second copy
-writes the same bytes). #267: then a 4:3 Source boundary (960×720). MAX
+after the stop the sender is unlisted. Each picture is served until both
+senders sent it TWICE (`serve_twice`; the run's first picture one boundary
+more, the FHD output being built after MAX's first send) and read after
+that: the readback takes no Spout mutex, and the last draw's wait for the
+GPU proves the earlier send's copy done (the last copy writes the same
+bytes). #267: then a 4:3 Source boundary (960×720). MAX
 fills its width: the layer covers columns 0..3840, and no pixel of either
 edge column is black. The FHD sender keeps its bars, black at columns 239
-and 1680.
+and 1680. #251 step 2: the FHD sender is `for_target` of the target the
+worker adds to the same WARP compositor (the production `add_target` of
+`sp_gpu::Compositor`), so both read-backs come from one compose.
 
 ### The FHD Spout sender `SP-program` (#239)
 
@@ -1035,42 +1108,49 @@ Design: #239 "## Design" (the last comment). The FHD program goes out over
 Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
 1920×1080 program without NDI.
 
-- sp-gpu: `Compositor::with_size(w, h)` (the picked adapter, like `new`,
-  which is `with_size(CANVAS_*)`), doc-hidden `new_warp_with_size` for CI,
-  `size()`; `SpoutSender::new_fhd(&c)` = `SPOUT_FHD_SENDER_NAME` =
-  `SP-program` (Arena: `SPOUT_SP-program`). The sender shares whatever its
-  compositor draws: pair `new_fhd` with a 1920×1080 compositor.
+- sp-gpu: `SpoutSender::new_fhd(&c, target)` = `SPOUT_FHD_SENDER_NAME` =
+  `SP-program` (Arena: `SPOUT_SP-program`), the sender of the compositor's
+  target `target`. #251 step 2: that target is `FHD_TARGET` (1920×1080,
+  `FHD_FIT`) ADDED to MAX's compositor (`Compositor::add_target`), never a
+  second compositor: one device, one upload of each picture, one compose.
+  `Compositor::with_size(w, h, fit)` / doc-hidden `new_warp_with_size` stay
+  for tests (a compositor whose primary is another size).
   `read_shared_texture` reads at the size the sender's map lists.
-- #267: its compositor places by `FHD_FIT` (`aspect_fit`, bars included),
+- #267: its target places by `FHD_FIT` (`aspect_fit`, bars included),
   never MAX's fill. It is the same program as the NDI `SP-program`, which
   OBS, the Presenter and the stream take; the wall's Spout feed is MAX.
   Making the FHD feeds fill too would be one constant, but the NDI canvas
   (`program_canvas.rs`, CPU) would then have to follow, to stay one
   program.
 - The `program-max` thread (`program_max_worker.rs`): while
-  `MaxOut::fhd_wanted` (the setting AND MAX on), each job also goes to a
-  second `Side` (compositor + sender, `MaxGpu::fhd_compositor` /
-  `fhd_sender`), built on the thread like MAX's. Both compose the SAME
-  labelled composition (one `PictureIds`: ids are global, so each
-  compositor's residency stays right). **MAX goes first, whole** (review
-  of #239): MAX composed, its paced wait, its send; only THEN is the FHD
-  side built, composed and sent (`fhd_boundary`), so the FHD upload / draw /
-  GPU wait never eat MAX's lead or make its send late (the #223 stutter
-  fix). The FHD send goes out at once after MAX's (its `send_at` meets a
-  passed instant), never paced on its own; when MAX's boundary is not
-  drawn at all (its build failed or waits a backoff), the FHD side is
-  built first (`fhd_first`, it decides the labelling) and sent at the due
-  instant (`pace` once per job). Pinned by
-  `max_is_sent_at_its_due_instant_before_the_fhd_sender_is_even_composed`
-  (fake clock, the fake's `order` log) and
-  `a_slow_fhd_compose_never_holds_max_back` (the real loop, the FHD compose
-  held behind a gate while MAX is already out). Each `Side` keeps its own backoff and lost-device state
-  (`Side::recover`, shared with MAX): a refused FHD sender, a failed FHD
-  build or a lost FHD device never stops MAX, and the other way round.
-  The pictures are labelled only when one side is built (`ready`).
-  Switched off (`fhd_wanted` false), the FHD side is dropped at the next
-  boundary and its backoff forgotten (`release_fhd`); MAX off releases
-  both (MAX first, each sender before its compositor).
+  `MaxOut::fhd_wanted` (the setting AND MAX on), the FHD OUTPUT (its
+  target on MAX's compositor + its sender, `Output`, built on the thread:
+  `MaxCompositor::add_target(FHD_TARGET)`, then `MaxGpu::fhd_sender(&c,
+  target)`) is drawn by the same compose as MAX, from the same labelled
+  composition and the same uploaded textures (#251 step 2). The FHD
+  output is built AFTER MAX's send (#239, "MAX goes first, whole": its
+  Spout open never delays that boundary's MAX, at most the next compose,
+  `compose_late`; rare: the start, a backoff's end, a lost device) and
+  drawn from the next compose; the
+  compose waits for `compose_at` and draws both targets; at `due` MAX's
+  send runs, then the FHD one's (its `send_at` meets a passed instant).
+  When MAX's boundary is not drawn (its build failed, lost the device or
+  waits a backoff) the FHD output is built first and goes out at the due
+  instant alone.
+  Pinned by
+  `both_targets_are_composed_at_the_compose_instant_then_sent_max_first`
+  (a grid, the fake clock's waits [compose_at, due, due] once both are
+  built, the fake's `order` at each wait),
+  `the_fhd_output_is_built_after_max_s_send_then_drawn_by_the_same_compose`
+  and `the_fhd_build_never_delays_max_s_send`.
+  The FHD target exists only while its sender lives: a refused FHD sender
+  or a failed FHD build drops its sender and takes the target off the
+  compositor (`drop_fhd`), so nothing is drawn for it during its own
+  backoff; a refused or failed MAX sender never stops the FHD output, and
+  the other way round. Switched off (`fhd_wanted` false), the FHD sender
+  and target go at the next boundary and its backoff is forgotten
+  (`release_fhd`); MAX off releases everything (MAX's sender, the FHD
+  sender, then the compositor).
 - After its first good boundary the thread reads Spout's registry entry of
   the FHD sender once (`MaxSender::listed_size` →
   `spout_sender_info(name)`, a receiver's read; `None` = read again next
@@ -1083,10 +1163,15 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   then its own setting (`setting_off`).
 - `GET /api/v1/program` → `max.fhd {enabled, state, reason, spout_name,
   listed_width, listed_height, submitted, failed, sender_backoffs,
-  upload_us_p99, draw_us_p99, send_us_p99}` (`FhdStatus`; the uploads go
-  onto the FHD compositor's own device, so its extra cost is visible;
-  `program_max_fhd.rs`, a CHILD
-  module of `program_max.rs`: it reads the queue and the private `Window`).
+  spout_relists, draw_us_p99, send_us_p99}` (`FhdStatus`;
+  `program_max_fhd.rs`, a CHILD module of `program_max.rs`: it reads the
+  queue and the private `Window`). #251 step 2: no `upload_us_p99` (the
+  FHD target uploads nothing of its own: MAX's upload serves both, and
+  `max.upload_us_p99` / `max.draw_us_p99` cover the whole compose);
+  `draw_us_p99` is the FHD target's own part of the draw
+  (`record_fhd_sent(draw_us, send)`). `fhdGateFailures` never read the
+  upload figure; `max-gate.ts`'s `FhdStatus`, the mock and the post-deploy
+  log no longer name it.
   `state` = MAX's `state_label` over the FHD side's own phase (attach /
   end / unsupported follow MAX's) with `reason.is_none()` as "on". Its
   own lock, never held with the queue's or MAX's stats lock.
@@ -1105,13 +1190,25 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   setting on, no reason, `running`, listed 1920×1080, ≥ 30 out, `failed`
   and `sender_backoffs` +0. It runs on SNV and in PP's subset.
 - Tests: `program_max_fhd_tests.rs` (rule, records, JSON names, setting,
-  task), `program_max_worker_tests_fhd.rs` (fake GPU: the fake's objects
-  carry an FHD flag, `Log.fhd_*` / `sends` / `listed_reads`,
-  `Script.fhd_*` / `listed`, `order` = draws / sends / the FHD build in
-  order, `hold_next_fhd_compose`), WARP: sp-gpu `tests/warp.rs` (a 1920×1080
-  compositor against the reference), `tests/spout.rs` (the `SP-program`
-  sender listed at 1920×1080, read back on a second device) and
-  sp-server `program_max_tests_warp.rs` (the real loop with both senders).
+  task), `program_max_worker_tests_fhd.rs` (the fake GPU: ONE
+  `FakeCompositor` that draws the FHD target when one was added, `Log`
+  `targets_added` / `targets_removed` / `fhd_drawn` / `fhd_*` / `order`
+  ("fhd target", "fhd sender built", "max draw", "fhd draw", "max send",
+  "fhd send", "fhd target removed"), `Script.add_target` / `fhd_sender` /
+  `fhd_send` / `listed`: the FHD output built after MAX's send, both
+  targets at `compose_at`, MAX first, FHD off draws no FHD target, an FHD
+  refusal or failed build never stops MAX and takes its target off),
+  `program_max_worker_tests_fhd_lost.rs` (a lost device anywhere, building
+  the FHD output first or after MAX's send included, rebuilds both; a loss
+  after MAX's boundary went out leaves it sent and MAX's state and log name
+  it; a MAX boundary sent before the loss never counts after it), WARP:
+  sp-gpu `tests/warp.rs`
+  (one compose fills both targets, one upload per picture, a 4:3 picture
+  fills MAX's width and keeps FHD's bars, a removed target), `tests/spout.rs`
+  (the `SP-program` sender of the FHD target listed at 1920×1080 and read
+  back on a second device; two senders on one compositor, each listed at
+  its own size) and sp-server `program_max_tests_warp.rs` (the real loop
+  with both senders on one WARP compositor).
 
 ### The box gate after the deploy (the main session runs it)
 
@@ -1135,7 +1232,12 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   the installer carries `resources/THIRD-PARTY-NOTICES.txt`;
 - #239: Arena lists `SPOUT_SP-program` too, `spout_sender_info("SP-program")`
   reads 1920×1080 format 87, and MAX's budget and `coalesced` +0 hold with
-  both senders on.
+  both senders on (#251 step 2: `max.draw_us_p99` is then both targets'
+  draw).
+- #251 step 2: the same A/B as comment 6192123775 (`fhd_ab2.ps1`, 46
+  one-minute blocks, a whole drift cycle) must read FHD on like FHD off,
+  both at or under the off-rate of 3.09 jumps back per minute; then the
+  continuous monitor on normal songs.
 
 ## Telemetry (`ComposeStats`, behind `max.*_p99`)
 
@@ -1146,8 +1248,11 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   any ready thread runs first), bounded at 10 s (`GpuError::Timeout`). A 4K
   quad on the RTX is well under a millisecond. If S2 measures the spin as a
   cost, it can read the query a boundary later instead: Spout's copy is
-  ordered after the draw on the same context and needs no wait.
-- `uploads`: 0, 1 or 2 pictures uploaded.
+  ordered after the draw on the same context and needs no wait. #251 step
+  2: every target drawn (one query per target, one flush, one wait);
+  `Compositor::draw_us(id)` = a target's own part (`target_draws_us`), the
+  FHD one is `max.fhd.draw_us_p99`.
+- `uploads`: 0, 1 or 2 pictures uploaded, whatever the targets.
 - `SpoutSendStats::send_us` (S1b, for `max.send_us_p99`): `SendTexture`
   (the sender-mutex wait, the copy, the flush; at the first send also the
   shared texture's creation and the registration) and, since the #223
@@ -1175,7 +1280,10 @@ build step, and WARP and the RTX run the same source. A compile error is
   (the sender's registration: every refuse / confirm decision), `spout_lock`
   (#243: the lock names, the releases owed, the holder's text and program
   name, the list sentinel's steps), `vblank`
-  (the output pick, the refresh count and fit, the staleness bound). Keep
+  (the output pick, the refresh count and fit, the staleness bound),
+  #251 step 2's `targets` (a compositor's targets: ids, draw order, the
+  primary kept) and `stats::target_draws_us` (each target's part of the
+  draw). Keep
   it that way: logic added inside `win/` is untested by the gate.
   `win/vblank.rs` only calls DXGI / Win32 (`EnumOutputs`, `GetDesc`, which
   needs the `Win32_Graphics_Gdi` feature, `WaitForVBlank`,
@@ -1216,9 +1324,12 @@ build step, and WARP and the RTX run the same source. A compile error is
   them on). `SpoutGpu::compositor` stays gated: off Windows it is
   `Unsupported`, which `off_windows_the_production_gpu_is_unsupported`
   pins through the worker. #239: `SpoutGpu::fhd_sender` and the
-  `listed_size` impl on `SpoutSender` are glue too (`mutants::skip`);
-  `SpoutGpu::fhd_compositor` stays gated
-  (`off_windows_the_production_fhd_compositor_is_unsupported`). #243
+  `listed_size` impl on `SpoutSender` are glue too (`mutants::skip`).
+  #251 step 2: the traits and `SpoutGpu` live in `program_max_gpu.rs`;
+  `MaxCompositor for sp_gpu::Compositor`'s `add_target` /
+  `remove_target` / `draw_us` are glue too (`mutants::skip`; the WARP
+  real-loop test drives them on Windows); `SpoutGpu::fhd_compositor` is
+  gone (no second compositor). #243
   follow-up: `SpoutListLock`'s `holder`, `sentinel_ended` and
   `stop_sentinel` are glue too (`mutants::skip`); its `start_sentinel`
   stays gated (`off_windows_the_production_list_is_neither_read_nor_waited_on`),

@@ -6,7 +6,10 @@
  * (`fhdGateFailures`).
  */
 
-/** #239: `GET /api/v1/program` → `max.fhd` (sp-server `FhdStatus`). */
+/** #239: `GET /api/v1/program` → `max.fhd` (sp-server `FhdStatus`). #251
+ *  step 2: the FHD target is drawn by MAX's compose from MAX's upload, so it
+ *  has no `upload_us_p99` of its own; `draw_us_p99` is its own part of the
+ *  draw. */
 export interface FhdStatus {
   enabled: boolean;
   state: string;
@@ -17,7 +20,6 @@ export interface FhdStatus {
   submitted: number;
   failed: number;
   sender_backoffs: number;
-  upload_us_p99: number;
   draw_us_p99: number;
   send_us_p99: number;
 }

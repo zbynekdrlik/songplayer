@@ -5,12 +5,14 @@
 //! The FHD program goes out over Spout too, as `SP-program` (Arena lists
 //! `SPOUT_SP-program`): the same native picture(s) and weight as MAX's
 //! boundary, aspect-fitted into a 1920×1080 target, the picture the NDI
-//! `SP-program` carries. It rides MAX's `program-max` thread, queue and
-//! pacing (`program_max_worker.rs`): a second compositor (`sp-gpu`'s
-//! `Compositor::with_size`) and a second sender (`SpoutSender::new_fhd`),
-//! built, backed off and rebuilt on their own, sent right after MAX at the
-//! same paced instant. So it needs MAX: with `program_max_enabled` off it is
-//! off too ([`fhd_off_reason`] = [`FHD_OFF_MAX`]).
+//! `SP-program` carries. It rides MAX's `program-max` thread, queue,
+//! pacing and (#251 step 2) compositor (`program_max_worker.rs`): a second
+//! target of MAX's compositor (`FHD_TARGET`, drawn by the same compose from
+//! the same uploaded pictures) and a second sender of it
+//! (`SpoutSender::new_fhd`), the sender built, backed off and rebuilt on its
+//! own, sent right after MAX at the same paced instant. So it needs MAX:
+//! with `program_max_enabled` off it is off too ([`fhd_off_reason`] =
+//! [`FHD_OFF_MAX`]).
 //!
 //! The setting `program_spout_fhd_enabled` (`sp_core::config`, ON unless it
 //! says `"false"`) is applied with MAX's (`apply_fhd_setting`, every
@@ -21,7 +23,7 @@ use std::sync::MutexGuard;
 
 use serde::Serialize;
 use sp_core::config::{SETTING_PROGRAM_SPOUT_FHD_ENABLED, program_spout_fhd_enabled};
-use sp_gpu::{ComposeStats, SPOUT_FHD_SENDER_NAME, SpoutSendStats};
+use sp_gpu::{SPOUT_FHD_SENDER_NAME, SpoutSendStats};
 use sqlx::SqlitePool;
 use tracing::{info, warn};
 
@@ -78,10 +80,10 @@ pub struct FhdStatus {
     /// #243: how often Spout's list had lost `SP-program` (another program's
     /// clean-up) and a send put it back.
     pub spout_relists: u64,
-    /// The p99 over the last `MAX_STAT_WINDOW` sent frames, µs: the plane
-    /// uploads (onto the FHD compositor's own device: its extra cost next to
-    /// MAX), the draw until the GPU finished it, Spout's `SendTexture`.
-    pub upload_us_p99: u64,
+    /// The p99 over the last `MAX_STAT_WINDOW` sent frames, µs: the FHD
+    /// target's own part of the compose's draw (#251 step 2: it uploads
+    /// nothing of its own, MAX's upload serves both targets, so it has no
+    /// upload figure), Spout's `SendTexture`.
     pub draw_us_p99: u64,
     pub send_us_p99: u64,
 }
@@ -94,7 +96,6 @@ pub(super) struct FhdStats {
     failed: u64,
     sender_backoffs: u64,
     relists: u64,
-    upload: Window,
     draw: Window,
     send: Window,
     listed: Option<(u32, u32)>,
@@ -109,7 +110,6 @@ impl FhdStats {
             failed: 0,
             sender_backoffs: 0,
             relists: 0,
-            upload: Window::default(),
             draw: Window::default(),
             send: Window::default(),
             listed: None,
@@ -158,12 +158,12 @@ impl MaxOut {
         self.lock_fhd().phase = phase;
     }
 
-    /// An FHD boundary went out: its costs, and `running`.
-    pub fn record_fhd_sent(&self, compose: ComposeStats, send: SpoutSendStats) {
+    /// An FHD boundary went out: its target's own draw (`draw_us`, #251
+    /// step 2), its send, and `running`.
+    pub fn record_fhd_sent(&self, draw_us: u64, send: SpoutSendStats) {
         let mut fhd = self.lock_fhd();
         fhd.submitted += 1;
-        fhd.upload.push(compose.upload_us);
-        fhd.draw.push(compose.draw_us);
+        fhd.draw.push(draw_us);
         fhd.send.push(send.send_us);
         fhd.relists += u64::from(send.relisted);
         fhd.phase = MaxPhase::Running;
@@ -208,10 +208,10 @@ impl MaxOut {
                 fhd.phase.clone(),
                 [fhd.submitted, fhd.failed, fhd.sender_backoffs, fhd.relists],
                 fhd.listed,
-                [fhd.upload.clone(), fhd.draw.clone(), fhd.send.clone()],
+                [fhd.draw.clone(), fhd.send.clone()],
             )
         };
-        let [upload, draw, send] = windows;
+        let [draw, send] = windows;
         let [submitted, failed, sender_backoffs, spout_relists] = counts;
         let reason = fhd_off_reason(fhd_setting, max_enabled);
         let (listed_width, listed_height) = listed.unwrap_or_default();
@@ -226,7 +226,6 @@ impl MaxOut {
             failed,
             sender_backoffs,
             spout_relists,
-            upload_us_p99: upload.p99(),
             draw_us_p99: draw.p99(),
             send_us_p99: send.p99(),
         }

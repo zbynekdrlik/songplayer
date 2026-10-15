@@ -889,6 +889,10 @@ from a shim can be imported node-side in a spec (`import { f } from
 "../sp-ui/preview_player.js"`); the class touches browser globals only inside
 methods. The mock hardcodes port 8920 — if another session's stale mock holds
 it, run a port-substituted scratch copy with a config override of `baseURL`.
+The copy must sit IN `e2e/` (e.g. `e2e/mock-api-8933.mjs`, deleted before the
+commit): the mock reads `../VERSION` and `fixtures/` relative to its own
+`__dirname`. A spec that only reads the mock's API (`request` fixture, no
+`page`, e.g. `max-gate.spec.ts`) needs no `dist/` at all (#251 step 2).
 In a fresh worktree run `cd e2e && npm ci && npx playwright install chromium`
 first (the cached browser build may not match the lockfile's Playwright). Stop
 the scratch mock by PID (`ss -ltnp | grep :<port>`), never `pkill -f <name>` —

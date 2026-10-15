@@ -1,8 +1,10 @@
 //! The compositor and the Spout sender off Windows: there is no Direct3D 11
 //! and no Spout, so neither is ever built. They have the portable part of
 //! the Windows API (`new`, `with_size`, `new_warp`, `compose`, `read_back`,
-//! `adapter`, `size`; the sender's `new`, `new_fhd`, `send`, `size`, `name`,
-//! `registration`; the registry readers), so a cross-platform caller
+//! `adapter`, `size`, #251 step 2's `add_target` / `remove_target` /
+//! `target_size` / `draw_us` / `read_back_target`; the sender's `new`,
+//! `new_fhd`, `for_target`, `send`, `size`, `name`, `registration`; the
+//! registry readers), so a cross-platform caller
 //! compiles everywhere. The Direct3D accessors (`device`, `render_target`,
 //! `shared_handle`), the test constructors `new_on_listed_adapter` /
 //! `new_warp_with_size` / `with_name`, `adapters()` and the
@@ -17,12 +19,13 @@ use std::marker::PhantomData;
 use std::time::Instant;
 
 use crate::adapter::AdapterInfo;
-use crate::composition::{Composition, Fit};
+use crate::composition::{Composition, Fit, Target};
 use crate::error::GpuError;
 use crate::spout::SharedTextureInfo;
 use crate::spout_lock::{LockHolder, SentinelEnd};
 use crate::spout_state::Registration;
 use crate::stats::{ComposeStats, SpoutSendStats};
+use crate::targets::TargetId;
 use crate::vblank::{OutputInfo, VblankGrid, VblankState};
 
 /// Off Windows the compositor cannot be built: [`Compositor::new`] and
@@ -75,6 +78,36 @@ impl Compositor {
     pub fn size(&self) -> (u32, u32) {
         match self.0 {}
     }
+
+    /// Never runs (no value exists). `mutants::skip`: as `compose`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn add_target(&mut self, _target: Target) -> Result<TargetId, GpuError> {
+        match self.0 {}
+    }
+
+    /// Never runs (no value exists). `mutants::skip`: as `compose`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn remove_target(&mut self, _id: TargetId) -> bool {
+        match self.0 {}
+    }
+
+    /// Never runs (no value exists). `mutants::skip`: as `compose`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn target_size(&self, _id: TargetId) -> Option<(u32, u32)> {
+        match self.0 {}
+    }
+
+    /// Never runs (no value exists). `mutants::skip`: as `compose`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn draw_us(&self, _id: TargetId) -> Option<u64> {
+        match self.0 {}
+    }
+
+    /// Never runs (no value exists). `mutants::skip`: as `compose`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn read_back_target(&mut self, _id: TargetId) -> Result<Vec<u8>, GpuError> {
+        match self.0 {}
+    }
 }
 
 /// Off Windows there is no Spout sender: it needs a [`Compositor`], which
@@ -94,7 +127,18 @@ impl SpoutSender {
     /// Never runs: no [`Compositor`] exists to pass. `mutants::skip`: as
     /// `new`.
     #[cfg_attr(test, mutants::skip)]
-    pub fn new_fhd(compositor: &Compositor) -> Result<Self, GpuError> {
+    pub fn new_fhd(compositor: &Compositor, _target: TargetId) -> Result<Self, GpuError> {
+        match compositor.0 {}
+    }
+
+    /// Never runs: no [`Compositor`] exists to pass. `mutants::skip`: as
+    /// `new`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn for_target(
+        compositor: &Compositor,
+        _target: TargetId,
+        _name: &str,
+    ) -> Result<Self, GpuError> {
         match compositor.0 {}
     }
 

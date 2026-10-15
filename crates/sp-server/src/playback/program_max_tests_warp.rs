@@ -6,18 +6,21 @@
 //! and read on a SECOND WARP device as Arena opens it, shows the fitted
 //! picture and then the fade within S1a's tolerance (`reference.rs`: one
 //! code per quad that covers a pixel). #239: the same thread runs the FHD
-//! sender too (a 1920×1080 WARP compositor and a sender under its own test
-//! name): Spout lists it at 1920×1080 (the thread's own registry read,
+//! sender too (#251 step 2: a 1920×1080 target added to the same WARP
+//! compositor, drawn by the same compose, and a sender of it under its own
+//! test name): Spout lists it at 1920×1080 (the thread's own registry read,
 //! `max.fhd.listed_*`, says so too) and its texture holds the same pictures
 //! fitted into 1920×1080. #267: a third, 4:3 boundary fills MAX's whole
 //! width (no black column at either side), while the FHD sender keeps the
 //! NDI `SP-program`'s bars.
 //!
-//! The readback takes no Spout mutex, so each picture is served TWICE and
-//! read after the second one went out: its draw waited for the GPU, which
-//! ran the first send's copy before it, and the second copy writes the same
-//! bytes. Spout's list is machine-wide; this is the only Spout test in the
-//! sp-server binary, and cargo runs test binaries one at a time.
+//! The readback takes no Spout mutex, so each picture is served until both
+//! senders sent it TWICE (the run's first picture one boundary more: the
+//! FHD output is built after MAX's first send) and read after that: the
+//! last draw waited for the GPU, which ran the earlier send's copy before
+//! it, and the last copy writes the same bytes. Spout's list is
+//! machine-wide; this is the only Spout test in the sp-server binary, and
+//! cargo runs test binaries one at a time.
 //! Wired via `#[cfg(test)] #[cfg(windows)] #[path = "program_max_tests_warp.rs"] mod tests_warp;`.
 
 use std::sync::Arc;
@@ -26,7 +29,7 @@ use std::time::{Duration, Instant};
 use sp_core::genlock::{GENLOCK_GRID_FPS, floor_boundary_100ns, strict_next_boundary_100ns};
 use sp_gpu::{
     CANVAS_HEIGHT, CANVAS_WIDTH, Composition, Compositor, FHD_FIT, FHD_HEIGHT, FHD_WIDTH, GpuError,
-    Layer, Nv12Picture, SpoutSender, read_shared_texture, reference, spout_sender_info,
+    Layer, Nv12Picture, SpoutSender, TargetId, read_shared_texture, reference, spout_sender_info,
 };
 use sp_ndi::test_util::MockNdiBackend;
 use sp_ndi::{AudioFrame, NdiSender};
@@ -46,7 +49,9 @@ const TEST_SENDER: &str = "SP-program-MAX-s2-warp-test";
 const TEST_FHD_SENDER: &str = "SP-program-fhd-warp-test";
 
 /// The WARP GPU: `Compositor::new_warp` and the sender under [`TEST_SENDER`];
-/// a 1920×1080 WARP compositor and the sender under [`TEST_FHD_SENDER`].
+/// #251 step 2: the sender under [`TEST_FHD_SENDER`] of the FHD target the
+/// worker adds to that same compositor (the production
+/// `MaxCompositor::add_target` of `sp_gpu::Compositor`).
 struct WarpGpu;
 
 impl MaxGpu for WarpGpu {
@@ -61,12 +66,12 @@ impl MaxGpu for WarpGpu {
         SpoutSender::with_name(compositor, TEST_SENDER)
     }
 
-    fn fhd_compositor(&mut self) -> Result<Compositor, GpuError> {
-        Compositor::new_warp_with_size(FHD_WIDTH, FHD_HEIGHT, FHD_FIT)
-    }
-
-    fn fhd_sender(&mut self, compositor: &Compositor) -> Result<SpoutSender, GpuError> {
-        SpoutSender::with_name(compositor, TEST_FHD_SENDER)
+    fn fhd_sender(
+        &mut self,
+        compositor: &Compositor,
+        target: TargetId,
+    ) -> Result<SpoutSender, GpuError> {
+        SpoutSender::for_target(compositor, target, TEST_FHD_SENDER)
     }
 }
 
@@ -219,21 +224,30 @@ fn assert_matches(frame: &[u8], layers: &[Layer<'_>], (w, h): (u32, u32), what: 
     );
 }
 
-/// Serve `job` on boundaries `first` and `first + 1`, each once MAX and
-/// the FHD sender sent the one before (so the 2-deep queue never drops one).
+/// Serve `job` from boundary `*next` on until the FHD sender sent two of
+/// its boundaries (and MAX at least as many), each boundary once the one
+/// before went out (so the 2-deep queue never drops one). The run's first
+/// boundary goes out on MAX alone: the FHD output is built after MAX's
+/// send and goes out from the next boundary on (#239: MAX first, whole).
 fn serve_twice(
     out: &mut ProgramOutput<MockNdiBackend>,
     max: &MaxOut,
     job: impl Fn(i64) -> ProgramJob,
-    first: usize,
+    next: &mut usize,
 ) {
-    for k in [first, first + 1] {
+    let start = max.status();
+    loop {
         let before = max.status();
+        let k = *next;
         out.submit(job(at(k)));
-        wait_until("MAX and the FHD sender sent the boundary", || {
+        *next += 1;
+        wait_until("the boundary went out", || {
             let now = max.status();
-            now.submitted > before.submitted && now.fhd.submitted > before.fhd.submitted
+            now.submitted > before.submitted && (k == 0 || now.fhd.submitted > before.fhd.submitted)
         });
+        if max.status().fhd.submitted >= start.fhd.submitted + 2 {
+            break;
+        }
     }
     let status = max.status();
     assert_eq!((status.failed, status.fhd.failed), (0, 0), "{status:?}");
@@ -266,8 +280,13 @@ fn the_program_output_composes_on_warp_and_shares_it_over_spout() {
             ..one.clone()
         })
     };
-    serve_twice(&mut out, &max, plain, 0);
-    assert_eq!(max.status().submitted, 2);
+    let mut next = 0;
+    serve_twice(&mut out, &max, plain, &mut next);
+    assert_eq!(
+        (max.status().submitted, next),
+        (3, 3),
+        "the first boundary on MAX alone"
+    );
     let info = spout_sender_info(TEST_SENDER)
         .expect("Spout's registry reads")
         .expect("the sender is listed after its first send");
@@ -321,8 +340,8 @@ fn the_program_output_composes_on_warp_and_shares_it_over_spout() {
             n_slots: 9,
         })
     };
-    serve_twice(&mut out, &max, mix, 2);
-    assert_eq!(max.status().submitted, 4);
+    serve_twice(&mut out, &max, mix, &mut next);
+    assert_eq!(max.status().submitted, 5);
     let frame = read_shared_texture(&info).expect("a second WARP device reads Spout's texture");
     let fade = Composition::Fade {
         from: Some(nv12(&wide)),
@@ -344,8 +363,8 @@ fn the_program_output_composes_on_warp_and_shares_it_over_spout() {
             ..four_three.clone()
         })
     };
-    serve_twice(&mut out, &max, narrow, 4);
-    assert_eq!(max.status().submitted, 6);
+    serve_twice(&mut out, &max, narrow, &mut next);
+    assert_eq!(max.status().submitted, 7);
     let narrow = Composition::Picture(nv12(&four_three));
     let frame = read_shared_texture(&info).expect("a second WARP device reads Spout's texture");
     let layers = narrow.layers();

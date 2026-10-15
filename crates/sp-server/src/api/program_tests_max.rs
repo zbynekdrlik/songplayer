@@ -72,11 +72,10 @@ async fn get_program_reports_the_max_block() {
             "failed": 0,
             "sender_backoffs": 0,
             "spout_relists": 0,
-            "upload_us_p99": 0,
             "draw_us_p99": 0,
             "send_us_p99": 0,
         })),
-        "#239: the SP-program Spout sender, off while MAX is"
+        "#239: the SP-program Spout sender, off while MAX is; #251 step 2: no upload of its own"
     );
     assert_eq!(json["ndi_name"], PROGRAM_NDI_NAME, "the program stays flat");
     assert!(json["outputs"].is_array(), "the other blocks stay");
@@ -202,11 +201,7 @@ async fn get_program_reports_the_fhd_spout_sender() {
     max.set_enabled(true);
     let _consumer = max.attach();
     max.record_fhd_sent(
-        ComposeStats {
-            upload_us: 7,
-            draw_us: 400,
-            uploads: 1,
-        },
+        400,
         SpoutSendStats {
             send_us: 500,
             relisted: false,
@@ -233,7 +228,10 @@ async fn get_program_reports_the_fhd_spout_sender() {
             &serde_json::json!(500)
         )
     );
-    assert_eq!(fhd["upload_us_p99"], 7, "its own uploads");
+    assert!(
+        fhd.get("upload_us_p99").is_none(),
+        "#251 step 2: the FHD target uploads nothing of its own: {fhd}"
+    );
     assert_eq!(
         (&fhd["listed_width"], &fhd["listed_height"]),
         (&serde_json::json!(1920), &serde_json::json!(1080))

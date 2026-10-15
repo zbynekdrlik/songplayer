@@ -28,7 +28,6 @@ function fhd(submitted: number): FhdStatus {
     submitted,
     failed: 1,
     sender_backoffs: 1,
-    upload_us_p99: 200,
     draw_us_p99: 300,
     send_us_p99: 500,
   };
@@ -304,6 +303,27 @@ test.describe("SP-program (1920x1080) Spout gate (#239)", () => {
     const unlisted = { ...fhd(160), listed_width: 0, listed_height: 0 };
     expect(fhdGateFailures(fhd(100), unlisted)).toEqual([
       "Spout lists SP-program at 0x0, not 1920x1080",
+    ]);
+  });
+
+  test("#251 step 2: the mock serves max.fhd with the server's fields, no upload", async ({
+    request,
+  }) => {
+    // The server's `FhdStatus` names (program_max_fhd_tests.rs pins them).
+    const program = await (await request.get("/api/v1/program")).json();
+    expect(Object.keys(program.max.fhd).sort()).toEqual([
+      "draw_us_p99",
+      "enabled",
+      "failed",
+      "listed_height",
+      "listed_width",
+      "reason",
+      "send_us_p99",
+      "sender_backoffs",
+      "spout_name",
+      "spout_relists",
+      "state",
+      "submitted",
     ]);
   });
 });
