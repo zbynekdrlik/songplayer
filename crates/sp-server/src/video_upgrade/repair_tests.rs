@@ -585,9 +585,15 @@ async fn a_busy_repair_runs_again_ten_minutes_later() {
 #[tokio::test]
 async fn another_row_of_a_busy_video_waits_for_its_one_retry() {
     let rig = Rig::new().await;
+    // A third row of the video lives in a third playlist: (playlist_id,
+    // youtube_id) is unique, and rows 10 and 11 hold playlists 1 and 2.
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (3, 'c', 'u3')")
+        .execute(&rig.pool)
+        .await
+        .unwrap();
     sqlx::query(
         "INSERT INTO videos (id, playlist_id, youtube_id, normalized, file_path, \
-         audio_file_path) SELECT 13, 2, youtube_id, 1, file_path, audio_file_path \
+         audio_file_path) SELECT 13, 3, youtube_id, 1, file_path, audio_file_path \
          FROM videos WHERE id = 10",
     )
     .execute(&rig.pool)
