@@ -248,3 +248,50 @@ fn only_a_missing_map_reads_as_absent() {
         assert!(!is_not_found(hresult), "{hresult:#x}");
     }
 }
+
+/// #251 step 3: the shim's send waits until the GPU has written Spout's
+/// shared texture BEFORE it announces the frame and lets receivers in.
+/// spoutDX's own `SendTexture` announces right after `Flush`, while the copy
+/// may still run: a receiver then took a partly written picture, and the
+/// wall showed the new picture for one refresh, then the old one again. The
+/// shim compiles only on Windows, so its source is read here.
+#[test]
+fn the_shim_announces_a_frame_only_after_the_gpu_wrote_it() {
+    let shim = include_str!("win/spout_shim.cpp");
+    let body = shim
+        .split("int SendSynced(")
+        .nth(1)
+        .expect("spout_shim.cpp defines SyncedDX::SendSynced");
+    let body = &body[..body.find("};").expect("SyncedDX's declaration ends")];
+    let steps = [
+        "CheckTextureAccess(",
+        "CopyResource(",
+        "End(",
+        "Flush()",
+        "GetData(",
+        "SetNewFrame()",
+        "AllowTextureAccess(",
+    ];
+    let mut at = 0;
+    for step in steps {
+        let found = body[at..]
+            .find(step)
+            .unwrap_or_else(|| panic!("SendSynced calls `{step}` after {at} bytes of steps"));
+        at += found + step.len();
+    }
+    for once in ["SetNewFrame()", "AllowTextureAccess(", "CopyResource("] {
+        assert_eq!(
+            body.matches(once).count(),
+            1,
+            "SendSynced calls `{once}` once"
+        );
+    }
+    assert!(
+        shim.contains("->dx.SendSynced("),
+        "the shim's send goes through SendSynced"
+    );
+    assert!(
+        !shim.contains(".SendTexture("),
+        "the shim never sends through spoutDX's own SendTexture"
+    );
+}
