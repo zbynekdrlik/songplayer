@@ -27,8 +27,8 @@ use crate::resolume::sp_clip_store::SpClipStore;
 use crate::resolume::sp_clips::{self, Fact, ParamValue, Tracked};
 
 /// SNV's composition of 15.10.2026 (`sp_clips_tests.rs`): two
-/// `SP-program-MAX` clips connected, the NDI background connected, 22
-/// tracked params.
+/// `SP-program-MAX` clips connected, the NDI background connected, 29
+/// tracked params (the masters included).
 fn snv() -> Value {
     serde_json::from_str(include_str!("testdata/composition-snv-2026-10-15.json")).unwrap()
 }
@@ -41,7 +41,7 @@ const FIRST_PARAM: i64 = 1_681_395_963_139;
 /// The first `#sp-title` clip's text param (the liveness flip's probe).
 const TITLE_TEXT: i64 = 1_777_202_099_753;
 /// Every tracked param of SNV's composition.
-const TRACKED: usize = 22;
+const TRACKED: usize = 29;
 
 fn secs(s: u64) -> Duration {
     Duration::from_secs(s)
@@ -212,7 +212,7 @@ async fn a_full_refresh_reads_the_clip_from_its_own_body() {
 }
 
 /// The operator's Stream Deck scene ends (both clips disconnected) between
-/// two refreshes: the poll sees it within 30 s, reading 22 params of ~140 B
+/// two refreshes: the poll sees it within 30 s, reading 29 params of ~140 B
 /// each, never the 14 MB composition.
 #[tokio::test]
 async fn the_tracked_params_are_read_every_30_s_between_refreshes() {
@@ -335,7 +335,7 @@ async fn a_404_on_a_param_arena_still_lists_holds_the_poll_until_the_next_refres
 
 /// The operator deleted a SongPlayer clip: its param answers 404 and the
 /// refresh maps the same text clips, but the deleted clip is no longer
-/// tracked, so nothing holds and the next poll reads the 21 params left.
+/// tracked, so nothing holds and the next poll reads the 28 params left.
 #[tokio::test]
 async fn a_deleted_clip_s_404_refreshes_and_the_poll_goes_on() {
     let server = arena().await;
@@ -354,8 +354,8 @@ async fn a_deleted_clip_s_404_refreshes_and_the_poll_goes_on() {
     driver.on_tick_at(base).await;
 
     driver.on_tick_at(base + secs(30)).await;
-    // In id order YT_A's connected is the 17th tracked param.
-    assert_eq!(param_reads(&server).await, 17);
+    // In id order YT_A's connected is the 21st tracked param.
+    assert_eq!(param_reads(&server).await, 21);
     assert_eq!(composition_fetches(&server).await, 2);
     assert_eq!(
         driver.sp_clips.fact,
@@ -364,7 +364,7 @@ async fn a_deleted_clip_s_404_refreshes_and_the_poll_goes_on() {
     assert!(!driver.sp_clips.held, "the 404'd param is gone");
 
     driver.on_tick_at(base + secs(60)).await;
-    assert_eq!(param_reads(&server).await, 17 + 21);
+    assert_eq!(param_reads(&server).await, 21 + 28);
     assert_eq!(
         driver.sp_clips.fact,
         running(vec![yt_music()], vec![snv_bg()])
@@ -402,7 +402,7 @@ async fn a_poll_past_its_budget_is_unknown() {
     );
     assert_eq!(
         driver.sp_clips.fact,
-        Fact::unknown("the poll of 22 params took over 200ms")
+        Fact::unknown("the poll of 29 params took over 200ms")
     );
     assert_eq!(driver.consecutive_failures, 0);
     assert_eq!(composition_fetches(&server).await, 1);

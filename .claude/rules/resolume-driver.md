@@ -261,10 +261,10 @@ keeps the dead ids until the 300 s TTL refresh, which fires no event.
   `Watch::budget`, a test shortens it): it runs inside the driver's step,
   ahead of the title and lyric pushes (review round 1), so a slow Arena
   REST costs at most 2 s per poll; past it the fact is `unknown`. One
-  DEBUG line per poll: `params`, `elapsed_ms`. SNV: ~27 params (18 Spout
-  clips per the box read); the test fixture: 22 (8 Spout + 1 NDI clips'
-  `connected`, 4 layers and 2 groups × `bypassed` + `video.opacity`, the
-  composition's `video.opacity`).
+  DEBUG line per poll: `params`, `elapsed_ms`. SNV: ~39 params (19 clips'
+  `connected`, 18 Spout and 1 NDI; 4 layers and 2 groups × `bypassed`,
+  `video.opacity`, `master`; the composition's `video.opacity` and
+  `master`); the test fixture: 29 (the same with 8 of the 18 Spout clips).
 - **A 404** = a stale map: `refresh_stale_map(now)` (`driver_push.rs`, the
   tail `run_push` had: the refused-id 60 s hold, `not_ready_since.get_or_insert`,
   the refresh through `decide`, the same map = `refused_ids_at`). The poll

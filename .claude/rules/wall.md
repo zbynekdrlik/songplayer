@@ -138,13 +138,19 @@ The wall was black for 5.5 h with songs on program, and the report read
     source, so PP's `SP-program` over NDI reads `none` (the residual; the
     note says "Spout");
   - `running` = one is `connected` (`Connected`, `Connected & previewing`)
-    on a layer not bypassed with `video.opacity` > 0, its layer group (if
-    any) likewise, the composition's `video.opacity` (when the body has
-    one) > 0; `none` = no such clip (also a composition with none);
-    `unknown` = not loaded (no layers), a needed param with no id, a value
-    that did not read, the breaker open, or no Resolume host;
-  - the layer's master fader, solo and the crossfader are NOT read (the
-    design's rule names only these params).
+    on a layer not bypassed with `video.opacity` > 0 AND its `master` fader
+    > 0, its layer group (if any) likewise, the composition's
+    `video.opacity` and `master` (each when the body has it) > 0; `none` =
+    no such clip (also a composition with none); `unknown` = not loaded (no
+    layers), a needed param with no id, a value that did not read, the
+    breaker open, or no Resolume host;
+  - the masters: read on SNV 15.10.2026 (Arena 7.28.1) by the coordinator —
+    every level carries a `master` ParamRange 0..1 with an id (the group
+    "G# Kontent" stands at 0.96484375, which shows);
+  - **NOT read: `solo` and the crossfader** (both unset on SNV: `solo`
+    false on every layer and group, the SP layers' `crossfadergroup`
+    "None"). A solo'd OTHER layer, or the composition's crossfader away
+    from an A/B-assigned SongPlayer layer, still reads `running`.
 - **The record** (`resolume/sp_clip_store.rs`, `global()`): each host's fact,
   combined (running > unknown or no host > none); `since_ms` = when the
   combined state began, on the server's clock. A `running` / `none` counts
@@ -195,10 +201,14 @@ The wall was black for 5.5 h with songs on program, and the report read
   on program with a song; `/__mock/set-playing` takes it off and back.
 - **Tests:** `sp-core wall_clip_tests.rs` (states, note, texts, wire, song
   on program), `wall_tests.rs` (the note's precedence, tone, tooltip),
-  `resolume/sp_clips_tests.rs` (a REAL SNV composition of 15.10.2026,
-  `resolume/testdata/`, trimmed; its param ids derived from the owners' real
-  ids: running, all disconnected, a bypassed / opacity-0 layer, the group,
-  the composition, no group / no composition opacity, not loaded, a missing
+  `resolume/sp_clips_tests.rs` (a composition trimmed from SNV's of
+  15.10.2026, `resolume/testdata/`: real names, states and values, 8 of the
+  18 Spout clips, param objects and ids derived — the masters the
+  coordinator read keep their real id and value (the test file's header):
+  running, all disconnected, a bypassed / opacity-0 /
+  master-0 layer, the group (bypassed, opacity 0, master 0, SNV's 0.96
+  shows), the composition (opacity 0, master 0), no group / no composition
+  levels, not loaded, a missing
   id, a value that did not read or has another shape, the answer's typed
   decode, the 30 s due), `sp_clip_store_tests.rs`,
   `driver_sp_clips_tests.rs`, `api/routes_status_tests.rs` (the route),

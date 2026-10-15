@@ -374,6 +374,7 @@ mod tests {
             "id": 1, "name": {"value": layer},
             "bypassed": {"id": 2, "value": false},
             "video": {"opacity": {"id": 3, "value": 1.0}},
+            "master": {"id": 6, "value": 1.0},
             "clips": [{"id": 4, "name": {"value": "Yt music"},
                        "connected": {"id": 5, "value": "Connected"},
                        "video": {"description": "SP-program-MAX"}}],

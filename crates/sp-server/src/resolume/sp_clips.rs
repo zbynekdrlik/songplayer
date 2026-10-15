@@ -7,20 +7,25 @@
 //! that same body, every clip whose source is SongPlayer's Spout sender
 //! (`sp_core::wall_clip::SPOUT_SOURCES`) or an NDI source, with the ids of
 //! the params that decide whether it shows: the clip's `connected`, its
-//! layer's `bypassed` and `video.opacity`, the same two of the layer group
-//! holding the layer (if any), and the composition's `video.opacity` (when
-//! the body carries one). Their values are in the body too, so a full
-//! refresh evaluates at once; between refreshes the driver reads only those
-//! params by id (`driver_sp_clips.rs`, every [`POLL_EVERY`]).
+//! layer's `bypassed`, `video.opacity` and `master` (the layer's fader), the
+//! same three of the layer group holding the layer (if any), and the
+//! composition's `video.opacity` and `master` (each when the body carries
+//! it). Their values are in the body too, so a full refresh evaluates at
+//! once; between refreshes the driver reads only those params by id
+//! (`driver_sp_clips.rs`, every [`POLL_EVERY`]).
 //!
 //! [`evaluate`] gives the fact: `running` = at least one SongPlayer clip is
 //! connected (`Connected`, `Connected & previewing`) on a layer that is not
-//! bypassed with an opacity above 0, in a group (if any) likewise, under a
-//! composition opacity above 0; `none` = no such clip (also when the
-//! composition holds no SongPlayer clip); `unknown` = the composition is not
-//! loaded (no layers: Arena's REST answers before it has loaded, #217), a
-//! param the rule needs carries no id, or a value did not read. Visible NDI
-//! clips are listed by name (Arena does not name an NDI source).
+//! bypassed with its opacity and its master above 0, in a group (if any)
+//! likewise, under a composition whose opacity and master are above 0;
+//! `none` = no such clip (also when the composition holds no SongPlayer
+//! clip); `unknown` = the composition is not loaded (no layers: Arena's REST
+//! answers before it has loaded, #217), a param the rule needs carries no
+//! id, or a value did not read. Visible NDI clips are listed by name (Arena
+//! does not name an NDI source). Not read (unset on SNV, 15.10.2026): a
+//! layer's or a group's `solo` and the composition's crossfader, so a solo'd
+//! other layer, or a crossfader away from an A/B-assigned SongPlayer layer,
+//! still reads `running`.
 //!
 //! Read only: nothing here (nor in the driver's poll) triggers, connects or
 //! restores a clip, nor changes any setting (the owner's rules, #223,
@@ -35,14 +40,15 @@ use sp_core::wall_clip::{ClipState, ClipView, NDI_SOURCE, SPOUT_SOURCES};
 use crate::resolume::sp_clip_store::SpClipStore;
 
 /// How often the driver reads the tracked params by id between full
-/// refreshes (a full refresh is a read too). About 27 GETs of ~140 B on
-/// SNV: the design's light cadence (#157 hangs Arena's REST under the 14 MB
+/// refreshes (a full refresh is a read too). About 39 GETs of ~140 B on
+/// SNV (19 clips' `connected`, 4 layers and 2 groups × 3, the composition's
+/// 2): the design's light cadence (#157 hangs Arena's REST under the 14 MB
 /// composition, never under these).
 pub const POLL_EVERY: Duration = Duration::from_secs(30);
 
 /// The most one poll may take (review round 1): the reads run inside the
 /// driver's step, so a slow Arena REST would hold the title and lyric
-/// pushes behind it. ~27 reads are expected to take well under a second
+/// pushes behind it. ~39 reads are expected to take well under a second
 /// (not measured yet: the poll's DEBUG line carries `elapsed_ms`); past
 /// this the poll is unknown and the next one tries again.
 pub const POLL_BUDGET: Duration = Duration::from_secs(2);
@@ -72,11 +78,13 @@ pub struct ParamAnswer {
     pub value: ParamValue,
 }
 
-/// The two params that decide whether a layer or a layer group shows.
+/// The three params that decide whether a layer or a layer group shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Visibility {
     pub bypassed: ParamId,
     pub opacity: ParamId,
+    /// The layer's or group's master fader (a `ParamRange` 0..1).
+    pub master: ParamId,
 }
 
 /// One clip to watch: what it is and every param on its way to the wall.
@@ -90,11 +98,12 @@ pub struct TrackedClip {
     pub group: Option<Visibility>,
 }
 
-/// The clips of a loaded composition, and its own opacity.
+/// The clips of a loaded composition, and its own levels: its
+/// `video.opacity` and its `master`, each when the body carries it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Watched {
     pub clips: Vec<TrackedClip>,
-    pub master: Option<ParamId>,
+    pub composition: Vec<ParamId>,
 }
 
 /// What the driver watches.
@@ -122,9 +131,10 @@ impl Tracked {
             for vis in std::iter::once(clip.layer).chain(clip.group) {
                 ids.insert(vis.bypassed);
                 ids.insert(vis.opacity);
+                ids.insert(vis.master);
             }
         }
-        ids.extend(watched.master);
+        ids.extend(&watched.composition);
         ids.into_iter().collect()
     }
 }
@@ -210,6 +220,7 @@ fn watch_visibility(
             &format!("{what}'s opacity"),
             values,
         )?,
+        master: watch_param(&item["master"], &format!("{what}'s master"), values)?,
     })
 }
 
@@ -248,10 +259,13 @@ fn watch(composition: &serde_json::Value, values: &mut Values) -> Result<Option<
         return Ok(None);
     };
     let groups = groups_of(composition);
-    let master = match composition["video"].get("opacity") {
-        Some(opacity) => Some(watch_param(opacity, "the composition's opacity", values)?),
-        None => None,
-    };
+    let mut levels = Vec::new();
+    if let Some(opacity) = composition["video"].get("opacity") {
+        levels.push(watch_param(opacity, "the composition's opacity", values)?);
+    }
+    if let Some(master) = composition.get("master") {
+        levels.push(watch_param(master, "the composition's master", values)?);
+    }
     let mut clips = Vec::new();
     for layer in layers {
         let sources: Vec<(&serde_json::Value, &str)> = layer["clips"]
@@ -288,7 +302,10 @@ fn watch(composition: &serde_json::Value, values: &mut Values) -> Result<Option<
             });
         }
     }
-    Ok(Some(Watched { clips, master }))
+    Ok(Some(Watched {
+        clips,
+        composition: levels,
+    }))
 }
 
 /// What to watch in a full refresh's composition body, and the values it
@@ -338,16 +355,17 @@ fn shows(values: &Values, vis: Visibility) -> Result<bool, String> {
         other => return Err(format!("param {} is no bypass: {other:?}", vis.bypassed)),
     };
     let seen = opaque(values, vis.opacity)?;
-    Ok(!bypassed && seen)
+    let fader = opaque(values, vis.master)?;
+    Ok(!bypassed && seen && fader)
 }
 
 /// The SongPlayer and the NDI clips that show; every value is read (one
 /// that did not read is the answer, whatever the others say).
 fn visible(watched: &Watched, values: &Values) -> Result<(Vec<ClipView>, Vec<ClipView>), String> {
-    let master_shows = match watched.master {
-        Some(id) => opaque(values, id)?,
-        None => true,
-    };
+    let mut master_shows = true;
+    for &id in &watched.composition {
+        master_shows &= opaque(values, id)?;
+    }
     let (mut spout, mut ndi) = (Vec::new(), Vec::new());
     for clip in &watched.clips {
         let is_connected = connected(values, clip.connected)?;

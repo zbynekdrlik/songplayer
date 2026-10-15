@@ -1,4 +1,13 @@
 {
+ "master": {
+  "id": 1792013401987,
+  "valuetype": "ParamRange",
+  "min": 0.0,
+  "max": 1.0,
+  "in": 0.0,
+  "out": 1.0,
+  "value": 1.0
+ },
  "video": {
   "opacity": {
    "id": 1792013451639,
@@ -32,6 +41,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1717686037332,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "clips": []
   },
   {
@@ -54,6 +72,15 @@
      "out": 1.0,
      "value": 0.96484375
     }
+   },
+   "master": {
+    "id": 1717686037438,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
    },
    "clips": []
   },
@@ -78,6 +105,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1717686038219,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "clips": []
   },
   {
@@ -100,6 +136,15 @@
      "out": 1.0,
      "value": 1.0
     }
+   },
+   "master": {
+    "id": 1792013449453,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
    },
    "clips": [
     {
@@ -191,6 +236,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1683218732015,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "clips": [
     {
      "id": 1791369575524,
@@ -281,6 +335,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1683218732108,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "clips": []
   },
   {
@@ -304,6 +367,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1683810432587,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "clips": []
   },
   {
@@ -326,6 +398,15 @@
      "out": 1.0,
      "value": 1.0
     }
+   },
+   "master": {
+    "id": 1711346483651,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
    },
    "clips": [
     {
@@ -379,6 +460,15 @@
      "out": 1.0,
      "value": 1.0
     }
+   },
+   "master": {
+    "id": 1683810440552,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
    },
    "clips": [
     {
@@ -470,6 +560,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1683810440668,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "clips": [
     {
      "id": 1777202099254,
@@ -515,6 +614,15 @@
      "out": 1.0,
      "value": 1.0
     }
+   },
+   "master": {
+    "id": 1681395967127,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
    },
    "clips": [
     {
@@ -569,6 +677,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1683221212719,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "clips": [
     {
      "id": 1756614052022,
@@ -621,6 +738,15 @@
      "out": 1.0,
      "value": 1.0
     }
+   },
+   "master": {
+    "id": 1721455472944,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
    },
    "clips": [
     {
@@ -675,6 +801,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1711563416892,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "clips": [
     {
      "id": 1776576608295,
@@ -728,6 +863,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1711563419332,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "clips": [
     {
      "id": 1777202098183,
@@ -773,6 +917,15 @@
      "out": 1.0,
      "value": 1.0
     }
+   },
+   "master": {
+    "id": 1683810433940,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
    },
    "clips": [
     {
@@ -827,6 +980,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1681395963208,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "clips": [
     {
      "id": 1683814787367,
@@ -872,6 +1034,15 @@
      "out": 1.0,
      "value": 1.0
     }
+   },
+   "master": {
+    "id": 1683125699898,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
    },
    "clips": [
     {
@@ -919,6 +1090,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1711722926307,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "clips": [
     {
      "id": 1723735044642,
@@ -964,6 +1144,15 @@
      "out": 1.0,
      "value": 1.0
     }
+   },
+   "master": {
+    "id": 1683810427219,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
    },
    "clips": [
     {
@@ -1011,6 +1200,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1683810379047,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "clips": []
   },
   {
@@ -1033,6 +1231,15 @@
      "out": 1.0,
      "value": 1.0
     }
+   },
+   "master": {
+    "id": 1683294180788,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
    },
    "clips": []
   },
@@ -1057,6 +1264,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1683294180764,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "clips": []
   },
   {
@@ -1079,6 +1295,15 @@
      "out": 1.0,
      "value": 1.0
     }
+   },
+   "master": {
+    "id": 1683221213133,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
    },
    "clips": []
   },
@@ -1103,6 +1328,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1683221212966,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "clips": []
   },
   {
@@ -1125,6 +1359,15 @@
      "out": 1.0,
      "value": 1.0
     }
+   },
+   "master": {
+    "id": 1712677561475,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
    },
    "clips": []
   },
@@ -1149,6 +1392,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1695912364801,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "clips": []
   },
   {
@@ -1171,6 +1423,15 @@
      "out": 1.0,
      "value": 1.0
     }
+   },
+   "master": {
+    "id": 1683810379019,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
    },
    "clips": []
   },
@@ -1195,6 +1456,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1711039172243,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "clips": []
   },
   {
@@ -1217,6 +1487,15 @@
      "out": 1.0,
      "value": 1.0
     }
+   },
+   "master": {
+    "id": 1711039172342,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
    },
    "clips": []
   },
@@ -1241,6 +1520,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1711039174319,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "clips": []
   },
   {
@@ -1264,6 +1552,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1711039173628,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "clips": []
   },
   {
@@ -1286,6 +1583,15 @@
      "out": 1.0,
      "value": 1.0
     }
+   },
+   "master": {
+    "id": 1683356966968,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
    },
    "clips": [
     {
@@ -1333,6 +1639,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1719213848686,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "clips": [
     {
      "id": 1725893927517,
@@ -1379,6 +1694,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1711346482643,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "clips": []
   },
   {
@@ -1402,6 +1726,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1721455474002,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "clips": []
   },
   {
@@ -1424,6 +1757,15 @@
      "out": 1.0,
      "value": 1.0
     }
+   },
+   "master": {
+    "id": 1721455474750,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
    },
    "clips": []
   }
@@ -1449,6 +1791,15 @@
      "out": 1.0,
      "value": 1.0
     }
+   },
+   "master": {
+    "id": 1717686039000,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
    },
    "layers": [
     {
@@ -1482,6 +1833,15 @@
      "out": 1.0,
      "value": 1.0
     }
+   },
+   "master": {
+    "id": 1792013455710,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 0.96484375
    },
    "layers": [
     {
@@ -1546,6 +1906,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1691404992997,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "layers": [
     {
      "id": 1681395963204
@@ -1579,6 +1948,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1683810379075,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "layers": [
     {
      "id": 1683810427215
@@ -1608,6 +1986,15 @@
      "out": 1.0,
      "value": 1.0
     }
+   },
+   "master": {
+    "id": 1712471477807,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
    },
    "layers": [
     {
@@ -1642,6 +2029,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1683221212900,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "layers": [
     {
      "id": 1683221212962
@@ -1672,6 +2068,15 @@
      "value": 1.0
     }
    },
+   "master": {
+    "id": 1695912364695,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
+   },
    "layers": [
     {
      "id": 1695912364797
@@ -1701,6 +2106,15 @@
      "out": 1.0,
      "value": 1.0
     }
+   },
+   "master": {
+    "id": 1712229130625,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
    },
    "layers": [
     {
@@ -1737,6 +2151,15 @@
      "out": 1.0,
      "value": 1.0
     }
+   },
+   "master": {
+    "id": 1721455471390,
+    "valuetype": "ParamRange",
+    "min": 0.0,
+    "max": 1.0,
+    "in": 0.0,
+    "out": 1.0,
+    "value": 1.0
    },
    "layers": [
     {

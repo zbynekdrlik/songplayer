@@ -4,7 +4,11 @@
 //! ids, connected states, bypassed and opacity values; 8 of SNV's 18
 //! `SP-program-MAX` clips; every param object, its id and `valuetype`, and
 //! the composition's `video` block derived for the test, `testdata/`), and
-//! variants of it.
+//! variants of it. The `master` faders the coordinator read on SNV
+//! (15.10.2026) keep their real id and value: the composition's
+//! (1792013401987, 1.0), layer 4 = "L# Fill" `FILL_A` (1792013449453, 1.0)
+//! and the group "G# Kontent" (1792013455710, 0.96484375); every other
+//! master is derived (owner id + 4) at 1.0.
 
 use std::time::{Duration, Instant};
 
@@ -28,8 +32,13 @@ const YT_A: i64 = 1_791_369_575_545;
 const YT_B: i64 = 1_791_369_575_524;
 /// The group "G# Kontent" holding both layers.
 const KONTENT: i64 = 1_681_395_963_138;
-/// The composition's own opacity param.
-const MASTER: i64 = 1_792_013_451_639;
+/// The composition's own opacity and master params.
+const COMP_OPACITY: i64 = 1_792_013_451_639;
+const COMP_MASTER: i64 = 1_792_013_401_987;
+/// Real master ids the coordinator read on SNV (15.10.2026): layer 4
+/// (`FILL_A`, at 1.0) and the group "G# Kontent" (at 0.96484375).
+const FILL_A_MASTER: i64 = 1_792_013_449_453;
+const KONTENT_MASTER: i64 = 1_792_013_455_710;
 
 fn yt_music() -> ClipView {
     ClipView {
@@ -100,22 +109,23 @@ fn snv_runs_two_songplayer_clips_over_its_ndi_background() {
         running(vec![yt_music(), yt_music()], vec![snv_bg()])
     );
     // 9 clips watched (8 SongPlayer, 1 NDI): their connected, their 4
-    // layers' and 2 groups' bypassed + opacity, the composition's opacity.
+    // layers' and 2 groups' bypassed + opacity + master, the composition's
+    // opacity + master.
     let Tracked::Watched(watched) = &read.tracked else {
         panic!("{:?}", read.tracked);
     };
     assert_eq!(watched.clips.len(), 9);
     assert_eq!(watched.clips.iter().filter(|c| c.ndi).count(), 1);
-    assert_eq!(watched.master, Some(MASTER));
+    assert_eq!(watched.composition, vec![COMP_OPACITY, COMP_MASTER]);
     let params = read.tracked.params();
-    assert_eq!(params.len(), 22);
+    assert_eq!(params.len(), 29);
     assert_eq!(
         params[0],
         KONTENT + 1,
         "id order: the group's bypassed first"
     );
-    assert_eq!(params[21], MASTER);
-    assert_eq!(read.values.len(), 22, "the body carries every value");
+    assert_eq!(params[28], KONTENT_MASTER);
+    assert_eq!(read.values.len(), 29, "the body carries every value");
     let first = &watched.clips[0];
     assert_eq!(
         *first,
@@ -126,10 +136,12 @@ fn snv_runs_two_songplayer_clips_over_its_ndi_background() {
             layer: Visibility {
                 bypassed: FILL_A + 1,
                 opacity: FILL_A + 2,
+                master: FILL_A_MASTER,
             },
             group: Some(Visibility {
                 bypassed: KONTENT + 1,
                 opacity: KONTENT + 2,
+                master: KONTENT_MASTER,
             }),
         }
     );
@@ -139,6 +151,12 @@ fn snv_runs_two_songplayer_clips_over_its_ndi_background() {
     );
     assert_eq!(read.values[&(FILL_A + 1)], ParamValue::Bool(false));
     assert_eq!(read.values[&(FILL_A + 2)], ParamValue::Number(1.0));
+    // The group's master stands at 0.96484375 on SNV: it still shows.
+    assert_eq!(
+        read.values[&KONTENT_MASTER],
+        ParamValue::Number(0.964_843_75)
+    );
+    assert_eq!(read.values[&COMP_MASTER], ParamValue::Number(1.0));
 }
 
 #[test]
@@ -208,11 +226,47 @@ fn the_composition_at_opacity_0_hides_everything() {
     assert_eq!(eval(&body), none(Vec::new()));
 }
 
+/// The coordinator's box read (15.10.2026): every level carries a `master`
+/// fader (0..1); like its `video.opacity`, each must be above 0.
+#[test]
+fn a_master_fader_at_0_hides_like_its_opacity() {
+    let mut body = snv();
+    item(&mut body, FILL_A)["master"]["value"] = json!(0.0);
+    assert_eq!(eval(&body), running(vec![yt_music()], vec![snv_bg()]));
+    item(&mut body, FILL_B)["master"]["value"] = json!(0.0);
+    assert_eq!(
+        eval(&body),
+        none(vec![snv_bg()]),
+        "both layers' masters down"
+    );
+    item(&mut body, FILL_B)["master"]["value"] = json!(0.5);
+    assert_eq!(eval(&body), running(vec![yt_music()], vec![snv_bg()]));
+
+    let mut body = snv();
+    item(&mut body, KONTENT)["master"]["value"] = json!(0.0);
+    assert_eq!(
+        eval(&body),
+        none(vec![snv_bg()]),
+        "the NDI background is in another group"
+    );
+    // SNV's own group master, 0.96484375, shows (the fixture's value).
+    item(&mut body, KONTENT)["master"]["value"] = json!(0.964_843_75);
+    assert_eq!(
+        eval(&body),
+        running(vec![yt_music(), yt_music()], vec![snv_bg()])
+    );
+
+    let mut body = snv();
+    body["master"]["value"] = json!(0.0);
+    assert_eq!(eval(&body), none(Vec::new()), "the composition's master");
+}
+
 #[test]
 fn a_layer_in_no_group_under_a_composition_with_no_opacity_still_shows() {
     let mut body = snv();
     body.as_object_mut().unwrap().remove("layergroups");
     body.as_object_mut().unwrap().remove("video");
+    body.as_object_mut().unwrap().remove("master");
     let read = track(&body);
     assert_eq!(
         evaluate(&read.tracked, &read.values),
@@ -220,13 +274,13 @@ fn a_layer_in_no_group_under_a_composition_with_no_opacity_still_shows() {
     );
     assert_eq!(
         read.tracked.params().len(),
-        17,
-        "no group, no composition opacity"
+        21,
+        "no group, no composition opacity or master"
     );
     let Tracked::Watched(watched) = &read.tracked else {
         panic!("{:?}", read.tracked);
     };
-    assert_eq!(watched.master, None);
+    assert!(watched.composition.is_empty());
     assert!(watched.clips.iter().all(|c| c.group.is_none()));
 }
 
@@ -305,12 +359,37 @@ fn a_param_with_no_id_is_unreadable_and_unknown() {
         track(&body).tracked,
         Tracked::Unreadable("the composition's opacity carries no param id".to_string())
     );
+    // The masters are needed like the opacities.
+    let mut body = snv();
+    item(&mut body, FILL_A)["master"]
+        .as_object_mut()
+        .unwrap()
+        .remove("id");
+    assert_eq!(
+        track(&body).tracked,
+        Tracked::Unreadable("layer \"L# Fill\"'s master carries no param id".to_string())
+    );
+    let mut body = snv();
+    body["master"].as_object_mut().unwrap().remove("id");
+    assert_eq!(
+        track(&body).tracked,
+        Tracked::Unreadable("the composition's master carries no param id".to_string())
+    );
 }
 
 #[test]
 fn a_value_that_did_not_read_or_has_another_shape_is_unknown() {
     let read = track(&snv());
-    for missing in [YT_B + 1, FILL_B + 1, FILL_B + 2, KONTENT + 2, MASTER] {
+    for missing in [
+        YT_B + 1,
+        FILL_B + 1,
+        FILL_B + 2,
+        KONTENT + 2,
+        COMP_OPACITY,
+        FILL_A_MASTER,
+        KONTENT_MASTER,
+        COMP_MASTER,
+    ] {
         let mut values = read.values.clone();
         values.remove(&missing);
         assert_eq!(
@@ -328,7 +407,9 @@ fn a_value_that_did_not_read_or_has_another_shape_is_unknown() {
         (YT_A + 1, ParamValue::Bool(true)),
         (FILL_A + 1, ParamValue::Number(0.0)),
         (FILL_A + 2, ParamValue::Text("1".to_string())),
-        (MASTER, ParamValue::Bool(false)),
+        (COMP_OPACITY, ParamValue::Bool(false)),
+        (COMP_MASTER, ParamValue::Bool(false)),
+        (KONTENT_MASTER, ParamValue::Text("1".to_string())),
     ] {
         let mut values = read.values.clone();
         values.insert(id, wrong.clone());
