@@ -25,6 +25,7 @@ mod clear_lyrics;
 pub mod clock_health;
 pub mod dashboard_replay; // #225: the engine's last dashboard state per playlist, replayed on WS connect
 pub mod decode_thread; // #223 S0: the one way a decode thread starts (producer + decode bench)
+pub mod early_end; // #277: a video that ends long before its duration is a failure (pure)
 mod engine_play;
 pub(crate) mod failure_backoff; // #229: the pause after failed opens (pure; the selector's pick too)
 mod failure_retry; // #229: the engine's retry of a playlist whose opens fail

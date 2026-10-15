@@ -154,3 +154,13 @@ fn a_seek_back_clears_the_audio_end_until_the_audio_ends_again() {
     assert_eq!(step(&mut dec), Some((100, false)));
     assert_eq!(step(&mut dec), Some((200, true)));
 }
+
+#[test]
+fn the_video_duration_is_the_video_readers_own() {
+    // #277: an early end of the picture is measured against the video's own
+    // length, never the audio's (the master clock): the video here is 700 ms
+    // long, the audio 200 ms.
+    let dec = decoder(&[0, 100, 700], &[0, 100]);
+    assert_eq!(dec.video_duration_ms(), 700);
+    assert_eq!(dec.duration_ms(), 200, "the master clock is the audio's");
+}

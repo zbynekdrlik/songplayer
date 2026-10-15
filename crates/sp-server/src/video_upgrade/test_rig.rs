@@ -1,6 +1,7 @@
 //! #223 S11/S12: a cached song and scripted upgrade steps, shared by the
 //! upgrade's and the worker's tests.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -110,7 +111,10 @@ impl Rig {
 }
 
 /// Scripted steps: the cached video reads `old`, the temp `new`; the
-/// download writes `new_bytes` into the temp (none = writes nothing).
+/// download writes `new_bytes` into the temp (none = writes nothing). #277:
+/// the codec is `codec`; ffmpeg answers `remux` (the bytes it writes into
+/// its last argument, none = writes nothing), and the repair temp reads
+/// `repaired`.
 pub(crate) struct Fake {
     pub(crate) old: Result<VideoFacts, String>,
     pub(crate) new: Result<VideoFacts, String>,
@@ -119,6 +123,11 @@ pub(crate) struct Fake {
     pub(crate) new_bytes: Option<&'static str>,
     /// Each download: its format id and whether the temp existed then.
     pub(crate) downloads: Mutex<Vec<(String, bool)>>,
+    pub(crate) codec: Result<String, String>,
+    pub(crate) remux: Result<Option<&'static str>, String>,
+    pub(crate) repaired: Result<VideoFacts, String>,
+    /// Each ffmpeg run's arguments.
+    pub(crate) ffmpeg_runs: Mutex<Vec<Vec<OsString>>>,
 }
 
 impl Fake {
@@ -130,6 +139,19 @@ impl Fake {
             audio_ms: 200_000,
             new_bytes: Some("new"),
             downloads: Mutex::new(Vec::new()),
+            codec: Ok("H264".into()),
+            remux: Ok(Some("repaired")),
+            repaired: Ok(facts(1440, 0, 200_000)),
+            ffmpeg_runs: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// #277: a cached H.264 video Media Foundation reads no picture of, and
+    /// a remux that reads to its end.
+    pub(crate) fn repairing() -> Self {
+        Self {
+            old: Err(NO_PICTURE.into()),
+            ..Self::upgrading()
         }
     }
 }
@@ -143,6 +165,8 @@ impl Steps for Fake {
         let name = path.file_name().unwrap().to_str().unwrap();
         if name.ends_with("_video_upgrade_temp.mp4") {
             self.new.clone()
+        } else if name.ends_with("_video_repair_temp.mp4") {
+            self.repaired.clone()
         } else {
             self.old.clone()
         }
@@ -172,6 +196,17 @@ impl Steps for Fake {
     async fn audio_ms(&self, path: &Path) -> Result<u64, String> {
         assert!(path.to_str().unwrap().ends_with("_audio.flac"));
         Ok(self.audio_ms)
+    }
+    async fn codec(&self, _path: &Path) -> Result<String, String> {
+        self.codec.clone()
+    }
+    async fn ffmpeg(&self, args: &[OsString]) -> Result<(), String> {
+        self.ffmpeg_runs.lock().unwrap().push(args.to_vec());
+        let bytes = self.remux.clone()?;
+        if let Some(bytes) = bytes {
+            std::fs::write(args.last().expect("the output"), bytes).unwrap();
+        }
+        Ok(())
     }
 }
 

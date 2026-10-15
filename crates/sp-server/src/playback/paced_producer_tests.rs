@@ -421,3 +421,7 @@ fn the_preview_gets_the_held_picture_and_its_audio_through_the_tail() {
     let block = audio.try_recv().expect("its chunk was offered");
     assert_eq!(block.samples, vec![200.0f32; 4]);
 }
+
+/// #277: an early end of the video (a child module over these mocks).
+#[path = "paced_producer_tests_early.rs"]
+mod early;

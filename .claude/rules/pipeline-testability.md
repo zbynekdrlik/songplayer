@@ -72,9 +72,22 @@ The engine counts the Plays a pipeline was sent and has not answered
 records a play or counts a failure. That needs exactly one `Started` or
 `Error` per Play, in command order: the stub's one `Error`; on Windows the
 pre-roll's `Started` or the failed open's `Error` (the pre-roll reads no
-command, nothing after `Started` sends an `Error`). A new answer path, a
-second answer, or an answer that can overtake an earlier Play's breaks it
-(`open-failures.md`, "Which Play an answer belongs to").
+command). #277: a video that ends early before its first picture answers
+with its `Error` instead of `Started` (checked right after the pre-roll,
+`SharedQueue::failure`); after `Started` the one `Error` it may still send
+carries `early_end::after_start`'s suffix and is counted as no answer. A
+new answer path, a second answer, or an answer that can overtake an
+earlier Play's breaks it (`open-failures.md`, "Which Play an answer belongs
+to", "A video that ends early").
+
+## An early end is decided in the producer, not the loop (#277)
+
+`DecodeProducer::next_item` measures where the picture stopped against the
+video reader's own duration (`early_end::EarlyEnd::of`) and returns no held
+step for an early end; the Windows loop only WARNs, marks the queue
+(`producer_failed`) and turns `SharedQueue::failure` into
+`DecodeResult::Error`. Tests: `paced_producer_tests_early.rs` (mock readers
+with a container duration apart from their frames).
 
 ## Heartbeat helpers carry `mutants::skip` only where the effect is glue
 

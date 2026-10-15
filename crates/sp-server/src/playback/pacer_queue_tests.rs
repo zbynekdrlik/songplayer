@@ -222,3 +222,43 @@ fn shared_queue_is_primed_does_not_pop() {
     assert_eq!(q.consumer_pop(), Some(9), "the primed frame is still there");
     assert!(!q.is_primed());
 }
+
+/// #277: a failed song (an early end of the video) is an end-of-stream that
+/// names why; the frames queued before it still drain first.
+#[test]
+fn a_failure_ends_the_stream_and_names_why() {
+    let mut q: PacedQueue<u32> = PacedQueue::new(4);
+    q.push(1, 0);
+    assert_eq!(q.failure(), None);
+    q.mark_failed("early_end: x.mp4 ended at 100 ms of 250000 ms".into());
+    assert!(q.eos(), "a failure ends the stream");
+    assert!(!q.is_drained(), "the frame queued before it still plays");
+    assert_eq!(q.pop(), Some(1));
+    assert!(q.is_drained());
+    assert_eq!(
+        q.failure(),
+        Some("early_end: x.mp4 ended at 100 ms of 250000 ms")
+    );
+}
+
+/// #277: a seek plays the video again: the failure goes with the stream's end.
+#[test]
+fn a_seek_clears_a_failure() {
+    let mut q: PacedQueue<u32> = PacedQueue::new(4);
+    q.mark_failed("early_end: x".into());
+    q.begin_seek();
+    assert_eq!(q.failure(), None);
+    assert!(!q.eos());
+}
+
+/// The shared wrapper: the failure and the end come under one lock.
+#[test]
+fn shared_queue_reports_a_failure_at_the_stream_end() {
+    let q = SharedQueue::<u32>::new(4);
+    assert_eq!(q.failure(), None);
+    q.producer_failed("early_end: y".into());
+    assert!(q.is_drained());
+    assert_eq!(q.failure().as_deref(), Some("early_end: y"));
+    q.request_seek(0);
+    assert_eq!(q.failure(), None);
+}
