@@ -324,13 +324,7 @@ pub async fn follow_next(ex: Option<&Arc<Exchange>>) -> Vec<i64> {
         return Vec::new();
     };
     let now = now_ms();
-    let due = lock(&ex.follow).due(now);
-    // While paused nothing is read: looked at again on the next tick.
-    if !due || ex.transfers_paused().await {
-        return Vec::new();
-    }
-    let Some(cfg) = asking_config(ex).await else {
-        lock(&ex.follow).look_after(now, FOLLOW_IDLE);
+    let Some(cfg) = look_config(ex, &ex.follow, now).await else {
         return Vec::new();
     };
     let held = match held_videos(&ex.pool).await {
@@ -342,12 +336,7 @@ pub async fn follow_next(ex: Option<&Arc<Exchange>>) -> Vec<i64> {
         }
     };
     let catalogs = ex.read_peers(&cfg.peers).await;
-    let reads: Vec<(&str, Option<&Catalog>)> = cfg
-        .peers
-        .iter()
-        .zip(&catalogs)
-        .map(|(peer, catalog)| (peer.name.as_str(), catalog.as_deref()))
-        .collect();
+    let reads = peer_reads(&cfg, &catalogs);
     let untracked = !ex.may_run_here(Job::Lyrics).await;
     let found = candidates(&held, &reads, untracked);
     let picked = lock(&ex.follow).pick(&found, now);
@@ -361,9 +350,44 @@ pub async fn follow_next(ex: Option<&Arc<Exchange>>) -> Vec<i64> {
     settle(ex, &c, outcome, now_ms())
 }
 
+/// A follow's first step, the lyrics' and the titles' (#269) alike: the
+/// settings a look of `state` runs with at `now`. `None` = no look now: not
+/// due yet; this node's transfers paused (nothing read, looked at again on
+/// the next tick); or it asks no peer (SNV) or its settings do not hold (the
+/// next look [`FOLLOW_IDLE`] later).
+pub(super) async fn look_config<W: Copy>(
+    ex: &Exchange,
+    state: &std::sync::Mutex<FollowState<W>>,
+    now: i64,
+) -> Option<NodeConfig> {
+    let due = lock(state).due(now);
+    if !due || ex.transfers_paused().await {
+        return None;
+    }
+    let cfg = asking_config(ex).await;
+    if cfg.is_none() {
+        lock(state).look_after(now, FOLLOW_IDLE);
+    }
+    cfg
+}
+
+/// The listed peers' catalogs as a look reads them: each peer's name with
+/// its catalog, `None` where it could not be read (`Exchange::read_peers`,
+/// in `cfg.peers` order).
+pub(super) fn peer_reads<'a>(
+    cfg: &'a NodeConfig,
+    catalogs: &'a [Option<Arc<Catalog>>],
+) -> Vec<(&'a str, Option<&'a Catalog>)> {
+    cfg.peers
+        .iter()
+        .zip(catalogs)
+        .map(|(peer, catalog)| (peer.name.as_str(), catalog.as_deref()))
+        .collect()
+}
+
 /// This node's exchange settings when it asks peers; `None` when it asks
-/// none (SNV) or they do not hold (WARNed). Both follows ask it.
-pub(super) async fn asking_config(ex: &Exchange) -> Option<NodeConfig> {
+/// none (SNV) or they do not hold (WARNed).
+async fn asking_config(ex: &Exchange) -> Option<NodeConfig> {
     match NodeConfig::load(&ex.pool).await {
         Ok(cfg) => cfg.asking().then_some(cfg),
         Err(e) => {

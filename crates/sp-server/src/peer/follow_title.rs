@@ -53,7 +53,7 @@ use super::catalog::metadata_for;
 use super::client::{PeerError, lock};
 use super::config::PeerConfig;
 use super::download::{PeerTitle, record_title};
-use super::follow::{Candidate, FOLLOW_IDLE, FOLLOW_RETRY, FollowStatus, asking_config};
+use super::follow::{Candidate, FOLLOW_IDLE, FOLLOW_RETRY, FollowStatus, look_config, peer_reads};
 use super::hash::sha256_hex;
 use super::kind::{ArtifactKind, METADATA_MANUAL, acceptable};
 use super::wire::{Artifact, Catalog, PeerMetadata, now_ms};
@@ -170,13 +170,7 @@ pub async fn follow_next(ex: Option<&Arc<Exchange>>) -> Vec<i64> {
         return Vec::new();
     };
     let now = now_ms();
-    let due = lock(&ex.title_follow).due(now);
-    // While paused nothing is read: looked at again on the next tick.
-    if !due || ex.transfers_paused().await {
-        return Vec::new();
-    }
-    let Some(cfg) = asking_config(ex).await else {
-        lock(&ex.title_follow).look_after(now, FOLLOW_IDLE);
+    let Some(cfg) = look_config(ex, &ex.title_follow, now).await else {
         return Vec::new();
     };
     let held = match held_titles(&ex.pool, None).await {
@@ -188,13 +182,7 @@ pub async fn follow_next(ex: Option<&Arc<Exchange>>) -> Vec<i64> {
         }
     };
     let catalogs = ex.read_peers(&cfg.peers).await;
-    let reads: Vec<(&str, Option<&Catalog>)> = cfg
-        .peers
-        .iter()
-        .zip(&catalogs)
-        .map(|(peer, catalog)| (peer.name.as_str(), catalog.as_deref()))
-        .collect();
-    let found = candidates(&held, &reads);
+    let found = candidates(&held, &peer_reads(&cfg, &catalogs));
     let picked = lock(&ex.title_follow).pick(&found, now);
     let Some(c) = picked else {
         return Vec::new();
