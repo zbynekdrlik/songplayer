@@ -16,6 +16,11 @@
 //! rows match the reference. A 16:9 or wider picture is placed as before;
 //! the 1920×1080 `SP-program` target keeps the 4:3 bars (`FHD_FIT`).
 //!
+//! #251 step 2: MAX's compositor draws the `SP-program` target too
+//! (`add_target(FHD_TARGET)`): ONE compose uploads each picture once and
+//! fills both targets, each within the reference's tolerance in its own
+//! size and by its own rule.
+//!
 //! Windows only. A WARP capability the compositor needs (the shared render
 //! target included) that is missing FAILS here; nothing is skipped.
 
@@ -28,8 +33,8 @@ use common::{
     picture, warp, warp_fhd,
 };
 use sp_gpu::{
-    Composition, Compositor, FHD_FIT, FHD_HEIGHT, FHD_WIDTH, GpuError, Layer, PictureError,
-    pick_adapter, reference,
+    Composition, Compositor, FHD_FIT, FHD_HEIGHT, FHD_TARGET, FHD_WIDTH, GpuError, Layer,
+    MAX_TARGET, PictureError, TargetId, pick_adapter, reference,
 };
 use windows::Win32::Graphics::Direct3D11::{D3D11_RESOURCE_MISC_SHARED, D3D11_TEXTURE2D_DESC};
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -397,4 +402,146 @@ fn a_1920_by_1080_compositor_draws_into_its_own_target() {
     let layers = fade.layers_in(FHD_WIDTH, FHD_HEIGHT, FHD_FIT);
     assert_matches_reference_in(&frame, &layers, size, "fade 50 % in 1920x1080");
     assert_opaque(&frame, "fade 50 % in 1920x1080");
+}
+
+/// MAX's WARP compositor with the `SP-program` target added (#251 step 2,
+/// as the `program-max` thread builds it).
+fn warp_with_fhd() -> (Compositor, TargetId) {
+    let mut compositor = warp();
+    let fhd = compositor
+        .add_target(FHD_TARGET)
+        .unwrap_or_else(|e| panic!("WARP must add the 1920x1080 target: {e}"));
+    assert_ne!(fhd, TargetId::PRIMARY);
+    (compositor, fhd)
+}
+
+/// Both targets read back and compared, each in its own size by its own
+/// rule.
+fn assert_both_match(compositor: &mut Compositor, fhd: TargetId, c: &Composition<'_>, what: &str) {
+    let max = compositor.read_back().expect("read back MAX's target");
+    assert_matches_reference(&max, &c.layers_on(MAX_TARGET), &format!("{what}: MAX"));
+    assert_opaque(&max, what);
+    let frame = compositor.read_back_target(fhd).expect("read back FHD's");
+    assert_eq!(frame.len(), 1920 * 1080 * 4, "{what}: a 1080p frame");
+    let layers = c.layers_on(FHD_TARGET);
+    let size = (FHD_WIDTH, FHD_HEIGHT);
+    assert_matches_reference_in(&frame, &layers, size, &format!("{what}: FHD"));
+    assert_opaque(&frame, what);
+}
+
+/// #251 step 2: ONE compose fills BOTH targets of one device: MAX's
+/// 3840×2160 and `SP-program`'s 1920×1080, each within the reference's
+/// tolerance. The shared target is shared too (Spout sends it), and each
+/// target's own part of the draw is kept.
+#[test]
+fn one_compose_fills_both_targets_within_the_reference() {
+    let (mut compositor, fhd) = warp_with_fhd();
+    assert_eq!(compositor.target_size(fhd), Some((1920, 1080)));
+    assert_eq!(compositor.target_size(TargetId::PRIMARY), Some((W, H)));
+    assert_eq!(compositor.size(), (W, H), "the primary is still MAX's");
+    let texture = compositor.target_texture(fhd).expect("the FHD target");
+    let mut desc = D3D11_TEXTURE2D_DESC::default();
+    unsafe { texture.GetDesc(&mut desc) };
+    assert_eq!((desc.Width, desc.Height), (1920, 1080));
+    assert_eq!(desc.Format, DXGI_FORMAT_B8G8R8A8_UNORM);
+    assert_ne!(
+        desc.MiscFlags & D3D11_RESOURCE_MISC_SHARED.0 as u32,
+        0,
+        "the FHD target is shared (Spout)"
+    );
+    assert_eq!(compositor.draw_us(fhd), None, "not drawn yet");
+
+    let (from_stride, from) = pattern(2560, 1440, 7);
+    let (to_stride, to) = pattern(1440, 1080, 120);
+    let fade = Composition::Fade {
+        from: Some(picture(1, 2560, 1440, from_stride, &from)),
+        to: Some(picture(2, 1440, 1080, to_stride, &to)),
+        weight_q8: 128,
+    };
+    let stats = compositor.compose(&fade).expect("compose both targets");
+    assert_eq!(stats.uploads, 2, "two pictures, each uploaded once");
+    let max_draw = compositor.draw_us(TargetId::PRIMARY).expect("MAX drawn");
+    let fhd_draw = compositor.draw_us(fhd).expect("FHD drawn");
+    assert!(
+        max_draw + fhd_draw <= stats.draw_us,
+        "each target's part of the one draw: {max_draw} + {fhd_draw} > {stats:?}"
+    );
+    assert_both_match(&mut compositor, fhd, &fade, "fade 50 %");
+}
+
+/// #251 step 2: each picture is uploaded ONCE per compose, whatever the
+/// targets: the same counts as MAX's compositor alone, a resident picture
+/// costs no upload on either target, and both targets show it.
+#[test]
+fn each_picture_is_uploaded_once_for_both_targets() {
+    let (mut compositor, fhd) = warp_with_fhd();
+    let mut alone = warp();
+    let (stride, a) = pattern(1920, 1080, 3);
+    let (_, b) = pattern(1920, 1080, 77);
+    let first = Composition::Picture(picture(1, 1920, 1080, stride, &a));
+    let fade = Composition::Fade {
+        from: Some(picture(1, 1920, 1080, stride, &a)),
+        to: Some(picture(2, 1920, 1080, stride, &b)),
+        weight_q8: 64,
+    };
+    for (composition, uploads, what) in [
+        (first, 1, "a new picture"),
+        (first, 0, "the same id again"),
+        (fade, 1, "a fade out of it: only the incoming side"),
+        (fade, 0, "the fade again"),
+    ] {
+        let both = compositor.compose(&composition).expect("compose both");
+        let one = alone.compose(&composition).expect("compose MAX alone");
+        assert_eq!(both.uploads, uploads, "{what}: two targets");
+        assert_eq!(one.uploads, uploads, "{what}: MAX alone");
+    }
+    assert_both_match(&mut compositor, fhd, &fade, "the resident fade");
+}
+
+/// #251 step 2 + #267: a 4:3 picture, composed once, fills MAX's whole
+/// width (no black column at either side) and keeps the bars of
+/// `SP-program`'s target (black at columns 239 and 1680).
+#[test]
+fn a_4_by_3_picture_fills_max_s_width_and_keeps_fhd_s_bars_in_one_compose() {
+    let (mut compositor, fhd) = warp_with_fhd();
+    let (stride, data) = pattern(1440, 1080, 51);
+    let narrow = Composition::Picture(picture(1, 1440, 1080, stride, &data));
+    assert_eq!(compositor.compose(&narrow).expect("compose").uploads, 1);
+    let max = compositor.read_back().expect("read back MAX's");
+    assert_edge_columns_lit(&max, &narrow.layers_on(MAX_TARGET), "4:3 on MAX");
+    assert_both_match(&mut compositor, fhd, &narrow, "4:3");
+    let frame = compositor.read_back_target(fhd).expect("read back FHD's");
+    assert_eq!(at_in(&frame, FHD_WIDTH, 239, 540), BLACK, "the left bar");
+    assert_eq!(at_in(&frame, FHD_WIDTH, 1680, 540), BLACK, "the right bar");
+    assert_ne!(at_in(&frame, FHD_WIDTH, 240, 540), BLACK, "the picture");
+}
+
+/// #251 step 2: a removed target is drawn no more and names nothing; the
+/// primary is never removed and MAX keeps composing.
+#[test]
+fn a_removed_target_is_no_longer_drawn() {
+    let (mut compositor, fhd) = warp_with_fhd();
+    let (stride, data) = pattern(1280, 720, 17);
+    let plain = Composition::Picture(picture(1, 1280, 720, stride, &data));
+    compositor.compose(&plain).expect("compose both");
+    assert!(compositor.remove_target(fhd));
+    assert!(!compositor.remove_target(fhd), "removed once");
+    assert!(
+        !compositor.remove_target(TargetId::PRIMARY),
+        "the primary stays"
+    );
+    assert_eq!(compositor.target_size(fhd), None);
+    assert_eq!(compositor.draw_us(fhd), None);
+    assert!(compositor.target_texture(fhd).is_none());
+    assert!(matches!(
+        compositor.read_back_target(fhd),
+        Err(GpuError::NoObject { .. })
+    ));
+    let (stride, other) = pattern(1280, 720, 90);
+    let next = Composition::Picture(picture(2, 1280, 720, stride, &other));
+    compositor.compose(&next).expect("compose MAX alone again");
+    let max = compositor.read_back().expect("read back MAX's");
+    assert_matches_reference(&max, &next.layers(), "MAX after the removal");
+    let again = compositor.add_target(FHD_TARGET).expect("added again");
+    assert_ne!(again, fhd, "a new id, never the removed one");
 }

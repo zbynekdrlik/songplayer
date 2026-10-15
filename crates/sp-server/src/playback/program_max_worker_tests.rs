@@ -3,8 +3,10 @@
 //! failed build or a lost frame cost, the backoff, the release, and the loop.
 //! The fake ([`FakeGpu`]) is `pub(crate)`: `program_output_tests_max.rs`
 //! holds its compose to stall the consumer, and #239's
-//! `program_max_worker_tests_fhd.rs` drives its FHD side (every object
-//! knows whether it is the FHD sender's).
+//! `program_max_worker_tests_fhd.rs` drives its FHD side. #251 step 2: ONE
+//! fake compositor holds MAX's primary target and the FHD target the worker
+//! adds (`sp_gpu::Targets`, the compositor's own book-keeping); one compose
+//! draws both, and each sender knows whether it is the FHD one's.
 //! Wired via `#[cfg(test)] #[path = "program_max_worker_tests.rs"] pub(crate) mod tests;`.
 
 use std::collections::VecDeque;
@@ -12,7 +14,10 @@ use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use sp_gpu::{ComposeStats, Composition, GpuError, Nv12Picture, PictureError, SpoutSendStats};
+use sp_gpu::{
+    ComposeStats, Composition, GpuError, MAX_TARGET, Nv12Picture, PictureError, SpoutSendStats,
+    Target, TargetId, Targets,
+};
 
 use super::{
     MAX_RETRY_BACKOFF, MaxCompositor, MaxGpu, MaxSender, MaxWorker, PictureIds, is_refusal,
@@ -79,18 +84,23 @@ pub(crate) enum Drawn {
 pub(crate) struct Log {
     pub compositors_built: u32,
     pub senders_built: u32,
-    /// "sender" / "compositor" (MAX's), "fhd sender" / "fhd compositor"
-    /// (#239), in drop order.
+    /// "sender" / "fhd sender" / "compositor", in drop order.
     pub drops: Vec<&'static str>,
+    /// What each compose drew into MAX's target.
     pub drawn: Vec<Drawn>,
     pub sent: u32,
-    /// #239: the FHD sender's builds, draws and sends.
-    pub fhd_compositors_built: u32,
+    /// #251 step 2: the targets added to a compositor (`add_target`) and
+    /// how many were removed (`remove_target`).
+    pub targets_added: Vec<Target>,
+    pub targets_removed: u32,
+    /// #239: the FHD senders built, what each compose drew into the FHD
+    /// target (the SAME compose as `drawn`'s), the FHD sends.
     pub fhd_senders_built: u32,
     pub fhd_drawn: Vec<Drawn>,
     pub fhd_sent: u32,
-    /// #239: "max draw" / "max send" / "fhd build" / "fhd draw" / "fhd send",
-    /// in order; and the registry reads.
+    /// "fhd target" / "fhd sender built" / "max draw" / "fhd draw" (in the
+    /// same compose, right after MAX's) / "max send" / "fhd send" / "fhd
+    /// target removed", in order; and the registry reads.
     pub order: Vec<&'static str>,
     pub listed_reads: u32,
 }
@@ -102,11 +112,11 @@ pub(crate) struct Script {
     pub sender: VecDeque<GpuError>,
     pub compose: VecDeque<GpuError>,
     pub send: VecDeque<GpuError>,
+    /// #251 step 2: what adding the FHD target answers.
+    pub add_target: VecDeque<GpuError>,
     /// #239: the FHD sender's, and what each registry read answers (an
     /// empty queue: [`FAKE_LISTED`]).
-    pub fhd_compositor: VecDeque<GpuError>,
     pub fhd_sender: VecDeque<GpuError>,
-    pub fhd_compose: VecDeque<GpuError>,
     pub fhd_send: VecDeque<GpuError>,
     pub listed: VecDeque<Option<(u32, u32)>>,
 }
@@ -122,8 +132,6 @@ pub(crate) struct FakeShared {
     log: Mutex<Log>,
     script: Mutex<Script>,
     hold: Mutex<Option<Hold>>,
-    /// #239: a held FHD compose.
-    fhd_hold: Mutex<Option<Hold>>,
 }
 
 /// The fake compositor's adapter.
@@ -134,15 +142,15 @@ pub(crate) const UPLOAD_US: u64 = 11;
 pub(crate) const DRAW_US: u64 = 22;
 pub(crate) const SEND_US: u64 = 33;
 
-/// #239: the stats the fake FHD compose and send report (their own, so the
-/// FHD telemetry is never MAX's).
+/// #239: the FHD target's own draw (its part of the compose's) and the FHD
+/// send (their own, so the FHD telemetry is never MAX's).
 pub(crate) const FHD_DRAW_US: u64 = 44;
 pub(crate) const FHD_SEND_US: u64 = 55;
 
 /// #239: where the fake registry lists a sender.
 pub(crate) const FAKE_LISTED: (u32, u32) = (1920, 1080);
 
-/// The fake GPU: its compositor and sender record into [`Log`] and answer
+/// The fake GPU: its compositor and senders record into [`Log`] and answer
 /// from [`Script`]. Clones share one state.
 #[derive(Clone, Default)]
 pub(crate) struct FakeGpu(Arc<FakeShared>);
@@ -160,15 +168,23 @@ impl FakeGpu {
     pub(crate) fn hold_next_compose(&self, hold: Hold) {
         *self.0.hold.lock().unwrap_or_else(|p| p.into_inner()) = Some(hold);
     }
+}
 
-    /// #239: hold the next FHD compose behind `hold`.
-    pub(crate) fn hold_next_fhd_compose(&self, hold: Hold) {
-        *self.0.fhd_hold.lock().unwrap_or_else(|p| p.into_inner()) = Some(hold);
+/// The fake compositor: MAX's primary target and the targets added to it
+/// (the real `Targets` book-keeping mints their ids).
+pub(crate) struct FakeCompositor {
+    shared: Arc<FakeShared>,
+    targets: Targets<Target>,
+}
+
+impl FakeCompositor {
+    /// Whether it draws a target besides MAX's (the FHD one).
+    fn draws_fhd(&self) -> bool {
+        self.targets.iter().count() > 1
     }
 }
 
-/// The second field: the object is the FHD sender's (#239).
-pub(crate) struct FakeCompositor(Arc<FakeShared>, bool);
+/// The second field: the sender is the FHD one's (#239).
 pub(crate) struct FakeSender(Arc<FakeShared>, bool);
 
 fn log_of(shared: &FakeShared) -> MutexGuard<'_, Log> {
@@ -188,12 +204,7 @@ fn next_error(
 
 impl Drop for FakeCompositor {
     fn drop(&mut self) {
-        let what = if self.1 {
-            "fhd compositor"
-        } else {
-            "compositor"
-        };
-        log_of(&self.0).drops.push(what);
+        log_of(&self.shared).drops.push("compositor");
     }
 }
 
@@ -212,12 +223,14 @@ impl MaxGpu for FakeGpu {
         log_of(&self.0).compositors_built += 1;
         match next_error(&self.0, |s| s.compositor.pop_front()) {
             Some(error) => Err(error),
-            None => Ok(FakeCompositor(self.0.clone(), false)),
+            None => Ok(FakeCompositor {
+                shared: self.0.clone(),
+                targets: Targets::new(MAX_TARGET),
+            }),
         }
     }
 
-    fn sender(&mut self, compositor: &FakeCompositor) -> Result<FakeSender, GpuError> {
-        assert!(!compositor.1, "MAX's sender on MAX's compositor");
+    fn sender(&mut self, _compositor: &FakeCompositor) -> Result<FakeSender, GpuError> {
         log_of(&self.0).senders_built += 1;
         match next_error(&self.0, |s| s.sender.pop_front()) {
             Some(error) => Err(error),
@@ -225,20 +238,24 @@ impl MaxGpu for FakeGpu {
         }
     }
 
-    fn fhd_compositor(&mut self) -> Result<FakeCompositor, GpuError> {
+    fn fhd_sender(
+        &mut self,
+        compositor: &FakeCompositor,
+        target: TargetId,
+    ) -> Result<FakeSender, GpuError> {
+        assert_ne!(
+            target,
+            TargetId::PRIMARY,
+            "the FHD sender of its own target"
+        );
+        assert!(
+            compositor.targets.get(target).is_some(),
+            "the FHD sender of a target the compositor holds"
+        );
         let mut log = log_of(&self.0);
-        log.fhd_compositors_built += 1;
-        log.order.push("fhd build");
+        log.fhd_senders_built += 1;
+        log.order.push("fhd sender built");
         drop(log);
-        match next_error(&self.0, |s| s.fhd_compositor.pop_front()) {
-            Some(error) => Err(error),
-            None => Ok(FakeCompositor(self.0.clone(), true)),
-        }
-    }
-
-    fn fhd_sender(&mut self, compositor: &FakeCompositor) -> Result<FakeSender, GpuError> {
-        assert!(compositor.1, "the FHD sender on the FHD compositor");
-        log_of(&self.0).fhd_senders_built += 1;
         match next_error(&self.0, |s| s.fhd_sender.pop_front()) {
             Some(error) => Err(error),
             None => Ok(FakeSender(self.0.clone(), true)),
@@ -246,49 +263,50 @@ impl MaxGpu for FakeGpu {
     }
 }
 
+/// What `composition` shows, as the fake records it.
+fn drawn_of(composition: &Composition<'_>) -> Drawn {
+    match composition {
+        Composition::Black => Drawn::Black,
+        Composition::Picture(picture) => Drawn::Picture(Pic::of(picture)),
+        Composition::Fade {
+            from,
+            to,
+            weight_q8,
+        } => Drawn::Fade(
+            from.as_ref().map(Pic::of),
+            to.as_ref().map(Pic::of),
+            *weight_q8,
+        ),
+    }
+}
+
 impl MaxCompositor for FakeCompositor {
     fn compose(&mut self, composition: &Composition<'_>) -> Result<ComposeStats, GpuError> {
-        let fhd = self.1;
-        let held = if fhd { &self.0.fhd_hold } else { &self.0.hold };
-        let hold = held.lock().unwrap_or_else(|p| p.into_inner()).take();
+        let hold = self
+            .shared
+            .hold
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take();
         if let Some(hold) = hold {
             let _ = hold.entered.send(());
             hold.gate.wait();
         }
-        let drawn = match composition {
-            Composition::Black => Drawn::Black,
-            Composition::Picture(picture) => Drawn::Picture(Pic::of(picture)),
-            Composition::Fade {
-                from,
-                to,
-                weight_q8,
-            } => Drawn::Fade(
-                from.as_ref().map(Pic::of),
-                to.as_ref().map(Pic::of),
-                *weight_q8,
-            ),
-        };
-        let mut log = log_of(&self.0);
-        let drawn_log = if fhd {
-            &mut log.fhd_drawn
-        } else {
-            &mut log.drawn
-        };
-        drawn_log.push(drawn);
-        log.order.push(if fhd { "fhd draw" } else { "max draw" });
+        let drawn = drawn_of(composition);
+        let fhd = self.draws_fhd();
+        let mut log = log_of(&self.shared);
+        log.drawn.push(drawn.clone());
+        log.order.push("max draw");
+        if fhd {
+            log.fhd_drawn.push(drawn);
+            log.order.push("fhd draw");
+        }
         drop(log);
-        let scripted = next_error(&self.0, |s| {
-            if fhd {
-                s.fhd_compose.pop_front()
-            } else {
-                s.compose.pop_front()
-            }
-        });
-        match scripted {
+        match next_error(&self.shared, |s| s.compose.pop_front()) {
             Some(error) => Err(error),
             None => Ok(ComposeStats {
                 upload_us: UPLOAD_US,
-                draw_us: if fhd { FHD_DRAW_US } else { DRAW_US },
+                draw_us: DRAW_US,
                 uploads: 1,
             }),
         }
@@ -296,6 +314,31 @@ impl MaxCompositor for FakeCompositor {
 
     fn adapter(&self) -> String {
         FAKE_ADAPTER.to_string()
+    }
+
+    fn add_target(&mut self, target: Target) -> Result<TargetId, GpuError> {
+        let mut log = log_of(&self.shared);
+        log.targets_added.push(target);
+        log.order.push("fhd target");
+        drop(log);
+        match next_error(&self.shared, |s| s.add_target.pop_front()) {
+            Some(error) => Err(error),
+            None => Ok(self.targets.add(target)),
+        }
+    }
+
+    fn remove_target(&mut self, target: TargetId) {
+        assert!(
+            self.targets.remove(target).is_some(),
+            "a target the compositor holds is removed"
+        );
+        let mut log = log_of(&self.shared);
+        log.targets_removed += 1;
+        log.order.push("fhd target removed");
+    }
+
+    fn draw_us(&self, target: TargetId) -> u64 {
+        self.targets.get(target).map_or(0, |_| FHD_DRAW_US)
     }
 }
 

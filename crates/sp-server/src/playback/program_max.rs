@@ -40,8 +40,9 @@
 //!
 //! #239: the same boundaries also go out as the `SP-program` Spout sender,
 //! drawn into the FHD program's 1920×1080 on the same thread, queue and
-//! pacing; its setting, enable rule and telemetry (`max.fhd`) are the child
-//! module `program_max_fhd.rs`.
+//! pacing (#251 step 2: a second target of the same compositor, drawn from
+//! the same upload); its setting, enable rule and telemetry (`max.fhd`) are
+//! the child module `program_max_fhd.rs`.
 //!
 //! #243 follow-up: a deploy QUIESCES the thread before it kills the process
 //! ([`MaxOut::quiesce`], `POST /api/v1/program/spout/quiesce`): it drops
@@ -233,7 +234,9 @@ pub struct MaxStatus {
     /// platform counts neither).
     pub failed: u64,
     /// The p99 over the last [`MAX_STAT_WINDOW`] sent frames, µs: the plane
-    /// uploads, the draw until the GPU finished it, Spout's `SendTexture`.
+    /// uploads, the draw until the GPU finished it, Spout's `SendTexture`
+    /// (#251 step 2: the one upload and the whole draw serve both targets,
+    /// the FHD target's own part is `fhd.draw_us_p99`).
     pub upload_us_p99: u64,
     pub draw_us_p99: u64,
     pub send_us_p99: u64,

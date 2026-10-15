@@ -104,8 +104,8 @@ async fn a_quiesce_drops_both_spout_senders_and_ends_every_spout_call() {
     assert_eq!(fhd_state, "quiesced", "the SP-program sender too");
     assert_eq!(
         gpu.log().drops,
-        ["sender", "compositor", "fhd sender", "fhd compositor"],
-        "both Spout senders dropped, each before its compositor"
+        ["sender", "fhd sender", "compositor"],
+        "both Spout senders dropped, then their one compositor (#251 step 2)"
     );
     assert!(!running.finished(), "the thread lives on, quiesced");
     assert!(
@@ -122,11 +122,7 @@ async fn a_quiesce_drops_both_spout_senders_and_ends_every_spout_call() {
             "MAX: nothing built or sent after the quiesce"
         );
         assert_eq!(
-            (
-                log.fhd_compositors_built,
-                log.fhd_senders_built,
-                log.fhd_sent
-            ),
+            (log.targets_added.len(), log.fhd_senders_built, log.fhd_sent),
             (1, 1, 1),
             "SP-program: nothing built or sent after the quiesce"
         );

@@ -6,8 +6,9 @@
 //! and read on a SECOND WARP device as Arena opens it, shows the fitted
 //! picture and then the fade within S1a's tolerance (`reference.rs`: one
 //! code per quad that covers a pixel). #239: the same thread runs the FHD
-//! sender too (a 1920×1080 WARP compositor and a sender under its own test
-//! name): Spout lists it at 1920×1080 (the thread's own registry read,
+//! sender too (#251 step 2: a 1920×1080 target added to the same WARP
+//! compositor, drawn by the same compose, and a sender of it under its own
+//! test name): Spout lists it at 1920×1080 (the thread's own registry read,
 //! `max.fhd.listed_*`, says so too) and its texture holds the same pictures
 //! fitted into 1920×1080. #267: a third, 4:3 boundary fills MAX's whole
 //! width (no black column at either side), while the FHD sender keeps the
@@ -26,7 +27,7 @@ use std::time::{Duration, Instant};
 use sp_core::genlock::{GENLOCK_GRID_FPS, floor_boundary_100ns, strict_next_boundary_100ns};
 use sp_gpu::{
     CANVAS_HEIGHT, CANVAS_WIDTH, Composition, Compositor, FHD_FIT, FHD_HEIGHT, FHD_WIDTH, GpuError,
-    Layer, Nv12Picture, SpoutSender, read_shared_texture, reference, spout_sender_info,
+    Layer, Nv12Picture, SpoutSender, TargetId, read_shared_texture, reference, spout_sender_info,
 };
 use sp_ndi::test_util::MockNdiBackend;
 use sp_ndi::{AudioFrame, NdiSender};
@@ -46,7 +47,9 @@ const TEST_SENDER: &str = "SP-program-MAX-s2-warp-test";
 const TEST_FHD_SENDER: &str = "SP-program-fhd-warp-test";
 
 /// The WARP GPU: `Compositor::new_warp` and the sender under [`TEST_SENDER`];
-/// a 1920×1080 WARP compositor and the sender under [`TEST_FHD_SENDER`].
+/// #251 step 2: the sender under [`TEST_FHD_SENDER`] of the FHD target the
+/// worker adds to that same compositor (the production
+/// `MaxCompositor::add_target` of `sp_gpu::Compositor`).
 struct WarpGpu;
 
 impl MaxGpu for WarpGpu {
@@ -61,12 +64,12 @@ impl MaxGpu for WarpGpu {
         SpoutSender::with_name(compositor, TEST_SENDER)
     }
 
-    fn fhd_compositor(&mut self) -> Result<Compositor, GpuError> {
-        Compositor::new_warp_with_size(FHD_WIDTH, FHD_HEIGHT, FHD_FIT)
-    }
-
-    fn fhd_sender(&mut self, compositor: &Compositor) -> Result<SpoutSender, GpuError> {
-        SpoutSender::with_name(compositor, TEST_FHD_SENDER)
+    fn fhd_sender(
+        &mut self,
+        compositor: &Compositor,
+        target: TargetId,
+    ) -> Result<SpoutSender, GpuError> {
+        SpoutSender::for_target(compositor, target, TEST_FHD_SENDER)
     }
 }
 

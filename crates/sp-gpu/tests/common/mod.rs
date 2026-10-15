@@ -23,8 +23,9 @@ pub fn warp() -> Compositor {
     })
 }
 
-/// #239: the `SP-program` sender's 1920×1080 compositor (#267: placing by
-/// `FHD_FIT`, as production builds it), on WARP.
+/// #239: a compositor whose PRIMARY target is `SP-program`'s 1920×1080
+/// (#267: placing by `FHD_FIT`), on WARP. #251 step 2: production adds that
+/// target to MAX's compositor instead (`add_target(FHD_TARGET)`).
 pub fn warp_fhd() -> Compositor {
     Compositor::new_warp_with_size(FHD_WIDTH, FHD_HEIGHT, FHD_FIT)
         .unwrap_or_else(|e| panic!("WARP must build the 1920x1080 compositor: {e}"))

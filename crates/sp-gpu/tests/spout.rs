@@ -1,5 +1,6 @@
 //! WARP proof of the `SP-program-MAX` Spout sender (#223 S1b), and of the
-//! FHD program's `SP-program` sender on a 1920×1080 compositor (#239).
+//! FHD program's `SP-program` sender (#239) on the 1920×1080 target of the
+//! same compositor (#251 step 2: two senders, one per target).
 //!
 //! Each test draws on WARP (windows-latest has no GPU), sends the render
 //! target through the vendored Spout2 SDK 2.007.017, and reads Spout's
@@ -25,15 +26,14 @@ use std::sync::{Mutex, MutexGuard};
 use common::locks::{GiveBack, Hold, TestMutex, abandon, this_process_holder, wait_elsewhere};
 use common::{
     BLACK, H, W, assert_matches_reference, assert_matches_reference_in, pattern, picture, warp,
-    warp_fhd,
 };
 use sp_gpu::spout_state::{
     ACCESS_HELD, MAX_ACCESS_HELD, MAX_UNREADABLE, NOT_LISTED, Registration, TAKEN, UNREADABLE,
 };
 use sp_gpu::{
-    Composition, Compositor, FHD_FIT, FHD_HEIGHT, FHD_WIDTH, GpuError, NAME_SLOT_LEN,
+    Composition, Compositor, FHD_HEIGHT, FHD_TARGET, FHD_WIDTH, GpuError, NAME_SLOT_LEN,
     SENDER_NAMES_MAP, SPOUT_FHD_SENDER_NAME, SPOUT_SENDER_NAME, SharedTextureInfo, SpoutSender,
-    mapped_len, read_shared_texture, spout_sender_info, spout_sender_names, unpad_rows,
+    TargetId, mapped_len, read_shared_texture, spout_sender_info, spout_sender_names, unpad_rows,
 };
 use windows::Win32::Foundation::{
     CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0,
@@ -339,15 +339,17 @@ fn a_sent_frame_registers_sp_program_max_at_4k_and_drop_unregisters_it() {
     assert_eq!(info(SPOUT_SENDER_NAME), None, "the sender's map is gone");
 }
 
-/// #239: the FHD program's sender: a 1920×1080 compositor and the sender
-/// `SP-program` register at its first send, Spout lists it at 1920×1080
-/// (Arena: `SPOUT_SP-program`), its shared texture read on a second device
-/// holds the compositor's frame, and `Drop` unlists it.
+/// #239: the FHD program's sender: the sender `SP-program` of the
+/// 1920×1080 target (#251 step 2: added to MAX's compositor) registers at
+/// its first send, Spout lists it at 1920×1080 (Arena: `SPOUT_SP-program`),
+/// its shared texture read on a second device holds that target's frame,
+/// and `Drop` unlists it.
 #[test]
-fn a_1920_by_1080_compositor_sends_as_sp_program() {
+fn the_fhd_target_sends_as_sp_program() {
     let _one = one_at_a_time();
-    let mut compositor = warp_fhd();
-    let mut sender = SpoutSender::new_fhd(&compositor).expect("the SP-program sender");
+    let mut compositor = warp();
+    let fhd = compositor.add_target(FHD_TARGET).expect("the FHD target");
+    let mut sender = SpoutSender::new_fhd(&compositor, fhd).expect("the SP-program sender");
     assert_eq!(sender.name(), SPOUT_FHD_SENDER_NAME);
     assert_eq!(sender.name(), "SP-program");
     assert_eq!(listed(SPOUT_FHD_SENDER_NAME), 0, "{:?}", names());
@@ -361,7 +363,7 @@ fn a_1920_by_1080_compositor_sends_as_sp_program() {
     assert!(stats.send_us > 0, "{stats:?}");
     assert_eq!(sender.registration(), Registration::Confirmed);
     // The readback's Map waits for Spout's copy, queued on the same context.
-    let drawn = compositor.read_back().expect("read back");
+    let drawn = compositor.read_back_target(fhd).expect("read back");
 
     assert_eq!(listed(SPOUT_FHD_SENDER_NAME), 1, "{:?}", names());
     assert_eq!(listed(SPOUT_SENDER_NAME), 0, "the MAX name is not taken");
@@ -379,7 +381,7 @@ fn a_1920_by_1080_compositor_sends_as_sp_program() {
     assert_same_frame(&received, &drawn, "SP-program through Spout");
     assert_matches_reference_in(
         &received,
-        &frame.layers_in(FHD_WIDTH, FHD_HEIGHT, FHD_FIT),
+        &frame.layers_on(FHD_TARGET),
         (FHD_WIDTH, FHD_HEIGHT),
         "SP-program through Spout",
     );
@@ -391,6 +393,79 @@ fn a_1920_by_1080_compositor_sends_as_sp_program() {
         info(SPOUT_FHD_SENDER_NAME),
         None,
         "the sender's map is gone"
+    );
+}
+
+/// #251 step 2: TWO senders on ONE compositor, one per target. One compose
+/// (one upload) fills both; Spout lists each sender at its own target's
+/// size, and each shared texture, read on a second device, holds its own
+/// target's frame (MAX fills its width with the 4:3 picture, `SP-program`
+/// keeps its bars). A target the compositor does not hold is refused
+/// before Spout.
+#[test]
+fn two_senders_on_one_compositor_are_listed_with_their_own_sizes() {
+    let _one = one_at_a_time();
+    let (max_name, fhd_name) = ("sp-gpu test MAX target", "sp-gpu test FHD target");
+    let mut compositor = warp();
+    let fhd = compositor.add_target(FHD_TARGET).expect("the FHD target");
+    let mut max_sender =
+        SpoutSender::for_target(&compositor, TargetId::PRIMARY, max_name).expect("MAX's sender");
+    let mut fhd_sender =
+        SpoutSender::for_target(&compositor, fhd, fhd_name).expect("the FHD target's sender");
+
+    let (stride, data) = pattern(1440, 1080, 33);
+    let frame = Composition::Picture(picture(1, 1440, 1080, stride, &data));
+    let stats = compositor.compose(&frame).expect("compose both targets");
+    assert_eq!(stats.uploads, 1, "one upload for both targets");
+    max_sender.send().expect("send MAX's target");
+    fhd_sender.send().expect("send the FHD target");
+
+    assert_eq!(
+        (listed(max_name), listed(fhd_name)),
+        (1, 1),
+        "{:?}",
+        names()
+    );
+    let max_entry = info(max_name).expect("MAX's map");
+    let fhd_entry = info(fhd_name).expect("the FHD sender's map");
+    assert_eq!((max_entry.width, max_entry.height), (W, H), "{max_entry:?}");
+    assert_eq!(
+        (fhd_entry.width, fhd_entry.height),
+        (FHD_WIDTH, FHD_HEIGHT),
+        "{fhd_entry:?}"
+    );
+    assert_eq!((max_entry.format, fhd_entry.format), (BGRA, BGRA));
+    assert_eq!(max_sender.size(), (W, H));
+    assert_eq!(fhd_sender.size(), (FHD_WIDTH, FHD_HEIGHT));
+
+    let max_drawn = compositor.read_back().expect("read back MAX's target");
+    let fhd_drawn = compositor.read_back_target(fhd).expect("read back FHD's");
+    let received = read_shared_texture(&max_entry).expect("a second device reads MAX");
+    assert_same_frame(&received, &max_drawn, "MAX's target through Spout");
+    assert_matches_reference(&received, &frame.layers(), "MAX's target through Spout");
+    assert_ne!(&received[..4], &BLACK, "MAX fills its width: no bar");
+    let received = read_shared_texture(&fhd_entry).expect("a second device reads FHD");
+    assert_same_frame(&received, &fhd_drawn, "the FHD target through Spout");
+    assert_matches_reference_in(
+        &received,
+        &frame.layers_on(FHD_TARGET),
+        (FHD_WIDTH, FHD_HEIGHT),
+        "the FHD target through Spout",
+    );
+    assert_eq!(&received[..4], &BLACK, "the FHD target's bar at (0, 0)");
+
+    assert!(compositor.remove_target(fhd));
+    assert!(matches!(
+        SpoutSender::for_target(&compositor, fhd, "sp-gpu test removed target"),
+        Err(GpuError::NoObject { .. })
+    ));
+    drop(fhd_sender);
+    drop(max_sender);
+    assert_eq!(
+        (listed(max_name), listed(fhd_name)),
+        (0, 0),
+        "{:?}",
+        names()
     );
 }
 
