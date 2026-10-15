@@ -416,6 +416,13 @@ failed on them (`36438006665`):
   `#[cfg(test)] mod tests` after a blank line) →
   `clippy::empty_line_after_doc_comments` under `-D warnings`. Delete the
   doc with the fn; re-read the cut site.
+- **A test file that newly names a parent type must import it: E0422**
+  (#251 step 2 review round 2). A `#[path]` test module sees only what its
+  `use` lines bring in (no `super::*` in this repo's convention), so a new
+  `assert_eq!(lines, Lines { max: None, fhd: None })` in a file whose import
+  is `use super::{LogLine, …}` broke the whole test target. After writing a
+  test, grep each type it names against the file's `use` lines, or compare
+  the fields instead (`(lines.max, lines.fhd)`).
 - **A new field on a struct that a TEST builds by literal is E0063 for the
   whole test target** (#224 part 2 review round 2: `SharedEmitterInner`
   gained `fleet`, `audio_emitter_tests.rs` still built one without it).
