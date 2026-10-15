@@ -32,8 +32,9 @@
 //!   every row of the video takes the peer's lyrics columns (a row that did
 //!   not keeps the stand-in, so the next look does it all again). Kept for
 //!   good (the record dropped) when the peer's copy is made from another
-//!   audio, when the video has an operator's text or ask or a dub, or when
-//!   no row of it is left. Else it waits for the next recheck.
+//!   audio, when the video has an operator's text or ask (an ask only while
+//!   this node's paid AI is on, #264) or a dub, or when no row of it is
+//!   left. Else it waits for the next recheck.
 
 use std::sync::Arc;
 use std::time::Duration;
