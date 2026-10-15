@@ -343,7 +343,7 @@ pub fn is_blank_scene(scene: &str) -> bool {
 
 // Default values for settings that have sensible defaults.
 pub const DEFAULT_OBS_WEBSOCKET_URL: &str = "ws://127.0.0.1:4455";
-pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3.1-pro-preview";
+pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3.8-flash";
 pub const DEFAULT_CACHE_DIR: &str = "cache";
 /// #223 S10b: a download's height cap when `max_resolution` is unset and
 /// hardware video decode is on (G3, comment 6102650616).
