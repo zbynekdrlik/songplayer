@@ -590,7 +590,8 @@ async fn the_held_titles_are_the_downloaded_videos_out_of_the_repair_queue() {
         sha256: listed_sha(&snv, YT).await,
         took: Some(("snv".to_string(), "recorded".to_string())),
     };
-    assert_eq!(held, [want.clone()]);
+    assert_eq!(held.len(), 1, "one held title: {held:?}");
+    assert_eq!(held[0], want);
     assert_eq!(held_titles(pp.pool(), Some(YT)).await.unwrap(), [want]);
     let none = held_titles(pp.pool(), Some("ddddddddddd")).await.unwrap();
     assert!(none.is_empty());
