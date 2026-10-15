@@ -1880,9 +1880,14 @@ function programBody() {
       vblank_tracking: false,
       vblank_period_ns: 0,
       vblank_phase_us: mockVblankPhaseUs(),
+      // #251: where each compose starts after the vblank (the setting).
+      compose_phase_us: mockComposePhaseUs(),
       send_off_grid: 0,
       send_phase_us_p50: 0,
       send_phase_us_p99: 0,
+      compose_phase_us_p50: 0,
+      compose_phase_us_p99: 0,
+      compose_late: 0,
       slot_repicks: 0,
       device_resets: 0,
       sender_backoffs: 0,
@@ -1920,9 +1925,17 @@ function mockFhdStatus() {
 // (`sp_core::config::program_max_vblank_phase_us`): ms from 0 to under
 // 1000, rounded to the µs, else 14000.
 function mockVblankPhaseUs() {
-  const raw = String(settings.program_max_vblank_phase_ms ?? "").trim();
+  return mockPhaseUs(settings.program_max_vblank_phase_ms, 14000);
+}
+// #251: `program_max_compose_phase_ms` by the same rule, else 13000
+// (`sp_core::config::program_max_compose_phase_us`).
+function mockComposePhaseUs() {
+  return mockPhaseUs(settings.program_max_compose_phase_ms, 13000);
+}
+function mockPhaseUs(stored, fallback) {
+  const raw = String(stored ?? "").trim();
   const ms = raw === "" ? NaN : Number(raw);
-  return Number.isFinite(ms) && ms >= 0 && ms < 1000 ? Math.round(ms * 1000) : 14000;
+  return Number.isFinite(ms) && ms >= 0 && ms < 1000 ? Math.round(ms * 1000) : fallback;
 }
 // #233: the outputs as `GET /api/v1/program` lists them, from the stored
 // list (an unreadable one lists nothing); an enabled VBAN entry carries its

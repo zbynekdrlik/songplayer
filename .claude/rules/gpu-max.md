@@ -782,7 +782,9 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   boundary in a slot `vblank + phase` (setting
   `program_max_vblank_phase_ms`, default 14 ms: measured, see below) and KEEPS its lead (due −
   offer) from one boundary to the next while it stays in
-  [`LEAD_MIN` 12 ms, 12 ms + one period + `LEAD_HYSTERESIS` 3 ms]: the
+  [K, K + one period + `LEAD_HYSTERESIS` 3 ms] (#251: K =
+  `compose_offset`, "The compose phase" below; it was a constant
+  `LEAD_MIN` 12 ms floor before): the
   30 fps boundaries then sit on every second refresh, and only the slow
   drift carrying the lead out of the window picks a new slot (one
   `slot_repick` = one picture held one refresh more or less, hours apart;
@@ -807,6 +809,66 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   30 s**: the default. The same 8-vs-14 contrast is the causal check that
   Arena shows MAX at all: after an Arena relaunch (its clips reconnected)
   16 + 39 vs 5 + 0, after a forced SongPlayer kill 25 + 41 vs 0 + 0.
+- **The compose phase** (#251, SNV 15.10.2026, design on #251, "Design-by"
+  comment 6181037052). The SEND was on the grid, but the COMPOSE (the 4K
+  uploads and the blend draw; every 24/25 fps boundary is a two-picture
+  `Fade` since #251's frame blending) started at the OFFER, which drifts
+  against the refresh (~0.4 ms/min, a full turn ~45 min). The wall then
+  showed the previous picture for one refresh (`IH` pattern) whenever that
+  GPU work landed where Arena renders and reads Spout. Measured with the
+  `wall-25` frame-ID clip over two drift cycles (wall jumps back per
+  minute against where the compose started after the PRIMARY's vblank):
+
+  | compose start | jumps back / min |
+  |---|---|
+  | +10.4 … +15.2 ms | 0–2 |
+  | +15.6 … +0.4 ms (around the vblank) | 4–19 |
+  | +0.9 … +4.0 ms | 0–3 |
+  | +4.4 … +9 ms | 7–30 (worst +6.7 … +8.9) |
+
+  The FHD sender is not the cause (A/B: off gave both 3 and 113); the old
+  12 ms lead floor added late sends at the window's bottom, a secondary
+  effect. So now:
+  - `VblankPacer::due(offered, grid, send_phase, compose_phase)` also
+    returns `Due::compose_at` = due − K, `None` off the grid (composed at
+    once: exactly the old behaviour, the constant `MAX_SEND_LEAD`);
+  - K = `compose_offset(period, send_phase, compose_phase,
+    COMPOSE_BUDGET)`: from the compose phase FORWARD to the send phase,
+    both modulo the period, plus whole periods until K ≥ `COMPOSE_BUDGET`
+    (14 ms, above the measured upload p99 ~5–6 ms + draw p99 ~5–9 ms).
+    SNV (send 19 ms = 2.333 ms into a 16.667 ms refresh, compose 13 ms):
+    K = 6 ms + one period = **22.667 ms**; the default send phase 14 ms:
+    K = 1 ms + one period = **17.667 ms** (the design's 23.17 / 18.17 were
+    0.5 ms over its own definition; with them the compose would start at
+    12.5 ms, comment 6181128848);
+  - the lead window's floor is K, so the compose instant is never before
+    the offer; the top is K + one period + 3 ms; `LEAD_MIN` is deleted;
+  - the worker paces FIRST, waits on its `SendClock` until `compose_at`
+    (`program_max_send::wait_for`, the wait `send_at` shares: a job taken
+    after that instant composes at once and counts `compose_late`),
+    composes MAX, then sends at `due` as before; the FHD sender stays after
+    MAX's send, unchanged (its compose lands right after the send phase);
+  - setting `program_max_compose_phase_ms` (`sp_core::config`, default 13,
+    `program_max_compose_phase_us`, the send phase's parse rule), read
+    with MAX's settings every 5 s (`program_max_phase.rs`, a child of
+    `program_max.rs`, holds both phases). Tune it on the box like the send
+    phase: PATCH it, measure the wall over a whole drift cycle (never a
+    short take: the effect comes in waves).
+  - The cost: the picture leaves later (mean lead ~K + 10 ms, up from
+    ~22 ms) and the thread waits up to one period + 3 ms after the offer
+    before it composes. Two outstanding jobs never coalesce: a lead under
+    ~50 ms leaves at most one job queued.
+  - A lead at the window's floor makes `compose_at` the offer itself, so
+    the thread's wake-up latency (~0.1–0.2 ms) makes those composes late
+    by that much (`compose_late` counts them, the phase median barely
+    moves) for the ~30 s of each drift cycle the lead sits there.
+  - Tests: `program_max_vblank_tests.rs` (the K pins, the window's two
+    edges, the drift sweep over every phase with two re-picks each way:
+    compose exactly at 13 ms, send at 2.333 ms, never before the offer),
+    `program_max_worker_tests_send.rs` (the compose waits for its instant
+    and never runs at the offer, a late job composes at once and counts,
+    off the grid unchanged, three offer phases), the pins from a scratch
+    Python model.
 - **A dropped Spout name is put back** (#243, SNV 13.10.2026 ~12:52):
   ANY Spout program that lists or checks senders (vendored
   `SpoutSenderNames.cpp`: `GetSenderNames` + `getSharedInfo` in the
@@ -887,8 +949,13 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   3840, height: 2160, submitted, coalesced, failed, upload_us_p99,
   draw_us_p99, send_us_p99, send_at_us_p50/p99/max, send_late,
   vblank_output, vblank_state, vblank_tracking, vblank_period_ns, vblank_phase_us,
-  send_off_grid, send_phase_us_p50/p99, slot_repicks, device_resets,
+  compose_phase_us, send_off_grid, send_phase_us_p50/p99,
+  compose_phase_us_p50/p99, compose_late, slot_repicks, device_resets,
   sender_backoffs, spout_name, adapter, list_holder, fhd}` (`MaxStatus`;
+  #251: `compose_phase_us` = the setting, `compose_phase_us_*` = where
+  after the vblank the aligned boundaries' composes started, over the same
+  window as the send phase, `compose_late` = grid boundaries whose job came
+  after their compose instant;
   `list_holder` = #243 follow-up, above; `fhd` = #239,
   "The FHD Spout sender" below;
   `send_at_us_*` = send done − offer over the window, `send_late` = composes
@@ -932,7 +999,11 @@ a `vblank_output`, `vblank_tracking` and `send_off_grid` +0 (every
 boundary on the wall's grid; a `vblank_state` `not_ticking` is named as a
 dark output, #243), the median start after the vblank
 (`send_phase_us_p50`) in [`vblank_phase_us`, + `SEND_PHASE_SLACK_US`
-1 500 µs], and `slot_repicks` +1 at most (`MAX_SLOT_REPICKS`). The
+1 500 µs], #251: while `vblank_state` is `ticking`, the median compose
+start (`compose_phase_us_p50`) in [`compose_phase_us`, +
+`COMPOSE_PHASE_SLACK_US` 1 500 µs] (both read modulo the refresh,
+`phaseInRefresh`; `compose_late` is logged, not gated), and
+`slot_repicks` +1 at most (`MAX_SLOT_REPICKS`). The
 first read comes after the first boundary went out, so the build's own
 time never counts. A coalesce can also come from the PROGRAM: after a
 program-side stall its thread serves several boundaries back to back, and
