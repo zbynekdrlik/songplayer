@@ -31,7 +31,7 @@ const SHADER: &str = include_str!("../compose.hlsl");
 /// [`GpuError::Timeout`]. A frame takes milliseconds; a hung GPU is reset by
 /// Windows after 2 s (TDR) and then reports the device removed, so this only
 /// bounds a driver that never answers.
-const FRAME_WAIT_LIMIT: Duration = Duration::from_secs(10);
+pub(super) const FRAME_WAIT_LIMIT: Duration = Duration::from_secs(10);
 
 /// What the compositor draws with: created once per device, shared by
 /// every target (#251 step 2: a target only brings its render target and
@@ -181,18 +181,6 @@ impl Pipeline {
             context.PSSetShaderResources(0, Some(&[None, None]));
         }
     }
-}
-
-/// Flush the work queued on `context` and wait until the GPU has finished
-/// it, through the event query `done`, yielding the thread between polls:
-/// the Spout sender's wait for its copy into Spout's shared texture (#223
-/// follow-up).
-pub(super) fn wait_until_done_on(
-    context: &ID3D11DeviceContext,
-    done: &ID3D11Query,
-) -> Result<(), GpuError> {
-    unsafe { context.End(done) };
-    wait_until_each_done(context, &[done]).map(|_| ())
 }
 
 /// #251 step 2: flush the work queued on `context` ONCE and wait until the

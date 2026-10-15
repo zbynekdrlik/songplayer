@@ -66,6 +66,22 @@ pub(crate) mod status {
     pub const OK: i32 = 0;
     /// `claim_name`: Spout renamed the sender, a live sender holds the name.
     pub const RENAMED: i32 = 1;
+    /// #251: the synchronised send's copy was not done within its bound (or
+    /// its query failed); the frame was announced anyway.
+    pub const COPY_NOT_DONE: i32 = 6;
+}
+
+/// #251: the synchronised send's code before the registration decision
+/// (`spout_state::after_send`) reads it: a copy the GPU did not finish within
+/// `bound_ms` is the timeout every other GPU wait of this crate reports;
+/// every other code goes on as it is.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn copy_waited(code: i32, bound_ms: u64) -> Result<i32, GpuError> {
+    if code == status::COPY_NOT_DONE {
+        Err(GpuError::Timeout(bound_ms))
+    } else {
+        Ok(code)
+    }
 }
 
 /// `name` as the NUL-terminated string Spout takes, if Spout can carry it:

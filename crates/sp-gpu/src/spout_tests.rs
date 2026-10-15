@@ -5,7 +5,8 @@
 use super::{
     HRESULT_FILE_NOT_FOUND, NAME_SLOT_LEN, SENDER_NAMES_MAP, SHARED_TEXTURE_INFO_LEN,
     SPOUT_FHD_SENDER_NAME, SPOUT_NAME_MAX_LEN, SPOUT_SENDER_NAME, SharedTextureInfo,
-    check_sender_name, is_not_found, map_mutex_name, parse_sender_names, status, status_result,
+    check_sender_name, copy_waited, is_not_found, map_mutex_name, parse_sender_names, status,
+    status_result,
 };
 use crate::error::GpuError;
 
@@ -294,4 +295,20 @@ fn the_shim_announces_a_frame_only_after_the_gpu_wrote_it() {
         !shim.contains(".SendTexture("),
         "the shim never sends through spoutDX's own SendTexture"
     );
+}
+
+/// #251 step 3: a copy the GPU did not finish within the bound is the
+/// crate's GPU timeout, naming the bound; every other code of the
+/// synchronised send goes on, unchanged, to the registration decision.
+#[test]
+fn a_copy_not_done_in_time_is_a_timeout_and_other_codes_pass_through() {
+    assert_eq!(status::COPY_NOT_DONE, 6, "the shim's kCopyNotDone");
+    assert!(matches!(
+        copy_waited(status::COPY_NOT_DONE, 10_000),
+        Err(GpuError::Timeout(10_000))
+    ));
+    assert!(matches!(copy_waited(6, 250), Err(GpuError::Timeout(250))));
+    for code in [0, 1, 3, 4, 5, 7] {
+        assert_eq!(copy_waited(code, 10_000).ok(), Some(code), "code {code}");
+    }
 }

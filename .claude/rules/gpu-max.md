@@ -241,7 +241,8 @@ of each picture, both targets drawn at the compose phase).
   - it is shared anyway, with Spout's own description. S1b SENDS it
     (`SendTexture`, a GPU copy) rather than registering its handle: Spout's
     own texture is guarded by the sender mutex a receiver takes, so Arena
-    never reads a frame the compositor is drawing.
+    never reads a frame the compositor is drawing (#251 step 3: nor one
+    Spout's copy is still writing, below).
 - WARP supports shared resources since Windows 8 (D3D11_RESOURCE_MISC_FLAG
   docs). `tests/warp.rs` asserts the flag and a non-null `GetSharedHandle`,
   and it fails (never skips) if WARP refuses.
@@ -341,6 +342,21 @@ anchors are on #223 (comment 5984577044).
   under the named mutex `<name>_SpoutAccessMutex`, then `Flush`es. If a
   receiver holds that mutex over 67 ms Spout SKIPS the copy and still
   returns true: nothing tells the caller, `send_us` shows the wait.
+- **#251 step 3: the shim never calls `SendTexture`.** `SendTexture`
+  announces the frame (`SetNewFrame`) and releases the mutex right after
+  `Flush`, which only SUBMITS the copy: a receiver could take a frame the
+  GPU was still writing. On SNV's wall that was the new picture for one
+  refresh (often only its top part), then the old one again, `-1 [0] -1
+  +1`, 8-18x more often under background CPU load (#251 comment
+  6202137095). The shim's `Sender` holds `SyncedDX` (a subclass, the
+  vendor unmodified), whose `SendSynced` runs the same steps on the same
+  members and WAITS for the copy (an event query of the device, `GetData`
+  + `SwitchToThread`, bounded by `FRAME_WAIT_LIMIT`) before `SetNewFrame`
+  and `AllowTextureAccess`, still under the mutex. Code 6
+  (`status::COPY_NOT_DONE`) = not done in time, announced anyway →
+  `spout::copy_waited` → `GpuError::Timeout`; a lost device is read first.
+  `spout_tests.rs::the_shim_announces_a_frame_only_after_the_gpu_wrote_it`
+  reads the shim source for the order (the shim compiles only on Windows).
 - Registration is lazy: Spout lists the sender at its FIRST send (it needs
   the texture's size and format). Before that `spout_sender_info` is `None`.
 - `spoutDX::OpenDirectX11(device)` keeps the device pointer WITHOUT AddRef
@@ -352,7 +368,7 @@ anchors are on #223 (comment 5984577044).
   and Linux-tested (the mutation gate sees them). `spout_shim.cpp` only does
   one SpoutDX step per call: `open` (+ Spout's own `CleanSenders`), `listed`
   (yes / no / unreadable), `claim_name` (`SetSenderName`: kept or renamed),
-  `send` (`SendTexture`), `state` (`IsInitialized`, the name kept),
+  `send_synced` (`SyncedDX::SendSynced`, #251 step 3), `state` (`IsInitialized`, the name kept),
   `refuse` (release), `size`, `release`.
 - **A second sender with the same name is REFUSED** (Spout would rename it
   `SP-program-MAX_1`, which Arena's layer never shows), and a refusal is for
@@ -1253,11 +1269,11 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   `Compositor::draw_us(id)` = a target's own part (`target_draws_us`), the
   FHD one is `max.fhd.draw_us_p99`.
 - `uploads`: 0, 1 or 2 pictures uploaded, whatever the targets.
-- `SpoutSendStats::send_us` (S1b, for `max.send_us_p99`): `SendTexture`
-  (the sender-mutex wait, the copy, the flush; at the first send also the
-  shared texture's creation and the registration) and, since the #223
-  follow-up, the wait until the GPU has DONE that copy (an event query on
-  the compositor's context, `pipeline::wait_until_done_on`), so
+- `SpoutSendStats::send_us` (S1b, for `max.send_us_p99`): the shim's
+  `SendSynced` (the sender-mutex wait, the copy, the flush, the wait until
+  the GPU has DONE that copy, then the announce; at the first send also the
+  shared texture's creation and the registration; #251 step 3 moved the
+  #223 follow-up's wait from after `SendTexture` to before the announce), so
   `max.send_at_us_*` is when Spout's shared texture really holds the frame,
   relative to the program's offer: its spread is the GPU's delay of the
   copy (Arena reads the texture on its own 60 Hz clock).

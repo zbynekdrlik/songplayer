@@ -14,17 +14,15 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use tracing::{info, warn};
-use windows::Win32::Graphics::Direct3D11::{
-    ID3D11Device, ID3D11DeviceContext, ID3D11Query, ID3D11Texture2D,
-};
+use windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11Query, ID3D11Texture2D};
 use windows::core::Interface;
 
 use super::spout_lock::{give_back, give_back_maps, held_elsewhere, listed_senders};
 use super::{Compositor, NO_TARGET, micros_since};
 use crate::error::GpuError;
 use crate::spout::{
-    SENDER_NAMES_MAP, SPOUT_FHD_SENDER_NAME, SPOUT_SENDER_NAME, check_sender_name, map_mutex_name,
-    status_result,
+    SENDER_NAMES_MAP, SPOUT_FHD_SENDER_NAME, SPOUT_SENDER_NAME, check_sender_name, copy_waited,
+    map_mutex_name, status_result,
 };
 use crate::spout_lock::access_mutex_name;
 use crate::spout_state::{
@@ -43,7 +41,12 @@ unsafe extern "C" {
     ) -> *mut c_void;
     fn spout_sender_listed(sender: *mut c_void) -> c_int;
     fn spout_sender_claim_name(sender: *mut c_void) -> c_int;
-    fn spout_sender_send(sender: *mut c_void, texture: *mut c_void) -> c_int;
+    fn spout_sender_send_synced(
+        sender: *mut c_void,
+        texture: *mut c_void,
+        done: *mut c_void,
+        bound_ms: u64,
+    ) -> c_int;
     fn spout_sender_relist(sender: *mut c_void) -> c_int;
     fn spout_sender_state(sender: *mut c_void, initialized: *mut c_int, name_matches: *mut c_int);
     fn spout_sender_refuse(sender: *mut c_void) -> c_int;
@@ -151,9 +154,9 @@ pub struct SpoutSender {
     confirmed_sends: u64,
     device: ID3D11Device,
     texture: ID3D11Texture2D,
-    /// The compositor's immediate context and an event query: each send
-    /// waits until the GPU has done its copy into Spout's shared texture.
-    context: ID3D11DeviceContext,
+    /// An event query on the compositor's device: each send waits until the
+    /// GPU has done its copy into Spout's shared texture BEFORE Spout
+    /// announces the frame (#251, the shim's `SendSynced`).
     copied: ID3D11Query,
 }
 
@@ -195,7 +198,6 @@ impl SpoutSender {
         let c_name = check_sender_name(name)?;
         let texture = compositor.target_texture(target).ok_or(NO_TARGET)?.clone();
         let device = compositor.device().clone();
-        let context = compositor.context().clone();
         let copied = super::pipeline::query(&device)?;
         // Not OK until the shim says so.
         let mut code: c_int = -1;
@@ -234,7 +236,6 @@ impl SpoutSender {
             confirmed_sends: 0,
             device,
             texture,
-            context,
             copied,
         })
     }
@@ -251,8 +252,10 @@ impl SpoutSender {
 
     /// Share the render target as it is now: call it after
     /// `Compositor::compose`, on the same thread. Spout copies it into its
-    /// own shared texture on the GPU (`SendTexture`); the first call
-    /// registers the sender. [`GpuError::DeviceLost`] means the device must
+    /// own shared texture on the GPU and announces the frame only once the
+    /// GPU has done the copy (#251: the shim's `SendSynced`, never spoutDX's
+    /// `SendTexture`, which announced a frame still being written); the
+    /// first call registers the sender. [`GpuError::DeviceLost`] means the device must
     /// be rebuilt (and the sender with it). [`GpuError::SpoutNotRegistered`]
     /// means this sender is done (`crate::spout_state`: another sender took
     /// the name, Spout did not list it or could not register it, or its list
@@ -275,14 +278,18 @@ impl SpoutSender {
         // SAFETY: the shim sender is live until Drop; the texture is the
         // compositor's render target, on the device the sender opened on.
         let texture = self.texture.as_raw();
-        let code = sdk(&self.name, || unsafe { spout_sender_send(raw, texture) });
-        // #223 follow-up: return once the GPU has done the copy, so the
-        // caller's timing is when Spout's shared texture really holds the
-        // frame (Arena reads it on its own clock), not when it was queued.
-        super::pipeline::wait_until_done_on(&self.context, &self.copied)?;
+        let done = self.copied.as_raw();
+        let bound_ms = super::pipeline::FRAME_WAIT_LIMIT.as_millis() as u64;
+        // #223 follow-up + #251: the shim returns once the GPU has done the
+        // copy (and only then announced it), so `send_us` is when Spout's
+        // shared texture really holds the frame.
+        let code = sdk(&self.name, || unsafe {
+            spout_sender_send_synced(raw, texture, done, bound_ms)
+        });
         let send_us = micros_since(start);
         unsafe { self.device.GetDeviceRemovedReason() }
             .map_err(|e| GpuError::removed(e.code().0 as u32))?;
+        let code = copy_waited(code, bound_ms)?;
         match after_send(self.registration, code, || first_send_facts(&self.shim)) {
             AfterSend::Shared(next) => {
                 self.check_texture_lock(send_us)?;

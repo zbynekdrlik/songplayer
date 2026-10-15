@@ -262,12 +262,6 @@ impl Compositor {
         &self.device
     }
 
-    /// The device's immediate context (the [`SpoutSender`] waits on it for
-    /// its copy).
-    pub(crate) fn context(&self) -> &ID3D11DeviceContext {
-        &self.context
-    }
-
     /// The primary BGRA render target (what [`SpoutSender::new`] sends).
     pub fn render_target(&self) -> &ID3D11Texture2D {
         &self.targets.primary().render.texture
