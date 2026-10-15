@@ -33,7 +33,7 @@
 //! file as it was. `peer_hashes` follows the new bytes by itself: an entry
 //! holds only while the file keeps its size and mtime.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
@@ -241,9 +241,10 @@ async fn remux_checked<S: Steps>(
 /// What the download-time check did with a fresh video (#277).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Checked {
-    /// The reader reads it to its end: left as it is.
+    /// The reader reads a picture of it (or does not open it at all): left
+    /// as it is, for the player to judge.
     Plays,
-    /// It ended early; the remuxed video took its place.
+    /// The reader read no picture of it; the remuxed video took its place.
     Repaired,
 }
 
@@ -295,8 +296,12 @@ pub(crate) struct Requests {
     /// (ms) before which it waits (0 = at once).
     pending: VecDeque<(i64, i64)>,
     /// The YouTube ids a repair ran for in this process: rows of one video
-    /// share its file, so it is repaired at most once.
+    /// share its file, so it is repaired once (a busy one again, below).
     tried: BTreeSet<String>,
+    /// The YouTube ids whose repair a player's open file refused (`Busy`),
+    /// with the instant (ms) of their one retry: until then no row of the
+    /// video runs a repair.
+    busy_until: BTreeMap<String, i64>,
 }
 
 impl Requests {
@@ -305,6 +310,7 @@ impl Requests {
             asked: BTreeSet::new(),
             pending: VecDeque::new(),
             tried: BTreeSet::new(),
+            busy_until: BTreeMap::new(),
         }
     }
 
@@ -336,16 +342,25 @@ impl Requests {
     }
 
     /// A repair of `youtube_id` refused by a player that held the file
-    /// (`Busy`): its video row asked again, due at `due_ms`, and the video
-    /// may be tried once more.
+    /// (`Busy`): its video row asked again, behind the requests already
+    /// queued, due at `due_ms`, when the video is tried once more.
     fn retry_later(&mut self, video_id: i64, youtube_id: &str, due_ms: i64) {
-        self.tried.remove(youtube_id);
+        self.busy_until.insert(youtube_id.to_string(), due_ms);
         self.pending.push_back((video_id, due_ms));
     }
 
-    /// Whether a repair of `youtube_id` may run: only the first time in this
-    /// process.
-    pub(crate) fn first_try(&mut self, youtube_id: &str) -> bool {
+    /// Whether a repair of `youtube_id` may run at `now_ms`: the first time
+    /// in this process, or once its busy retry is due (a request of another
+    /// row of the video before then runs nothing: the retry covers the
+    /// shared file).
+    pub(crate) fn first_try(&mut self, youtube_id: &str, now_ms: i64) -> bool {
+        if let Some(&due_ms) = self.busy_until.get(youtube_id) {
+            let due = due_ms <= now_ms;
+            if due {
+                self.busy_until.remove(youtube_id);
+            }
+            return due;
+        }
         self.tried.insert(youtube_id.to_string())
     }
 }
@@ -414,8 +429,8 @@ pub(crate) async fn tick<S: Steps>(
             return None;
         }
     };
-    if !lock().first_try(&youtube_id) {
-        debug!(youtube_id = %youtube_id, "video repair: tried before in this process");
+    if !lock().first_try(&youtube_id, now_ms) {
+        debug!(youtube_id = %youtube_id, "video repair: tried before in this process, or busy");
         return None;
     }
     info!(youtube_id = %youtube_id, video_id, "video repair: start");
@@ -427,8 +442,10 @@ pub(crate) async fn tick<S: Steps>(
     Some(report)
 }
 
-/// The one line a repair ends with: INFO when the remuxed video is in place,
-/// else a WARN naming why (logged once: a video is tried once per process).
+/// The one line a repair ends with: INFO when the remuxed video is in place
+/// (with the first picture's time the reader reads, the one check skipped
+/// when no picture of the old file was read), else a WARN naming why (a
+/// video is tried once per process, a busy one again every 10 min).
 #[cfg_attr(test, mutants::skip)] // log only; the outcomes are tested
 fn log_outcome(report: &RepairReport) {
     let rows = |facts: &Option<VideoFacts>| facts.map(|facts| facts.height);
@@ -438,6 +455,7 @@ fn log_outcome(report: &RepairReport) {
             codec = ?report.codec,
             old_rows = ?rows(&report.old),
             new_rows = ?rows(&report.new),
+            new_first_ms = ?report.new.map(|facts| facts.first_ms),
             "video repair: done - the remuxed video is in place, the old one kept as .prev"
         );
     } else {

@@ -481,24 +481,38 @@ fn a_video_row_is_asked_for_once_and_taken_oldest_first() {
     assert_eq!(requests.take(NOW), Some(1));
     assert_eq!(requests.take(NOW), None);
     assert!(!requests.ask(1), "taken, still asked in this process");
-    assert!(requests.first_try("abcdefghijk"));
-    assert!(!requests.first_try("abcdefghijk"));
+    assert!(requests.first_try("abcdefghijk", NOW));
+    assert!(!requests.first_try("abcdefghijk", NOW));
 }
 
-/// A busy repair is asked again at its due instant, behind requests due
-/// before it, and its video may be tried once more.
+/// A busy repair is asked again at its due instant, behind the requests
+/// queued before it, and its video is tried once more then, once.
 #[test]
 fn a_busy_repair_waits_for_its_due_instant() {
     let mut requests = Requests::new();
     requests.ask(5);
-    assert_eq!(requests.take(NOW), Some(5));
-    assert!(requests.first_try("abcdefghijk"));
-    requests.retry_later(5, "abcdefghijk", NOW + 100);
     requests.ask(6);
-    assert_eq!(requests.take(NOW), Some(6), "the due one first");
+    requests.ask(8);
+    assert_eq!(requests.take(NOW), Some(5));
+    assert!(requests.first_try("abcdefghijk", NOW));
+    requests.retry_later(5, "abcdefghijk", NOW + 100);
+    assert_eq!(
+        requests.take(NOW + 100),
+        Some(6),
+        "the retry queues behind the requests already there"
+    );
+    assert_eq!(requests.take(NOW + 99), Some(8), "the due one");
     assert_eq!(requests.take(NOW + 99), None, "not due yet");
+    assert!(
+        !requests.first_try("abcdefghijk", NOW + 99),
+        "no row runs it before the retry"
+    );
     assert_eq!(requests.take(NOW + 100), Some(5), "due");
-    assert!(requests.first_try("abcdefghijk"), "tried again");
+    assert!(requests.first_try("abcdefghijk", NOW + 100), "tried again");
+    assert!(
+        !requests.first_try("abcdefghijk", NOW + 100),
+        "once: the retry is used up"
+    );
 }
 
 /// One request per tick; the two rows of the song share its file, so the
@@ -563,6 +577,42 @@ async fn a_busy_repair_runs_again_ten_minutes_later() {
     let again = tick(&rig.pool, rig.dir.path(), &requests, &steps, due).await;
     assert_eq!(again.map(|r| r.outcome), Some(RepairOutcome::Repaired));
     assert_eq!(read_to_string(&rig.video), "repaired");
+}
+
+/// Review round 2: the song's other row asked while the busy retry waits
+/// runs nothing (the retry covers the shared file), and once the retry ran
+/// a later row's request runs nothing either.
+#[tokio::test]
+async fn another_row_of_a_busy_video_waits_for_its_one_retry() {
+    let rig = Rig::new().await;
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, normalized, file_path, \
+         audio_file_path) SELECT 13, 2, youtube_id, 1, file_path, audio_file_path \
+         FROM videos WHERE id = 10",
+    )
+    .execute(&rig.pool)
+    .await
+    .unwrap();
+    let requests = Mutex::new(Requests::new());
+    requests.lock().unwrap().ask(10);
+    requests.lock().unwrap().ask(11);
+    let busy = Fake {
+        remux: Ok(None),
+        ..Fake::repairing()
+    };
+    let first = tick(&rig.pool, rig.dir.path(), &requests, &busy, NOW).await;
+    assert_eq!(first.map(|r| r.outcome), Some(RepairOutcome::Busy));
+    let steps = Fake::repairing();
+    let minute = tick(&rig.pool, rig.dir.path(), &requests, &steps, NOW + 60_000).await;
+    assert_eq!(minute, None, "row 11 waits for the retry");
+    assert!(steps.ffmpeg_runs.lock().unwrap().is_empty());
+    let due = NOW + super::super::worker::BUSY_RETRY_MS;
+    let again = tick(&rig.pool, rig.dir.path(), &requests, &steps, due).await;
+    assert_eq!(again.map(|r| r.outcome), Some(RepairOutcome::Repaired));
+    requests.lock().unwrap().ask(13);
+    let later = tick(&rig.pool, rig.dir.path(), &requests, &steps, due).await;
+    assert_eq!(later, None, "the video was repaired once");
+    assert_eq!(steps.ffmpeg_runs.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]

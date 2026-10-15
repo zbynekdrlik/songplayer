@@ -188,8 +188,12 @@ reports end-of-stream (SNV: "Remembrance" 0 frames in 9 ms; remuxed with
   The requests are in memory (`Requests`, one per row, and one repair per
   YouTube id per process: a failed one is logged once and never retried
   before a restart, except a `busy` one, asked again `BUSY_RETRY_MS`
-  (10 min) later with its try given back (a Loop playlist can hold the
-  file); a restart forgets them, and the next failing play asks again).
+  (10 min) later for one more try (a Loop playlist can hold the file;
+  `busy_until`: no other row of the video runs a repair before then); a
+  restart forgets them, and the next failing play asks again). The
+  `done` INFO line names the remux's `new_first_ms`: with no picture of
+  the old file read, the first-picture check is skipped, so a remux the
+  reader reads late shows there.
 - **Run by the worker:** every tick (`repair::tick`, first in `run`, before
   the upgrade) takes ONE request due, whatever `video_upgrade_enabled`
   says, behind #230's hold (`Job::VideoUpgrade`; a held request is put back
