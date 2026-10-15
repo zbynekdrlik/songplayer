@@ -15,7 +15,7 @@ use crate::peer::client::{PeerError, lock};
 use crate::peer::config::{NodeConfig, PeerConfig};
 use crate::peer::follow::{Candidate, FOLLOW_IDLE, FOLLOW_RETRY};
 use crate::peer::hash::sha256_hex;
-use crate::peer::kind::ArtifactKind;
+use crate::peer::kind::{ArtifactKind, Job};
 use crate::peer::lan::ExchangeStatus;
 use crate::peer::rig::{SNV_KEY, TestNode, set};
 use crate::peer::wire::{Artifact, Catalog, now_ms};
@@ -437,6 +437,99 @@ async fn the_take_waits_for_the_song_files_lock() {
     every_row_named(&pp, YT, LIVE, "manual").await;
 }
 
+/// ROZHODNUTÉ (#269): PP's title is byte for byte SNV's with no record of
+/// it (a phase-0 copy of an operator's title). The look records SNV as its
+/// origin and takes nothing: no row, no rename. Recorded once, and SNV's
+/// later correction then follows.
+#[tokio::test]
+async fn a_byte_identical_title_is_recorded_then_followed() {
+    let (snv, pp) = snv_and_pp(&[YT]).await;
+    correct(&snv, YT, LIVE).await;
+    correct(&pp, YT, LIVE).await;
+    assert_eq!(took(&pp, YT).await, None, "a phase-0 copy: no record");
+
+    assert!(follow_next(Some(&pp.ex)).await.is_empty(), "nothing taken");
+
+    every_row_named(&pp, YT, LIVE, "manual").await;
+    let sha = listed_sha(&snv, YT).await;
+    assert_eq!(took(&pp, YT).await, Some(("snv".to_string(), 2, sha)));
+    let status = pp.ex.title_follow_status();
+    assert_eq!(status.last.unwrap().why, TitleWhy::Same);
+    let before = now_ms();
+    assert!(follow_next(Some(&pp.ex)).await.is_empty(), "recorded once");
+    assert!(lock(&pp.ex.title_follow).next_look_ms >= before + ms(FOLLOW_IDLE));
+
+    correct(&snv, YT, "Way Maker (Studio)").await;
+    pp.ex.client.forget_catalog("snv");
+    due_now(&pp);
+    assert_eq!(follow_next(Some(&pp.ex)).await, rows_of(&pp, YT).await);
+    every_row_named(&pp, YT, "Way Maker (Studio)", "manual").await;
+    assert_eq!(
+        pp.ex.title_follow_status().last.unwrap().why,
+        TitleWhy::Changed
+    );
+}
+
+/// A title byte for byte SNV's that PP's operator changes between the look
+/// and the record is no copy of SNV's: nothing is recorded, and the
+/// correction stays PP's own.
+#[tokio::test]
+async fn a_title_changed_before_its_record_is_not_recorded() {
+    let (snv, pp) = snv_and_pp(&[YT]).await;
+    let held = held_titles(pp.pool(), None).await.unwrap();
+    let peer = snv_peer(&pp).await;
+    let catalog = pp.ex.client.catalog(&peer).await.unwrap();
+    let found = candidates(&held, &[("snv", Some(&*catalog))]);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].why, TitleWhy::Same, "both start with one title");
+
+    correct(&pp, YT, MINE).await;
+    let outcome = take(&pp.ex, &found[0], &peer).await;
+
+    assert!(matches!(outcome, Outcome::Later(_)), "{outcome:?}");
+    assert_eq!(took(&pp, YT).await, None);
+    correct(&snv, YT, LIVE).await;
+    pp.ex.client.forget_catalog("snv");
+    assert!(follow_next(Some(&pp.ex)).await.is_empty());
+    every_row_named(&pp, YT, MINE, "manual").await;
+}
+
+/// ROZHODNUTÉ (#269): a download run here (a local re-download) keeps the
+/// title's record while PP's title is still the copy it took: SNV's later
+/// correction still follows. The pair's own records go, as before.
+#[tokio::test]
+async fn a_download_here_keeps_the_record_of_the_title_it_keeps() {
+    let (snv, pp) = snv_and_pp(&[YT]).await;
+    correct(&snv, YT, LIVE).await;
+    assert_eq!(follow_next(Some(&pp.ex)).await.len(), 1);
+    pp.audio_from(YT, "snv").await;
+
+    let _guard = pp.ex.run_here(Job::Download, YT).await;
+
+    let sha = listed_sha(&snv, YT).await;
+    assert_eq!(took(&pp, YT).await, Some(("snv".to_string(), 2, sha)));
+    assert_eq!(fetch_record(pp.pool(), YT, "audio").await.unwrap(), None);
+    correct(&snv, YT, "Way Maker (Studio)").await;
+    pp.ex.client.forget_catalog("snv");
+    retry_now(&pp);
+    assert_eq!(follow_next(Some(&pp.ex)).await.len(), 1);
+    every_row_named(&pp, YT, "Way Maker (Studio)", "manual").await;
+}
+
+/// …and forgets it once PP's title is no longer that copy: the title the
+/// record names changed here.
+#[tokio::test]
+async fn a_download_here_forgets_the_record_of_a_changed_title() {
+    let (snv, pp) = snv_and_pp(&[YT]).await;
+    correct(&snv, YT, LIVE).await;
+    assert_eq!(follow_next(Some(&pp.ex)).await.len(), 1);
+    correct(&pp, YT, MINE).await;
+
+    let _guard = pp.ex.run_here(Job::Download, YT).await;
+
+    assert_eq!(took(&pp, YT).await, None);
+}
+
 /// The peer's row must be the title its catalog lists: a read between two
 /// corrections there is not taken (a failure, retried); a fresh catalog
 /// lists the newer title, taken at once.
@@ -539,7 +632,7 @@ type WantsCase = (HeldTitle, Artifact, Option<TitleWhy>);
 fn wants_follows_a_higher_rank_or_the_peers_newer_copy_never_a_correction_made_here() {
     let h = |version, seed, took| held_of(YT, version, seed, took);
     let t = |version, seed| title_of(YT, version, seed);
-    let cases: [WantsCase; 13] = [
+    let cases: [WantsCase; 18] = [
         // A higher rank: a provider's over a parser's, an operator's over a
         // provider's.
         (h(0, "mine", None), t(1, "snv"), Some(TitleWhy::Higher)),
@@ -571,6 +664,22 @@ fn wants_follows_a_higher_rank_or_the_peers_newer_copy_never_a_correction_made_h
         // A parser's title there is never taken.
         (h(0, "was", Some(("snv", "was"))), t(0, "now"), None),
         (h(0, "mine", None), t(0, "snv"), None),
+        // ROZHODNUTÉ: byte for byte the peer's title with no record of it
+        // (a phase-0 operator's title, a provider's, another peer's record,
+        // a record of an older title) is recorded; never a parser's.
+        (h(2, "same", None), t(2, "same"), Some(TitleWhy::Same)),
+        (h(1, "same", None), t(1, "same"), Some(TitleWhy::Same)),
+        (
+            h(2, "same", Some(("pp2", "same"))),
+            t(2, "same"),
+            Some(TitleWhy::Same),
+        ),
+        (
+            h(2, "same", Some(("snv", "was"))),
+            t(2, "same"),
+            Some(TitleWhy::Same),
+        ),
+        (h(0, "same", None), t(0, "same"), None),
     ];
     for (held, listed, want) in cases {
         assert_eq!(wants(&held, "snv", &listed), want, "{held:?} {listed:?}");

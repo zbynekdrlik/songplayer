@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::config::valid_name;
+use super::hash::sha256_hex;
 use super::kind::{ArtifactKind, metadata_version};
 use crate::downloader::cache::is_valid_video_id;
 
@@ -125,6 +126,12 @@ impl PeerMetadata {
     /// the artifact route serves them.
     pub fn to_bytes(&self) -> Vec<u8> {
         serde_json::to_vec(self).unwrap_or_default()
+    }
+
+    /// The sha256 of [`Self::to_bytes`], as the catalog lists the title
+    /// (#269: the title follow compares this node's own with a record's).
+    pub fn sha256(&self) -> String {
+        sha256_hex(&self.to_bytes())
     }
 }
 

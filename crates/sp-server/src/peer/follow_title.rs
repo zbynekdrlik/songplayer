@@ -21,12 +21,16 @@
 //!   whose catalog lists its title at a version this node takes (a
 //!   provider's or an operator's, `kind::acceptable`) lists one [`wants`]
 //!   takes.
-//! - [`wants`]: never over a correction made here (a `'manual'` title that
-//!   is not the copy recorded from that peer); else a title of a higher
-//!   rank (`kind::metadata_version`: an operator's over a provider's over
-//!   a parser's), or, when this node's title IS the copy it recorded from
-//!   that peer, the one the peer lists now if it differs (corrected or
-//!   improved there).
+//! - [`wants`]: a title byte for byte the peer's with no record of it (a
+//!   phase-0 copy) is recorded as the peer's copy, nothing taken
+//!   (ROZHODNUTÉ on #269); never over a correction made here (a `'manual'`
+//!   title that is not the copy recorded from that peer); else a title of a
+//!   higher rank (`kind::metadata_version`: an operator's over a provider's
+//!   over a parser's), or, when this node's title IS the copy it recorded
+//!   from that peer, the one the peer lists now (corrected or improved
+//!   there).
+//! - A download run here keeps the title's record while the title is still
+//!   that copy (`Exchange::forget_origins`, [`title_is_recorded_copy`]).
 //! - The take (`take`): the peer's `/videos` row (`PeerTitle::of`), its
 //!   sha256 checked against the catalog entry as the repair checks it; then
 //!   under `cache::SONG_FILES` the look's answer is checked again (a
@@ -46,7 +50,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use super::Exchange;
 use super::catalog::metadata_for;
@@ -54,9 +58,9 @@ use super::client::{PeerError, lock};
 use super::config::PeerConfig;
 use super::download::{PeerTitle, record_title};
 use super::follow::{Candidate, FOLLOW_IDLE, FOLLOW_RETRY, FollowStatus, look_config, peer_reads};
-use super::hash::sha256_hex;
 use super::kind::{ArtifactKind, METADATA_MANUAL, acceptable};
 use super::wire::{Artifact, Catalog, PeerMetadata, now_ms};
+use crate::db::models_peer;
 use crate::metadata::health::REPAIR_QUEUE_WHERE;
 use crate::metadata::manual::{rename_rows, spread_title};
 
@@ -70,6 +74,11 @@ pub enum TitleWhy {
     /// This node's title is the copy it took from that peer, and the peer
     /// names the video otherwise now.
     Changed,
+    /// This node's title is byte for byte the one the peer lists, with no
+    /// record of it (a phase-0 copy, an identical correction): its origin is
+    /// recorded and nothing is taken (ROZHODNUTÉ on #269), so the peer's
+    /// later corrections follow.
+    Same,
 }
 
 /// What this node holds of one video's title ([`held_titles`]).
@@ -104,6 +113,10 @@ pub fn wants(held: &HeldTitle, peer: &str, listed: &Artifact) -> Option<TitleWhy
         return None;
     }
     let copy = held.is_copy_of(peer);
+    // The very bytes the peer lists (so the same rank too): recorded once.
+    if listed.sha256 == held.sha256 {
+        return (!copy).then_some(TitleWhy::Same);
+    }
     // An operator's correction made here is final.
     if held.version == METADATA_MANUAL && !copy {
         return None;
@@ -111,7 +124,7 @@ pub fn wants(held: &HeldTitle, peer: &str, listed: &Artifact) -> Option<TitleWhy
     if listed.version > held.version {
         return Some(TitleWhy::Higher);
     }
-    (copy && listed.sha256 != held.sha256).then_some(TitleWhy::Changed)
+    copy.then_some(TitleWhy::Changed)
 }
 
 /// The videos of `held` whose title follows a peer's, in the order a look
@@ -242,17 +255,37 @@ pub(crate) async fn held_titles(
             Some(HeldTitle {
                 youtube_id,
                 version: title.version(),
-                sha256: sha256_hex(&title.to_bytes()),
+                sha256: title.sha256(),
                 took: node.zip(sha256),
             })
         })
         .collect())
 }
 
+/// This node's title of `youtube_id` is the copy it recorded from a peer:
+/// the `peer_fetches` metadata record's sha256 is the one of the title as
+/// this node's catalog lists it. A download run here keeps that record
+/// (ROZHODNUTÉ on #269, `Exchange::forget_origins`): the title it keeps is
+/// still the peer's, so the peer's later corrections still follow.
+pub(crate) async fn title_is_recorded_copy(
+    pool: &SqlitePool,
+    youtube_id: &str,
+) -> Result<bool, sqlx::Error> {
+    let metadata = ArtifactKind::Metadata.as_str();
+    let Some((_, _, recorded)) = models_peer::fetch_record(pool, youtube_id, metadata).await?
+    else {
+        return Ok(false);
+    };
+    let own = metadata_for(pool, Some(youtube_id)).await?;
+    Ok(own.first().is_some_and(|title| title.sha256() == recorded))
+}
+
 /// What a look did with its video.
 #[derive(Debug)]
 enum Outcome {
-    /// Every row took the peer's title (these rows); its origin is recorded.
+    /// Every row took the peer's title (these rows; none for
+    /// [`TitleWhy::Same`], whose title already was the peer's); its origin
+    /// is recorded.
     Taken(Vec<i64>),
     /// Not now (why): asked again after [`FOLLOW_RETRY`].
     Later(PeerError),
@@ -262,6 +295,15 @@ enum Outcome {
 
 /// `c`'s title follows the peer's (the module doc).
 async fn take(ex: &Exchange, c: &Candidate<TitleWhy>, peer: &PeerConfig) -> Outcome {
+    if c.why == TitleWhy::Same {
+        return match record_same(ex, c).await {
+            Ok(true) => Outcome::Taken(Vec::new()),
+            Ok(false) => Outcome::Later(PeerError::NotYet(
+                "this node's title changed meanwhile".into(),
+            )),
+            Err(e) => Outcome::Failed(e.into()),
+        };
+    }
     let video = match ex.client.video(peer, &c.youtube_id).await {
         Ok(video) => video,
         Err(e) => return Outcome::Failed(e),
@@ -315,12 +357,7 @@ async fn apply(
     taken: &PeerTitle,
 ) -> Result<Applied, sqlx::Error> {
     let _files = crate::downloader::cache::SONG_FILES.lock().await;
-    let held = held_titles(&ex.pool, Some(c.youtube_id.as_str())).await?;
-    if held
-        .first()
-        .and_then(|h| wants(h, &c.peer, &c.artifact))
-        .is_none()
-    {
+    if wants_now(ex, c).await?.is_none() {
         return Ok(Applied::Kept);
     }
     let t = &taken.title;
@@ -331,6 +368,42 @@ async fn apply(
     let artist = Some(t.artist.as_str());
     let rows = spread_title(&ex.pool, &c.youtube_id, &t.song, artist, t.source).await?;
     Ok(Applied::Rows(rows))
+}
+
+/// `c`'s title is byte for byte the peer's ([`TitleWhy::Same`]): only its
+/// origin is recorded (`peer_fetches` kind `metadata`, the peer and the sha
+/// its catalog lists), checked again under `cache::SONG_FILES` like a take
+/// (a correction made here meanwhile is no copy of the peer's). `false` =
+/// the look's answer no longer holds, nothing recorded.
+async fn record_same(ex: &Exchange, c: &Candidate<TitleWhy>) -> Result<bool, sqlx::Error> {
+    let _files = crate::downloader::cache::SONG_FILES.lock().await;
+    if wants_now(ex, c).await? != Some(TitleWhy::Same) {
+        return Ok(false);
+    }
+    let metadata = ArtifactKind::Metadata.as_str();
+    let (peer, version, sha256) = (&c.peer, c.artifact.version, &c.artifact.sha256);
+    models_peer::record_fetch(
+        &ex.pool,
+        &c.youtube_id,
+        metadata,
+        peer,
+        version,
+        sha256,
+        now_ms(),
+    )
+    .await?;
+    log_same(c);
+    Ok(true)
+}
+
+/// The look's answer for `c`, read again from this node's rows (the caller
+/// holds `cache::SONG_FILES`).
+async fn wants_now(
+    ex: &Exchange,
+    c: &Candidate<TitleWhy>,
+) -> Result<Option<TitleWhy>, sqlx::Error> {
+    let held = held_titles(&ex.pool, Some(c.youtube_id.as_str())).await?;
+    Ok(held.first().and_then(|h| wants(h, &c.peer, &c.artifact)))
 }
 
 /// `outcome` of `c` into the follow's memory and the log; the rows that took
@@ -369,6 +442,17 @@ fn log_followed(c: &Candidate<TitleWhy>, rows: usize) {
         rows,
         sha256 = %c.artifact.sha256.get(..12).unwrap_or_default(),
         "exchange: followed the peer's title"
+    );
+}
+
+/// The one INFO of a title recorded as the peer's copy. Logging only.
+#[cfg_attr(test, mutants::skip)]
+fn log_same(c: &Candidate<TitleWhy>) {
+    info!(
+        youtube_id = %c.youtube_id,
+        peer = %c.peer,
+        sha256 = %c.artifact.sha256.get(..12).unwrap_or_default(),
+        "exchange: this node's title is the peer's - its origin recorded"
     );
 }
 
