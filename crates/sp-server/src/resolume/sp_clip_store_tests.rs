@@ -116,3 +116,53 @@ fn every_host_s_clips_are_listed() {
 fn the_process_has_one_record() {
     assert!(std::ptr::eq(global(), global()));
 }
+
+/// Review round 1: one unread poll (a REST hiccup) between two reads of the
+/// same state must not restart the note's "(12 min)".
+#[test]
+fn a_known_state_counts_from_its_start_across_unknown_gaps() {
+    let store = SpClipStore::default();
+    store.publish("snv:8090", fact(ClipState::NotRunning, Vec::new()), 1_000);
+    store.publish("snv:8090", Fact::unknown("param 7: 500"), 2_000);
+    let gap = store.current(2_500);
+    assert_eq!((gap.state, gap.since_ms), (ClipState::Unknown, Some(2_000)));
+    assert_eq!(gap.read_error.as_deref(), Some("param 7: 500"));
+    store.publish("snv:8090", Fact::unknown("param 7: 500"), 2_400);
+    assert_eq!(
+        store.current(2_500).since_ms,
+        Some(2_000),
+        "an unknown counts from its own start"
+    );
+    store.publish("snv:8090", fact(ClipState::NotRunning, Vec::new()), 3_000);
+    let back = store.current(3_500);
+    assert_eq!(
+        (back.state, back.since_ms),
+        (ClipState::NotRunning, Some(1_000)),
+        "the black wall's count goes on"
+    );
+    assert_eq!(back.read_error, None);
+    // Another known state after a gap starts its own count.
+    store.publish("snv:8090", Fact::unknown("no answer"), 4_000);
+    store.publish(
+        "snv:8090",
+        fact(ClipState::Running, vec![clip("L# Fill", "Yt music")]),
+        5_000,
+    );
+    assert_eq!(store.current(5_000).since_ms, Some(5_000));
+}
+
+#[test]
+fn a_reader_fault_and_the_first_reason_combine_over_hosts() {
+    let a = Fact::unknown("Arena does not answer");
+    let b = Fact::reader_fault("param 7: error decoding response body");
+    let both = combine([&a, &b]);
+    assert_eq!(
+        both.read_error.as_deref(),
+        Some("Arena does not answer"),
+        "the first host's"
+    );
+    assert!(both.reader_fault);
+    let running = fact(ClipState::Running, vec![clip("L# Fill", "Yt music")]);
+    let fine = combine([&running]);
+    assert_eq!((fine.read_error, fine.reader_fault), (None, false));
+}

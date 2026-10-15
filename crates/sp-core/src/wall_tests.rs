@@ -787,6 +787,7 @@ fn sp_clip(state: ClipState) -> SongplayerClip {
         }],
         since_ms: Some(now - 750_000),
         now_ms: Some(now),
+        ..SongplayerClip::default()
     }
 }
 

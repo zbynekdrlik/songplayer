@@ -256,19 +256,33 @@ keeps the dead ids until the 300 s TTL refresh, which fires no event.
   `read_at` `POLL_EVERY` (30 s) old — so 30–42 s on the jittered ~10 s
   ticks. It reads each tracked param once, in id order, one after another
   (`GET /api/v1/parameter/by-id/{id}`, decoded into the typed `ParamAnswer`,
-  never `serde_json::Value`), and stops at the first that does not read: a
-  hung Arena costs one 5 s timeout per poll, never 22. SNV: 22 params (8
-  Spout + 1 NDI clips' `connected`, 4 layers and 2 groups × `bypassed` +
-  `video.opacity`, the composition's `video.opacity`).
+  never `serde_json::Value`), and stops at the first that does not read.
+  The whole poll is bounded by `POLL_BUDGET` (2 s, `tokio::time::timeout`;
+  `Watch::budget`, a test shortens it): it runs inside the driver's step,
+  ahead of the title and lyric pushes (review round 1), so a slow Arena
+  REST costs at most 2 s per poll; past it the fact is `unknown`. One
+  DEBUG line per poll: `params`, `elapsed_ms`. SNV: ~27 params (18 Spout
+  clips per the box read); the test fixture: 22 (8 Spout + 1 NDI clips'
+  `connected`, 4 layers and 2 groups × `bypassed` + `video.opacity`, the
+  composition's `video.opacity`).
 - **A 404** = a stale map: `refresh_stale_map(now)` (`driver_push.rs`, the
   tail `run_push` had: the refused-id 60 s hold, `not_ready_since.get_or_insert`,
   the refresh through `decide`, the same map = `refused_ids_at`). The poll
   fires no RecoveryEvent of its own (the refresh's ready transition does,
   as for a push) and never counts toward the breaker (like the param
   probe). When no refresh evaluated a body at this `now` (`body_at`: held,
-  or the fetch failed) the fact is `unknown`.
-- **Any other failure** (a 5xx, a transport error, a body that is no param):
-  `unknown` until the next read; nothing counted, nothing refreshed.
+  or the fetch failed) the fact is `unknown`. The same clips back with the
+  404'd param still tracked (a refused id) HOLDS the poll
+  (`Watch::held`) until the next full refresh reads a body
+  (`note_sp_clips` clears it): at most one extra 14 MB fetch per TTL,
+  never one a minute (review round 1). A deleted clip's 404 maps the same
+  text clips but no longer tracks that param: no hold.
+- **Any other failure** (a 5xx, a transport error, the budget):
+  `unknown` until the next read; nothing counted, nothing refreshed. An
+  answer that does not decode as a param (`reqwest::Error::is_decode`), a
+  param with no id or a value of another shape is a READER FAULT
+  (`Fact::reader_fault`): SongPlayer's own reader cannot read Arena's
+  answer, and the post-deploy gate fails on it (`wall.md`).
 - **The outage:** opening the breaker (`apply_outcome`) also calls
   `forget_sp_clips` (tracked `NotLoaded`, `unknown`) next to evicting the
   map.
@@ -279,8 +293,12 @@ keeps the dead ids until the 300 s TTL refresh, which fires no event.
   never the process's.
 - **Tests:** `driver_sp_clips_tests.rs` on the synthetic clock: the body
   read, the 30 s cadence (29.999 / 30 s), a relaunch caught by a 404 (one
-  RecoveryEvent, the relaunched body), a refused id held 60 s, a 500, the
-  gates, a failed probe, the outage, a composition with no SongPlayer clip.
+  RecoveryEvent, the relaunched body), a refused id holding the poll until
+  the TTL's refresh, a deleted clip's 404, the budget (a param delayed
+  30 s, a 200 ms budget), a reader fault, a 500, the gates, a failed probe,
+  the outage, a composition with no SongPlayer clip; `mod.rs`'s
+  `a_registry_host_publishes_its_clip_into_the_process_record` pins
+  `add_host`'s store.
 
 ## The driver owns the wall title (#217 addendum 3)
 

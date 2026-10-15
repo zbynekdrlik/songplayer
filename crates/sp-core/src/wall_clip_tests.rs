@@ -40,6 +40,7 @@ fn clip(
         ndi_clips: ndi,
         since_ms: Some(NOW - held_ms),
         now_ms: Some(NOW),
+        ..SongplayerClip::default()
     }
 }
 
@@ -189,10 +190,25 @@ fn the_fact_travels_with_every_field_named() {
             "ndi_clips": [{"layer": "L # BG", "clip": "SNV BG", "source": "NDI Source"}],
             "since_ms": NOW - 60_000,
             "now_ms": NOW,
+            "read_error": null,
+            "reader_fault": false,
         })
     );
     let back: SongplayerClip = serde_json::from_value(wire).unwrap();
     assert_eq!(back, fact);
+    // A host's reader fault travels with its reason.
+    let fault = SongplayerClip {
+        read_error: Some("param 7: error decoding response body".to_string()),
+        reader_fault: true,
+        ..SongplayerClip::default()
+    };
+    let wire = serde_json::to_value(&fault).unwrap();
+    assert_eq!(wire["read_error"], "param 7: error decoding response body");
+    assert_eq!(wire["reader_fault"], true);
+    assert_eq!(
+        serde_json::from_value::<SongplayerClip>(wire).unwrap(),
+        fault
+    );
     let none: SongplayerClip = serde_json::from_value(json!({"state": "none"})).unwrap();
     assert_eq!(none.state, ClipState::NotRunning);
     let empty: SongplayerClip = serde_json::from_value(json!({})).unwrap();

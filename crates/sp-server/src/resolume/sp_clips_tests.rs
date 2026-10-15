@@ -1,7 +1,10 @@
-//! #275: what Arena's composition says about SongPlayer's clip, over a REAL
-//! SNV composition (15.10.2026, Arena 7.28.1, the main session's read only
-//! box read, trimmed to the layers / clips / groups; the param ids derived
-//! from their owners' real ids, `testdata/`), and variants of it.
+//! #275: what Arena's composition says about SongPlayer's clip, over a
+//! composition trimmed from SNV's (15.10.2026, Arena 7.28.1, the main
+//! session's read-only box read: the real layer / clip / group names and
+//! ids, connected states, bypassed and opacity values; 8 of SNV's 18
+//! `SP-program-MAX` clips; every param object, its id and `valuetype`, and
+//! the composition's `video` block derived for the test, `testdata/`), and
+//! variants of it.
 
 use std::time::{Duration, Instant};
 
@@ -75,6 +78,7 @@ fn running(clips: Vec<ClipView>, ndi: Vec<ClipView>) -> Fact {
         clips,
         ndi_clips: ndi,
         why: None,
+        reader_fault: false,
     }
 }
 
@@ -84,6 +88,7 @@ fn none(ndi: Vec<ClipView>) -> Fact {
         clips: Vec::new(),
         ndi_clips: ndi,
         why: None,
+        reader_fault: false,
     }
 }
 
@@ -250,6 +255,7 @@ fn a_composition_not_loaded_yet_is_unknown() {
             fact.why.as_deref(),
             Some("Arena's composition is not loaded")
         );
+        assert!(!fact.reader_fault, "Arena still loading is no reader fault");
         assert!(read.tracked.params().is_empty());
     }
 }
@@ -266,7 +272,11 @@ fn a_param_with_no_id_is_unreadable_and_unknown() {
     assert_eq!(read.tracked, Tracked::Unreadable(why.to_string()));
     assert!(read.values.is_empty());
     assert!(read.tracked.params().is_empty(), "nothing to poll by id");
-    assert_eq!(evaluate(&read.tracked, &read.values), Fact::unknown(why));
+    // SongPlayer's own reader cannot read Arena's answer: a reader fault.
+    assert_eq!(
+        evaluate(&read.tracked, &read.values),
+        Fact::reader_fault(why)
+    );
     // A clip's connected and a group's opacity are needed too.
     let mut body = snv();
     item(&mut body, YT_B)["connected"]
@@ -305,7 +315,7 @@ fn a_value_that_did_not_read_or_has_another_shape_is_unknown() {
         values.remove(&missing);
         assert_eq!(
             evaluate(&read.tracked, &values),
-            Fact::unknown(&format!("param {missing} did not read")),
+            Fact::reader_fault(&format!("param {missing} did not read")),
         );
     }
     // A disconnected clip's layer still has to read: one rule for all.
@@ -324,6 +334,7 @@ fn a_value_that_did_not_read_or_has_another_shape_is_unknown() {
         values.insert(id, wrong.clone());
         let fact = evaluate(&read.tracked, &values);
         assert_eq!(fact.state, ClipState::Unknown, "{wrong:?}");
+        assert!(fact.reader_fault, "{wrong:?}");
         assert!(
             fact.why
                 .as_deref()
@@ -367,6 +378,34 @@ fn a_poll_is_due_every_30_s_with_something_to_read() {
     // Nothing tracked (not loaded, no SongPlayer clip): never.
     let idle = Watch::default();
     assert!(!idle.poll_due(base));
+    // Held after a refused id: not until the next full refresh.
+    watch.held = true;
+    assert!(!watch.poll_due(base + Duration::from_secs(60)));
+}
+
+#[test]
+fn a_poll_has_a_2_s_budget_a_test_may_shorten() {
+    assert_eq!(POLL_BUDGET, Duration::from_secs(2));
+    assert_eq!(Watch::default().budget(), Duration::from_secs(2));
+    let short = Watch {
+        budget: Some(Duration::from_millis(200)),
+        ..Watch::default()
+    };
+    assert_eq!(short.budget(), Duration::from_millis(200));
+}
+
+#[test]
+fn a_reader_fault_is_unknown_with_its_reason() {
+    let fact = Fact::reader_fault("param 7: error decoding response body");
+    assert_eq!(fact.state, ClipState::Unknown);
+    assert!(fact.reader_fault);
+    assert_eq!(
+        fact.why.as_deref(),
+        Some("param 7: error decoding response body")
+    );
+    let unknown = Fact::unknown("no answer");
+    assert!(!unknown.reader_fault);
+    assert_eq!(unknown.why.as_deref(), Some("no answer"));
 }
 
 /// The owner's rules (#223, #259): the clip read never triggers, connects

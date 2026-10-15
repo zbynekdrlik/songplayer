@@ -1,10 +1,12 @@
 //! #275: the driver's read of SongPlayer's clip in Arena — a full refresh
 //! evaluates its own body, the tracked params are read by id every 30 s
 //! (only with the breaker closed, an answered probe and no not-ready
-//! episode), a 404 is a stale map (the push path's refresh and its refused
-//! id hold), anything else that does not read is unknown, and the outage
-//! forgets. Every tick on the synthetic clock (`base + Duration`,
-//! `resolume-driver.md` "Testing the driver").
+//! episode, within a 2 s budget), a 404 is a stale map (the push path's
+//! refresh; a refused id holds the poll until the next full refresh),
+//! anything else that does not read is unknown (an answer that does not
+//! decode a reader fault), and the outage forgets. Every tick on the
+//! synthetic clock (`base + Duration`, `resolume-driver.md` "Testing the
+//! driver").
 
 use std::time::{Duration, Instant};
 
@@ -169,6 +171,7 @@ fn running(clips: Vec<ClipView>, ndi: Vec<ClipView>) -> Fact {
         clips,
         ndi_clips: ndi,
         why: None,
+        reader_fault: false,
     }
 }
 
@@ -178,6 +181,7 @@ fn none(ndi: Vec<ClipView>) -> Fact {
         clips: Vec::new(),
         ndi_clips: ndi,
         why: None,
+        reader_fault: false,
     }
 }
 
@@ -280,11 +284,11 @@ async fn a_poll_404_refreshes_the_stale_map_and_reads_the_relaunched_composition
 }
 
 /// A 404 on a param Arena still lists (a refused id, never the steady
-/// state): the refresh maps the same clips, so its body is read and the
-/// push path's 60 s hold starts; a 404 inside the hold refreshes nothing
-/// and nothing is known until the next read.
+/// state): the refresh maps the same clips, so its body is read; the poll
+/// then holds until the next full refresh (the TTL's), so a refused id
+/// costs one extra 14 MB fetch per TTL, never one a minute.
 #[tokio::test]
-async fn a_404_on_a_param_arena_still_lists_is_held_for_60_s() {
+async fn a_404_on_a_param_arena_still_lists_holds_the_poll_until_the_next_refresh() {
     let server = arena().await;
     composition_always(&server, snv()).await;
     param_answers(&server, FIRST_PARAM, 404).await;
@@ -305,21 +309,134 @@ async fn a_404_on_a_param_arena_still_lists_is_held_for_60_s() {
         running(vec![yt_music(), yt_music()], vec![snv_bg()]),
         "the refresh's own body"
     );
+    assert!(driver.sp_clips.held, "the 404'd param is still tracked");
     assert_eq!(drain(&mut rx), 0, "the same map: no event");
 
-    driver.on_tick_at(base + secs(60)).await;
-    assert_eq!(param_reads(&server).await, 2);
+    for at in [60, 90, 300] {
+        driver.on_tick_at(base + secs(at)).await;
+    }
+    assert_eq!(param_reads(&server).await, 1, "held: nothing polled");
     assert_eq!(composition_fetches(&server).await, 2, "held: no refresh");
-    assert_eq!(driver.sp_clips.fact.state, ClipState::Unknown);
-    assert_eq!(
-        driver.sp_clips.fact.why.as_deref(),
-        Some("param 1681395963139 answered 404 and no refresh read the composition")
-    );
+    assert_eq!(driver.sp_clips.fact.state, ClipState::Running);
 
-    driver.on_tick_at(base + secs(90)).await;
-    assert_eq!(composition_fetches(&server).await, 3, "the hold is over");
+    // The TTL's refresh (300 s after the last one) reads a body and ends
+    // the hold; the next due poll meets the refused id once more.
+    driver.on_tick_at(base + secs(330)).await;
+    assert_eq!(composition_fetches(&server).await, 3, "the TTL refresh");
+    assert!(!driver.sp_clips.held);
+    assert_eq!(param_reads(&server).await, 1, "the refresh was the read");
+    driver.on_tick_at(base + secs(360)).await;
+    assert_eq!(param_reads(&server).await, 2);
+    assert_eq!(composition_fetches(&server).await, 4);
+    assert!(driver.sp_clips.held);
     assert_eq!(driver.sp_clips.fact.state, ClipState::Running);
     assert!(driver.not_ready_since.is_none());
+}
+
+/// The operator deleted a SongPlayer clip: its param answers 404 and the
+/// refresh maps the same text clips, but the deleted clip is no longer
+/// tracked, so nothing holds and the next poll reads the 21 params left.
+#[tokio::test]
+async fn a_deleted_clip_s_404_refreshes_and_the_poll_goes_on() {
+    let server = arena().await;
+    let mut without = snv();
+    for layer in without["layers"].as_array_mut().unwrap() {
+        layer["clips"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|clip| clip["id"] != YT_A);
+    }
+    composition_sequence(&server, snv(), without).await;
+    param_answers(&server, YT_A + 1, 404).await;
+    params_answer(&server, &snv()).await;
+    let (mut driver, _rx, _store) = driver_on(&server);
+    let base = Instant::now();
+    driver.on_tick_at(base).await;
+
+    driver.on_tick_at(base + secs(30)).await;
+    // In id order YT_A's connected is the 17th tracked param.
+    assert_eq!(param_reads(&server).await, 17);
+    assert_eq!(composition_fetches(&server).await, 2);
+    assert_eq!(
+        driver.sp_clips.fact,
+        running(vec![yt_music()], vec![snv_bg()])
+    );
+    assert!(!driver.sp_clips.held, "the 404'd param is gone");
+
+    driver.on_tick_at(base + secs(60)).await;
+    assert_eq!(param_reads(&server).await, 17 + 21);
+    assert_eq!(
+        driver.sp_clips.fact,
+        running(vec![yt_music()], vec![snv_bg()])
+    );
+}
+
+/// A poll past its budget is unknown: a slow Arena never holds the driver's
+/// step (and the title and lyric pushes behind it) longer than the budget.
+#[tokio::test]
+async fn a_poll_past_its_budget_is_unknown() {
+    let server = arena().await;
+    composition_always(&server, snv()).await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/parameter/by-id/{FIRST_PARAM}")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"id": FIRST_PARAM, "value": false}))
+                .set_delay(secs(30)),
+        )
+        .mount(&server)
+        .await;
+    params_answer(&server, &snv()).await;
+    let (mut driver, _rx, _store) = driver_on(&server);
+    driver.sp_clips.budget = Some(Duration::from_millis(200));
+    let base = Instant::now();
+    driver.on_tick_at(base).await;
+
+    driver.on_tick_at(base + secs(30)).await;
+
+    assert_eq!(
+        param_reads(&server).await,
+        1,
+        "ended while the first one waited"
+    );
+    assert_eq!(
+        driver.sp_clips.fact,
+        Fact::unknown("the poll of 22 params took over 200ms")
+    );
+    assert_eq!(driver.consecutive_failures, 0);
+    assert_eq!(composition_fetches(&server).await, 1);
+}
+
+/// An answer that does not decode as a param is SongPlayer's own reader
+/// failing: a reader fault, which the post-deploy gate fails on.
+#[tokio::test]
+async fn an_answer_that_is_no_param_is_a_reader_fault() {
+    let server = arena().await;
+    composition_always(&server, snv()).await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/parameter/by-id/{FIRST_PARAM}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": FIRST_PARAM})))
+        .mount(&server)
+        .await;
+    params_answer(&server, &snv()).await;
+    let (mut driver, _rx, store) = driver_on(&server);
+    let base = Instant::now();
+    driver.on_tick_at(base).await;
+
+    driver.on_tick_at(base + secs(30)).await;
+
+    let fact = &driver.sp_clips.fact;
+    assert_eq!(fact.state, ClipState::Unknown);
+    assert!(fact.reader_fault, "{fact:?}");
+    assert!(
+        fact.why
+            .as_deref()
+            .is_some_and(|why| why.starts_with("param 1681395963139: ")),
+        "{fact:?}"
+    );
+    let published = store.current(0);
+    assert!(published.reader_fault);
+    assert_eq!(published.read_error, fact.why);
 }
 
 /// A param that does not read (a 500: Arena's REST choking) makes the fact
@@ -353,6 +470,10 @@ async fn a_param_that_does_not_read_is_unknown_and_counts_nothing() {
         driver.sp_clips.fact
     );
     assert_eq!(store.current(0).state, ClipState::Unknown);
+    assert!(
+        !driver.sp_clips.fact.reader_fault,
+        "Arena choking is no reader fault"
+    );
     assert_eq!(driver.consecutive_failures, 0);
     assert!(!driver.circuit_breaker_open);
     assert!(driver.not_ready_since.is_none());

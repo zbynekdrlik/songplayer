@@ -12,16 +12,23 @@
 //!   stopping at the first that does not answer) once its last read is
 //!   `sp_clips::POLL_EVERY` old — only with the breaker closed, an answered
 //!   probe on this tick and no not-ready episode open (a relaunch is being
-//!   refreshed then; the episode's own refreshes evaluate their bodies).
+//!   refreshed then; the episode's own refreshes evaluate their bodies). The
+//!   whole poll is bounded by `sp_clips::POLL_BUDGET` (2 s): it runs inside
+//!   the driver's step, ahead of the title and lyric pushes (review round 1).
 //! - **A param answered 404** is a stale map (Arena re-ids every clip and
 //!   param on relaunch): the push path's own stale-map refresh
 //!   (`refresh_stale_map`: the refused-id hold, the not-ready episode, the
 //!   refresh through `decide`). It fires no RecoveryEvent of its own (the
 //!   refresh's ready transition does, as for a push) and never counts
 //!   toward the breaker, like the param probe (`driver_probe.rs`). An
-//!   answered refresh evaluates its body; else the fact is unknown.
-//! - **Anything else that does not read** (a 5xx, a timeout, a body that is
-//!   no param) makes the fact unknown until the next read.
+//!   answered refresh evaluates its body; else the fact is unknown. A
+//!   refresh that maps the same clips while the 404'd param is still
+//!   tracked (a refused id) holds the poll until the next full refresh: no
+//!   14 MB fetch every minute (review round 1).
+//! - **Anything else that does not read** (a 5xx, a timeout, the budget)
+//!   makes the fact unknown until the next read; an answer that does not
+//!   decode as a param is a reader fault (`Fact::reader_fault`: SongPlayer's
+//!   own reader is wrong, the post-deploy gate fails on it).
 //! - **The outage** (`apply_outcome` opening the breaker) forgets the
 //!   tracked clips: unknown until a refresh tracks them again.
 //!
@@ -32,6 +39,7 @@ use std::time::Instant;
 
 use tracing::{debug, info};
 
+use super::push::StaleRefresh;
 use super::{HostDriver, ResolvedEndpoint};
 use crate::resolume::sp_clip_store::SpClipStore;
 use crate::resolume::sp_clips::{self, Fact, ParamAnswer, ParamId, ParamValue, Read, Values};
@@ -42,8 +50,8 @@ enum Polled {
     Values(Values),
     /// A param answered 404: the map is stale.
     Stale(ParamId),
-    /// A param did not read (why).
-    Unread(String),
+    /// A param did not read: the unknown fact, and why.
+    Unread(Fact),
 }
 
 impl HostDriver {
@@ -63,6 +71,7 @@ impl HostDriver {
         self.sp_clips.tracked = read.tracked;
         self.sp_clips.read_at = Some(now);
         self.sp_clips.body_at = Some(now);
+        self.sp_clips.held = false;
         self.set_sp_fact(fact);
     }
 
@@ -87,27 +96,56 @@ impl HostDriver {
             return;
         }
         self.sp_clips.read_at = Some(now);
-        match self.read_sp_params().await {
+        let budget = self.sp_clips.budget();
+        let params = self.sp_clips.tracked.params().len();
+        let started = Instant::now();
+        let polled = tokio::time::timeout(budget, self.read_sp_params())
+            .await
+            .unwrap_or_else(|_| {
+                Polled::Unread(Fact::unknown(&format!(
+                    "the poll of {params} params took over {budget:?}"
+                )))
+            });
+        debug!(
+            host = %self.host,
+            params,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "SongPlayer clip params polled"
+        );
+        match polled {
             Polled::Values(values) => {
                 let fact = sp_clips::evaluate(&self.sp_clips.tracked, &values);
                 self.set_sp_fact(fact);
             }
-            Polled::Unread(why) => self.set_sp_fact(Fact::unknown(&why)),
-            Polled::Stale(param_id) => {
-                info!(
-                    host = %self.host,
-                    param_id,
-                    "Resolume answered 404 for a tracked SongPlayer clip param — the clip map is stale"
-                );
-                self.refresh_stale_map(now).await;
-                if self.sp_clips.body_at != Some(now) {
-                    // No answered refresh evaluated a body: the tracked ids
-                    // are gone, nothing is known.
-                    self.set_sp_fact(Fact::unknown(&format!(
-                        "param {param_id} answered 404 and no refresh read the composition"
-                    )));
-                }
-            }
+            Polled::Unread(fact) => self.set_sp_fact(fact),
+            Polled::Stale(param_id) => self.stale_sp_param(param_id, now).await,
+        }
+    }
+
+    /// A tracked param answered 404: refresh the stale map the push path's
+    /// way. A refresh that read a body gave the fact; with none, the tracked
+    /// ids are gone and nothing is known. The same clips with the 404'd param
+    /// still tracked is a refused id: the poll holds until the next refresh.
+    async fn stale_sp_param(&mut self, param_id: ParamId, now: Instant) {
+        info!(
+            host = %self.host,
+            param_id,
+            "Resolume answered 404 for a tracked SongPlayer clip param — the clip map is stale"
+        );
+        let refreshed = self.refresh_stale_map(now).await;
+        if self.sp_clips.body_at != Some(now) {
+            self.set_sp_fact(Fact::unknown(&format!(
+                "param {param_id} answered 404 and no refresh read the composition"
+            )));
+        } else if refreshed == StaleRefresh::SameMap
+            && self.sp_clips.tracked.params().contains(&param_id)
+        {
+            self.sp_clips.held = true;
+            info!(
+                host = %self.host,
+                param_id,
+                "Resolume still lists the SongPlayer clip param it answered 404 for — the clip poll waits for the next full refresh"
+            );
         }
     }
 
@@ -116,7 +154,9 @@ impl HostDriver {
     async fn read_sp_params(&mut self) -> Polled {
         let ep = match self.ensure_endpoint().await {
             Ok(ep) => ep,
-            Err(e) => return Polled::Unread(format!("no Resolume endpoint: {e}")),
+            Err(e) => {
+                return Polled::Unread(Fact::unknown(&format!("no Resolume endpoint: {e}")));
+            }
         };
         let mut values = Values::new();
         for param_id in self.sp_clips.tracked.params() {
@@ -125,7 +165,7 @@ impl HostDriver {
                     values.insert(param_id, value);
                 }
                 Ok(None) => return Polled::Stale(param_id),
-                Err(e) => return Polled::Unread(format!("param {param_id}: {e}")),
+                Err(e) => return Polled::Unread(unread_param(param_id, &e)),
             }
         }
         Polled::Values(values)
@@ -157,6 +197,20 @@ impl HostDriver {
             store.publish(&key, fact.clone(), chrono::Utc::now().timestamp_millis());
         }
         self.sp_clips.fact = fact;
+    }
+}
+
+/// The fact of a param read that failed: an answer that does not decode as
+/// a param is SongPlayer's own reader failing (a reader fault); a status or
+/// a transport error is Arena not answering.
+fn unread_param(param_id: ParamId, e: &anyhow::Error) -> Fact {
+    let why = format!("param {param_id}: {e}");
+    if e.downcast_ref::<reqwest::Error>()
+        .is_some_and(reqwest::Error::is_decode)
+    {
+        Fact::reader_fault(&why)
+    } else {
+        Fact::unknown(&why)
     }
 }
 

@@ -113,14 +113,25 @@ pub struct SongplayerClip {
     /// be SongPlayer's `SP-program` over NDI.
     #[serde(default)]
     pub ndi_clips: Vec<ClipView>,
-    /// When the state last changed (UTC unix ms; `None` before the first
-    /// read).
+    /// When the state began (UTC unix ms; `None` before the first read). A
+    /// `running` or `none` counts from its start across `unknown` gaps (an
+    /// unread poll is no change of what runs).
     #[serde(default)]
     pub since_ms: Option<i64>,
     /// The server's clock when it answered: how long the state holds is read
     /// against it, never against the browser's clock (another machine).
     #[serde(default)]
     pub now_ms: Option<i64>,
+    /// Why a host's fact is unknown (English, for the log and the gate);
+    /// `None` when every host read.
+    #[serde(default)]
+    pub read_error: Option<String>,
+    /// SongPlayer's own reader cannot read Arena's answer (a param with no
+    /// id, a value of another shape, a by-id answer that does not decode):
+    /// the post-deploy gate fails on it. Arena not answering, or its
+    /// composition not loaded yet, is no reader fault.
+    #[serde(default)]
+    pub reader_fault: bool,
 }
 
 impl SongplayerClip {

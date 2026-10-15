@@ -40,6 +40,12 @@ use crate::resolume::sp_clip_store::SpClipStore;
 /// composition, never under these).
 pub const POLL_EVERY: Duration = Duration::from_secs(30);
 
+/// The most one poll may take (review round 1): the reads run inside the
+/// driver's step, so a slow Arena REST would hold the title and lyric
+/// pushes behind it. ~27 reads take ~0.1-0.5 s on the box; past this the
+/// poll is unknown and the next one tries again.
+pub const POLL_BUDGET: Duration = Duration::from_secs(2);
+
 /// An Arena param's id (`parameter/by-id/{id}`); Arena gives every param a
 /// new one on each relaunch.
 pub type ParamId = i64;
@@ -138,16 +144,29 @@ pub struct Fact {
     pub clips: Vec<ClipView>,
     /// The NDI clips that show.
     pub ndi_clips: Vec<ClipView>,
-    /// Why it is unknown (English, for the log).
+    /// Why it is unknown (English, for the log and the gate).
     pub why: Option<String>,
+    /// Unknown because SongPlayer's own reader cannot read Arena's answer (a
+    /// param with no id, a value of another shape, a by-id answer that does
+    /// not decode), never because Arena did not answer: the post-deploy gate
+    /// fails on it (review round 1).
+    pub reader_fault: bool,
 }
 
 impl Fact {
-    /// Unknown, and why.
+    /// Unknown: Arena did not answer, or has not loaded its composition.
     pub fn unknown(why: &str) -> Self {
         Self {
             why: Some(why.to_string()),
             ..Self::default()
+        }
+    }
+
+    /// Unknown: SongPlayer's own reader cannot read Arena's answer.
+    pub fn reader_fault(why: &str) -> Self {
+        Self {
+            reader_fault: true,
+            ..Self::unknown(why)
         }
     }
 }
@@ -348,7 +367,7 @@ fn visible(watched: &Watched, values: &Values) -> Result<(Vec<ClipView>, Vec<Cli
 pub fn evaluate(tracked: &Tracked, values: &Values) -> Fact {
     let watched = match tracked {
         Tracked::NotLoaded => return Fact::unknown("Arena's composition is not loaded"),
-        Tracked::Unreadable(why) => return Fact::unknown(why),
+        Tracked::Unreadable(why) => return Fact::reader_fault(why),
         Tracked::Watched(watched) => watched,
     };
     match visible(watched, values) {
@@ -361,15 +380,20 @@ pub fn evaluate(tracked: &Tracked, values: &Values) -> Fact {
             clips,
             ndi_clips,
             why: None,
+            reader_fault: false,
         },
-        Err(why) => Fact::unknown(&why),
+        // A value of another shape, or one the body lacks (a poll stops at
+        // its first unread param, so only a body can lack one).
+        Err(why) => Fact::reader_fault(&why),
     }
 }
 
 /// The driver's watch of one host: what it tracks, when it last read the
 /// values (a full refresh or a poll), when a full refresh last evaluated
-/// its body, the last fact, and the store it publishes into (production:
-/// `sp_clip_store::global()`; none: the fact stays here).
+/// its body, the last fact, the store it publishes into (production:
+/// `sp_clip_store::global()`; none: the fact stays here), whether the poll
+/// holds until the next full refresh, and the poll's budget (`None`:
+/// [`POLL_BUDGET`]; a test shortens it).
 #[derive(Debug, Default)]
 pub struct Watch {
     pub tracked: Tracked,
@@ -377,16 +401,28 @@ pub struct Watch {
     pub body_at: Option<Instant>,
     pub fact: Fact,
     pub store: Option<&'static SpClipStore>,
+    /// A param answered 404 while the composition still lists it (a
+    /// refused id, never the steady state): reading it again would only
+    /// refetch the 14 MB composition, so the poll waits for the next full
+    /// refresh, whose body is read (review round 1).
+    pub held: bool,
+    pub budget: Option<Duration>,
 }
 
 impl Watch {
-    /// A poll is due: something to read, and the last read is
+    /// A poll is due: not held, something to read, and the last read is
     /// [`POLL_EVERY`] old (or none yet).
     pub fn poll_due(&self, now: Instant) -> bool {
-        !self.tracked.params().is_empty()
+        !self.held
+            && !self.tracked.params().is_empty()
             && self
                 .read_at
                 .is_none_or(|at| now.duration_since(at) >= POLL_EVERY)
+    }
+
+    /// The most one poll may take.
+    pub fn budget(&self) -> Duration {
+        self.budget.unwrap_or(POLL_BUDGET)
     }
 }
 

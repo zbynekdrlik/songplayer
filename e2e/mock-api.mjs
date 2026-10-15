@@ -1537,7 +1537,15 @@ const WALL_DEFAULT = {
   // #254: the guard that ends a crashed or hung Arena: nothing ended.
   guard: { ends: 0, last: null, phase: "idle" },
   // #275: SongPlayer's clip in Resolume: not read.
-  songplayer_clip: { state: "unknown", clips: [], ndi_clips: [], since_ms: null, now_ms: null },
+  songplayer_clip: {
+    state: "unknown",
+    clips: [],
+    ndi_clips: [],
+    since_ms: null,
+    now_ms: null,
+    read_error: null,
+    reader_fault: false,
+  },
 };
 let wall = { ...WALL_DEFAULT };
 app.get("/api/v1/wall", (_req, res) => {

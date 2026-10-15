@@ -147,11 +147,17 @@ The wall was black for 5.5 h with songs on program, and the report read
     design's rule names only these params).
 - **The record** (`resolume/sp_clip_store.rs`, `global()`): each host's fact,
   combined (running > unknown or no host > none); `since_ms` = when the
-  combined state last changed (to or from `unknown` too: a one-poll REST
-  hiccup restarts the count), on the server's clock.
+  combined state began, on the server's clock. A `running` / `none` counts
+  from its start ACROSS `unknown` gaps (`Record::since`, review round 1:
+  one unread poll must not restart the note's "(12 min)"); an `unknown`
+  counts from when it began. The note itself is hidden for the ~30 s an
+  unread poll stands (the state is `unknown` then). `read_error` = the
+  first host's reason for an unknown, `reader_fault` = any host's reader
+  fault.
 - **Wire:** `GET /api/v1/wall` adds `songplayer_clip: {state:
   running|none|unknown, clips: [{layer, clip, source}], ndi_clips: […],
-  since_ms, now_ms}` (`sp_core::wall_clip::SongplayerClip`, `serde(default)`:
+  since_ms, now_ms, read_error, reader_fault}`
+  (`sp_core::wall_clip::SongplayerClip`, `serde(default)`:
   an older server reads `unknown`). The route copies the record in and
   stamps `now_ms` at the answer. `wall::decide`, the state, the problem
   codes and the wall's logs are UNCHANGED: the clip is never a fault.
@@ -172,8 +178,14 @@ The wall was black for 5.5 h with songs on program, and the report read
   `sp_clips.rs`, `sp_clip_store.rs`, `driver_sp_clips.rs` for `.put(`,
   `.post(`, `/connect`, `/trigger`, `/clips/`, `set_text`, …).
 - **Gate:** `wall-gate.ts` `clipSummary` (in `wallSummary`; the spec's
-  `[#275 clip]` lines) only LOGS the state; `clipFailures` fails only when a
-  checked report carries no `songplayer_clip` (a server without #275).
+  `[#275 clip]` lines) LOGS the state; while Resolume runs, `pollClip`
+  reads the report until the clip reads or a reader fault shows
+  (`CLIP_WAIT_MS` 90 s: the driver reads at its start, a failed fetch is
+  retried after 60 s); `clipFailures` fails only on a report with no
+  `songplayer_clip` (a server without #275) or a `reader_fault` (SongPlayer
+  cannot read Arena's answer: the box is the reader's first real contact
+  with Arena's REST, review round 1). `running`, `none`, Arena not
+  answering and a composition still loading never fail.
 - **Mock:** `WALL_DEFAULT.songplayer_clip` is `unknown` (no existing spec
   sees a note or a sentence); `/__mock/wall {songplayer_clip: {…}}`; the GET
   stamps `now_ms` with the mock's clock. The default replay has playlist 1
