@@ -5,7 +5,7 @@
 use sp_core::fit::Placement;
 
 use super::{covers, layer_rgb, pixel, sample, taps, tolerance, unorm8, yuv_to_rgb};
-use crate::composition::{Composition, FHD_FIT, Layer, Slot};
+use crate::composition::{Composition, FHD_FIT, FHD_TARGET, Layer, MAX_TARGET, Slot};
 use crate::picture::{Nv12Picture, Plane};
 
 const PAD: u8 = 0xEE;
@@ -352,6 +352,33 @@ fn the_tolerance_is_one_code_per_layer_covering_the_pixel() {
     assert_eq!(tolerance(&fhd, 50, 25), 0, "neither: exact");
     assert_eq!(tolerance(&fhd, 500, 25), 1, "to only");
     assert_eq!(tolerance(&fhd, 50, 500), 1, "from only");
+}
+
+/// #251 step 2: ONE composition drawn on both targets of one compositor:
+/// its MAX layers give the 4K pins and its FHD layers the 1920×1080 ones
+/// above, each target's bars and tolerance its own (the model needs no
+/// second composition, nor a second upload).
+#[test]
+fn one_composition_gives_each_target_its_own_reference() {
+    let fade = Composition::Fade {
+        from: Some(picture_a()),
+        to: Some(picture_b()),
+        weight_q8: 64,
+    };
+    let max = fade.layers_on(MAX_TARGET);
+    let fhd = fade.layers_on(FHD_TARGET);
+    assert_eq!(pixel(&max, 0, 120), [33, 50, 94, 255], "MAX: both");
+    assert_eq!(pixel(&max, 3839, 2040), [28, 44, 64, 255], "MAX: to only");
+    assert_eq!(tolerance(&max, 1000, 1000), 2, "MAX: both");
+    assert_eq!(pixel(&fhd, 50, 25), [0, 0, 0, 255], "FHD: neither");
+    assert_eq!(pixel(&fhd, 500, 500), [24, 67, 120, 255], "FHD: both");
+    assert_eq!(
+        pixel(&fhd, 1500, 500),
+        [191, 133, 26, 255],
+        "FHD: from only"
+    );
+    assert_eq!(tolerance(&fhd, 50, 25), 0, "FHD: a bar, exact");
+    assert_eq!(tolerance(&fhd, 500, 500), 2, "FHD: both");
 }
 
 #[test]

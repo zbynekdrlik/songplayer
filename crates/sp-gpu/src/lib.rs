@@ -50,12 +50,16 @@
 //! (`tests/video_device.rs`).
 //!
 //! #239: the FHD program goes out over Spout too, as `SP-program`
-//! ([`SPOUT_FHD_SENDER_NAME`], `SpoutSender::new_fhd`): a second compositor
-//! whose render target is [`FHD_WIDTH`] × [`FHD_HEIGHT`]
-//! (`Compositor::with_size`; the layers, the quads and the CPU reference
-//! take the target's size, [`Composition::layers_in`]). It carries the
-//! program the NDI `SP-program` carries, so it keeps `aspect_fit`
-//! ([`FHD_FIT`], #267).
+//! ([`SPOUT_FHD_SENDER_NAME`], `SpoutSender::new_fhd`), into a render
+//! target of [`FHD_WIDTH`] × [`FHD_HEIGHT`] (the layers, the quads and the
+//! CPU reference take the target's size, [`Composition::layers_on`]). It
+//! carries the program the NDI `SP-program` carries, so it keeps
+//! `aspect_fit` ([`FHD_FIT`], #267). #251 step 2: that target is a SECOND
+//! target of MAX's compositor ([`FHD_TARGET`], `Compositor::add_target`,
+//! ids and draw order in the pure [`Targets`]): one device, one upload of
+//! each picture ([`Composition::pictures`]), every target drawn from it,
+//! one wait; `SpoutSender::for_target` sends any one of them, and each
+//! target's own share of the draw is [`target_draws_us`].
 //!
 //! #223 follow-up: [`VblankTracker`] measures the primary display's refresh
 //! (DWM's clock, which Arena renders in) on its own thread, `WaitForVBlank`
@@ -79,6 +83,7 @@ mod spout;
 mod spout_lock;
 pub mod spout_state;
 mod stats;
+mod targets;
 mod vblank;
 
 #[cfg(not(windows))]
@@ -91,8 +96,8 @@ pub use adapter::{
 };
 pub use color::{BT709_LIMITED_TO_FULL, KB, KR, matrix_f32};
 pub use composition::{
-    CANVAS_HEIGHT, CANVAS_WIDTH, Composition, FHD_FIT, FHD_HEIGHT, FHD_WIDTH, Fit, Layer, MAX_FIT,
-    Q8_ONE, Slot,
+    CANVAS_HEIGHT, CANVAS_WIDTH, Composition, FHD_FIT, FHD_HEIGHT, FHD_TARGET, FHD_WIDTH, Fit,
+    Layer, MAX_FIT, MAX_TARGET, Q8_ONE, Slot, Target,
 };
 pub use error::{
     DXGI_ERROR_DEVICE_HUNG, DXGI_ERROR_DEVICE_REMOVED, DXGI_ERROR_DEVICE_RESET,
@@ -108,7 +113,8 @@ pub use spout::{
     parse_sender_names,
 };
 pub use spout_lock::{LockHolder, SentinelEnd};
-pub use stats::{ComposeStats, SpoutSendStats};
+pub use stats::{ComposeStats, SpoutSendStats, target_draws_us};
+pub use targets::{TargetId, Targets};
 pub use vblank::{
     OutputInfo, Seen, VBLANK_BOOT_INTERVALS, VBLANK_IDLE_MAX, VBLANK_MAX_PERIOD, VBLANK_MIN_FIT,
     VBLANK_MIN_PERIOD, VBLANK_MIN_WAIT, VBLANK_NOT_TICKING, VBLANK_RECHECK, VBLANK_RESTART,
