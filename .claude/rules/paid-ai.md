@@ -102,7 +102,10 @@ Every path:
     asks for a run HERE. While OFF the hook, the follow and the
     stand-in's look take the peer's copy for it instead, and the take
     clears the flag on every row (before, such a row was held every
-    30 min for good). An operator's text, a dub and Live-Translate keep
+    30 min for good). When the track here already IS the peer's copy
+    (nothing newer), the hook clears the flag on every row and answers
+    done (`lyrics::nothing_newer`, option a); without a flag such a row is
+    held as before. An operator's text, a dub and Live-Translate keep
     the lyrics local either way (`held_tests.rs`).
   - The gate lives in the exchange, so it needs one: production wires it
     into the lyrics worker on every node (`lib.rs`, `with_peer`, even with

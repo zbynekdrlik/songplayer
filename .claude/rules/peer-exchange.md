@@ -846,13 +846,18 @@ wait for a peer that has the song", below).
   listed peer's copy under the same audio rule, and the take
   (`adopt_lyrics` → `mark_video_lyrics_complete`) clears the flag on every
   row. An operator's text, a dub and Live-Translate keep the lyrics local
-  either way; SNV (paid AI on, no peer) is unchanged. Known limit, OPEN
-  (the lane's finding on #264, for the main to decide): a flagged row
-  whose track here already carries the peer's source at the same version
-  is `NothingNewer` to the hook, which runs it here, so with paid AI off it
-  is still held with its flag kept, and the follow leaves a queued row to
-  the hook: such a row stays held, and a newer copy of the same source at
-  the peer does not reach it. The
+  either way; SNV (paid AI on, no peer) is unchanged. A flagged row whose
+  track here already IS the peer's copy (the same source at the same
+  version: `NothingNewer`) has nothing to fetch either (#264 ROZHODNUTÉ,
+  option a, finding 6188753933): with paid AI off `lyrics::nothing_newer`
+  clears the flag on every row of the video (`answer_reprocess`, one
+  UPDATE; a row affected = a flag was set), ends the wait and answers
+  Done (INFO `exchange: an operator's reprocess is answered by the peer's
+  copy served here`); the row leaves bucket 1, so the follow brings any
+  later copy of the peer's. Without a flag, or with paid AI on, it runs
+  here as before (`Exchange::local`: held while off). Re-fetching the same
+  copy (option b) was rejected: it moves the same bytes and changes
+  nothing. The
   peer's `/videos` row must match its catalog (pipeline version) and must
   not be `gemini-live-translate`; the same source at the same version as
   the row already serves = nothing newer → runs here (the daily full-mix
@@ -1054,7 +1059,11 @@ Three rules:
   the_kept_local_sql_binds_four_bare_parameters_in_text_order}`,
   `held_tests.rs::{a_reprocess_flag_keeps_the_lyrics_here_only_while_paid_ai_is_on,
   an_operators_text_or_a_dub_keeps_the_lyrics_here_while_paid_ai_is_off,
-  an_operators_reprocess_takes_the_peers_copy_while_paid_ai_is_off}` (#264),
+  an_operators_reprocess_takes_the_peers_copy_while_paid_ai_is_off,
+  a_reprocess_of_the_peers_copy_served_here_is_answered_while_paid_ai_is_off,
+  with_paid_ai_on_the_peers_copy_served_here_runs_here_and_keeps_a_flag,
+  a_reprocess_flag_with_an_operators_text_or_a_dub_is_left_alone_while_paid_ai_is_off}`
+  (#264),
   `standin_tests.rs` (the supersede over two real nodes: every row, a
   parked track, the check row with an audio, the recheck, another audio,
   an operator or a dub, no row, the order, the recheck curve, every row or
@@ -1214,6 +1223,9 @@ record: #264 comment 6146849106.
    `lyrics_manual_priority = 0`; PP's log shows `exchange: done with a
    peer's copy` (`job=lyrics`) or `exchange: followed the peer's lyrics`
    once per video, and no more `paid AI is off - still held` for them.
+   A Reprocess at PP of a song that already serves SNV's copy logs
+   `exchange: an operator's reprocess is answered by the peer's copy
+   served here` once and its rows read `lyrics_manual_priority = 0`.
 
 ## Tests
 
