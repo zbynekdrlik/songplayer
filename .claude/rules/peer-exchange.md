@@ -1237,6 +1237,14 @@ record: #264 comment 6146849106.
   `TestNode::audio_from(yt, peer)` records
   this node's audio as fetched from `peer` at the sha every node's
   `give_song` audio has (`rig::song_audio_sha`).
+- To bring an operator's mark to the follow (`follow::follow`'s
+  `kept_local`), put it on a second row that is outside the lyrics queue
+  NOW but that the queue WILL take: one not downloaded yet
+  (`normalized = 0`). A row in the queue never reaches the follow (it is
+  the hook's), and a `removed_at` / test-item row is one the queue never
+  takes: `kept_local`'s operator clauses do not apply `queue_row!()`, so
+  such a fixture pins that gap instead of a real ask (#264 review round
+  1). `TestNode::manual_flags(yt)` reads every row's reprocess flag.
 - wiremock stands in for Cloudflare Access and a peer (`client_tests.rs`,
   `fetch_tests.rs`); the routes go through the real `peer::router`
   (`api_tests.rs`, `lan_tests.rs`). A real-time rate test asserts a LOWER
