@@ -1929,7 +1929,9 @@ function mockFhdStatus() {
     submitted: 0,
     failed: 0,
     sender_backoffs: 0,
-    upload_us_p99: 0,
+    spout_relists: 0,
+    // #251 step 2: no upload_us_p99 (the FHD target is drawn from MAX's
+    // upload); draw_us_p99 is its own part of the draw.
     draw_us_p99: 0,
     send_us_p99: 0,
   };
