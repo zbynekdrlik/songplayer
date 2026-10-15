@@ -17,6 +17,11 @@
 //! operator's relaunch script brings it back; it never touches Arena's
 //! setup or its clips.
 //!
+//! #275: the status also carries whether SongPlayer's clip runs in Arena
+//! ([`SongplayerClip`], `crate::wall_clip`): a calm amber note on the
+//! segment while a song plays on program and none runs, never a fault (the
+//! wall's own state is unchanged by it).
+//!
 //! sp-server's `wall` reads the facts and decides; this module only names
 //! the outcome (WASM-safe: the dashboard shows it).
 
@@ -26,6 +31,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::health::HealthTone;
+use crate::wall_clip::SongplayerClip;
 
 /// An NVIDIA display id (NVAPI `displayId`): one per GPU connector. Sent as
 /// `0x80061086`.
@@ -297,6 +303,14 @@ impl WallState {
     /// physical display (nothing to report).
     pub fn shown(self) -> bool {
         !matches!(self, Self::SimpleOutput | Self::NoDisplayOutput)
+    }
+
+    /// #275: the segment may name a missing SongPlayer clip instead of this
+    /// state's words: over `ok`, `no_preset` and `unknown` (the clip is a
+    /// fact of its own), never over a red state, the screens switched off or
+    /// Resolume not running (those say more).
+    pub fn clip_note_shown(self) -> bool {
+        matches!(self, Self::Ok | Self::NoPreset | Self::Unknown)
     }
 
     /// The wall is fine as the operator set it up, or there is nothing to
@@ -649,6 +663,10 @@ pub struct WallStatus {
     /// #254: the guard that ends a crashed or hung Arena.
     #[serde(default)]
     pub guard: WallGuard,
+    /// #275: whether SongPlayer's clip runs in Arena (the Resolume host
+    /// driver's read; `unknown` from an older server).
+    #[serde(default)]
+    pub songplayer_clip: SongplayerClip,
 }
 
 /// The health bar's `data-wall` marker of the last poll: `unchecked` (no
@@ -684,19 +702,27 @@ pub fn wanted_sk(displays: &[WantedDisplay]) -> String {
 /// the same), with the rule, what Arena wants and every problem as its
 /// tooltip. #254: while the guard's last end is pending (Arena has not run
 /// again since), the segment names that end instead, red, and the tooltip
-/// ends with it. Nothing before the first check, nor for an Arena that
-/// drives no physical display.
-pub fn label(status: &WallStatus) -> Option<(HealthTone, String, String)> {
+/// ends with it. #275: while a song plays on program (`song_on_program`,
+/// `wall_clip::song_on_program`) and no SongPlayer clip runs, the segment
+/// names that, amber, over the states [`WallState::clip_note_shown`] allows;
+/// the tooltip says which SongPlayer clips run, or that none does. Nothing
+/// before the first check, nor for an Arena that drives no physical display.
+pub fn label(status: &WallStatus, song_on_program: bool) -> Option<(HealthTone, String, String)> {
     if !status.checked || !status.state.shown() {
         return None;
     }
     let guard = status.guard.short_sk();
+    let clip = &status.songplayer_clip;
+    let note = clip_note(status, song_on_program);
     let tone = if guard.is_some() {
         HealthTone::Error
+    } else if note {
+        HealthTone::Warn
     } else {
         status.state.tone()
     };
     let text = guard
+        .or_else(|| note.then(|| clip.short_sk()))
         .or_else(|| status.problems.first().map(|first| first.short_sk.clone()))
         .unwrap_or_else(|| status.state.text_sk().to_string());
     let mut tip = RULE_SK.to_string();
@@ -716,10 +742,22 @@ pub fn label(status: &WallStatus) -> Option<(HealthTone, String, String)> {
         let found: Vec<&str> = status.problems.iter().map(|p| p.text_sk.as_str()).collect();
         tip.push_str(&format!(" Zistené: {}.", found.join("; ")));
     }
+    if let Some(clip) = clip.text_sk() {
+        tip.push_str(&format!(" {clip}"));
+    }
     if let Some(end) = status.guard.text_sk() {
         tip.push_str(&format!(" {end}"));
     }
     Some((tone, format!("Stena: {text}"), tip))
+}
+
+/// #275: the segment names a missing SongPlayer clip (the segment's
+/// `data-clip-missing`): a song plays on program, no SongPlayer clip runs,
+/// the wall's state lets the note through and no guard's end is pending.
+pub fn clip_note(status: &WallStatus, song_on_program: bool) -> bool {
+    status.guard.pending().is_none()
+        && status.state.clip_note_shown()
+        && status.songplayer_clip.missing(song_on_program)
 }
 
 #[cfg(test)]

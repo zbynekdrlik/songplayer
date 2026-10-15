@@ -31,6 +31,7 @@ pub mod seek_model;
 pub mod status_chip;
 pub mod video_upgrade_view; // #223 S13: Nastavenia's view of the 4K upgrade
 pub mod wall; // #259: the LED wall's state, problems, status and health segment
+pub mod wall_clip; // #275: SongPlayer's clip on the wall (the fact and the health bar's note)
 pub mod ws;
 
 #[cfg(test)]

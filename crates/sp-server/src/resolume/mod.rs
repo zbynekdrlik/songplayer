@@ -2,6 +2,8 @@
 
 pub mod driver;
 pub mod handlers;
+pub mod sp_clip_store;
+pub mod sp_clips;
 pub(crate) mod title_state;
 
 use std::collections::HashMap;
@@ -157,7 +159,8 @@ impl ResolumeRegistry {
         let (health_tx, health_rx) = watch::channel(initial);
         let driver = HostDriver::new(host.clone(), port)
             .with_recovery_channel(self.recovery_tx.clone())
-            .with_health_channel(health_tx);
+            .with_health_channel(health_tx)
+            .with_sp_clip_store(sp_clip_store::global());
 
         tokio::spawn(async move {
             driver.run(rx, shutdown).await;
@@ -347,5 +350,62 @@ mod tests {
     #[test]
     fn subs_next_token_matches_agreed_clip_name() {
         assert_eq!(super::SUBS_NEXT_TOKEN, "#sp-subs-next");
+    }
+
+    /// #275: a driver the registry builds publishes SongPlayer's clip into
+    /// the process's record (`sp_clip_store::global()`), the one
+    /// `GET /api/v1/wall` reads (review round 1: without it the route would
+    /// read `unknown` forever with every driver test green).
+    #[tokio::test]
+    async fn a_registry_host_publishes_its_clip_into_the_process_record() {
+        use std::time::Duration;
+
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/product"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let layer = "L# registry 275";
+        let composition = serde_json::json!({"layers": [{
+            "id": 1, "name": {"value": layer},
+            "bypassed": {"id": 2, "value": false},
+            "video": {"opacity": {"id": 3, "value": 1.0}},
+            "master": {"id": 6, "value": 1.0},
+            "clips": [{"id": 4, "name": {"value": "Yt music"},
+                       "connected": {"id": 5, "value": "Connected"},
+                       "video": {"description": "SP-program-MAX"}}],
+        }]});
+        Mock::given(method("GET"))
+            .and(path("/api/v1/composition"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(composition))
+            .mount(&server)
+            .await;
+        let (shutdown_tx, _) = broadcast::channel::<()>(1);
+        let mut registry = ResolumeRegistry::new();
+
+        registry.add_host(
+            275,
+            "127.0.0.1".to_string(),
+            server.address().port(),
+            shutdown_tx.subscribe(),
+        );
+
+        let published = tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                let clip = sp_clip_store::global().current(0);
+                if clip.clips.iter().any(|c| c.layer == layer) {
+                    return clip;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("the registry's driver publishes into the process's record");
+        assert_eq!(published.state, sp_core::wall_clip::ClipState::Running);
+        let _ = shutdown_tx.send(());
     }
 }

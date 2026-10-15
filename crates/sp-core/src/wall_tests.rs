@@ -7,6 +7,7 @@ use serde_json::json;
 
 use super::*;
 use crate::health::HealthTone;
+use crate::wall_clip::{ClipState, ClipView, SongplayerClip};
 
 const NO_ID: &str = "is no display id (0x and 1 to 8 hex digits)";
 
@@ -335,9 +336,15 @@ fn no_segment_before_the_first_check_nor_without_a_display_output() {
         state: WallState::Ok,
         ..WallStatus::default()
     };
-    assert_eq!(label(&not_checked), None);
-    assert_eq!(label(&checked(WallState::SimpleOutput, &[], None)), None);
-    assert_eq!(label(&checked(WallState::NoDisplayOutput, &[], None)), None);
+    assert_eq!(label(&not_checked, true), None);
+    assert_eq!(
+        label(&checked(WallState::SimpleOutput, &[], None), true),
+        None
+    );
+    assert_eq!(
+        label(&checked(WallState::NoDisplayOutput, &[], None), true),
+        None
+    );
 }
 
 #[test]
@@ -390,14 +397,14 @@ fn a_segment_says_the_first_problem_or_else_the_state() {
         ),
     ];
     for (status, tone, text) in table {
-        let (got_tone, got_text, _) = label(&status).unwrap();
+        let (got_tone, got_text, _) = label(&status, true).unwrap();
         assert_eq!((got_tone, got_text.as_str()), (tone, text));
     }
 }
 
 #[test]
 fn the_tooltip_holds_the_rule_what_arena_wants_and_every_problem() {
-    let (_, _, ok_tip) = label(&checked(WallState::Ok, &[], Some(snv_output()))).unwrap();
+    let (_, _, ok_tip) = label(&checked(WallState::Ok, &[], Some(snv_output())), true).unwrap();
     assert_eq!(
         ok_tip,
         format!("{RULE_SK} Resolume (preset „snv surround 7680“) chce: Display 1 7680×1080.")
@@ -422,11 +429,14 @@ fn the_tooltip_holds_the_rule_what_arena_wants_and_every_problem() {
         right: 1920,
         bottom: 1200,
     };
-    let (_, text, tip) = label(&checked(
-        WallState::ArenaNotDrawing,
-        std::slice::from_ref(&drawing),
-        Some(two),
-    ))
+    let (_, text, tip) = label(
+        &checked(
+            WallState::ArenaNotDrawing,
+            std::slice::from_ref(&drawing),
+            Some(two),
+        ),
+        true,
+    )
     .unwrap();
     assert_eq!(text, "Stena: Resolume nekreslí na Display 2");
     assert_eq!(
@@ -442,7 +452,8 @@ fn the_tooltip_holds_the_rule_what_arena_wants_and_every_problem() {
         displays: Vec::new(),
         ..snv_output()
     };
-    let (_, _, arena_off_tip) = label(&checked(WallState::ArenaOff, &[], Some(none))).unwrap();
+    let (_, _, arena_off_tip) =
+        label(&checked(WallState::ArenaOff, &[], Some(none)), true).unwrap();
     assert_eq!(arena_off_tip, RULE_SK);
 }
 
@@ -670,7 +681,7 @@ fn a_pending_end_reads_red_on_the_segment_until_arena_runs_again() {
         guard: ended(GuardWhy::CrashReport, GuardPhase::Relaunching, None),
         ..checked(WallState::ArenaOff, &[], None)
     };
-    let (tone, text, tip) = label(&off).unwrap();
+    let (tone, text, tip) = label(&off, true).unwrap();
     assert_eq!(tone, HealthTone::Error);
     assert_eq!(
         text,
@@ -686,7 +697,7 @@ fn a_pending_end_reads_red_on_the_segment_until_arena_runs_again() {
         ),
         ..checked(WallState::Ok, &[], Some(snv_output()))
     };
-    let (tone, text, tip) = label(&still_drawing).unwrap();
+    let (tone, text, tip) = label(&still_drawing, true).unwrap();
     assert_eq!(
         (tone, text.as_str()),
         (
@@ -707,15 +718,15 @@ fn a_pending_end_reads_red_on_the_segment_until_arena_runs_again() {
         ..checked(WallState::Ok, &[], Some(snv_output()))
     };
     assert_eq!(
-        label(&back),
-        label(&checked(WallState::Ok, &[], Some(snv_output())))
+        label(&back, true),
+        label(&checked(WallState::Ok, &[], Some(snv_output())), true)
     );
     // Nothing to show for an Arena that drives no physical display.
     let simple = WallStatus {
         guard: ended(GuardWhy::CrashReport, GuardPhase::Relaunching, None),
         ..checked(WallState::SimpleOutput, &[], None)
     };
-    assert_eq!(label(&simple), None);
+    assert_eq!(label(&simple, true), None);
 }
 
 #[test]
@@ -752,4 +763,210 @@ fn the_guard_travels_with_every_field_named() {
     assert_eq!(old.guard, WallGuard::default());
     let bare: GuardEnd = serde_json::from_value(json!({})).unwrap();
     assert_eq!(bare, GuardEnd::default());
+}
+
+/// #275: SongPlayer's clip as the Resolume driver read it, 12 min (and 30 s)
+/// in `state`, SNV's NDI background clip visible.
+fn sp_clip(state: ClipState) -> SongplayerClip {
+    let now = 1_791_979_200_000;
+    SongplayerClip {
+        state,
+        clips: if state == ClipState::Running {
+            vec![ClipView {
+                layer: "L# Fill".to_string(),
+                clip: "Yt music".to_string(),
+                source: "SP-program-MAX".to_string(),
+            }]
+        } else {
+            Vec::new()
+        },
+        ndi_clips: vec![ClipView {
+            layer: "L # BG".to_string(),
+            clip: "SNV BG".to_string(),
+            source: "NDI Source".to_string(),
+        }],
+        since_ms: Some(now - 750_000),
+        now_ms: Some(now),
+        ..SongplayerClip::default()
+    }
+}
+
+/// The tooltip's sentence while no SongPlayer clip runs ([`sp_clip`]).
+const NONE_TIP: &str = "Na stene už 12 min nebeží žiadny Spout klip SongPlayeru (SP-program-MAX \
+     ani SP-program). Klipy spúšťa len operátor zo Stream Decku, SongPlayer žiadny nespúšťa. \
+     Klip so zdrojom NDI SongPlayer nerozozná (Resolume nepovie, aký NDI zdroj má); viditeľné NDI \
+     klipy: L # BG — SNV BG.";
+
+#[test]
+fn a_song_on_program_with_no_songplayer_clip_reads_an_amber_note() {
+    let black = WallStatus {
+        songplayer_clip: sp_clip(ClipState::NotRunning),
+        ..checked(WallState::Ok, &[], Some(snv_output()))
+    };
+    let wanted =
+        format!("{RULE_SK} Resolume (preset „snv surround 7680“) chce: Display 1 7680×1080.");
+    assert!(clip_note(&black, true));
+    assert_eq!(
+        label(&black, true),
+        Some((
+            HealthTone::Warn,
+            "Stena: nebeží Spout klip SongPlayeru (12 min)".to_string(),
+            format!("{wanted} {NONE_TIP}"),
+        ))
+    );
+    // No song on program (a sermon on "OBS manuál"): the wall's own words,
+    // the fact in the tooltip only.
+    assert!(!clip_note(&black, false));
+    assert_eq!(
+        label(&black, false),
+        Some((
+            HealthTone::Ok,
+            "Stena: OK".to_string(),
+            format!("{wanted} {NONE_TIP}"),
+        ))
+    );
+}
+
+#[test]
+fn a_running_clip_keeps_the_wall_s_words_and_names_the_clip_in_the_tooltip() {
+    let running = WallStatus {
+        songplayer_clip: sp_clip(ClipState::Running),
+        ..checked(WallState::Ok, &[], Some(snv_output()))
+    };
+    assert!(!clip_note(&running, true));
+    assert_eq!(
+        label(&running, true),
+        Some((
+            HealthTone::Ok,
+            "Stena: OK".to_string(),
+            format!(
+                "{RULE_SK} Resolume (preset „snv surround 7680“) chce: Display 1 7680×1080. Na \
+                 stene beží klip SongPlayeru: L# Fill — Yt music (SP-program-MAX)."
+            ),
+        ))
+    );
+    // Unknown (Arena not read): no note, no sentence.
+    let unknown = WallStatus {
+        songplayer_clip: sp_clip(ClipState::Unknown),
+        ..checked(WallState::Ok, &[], Some(snv_output()))
+    };
+    assert!(!clip_note(&unknown, true));
+    assert_eq!(
+        label(&unknown, true),
+        label(&checked(WallState::Ok, &[], Some(snv_output())), true)
+    );
+}
+
+#[test]
+fn the_note_shows_over_ok_no_preset_and_unknown_only() {
+    let shown = [WallState::Ok, WallState::NoPreset, WallState::Unknown];
+    for state in EVERY_STATE {
+        assert_eq!(state.clip_note_shown(), shown.contains(&state), "{state:?}");
+    }
+    for state in shown {
+        let status = WallStatus {
+            songplayer_clip: sp_clip(ClipState::NotRunning),
+            ..checked(state, &[], None)
+        };
+        let (tone, text, tip) = label(&status, true).unwrap();
+        assert_eq!(
+            (tone, text.as_str()),
+            (
+                HealthTone::Warn,
+                "Stena: nebeží Spout klip SongPlayeru (12 min)"
+            ),
+            "{state:?}"
+        );
+        assert!(tip.ends_with(NONE_TIP), "{state:?}: {tip}");
+    }
+    // A red wall, the screens off, Resolume not running: they say more; the
+    // clip is the tooltip's last sentence.
+    let missing = WallProblem::DisplayAbsent {
+        name: "Display 1".to_string(),
+        width: 7680,
+        height: 1080,
+        not_joined: false,
+    };
+    let cases = [
+        (
+            WallState::DisplayMissing,
+            vec![missing],
+            HealthTone::Error,
+            "Stena: Resolume chce obrazovku 7680×1080 (Display 1), Windows ju nemá",
+        ),
+        (
+            WallState::ScreensOff,
+            Vec::new(),
+            HealthTone::Off,
+            "Stena: obrazovky vypnuté",
+        ),
+        (
+            WallState::ArenaOff,
+            Vec::new(),
+            HealthTone::Off,
+            "Stena: Resolume nebeží",
+        ),
+    ];
+    for (state, problems, tone, text) in cases {
+        let status = WallStatus {
+            songplayer_clip: sp_clip(ClipState::NotRunning),
+            ..checked(state, &problems, None)
+        };
+        assert!(!clip_note(&status, true), "{state:?}");
+        let (got_tone, got_text, tip) = label(&status, true).unwrap();
+        assert_eq!((got_tone, got_text.as_str()), (tone, text), "{state:?}");
+        assert!(tip.ends_with(NONE_TIP), "{state:?}: {tip}");
+    }
+    // No segment at all for an Arena that drives no physical display.
+    let simple = WallStatus {
+        songplayer_clip: sp_clip(ClipState::NotRunning),
+        ..checked(WallState::SimpleOutput, &[], None)
+    };
+    assert_eq!(label(&simple, true), None);
+}
+
+#[test]
+fn a_pending_guard_end_wins_over_the_note() {
+    let ended_now = WallStatus {
+        guard: ended(GuardWhy::CrashReport, GuardPhase::Relaunching, None),
+        songplayer_clip: sp_clip(ClipState::NotRunning),
+        ..checked(WallState::Ok, &[], None)
+    };
+    assert!(!clip_note(&ended_now, true));
+    let (tone, text, tip) = label(&ended_now, true).unwrap();
+    assert_eq!(tone, HealthTone::Error);
+    assert_eq!(
+        text,
+        "Stena: Resolume spadol — ukončený, čaká na nové spustenie"
+    );
+    assert_eq!(
+        tip,
+        format!(
+            "{RULE_SK} {NONE_TIP} {}",
+            ended_now.guard.text_sk().unwrap()
+        )
+    );
+    // Arena runs again: the note.
+    let back = WallStatus {
+        guard: ended(GuardWhy::CrashReport, GuardPhase::Idle, None),
+        ..ended_now
+    };
+    assert!(clip_note(&back, true));
+}
+
+#[test]
+fn the_clip_travels_on_the_status() {
+    let status = WallStatus {
+        songplayer_clip: sp_clip(ClipState::Running),
+        ..checked(WallState::Ok, &[], None)
+    };
+    let wire = serde_json::to_value(&status).unwrap();
+    assert_eq!(wire["songplayer_clip"]["state"], "running");
+    assert_eq!(wire["songplayer_clip"]["clips"][0]["layer"], "L# Fill");
+    assert_eq!(wire["songplayer_clip"]["ndi_clips"][0]["clip"], "SNV BG");
+    let back: WallStatus = serde_json::from_value(wire).unwrap();
+    assert_eq!(back, status);
+    // An older server sends no clip: unknown.
+    let old: WallStatus = serde_json::from_value(json!({"checked": true, "state": "ok"})).unwrap();
+    assert_eq!(old.songplayer_clip, SongplayerClip::default());
 }

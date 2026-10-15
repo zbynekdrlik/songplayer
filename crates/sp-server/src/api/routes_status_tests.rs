@@ -43,3 +43,60 @@ async fn the_route_reports_no_hold_then_the_armed_one() {
     let left = json["remaining_s"].as_u64().unwrap();
     assert!((59..=60).contains(&left), "{left}");
 }
+
+/// #275: `GET /api/v1/wall` carries whether SongPlayer's clip runs in Arena
+/// (the Resolume drivers' facts, `resolume::sp_clip_store::global()`),
+/// stamped with the server's clock at the answer. Running wins over every
+/// other host's fact, so the process-wide store's other publishers (the
+/// registry tests' drivers) cannot change it.
+#[tokio::test]
+async fn the_wall_route_carries_songplayer_s_clip_stamped_with_the_server_s_clock() {
+    use sp_core::wall_clip::ClipView;
+
+    use crate::resolume::sp_clips::Fact;
+
+    let yt = ClipView {
+        layer: "L# Fill".to_string(),
+        clip: "Yt music".to_string(),
+        source: "SP-program-MAX".to_string(),
+    };
+    let before = chrono::Utc::now().timestamp_millis();
+    crate::resolume::sp_clip_store::global().publish(
+        "route-test-275:8090",
+        Fact {
+            state: sp_core::wall_clip::ClipState::Running,
+            clips: vec![yt],
+            ..Fact::default()
+        },
+        before,
+    );
+    let req = Request::builder()
+        .uri("/api/v1/wall")
+        .body(Body::empty())
+        .unwrap();
+    let resp = crate::api::router(test_state().await, None)
+        .oneshot(req)
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let clip = &json["songplayer_clip"];
+    assert_eq!(clip["state"], "running");
+    assert!(
+        clip["clips"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!({"layer": "L# Fill", "clip": "Yt music",
+                                          "source": "SP-program-MAX"})),
+        "{clip}"
+    );
+    assert!(clip["since_ms"].is_i64(), "{clip}");
+    let now_ms = clip["now_ms"].as_i64().unwrap();
+    assert!(
+        now_ms >= before,
+        "the answer's own clock: {now_ms} < {before}"
+    );
+}
