@@ -23,7 +23,7 @@
 /// How far before the video's own duration its picture may end and still be
 /// its natural end: a container's duration and its last picture's time
 /// differ by a frame or two, never by seconds.
-pub const EARLY_EOS_SLACK_MS: u64 = 1_000_000_000;
+pub const EARLY_EOS_SLACK_MS: u64 = 10_000;
 
 /// The text every early end's `Error` starts with.
 pub const EARLY_END: &str = "early_end:";

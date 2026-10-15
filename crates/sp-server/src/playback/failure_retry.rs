@@ -143,7 +143,7 @@ impl PlaybackEngine {
             // #277: a video that ends early is repaired (once per video and
             // process, by the video-upgrade worker).
             if early_end::is_early_end(error) {
-                crate::video_upgrade::repair::ask(playlist_id);
+                crate::video_upgrade::repair::ask(video_id);
             }
         }
         let backoff = {
@@ -293,8 +293,13 @@ impl PlaybackEngine {
     /// the answer to its Play ([`Self::answers_last_play`]). An early end
     /// after its song's `Started` answers no Play (`Started` did): it acts
     /// only while no newer Play is under way, and leaves the count alone.
-    pub(super) fn takes_error(&mut self, playlist_id: i64, _error: &str) -> bool {
-        self.answers_last_play(playlist_id)
+    pub(super) fn takes_error(&mut self, playlist_id: i64, error: &str) -> bool {
+        if !early_end::is_after_start(error) {
+            return self.answers_last_play(playlist_id);
+        }
+        self.pipelines
+            .get(&playlist_id)
+            .is_none_or(|pp| pp.pending_plays.pending() == 0)
     }
 
     /// `PipelineEvent::Started` of `playlist_id`: a song opened, so the run of

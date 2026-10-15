@@ -53,7 +53,7 @@ pub(crate) fn repair_temp(cache_dir: &Path, youtube_id: &str) -> PathBuf {
 /// Whether Media Foundation's name of a video codec is H.264, the one codec
 /// whose SEI a repair drops.
 fn is_h264(codec: &str) -> bool {
-    codec.eq_ignore_ascii_case("AVC1")
+    codec.eq_ignore_ascii_case("H264")
 }
 
 /// The ffmpeg arguments of a repair: the video stream of `input` copied

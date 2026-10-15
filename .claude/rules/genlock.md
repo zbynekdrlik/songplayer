@@ -1560,6 +1560,9 @@ video's last frame while the audio plays on, up to
   held picture and its audio (`DecodeTaps::offer_picture`), so the preview
   keeps its picture and sound (and its encoder never starves past 10 s).
   No picture ever decoded = no tail (the end counts its `underrun_end`).
+  #277: a picture that stops more than 10 s before the VIDEO reader's own
+  duration is no end at all but a failure, with no tail and no play-out
+  (`early_end.rs`, `open-failures.md` "A video that ends early").
   A seek that moved the decoder drops the held picture (review): the frame
   it lands on, or the last one its fast-forward decoded, replaces it, so a
   picture from before the seek never shows with the audio after it; a

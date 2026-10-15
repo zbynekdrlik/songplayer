@@ -97,7 +97,7 @@ static VOCALS_RE: LazyLock<Regex> =
 /// and `{id}_audio_temp.%(ext)s`, the in-place upgrade's and, #277, the
 /// repair's `{id}_video_repair_temp.mp4`).
 static TEMP_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[a-zA-Z0-9_-]{11}_(?:video|audio)(?:_upgrade)?_temp(?:\..+)?$").unwrap()
+    Regex::new(r"^[a-zA-Z0-9_-]{11}_(?:video|audio)(?:_upgrade|_repair)?_temp(?:\..+)?$").unwrap()
 });
 
 /// Whether `filename` is a download's temp, which the startup self-heal
