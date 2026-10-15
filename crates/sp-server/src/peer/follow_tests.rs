@@ -472,15 +472,16 @@ async fn an_operators_lyrics_or_a_dub_track_stay_here() {
 }
 
 /// SNV made the song's lyrics again since PP took them, and PP carries an
-/// operator's reprocess flag outside its lyrics queue (here on a second row
-/// whose song left its playlist: the queue never takes that row, so the
-/// follow meets the video). `paid_ai` is PP's switch. Returns PP's old JSON.
+/// operator's reprocess flag outside its lyrics queue for now (here on a
+/// second row not downloaded yet: the queue takes it once it is, so the
+/// flag asks for a run here then, and meanwhile the follow meets the
+/// video). `paid_ai` is PP's switch. Returns PP's old JSON.
 async fn flagged_outside_the_queue(paid_ai: &str) -> (TestNode, TestNode, Vec<u8>) {
     let (snv, pp) = snv_and_pp(&[YT]).await;
     set(pp.pool(), "paid_ai_enabled", paid_ai).await;
     let old = pp_took(&pp, YT, OLD_SOURCE).await;
     second_row(&pp, YT).await;
-    sqlx::query("UPDATE videos SET lyrics_manual_priority = 1, removed_at = 1000 WHERE id = ?")
+    sqlx::query("UPDATE videos SET lyrics_manual_priority = 1, normalized = 0 WHERE id = ?")
         .bind(rows_of(&pp, YT).await[1])
         .execute(pp.pool())
         .await
@@ -506,14 +507,11 @@ async fn a_reprocess_flag_keeps_the_lyrics_from_the_follow_only_while_paid_ai_is
     let rows = rows_of(&pp, YT).await;
     assert_eq!(follow_next(Some(&pp.ex)).await, rows);
     every_row_serves(&pp, YT, NEW_SOURCE).await;
-    let flags: Vec<i64> = sqlx::query_scalar(
-        "SELECT lyrics_manual_priority FROM videos WHERE youtube_id = ? ORDER BY id",
-    )
-    .bind(YT)
-    .fetch_all(pp.pool())
-    .await
-    .unwrap();
-    assert_eq!(flags, vec![0, 0], "the take clears the flag");
+    assert_eq!(
+        pp.manual_flags(YT).await,
+        vec![0, 0],
+        "the take clears the flag"
+    );
 }
 
 // ---- the pure decisions ----

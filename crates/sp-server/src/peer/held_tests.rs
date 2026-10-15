@@ -338,15 +338,6 @@ async fn an_operators_text_or_a_dub_keeps_the_lyrics_here_while_paid_ai_is_off()
     }
 }
 
-/// `lyrics_manual_priority` of every row of `YT` at `node`, by id.
-async fn flags(node: &TestNode) -> Vec<i64> {
-    sqlx::query_scalar("SELECT lyrics_manual_priority FROM videos WHERE youtube_id = ? ORDER BY id")
-        .bind(YT)
-        .fetch_all(node.pool())
-        .await
-        .unwrap()
-}
-
 /// #264, PP's rows 166, 225, 11 and 39: an operator's Reprocess made at a
 /// node with paid AI off was held every 30 min for good. The hook now takes
 /// the peer's copy for it (the same audio rule), and the take clears the
@@ -367,7 +358,7 @@ async fn an_operators_reprocess_takes_the_peers_copy_while_paid_ai_is_off() {
         assert_eq!(lyrics_state(&pp, row).await, (1, 0, false), "row {row}");
     }
     assert_eq!(
-        flags(&pp).await,
+        pp.manual_flags(YT).await,
         vec![0, 0],
         "the flag cleared on every row"
     );

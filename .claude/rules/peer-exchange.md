@@ -820,8 +820,9 @@ wait for a peer that has the song", below).
   audio as fetched from SNV (`TestNode::audio_from`), the state a real PP
   has after its download; the guard's own tests change PP's bytes so that
   one branch alone decides (the record, a stored hash, a hash taken now).
-- Lyrics: never for an operator's ask here (`lyrics_manual_priority`, a
-  non-blank `lyrics_override_text`) on ANY row of the video (its rows serve
+- Lyrics: never for an operator's ask here (`lyrics_manual_priority`,
+  only while this node's paid AI is on, #264; a non-blank
+  `lyrics_override_text`) on ANY row of the video (its rows serve
   one `{yt}_lyrics.json`; review round 5: the asked row only before), never
   for a video whose `{yt}_lyrics.json` here is a dub's subtitles (any row
   of it here dub-requested or `gemini-live-translate`), a failed read →

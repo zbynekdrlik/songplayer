@@ -314,14 +314,11 @@ async fn with_paid_ai_off_a_reprocess_flag_does_not_keep_the_stand_in() {
     assert_eq!(supersede_next(Some(&pp.ex)).await, rows.to_vec());
     assert_eq!(json_at(&pp), Some(snv_json));
     assert!(standins(&pp).await.is_empty());
-    let flags: Vec<i64> = sqlx::query_scalar(
-        "SELECT lyrics_manual_priority FROM videos WHERE youtube_id = ? ORDER BY id",
-    )
-    .bind(YT)
-    .fetch_all(pp.pool())
-    .await
-    .unwrap();
-    assert_eq!(flags, vec![0, 0], "the take clears the flag");
+    assert_eq!(
+        pp.manual_flags(YT).await,
+        vec![0, 0],
+        "the take clears the flag"
+    );
 }
 
 /// No row of the video is left here (removed from its playlists): nothing

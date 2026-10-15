@@ -220,6 +220,17 @@ impl TestNode {
         json
     }
 
+    /// `lyrics_manual_priority` of every row of `youtube_id` here, by id.
+    pub(crate) async fn manual_flags(&self, youtube_id: &str) -> Vec<i64> {
+        sqlx::query_scalar(
+            "SELECT lyrics_manual_priority FROM videos WHERE youtube_id = ? ORDER BY id",
+        )
+        .bind(youtube_id)
+        .fetch_all(self.pool())
+        .await
+        .unwrap()
+    }
+
     /// One hashing pass, no rate limit.
     pub(crate) async fn hash_now(&self) -> super::hasher::HashPass {
         super::hasher::hash_pass(&self.ex, 0).await.unwrap()
