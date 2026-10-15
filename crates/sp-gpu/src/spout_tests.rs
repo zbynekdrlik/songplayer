@@ -287,6 +287,24 @@ fn the_shim_announces_a_frame_only_after_the_gpu_wrote_it() {
             "SendSynced calls `{once}` once"
         );
     }
+    // The wait ends on the query's answer, and a copy that did not finish is
+    // never announced (the mutex is still let go).
+    assert!(
+        body.contains("hr == S_OK && finished"),
+        "the wait ends when the event query says the copy is done"
+    );
+    let announce = body.find("SetNewFrame()").expect("checked above");
+    let guard = body[..announce]
+        .rfind("if (result == kOk)")
+        .expect("SetNewFrame runs only for a finished copy");
+    assert!(
+        !body[guard..announce].contains('}'),
+        "SetNewFrame is inside the finished-copy branch"
+    );
+    assert!(
+        shim.contains("kCopyNotDone = 6;"),
+        "the shim's code for a copy not done is status::COPY_NOT_DONE"
+    );
     assert!(
         shim.contains("->dx.SendSynced("),
         "the shim's send goes through SendSynced"
