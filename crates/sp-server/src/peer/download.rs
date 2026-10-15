@@ -80,7 +80,8 @@ pub async fn record_title(ex: &Exchange, youtube_id: &str, t: &PeerTitle) {
 /// here forgets the pair's peer origin before it starts (`forget_origins`):
 /// it writes this node's own audio under the names a fetched pair had. That
 /// holds on the no-peers and bad-settings paths too, which never go through
-/// `run_here`.
+/// `run_here`. The title's record stays while the title is still that copy
+/// (#269): a re-download keeps an operator's title.
 pub(crate) async fn first(ex: Option<&Arc<Exchange>>, row: &VideoRow) -> PeerStep {
     let Some(ex) = ex else {
         return PeerStep::Local(None);

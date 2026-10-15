@@ -96,7 +96,8 @@ Every path:
   - #264's lyrics follow (`peer::follow`) only fetches. While OFF it
     also replaces a track no peer record names (`untracked`: this
     node makes no lyrics itself); while ON such a track is the node's
-    own and is kept.
+    own and is kept. #269's title follow (`peer::follow_title`) reads
+    only the peer's catalog and `/videos` row: no paid AI either way.
   - #264 (ROZHODNUTÉ 6185176417): an operator's reprocess flag keeps a
     song's lyrics local (`peer::lyrics::kept_local`) only while ON: it
     asks for a run HERE. While OFF the hook, the follow and the

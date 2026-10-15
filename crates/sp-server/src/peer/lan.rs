@@ -17,6 +17,7 @@ use super::catalog::{self, CatalogCounts};
 use super::client::LastRead;
 use super::config::NodeConfig;
 use super::follow::FollowStatus;
+use super::follow_title::TitleWhy;
 use super::transfer_probe::{PROBE_MAX_TIME, TransferProbe};
 use super::wire::CatalogJob;
 
@@ -45,6 +46,10 @@ pub struct ExchangeStatus {
     /// started (`peer::follow`).
     #[serde(default)]
     pub follow: FollowStatus,
+    /// #269: the titles this node followed from its peers since this
+    /// process started (`peer::follow_title`).
+    #[serde(default)]
+    pub title_follow: FollowStatus<TitleWhy>,
 }
 
 /// One configured peer, without its secrets.
@@ -113,6 +118,7 @@ pub async fn status(State(ex): State<Arc<Exchange>>) -> Json<ExchangeStatus> {
         catalog,
         jobs,
         follow: ex.follow_status(),
+        title_follow: ex.title_follow_status(),
     })
 }
 

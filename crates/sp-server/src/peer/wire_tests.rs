@@ -214,6 +214,26 @@ fn metadata_bytes_are_canonical_and_carry_the_version() {
     assert_eq!(manual.version(), 2);
 }
 
+/// #269: a title's sha256 is the one of its canonical bytes (the catalog's
+/// metadata entry), and another title has another.
+#[test]
+fn a_titles_sha256_is_the_one_of_its_bytes() {
+    let m = PeerMetadata {
+        youtube_id: "aaaaaaaaaaa".into(),
+        song: "Way Maker".into(),
+        artist: "Sinach".into(),
+        metadata_source: Some("manual".into()),
+        gemini_failed: false,
+    };
+    assert_eq!(m.sha256(), crate::peer::hash::sha256_hex(&m.to_bytes()));
+    assert!(is_sha256_hex(&m.sha256()));
+    let live = PeerMetadata {
+        song: "Way Maker (Live)".into(),
+        ..m.clone()
+    };
+    assert_ne!(live.sha256(), m.sha256());
+}
+
 #[test]
 fn times_go_both_ways_at_millisecond_precision() {
     let ms = 1_791_302_400_123;
