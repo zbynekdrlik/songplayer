@@ -3,6 +3,7 @@ paths:
   - "crates/sp-server/src/downloader/cache*.rs"
   - "crates/sp-server/src/downloader/mod.rs"
   - "crates/sp-server/src/peer/download*.rs"
+  - "crates/sp-server/src/peer/follow_title*.rs"
   - "crates/sp-server/src/reprocess/**"
   - "crates/sp-server/src/startup.rs"
   - "crates/sp-server/src/song_relink*.rs"
@@ -93,14 +94,18 @@ Design record: #136 comment 5894034820.
     recorded the old set: the same video in another playlist is a second row
     pointing at the same files. The ONE statement for that is
     `SongColumns::record(pool, youtube_id, old_video, old_audio)`.
-  - Three renamers today, all under `cache::SONG_FILES`: the metadata repair
+  - Four renamers today, all under `cache::SONG_FILES`: the metadata repair
     (`reprocess/mod.rs`); an operator's title correction
-    (`metadata::manual::apply_to_video`, ROZHODNUTÉ 5908227964: every row of
-    the video, each row's set read right before its move and named after
-    that row's title; a row with no files, `SongFiles::is_empty`, is
-    skipped); and a finished download whose video was corrected while it
-    ran (`metadata::manual::record_download`, review round 1: the fresh
-    pair is renamed after the correction before it is recorded).
+    (`metadata::manual::apply_to_video` = `spread_title` + `rename_rows`,
+    ROZHODNUTÉ 5908227964: every row of the video, each row's set read
+    right before its move and named after that row's title; a row with no
+    files, `SongFiles::is_empty`, is skipped); a peer's title the exchange
+    follows (#269, `peer::follow_title`: the same `rename_rows`, named after
+    the peer's title, FIRST, and the title written by `spread_title` only
+    when every set moved, so a held file is retried); and a finished
+    download whose video was corrected while it ran
+    (`metadata::manual::record_download`, review round 1: the fresh pair is
+    renamed after the correction before it is recorded).
   - Read the old set from the DB right before the move, never from a batch
     snapshot (an earlier row may have moved it).
   - Hold `cache::SONG_FILES` (a process-wide async lock) from that read to the

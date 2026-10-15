@@ -104,7 +104,8 @@ wait for a peer that has the song", below).
   listed, the queued job entries listed), `null` when the rows cannot be
   read (WARNed); `jobs` = the board's running jobs; `follow` = the
   lyrics this node followed from its peers (#264, "The lyrics follow
-  the peer's copy" below).
+  the peer's copy" below); `title_follow` = the titles, the same shape
+  (#269, "The titles follow the peer's" below).
 - A config that does not hold reads as the exchange OFF (no node, not
   serving, no peer) plus `config_error` = the reason.
 - `POST /api/v1/exchange/probe` (LAN, no key) reads every peer's catalog
@@ -148,8 +149,9 @@ wait for a peer that has the song", below).
 ## Wiring
 
 - `peer::Exchange { pool, cache_dir, board, client, transfer_probe,
-  follow }` (`client`, `transfer_probe` and `follow`, the lyrics
-  follow's memory, are `pub(crate)`; `cache_dir` holds the `{yt}_lyrics.json` the catalog names
+  follow, title_follow }` (`client`, `transfer_probe`, `follow` and
+  `title_follow`, the lyrics' and the titles' follow memory, are
+  `pub(crate)`; `cache_dir` holds the `{yt}_lyrics.json` the catalog names
   and the fetch parts dir `<cache>/peer/`; `board` = the jobs announced as
   running, below), built once by `lib.rs` right after `AppState`:
   `Exchange::new(pool, cache_dir) -> Arc<Exchange>` (it builds the board and
@@ -1153,11 +1155,10 @@ record: #264 comment 6146849106.
   {youtube_id, peer, why, at}, last_look, wanted, passed_over, last_error:
   {youtube_id, peer, error, at}}` since this process started.
 - **Not followed:** the stems (they change only with `STEMS_VERSION`,
-  which re-queues them here and the hook takes the peer's); the metadata
-  (an operator's title at SNV would rename PP's file set, `apply_title`
-  outside the repair queue: a follow-up candidate); a ★ toggled at SNV
-  without a new track (the admin toggle; „Nesedí" queues a reprocess, whose
-  new track is followed): it reaches PP with the next track.
+  which re-queues them here and the hook takes the peer's); a ★ toggled at
+  SNV without a new track (the admin toggle; „Nesedí" queues a reprocess,
+  whose new track is followed): it reaches PP with the next track. The
+  titles follow in their own step (#269, next section).
 - Known limit (the hooks' and the stand-in's too): an operator's Reprocess
   clicked at this node during a take is cleared by the adoption
   (`mark_video_lyrics_complete` sets the manual flag to 0); the window is
@@ -1179,6 +1180,90 @@ record: #264 comment 6146849106.
   `candidates`, `FollowState`), `lyrics/worker_tests_peer.rs::
   {the_worker_follows_the_peers_newer_lyrics,
   the_worker_fills_a_parked_row_from_the_peer}`.
+
+## The titles follow the peer's (`peer::follow_title`, #269)
+
+The same owner's rule, for titles: an operator's correction at SNV
+(`PATCH /api/v1/videos/{id}`, `'manual'`, every row, files renamed) never
+reached a song PP already held, because PP asks a peer for a title only at
+its download and in its metadata repair (rows of `REPAIR_QUEUE_WHERE`).
+Design record: #269 comment 6190388058.
+
+- **Where and how often:** `follow_title::follow_next`, in the lyrics
+  worker's tick right after the lyrics follow; the lyrics follow's own
+  machinery (`follow::FollowState<TitleWhy>`, its own copy
+  `Exchange::title_follow`, generic over the "why"): ONE video per look,
+  the next tick while a look finds one, else `FOLLOW_IDLE` (15 min);
+  `transfers_paused` (the operator's pause, #230's hold) reads nothing;
+  a node that asks no peer (SNV) reads nothing. No paid AI: it only reads
+  the peer's catalog and its `/videos` row.
+- **Candidates** (`follow_title::held_titles` + the pure `candidates` /
+  `wants`): every video this node holds downloaded (a row with
+  `normalized = 1` that `queue_row!()` takes) with NO row in the metadata
+  repair queue (those are the repair's, which takes a peer's title first),
+  its title as this node's own catalog lists it (`catalog::metadata_for`:
+  the version and the sha256 of `PeerMetadata::to_bytes`) and its
+  `peer_fetches` metadata record; per video the first listed peer whose
+  catalog lists its title at a version this node takes (≥ 1, a parser's
+  never). `wants`, in order:
+  - never over a correction made here: a `'manual'` title that is not the
+    copy recorded from that peer (no record, another peer's, or a record
+    whose sha256 is not this node's title's own: an operator here corrected
+    it after a take) stays;
+  - `higher`: the peer's rank is above this node's (`metadata_version`:
+    operator 2, provider 1, parser 0);
+  - `changed`: this node's title IS the copy recorded from that peer (the
+    record names it and its sha256 is this node's own title's) and the peer
+    lists another sha256 (corrected or improved there, a revert included).
+
+  An equal rank that is not the peer's recorded copy stays (a provider
+  title made here).
+- **The take:** the peer's `/videos` row (`PeerTitle::of`, its sha256
+  against the catalog entry; a mismatch is a failed take, asked again
+  `FOLLOW_RETRY` later or at once when a fresh catalog lists another
+  title); then under `cache::SONG_FILES` the look's answer is checked
+  again (`held_titles` of the one video + `wants`: a correction made here
+  meanwhile, or a row now in the repair queue → nothing touched, passed
+  over `FOLLOW_RETRY`); every row's files are renamed FIRST
+  (`metadata::manual::rename_rows`, named after the peer's title), and
+  only when every set moved is the title written on every row
+  (`metadata::manual::spread_title` with the peer's label: a peer's
+  operator title stays `'manual'` here and keeps its rank; `gemini_failed
+  = 0`) and the origin recorded (`download::record_title`, its one INFO
+  `exchange: a peer's title was taken`). A file that cannot move (the
+  player holds it on Windows) leaves every title as it was, the files
+  recorded where they are: the next look after `FOLLOW_RETRY` tries again.
+  Written the other way round, the next look would read the title as the
+  copy already taken (or, for a `'manual'` title with no record, as this
+  node's own correction) and never rename the files again.
+- **`apply_to_video` is the same two steps** (`spread_title` with
+  `'manual'`, then `rename_rows` after each row's own title): one rename
+  and record path for an operator's correction and a peer's title.
+- **Visible:** the DEBUG `exchange: followed the peer's title` (`why`,
+  `rows`); a failed take WARNs (`exchange: a peer's newer title was not
+  taken - asking again later`); `GET /api/v1/exchange/status` →
+  `title_follow`, the shape of `follow` with `why` `higher` | `changed`.
+- **Known limits:** a peer's `'manual'` row with `gemini_failed = 1` (none
+  is written since #136's PATCH) is taken with `gemini_failed = 0`, so this
+  node's own bytes differ from the recorded ones and the title then reads
+  as a correction made here: not followed again. A local re-download of a
+  video forgets its metadata record (`forget_origins(Download)`) while
+  `download_title` keeps a `'manual'` title: a peer's operator title taken
+  before then reads as this node's own. A failed `record_title` (WARNed)
+  leaves the same. A `'manual'` title PP took before #269 (phase 0, a
+  download) with no record is likewise PP's own.
+- OPEN for phase 2 (SNV listing PP): which node's titles may replace which
+  is the phase-2 tie-break ("Kinds, versions, jobs").
+- Tests: `peer/follow_title_tests.rs` (two real nodes: an operator's
+  correction at SNV into every row with the files, the record and the
+  status through the router; the next correction and a revert follow; a
+  correction made here stays, also over an older record; an equal rank
+  stays, a higher one is taken with the peer's label; a busy file retried;
+  the pause and the hold; a node with no peer; one video per look and the
+  idle wait; the repair queue left to the repair; a correction made during
+  the take; a row that no longer matches the catalog; `held_titles`'
+  rows; the pure `wants`, `candidates` and `FollowState<TitleWhy>`),
+  `lyrics/worker_tests_peer.rs::the_worker_follows_the_peers_corrected_title`.
 
 ## PP's workers on (MAIN SESSION OPS, after the release with lanes 7–9 reaches PP)
 
@@ -1228,6 +1313,12 @@ record: #264 comment 6146849106.
    A Reprocess at PP of a song that already serves SNV's copy logs
    `exchange: an operator's reprocess is answered by the peer's copy
    served here` once and its rows read `lyrics_manual_priority = 0`.
+8. The title follow (#269, after the release that carries it reaches
+   PP): correct a test title at SNV (an operator PATCH of a song no event
+   uses); within one look (≤ 15 min) PP's rows read it with
+   `metadata_source = 'manual'`, PP's log shows `exchange: a peer's title
+   was taken` for it, `title_follow.last` names it (`why: higher`). Revert
+   it at SNV: PP follows back (`why: changed`).
 
 ## Tests
 

@@ -142,6 +142,11 @@ answered correctly), and nothing ever ran the real providers.
     router: two rows sharing files, a row not downloaded, another video
     untouched, the stem following the audio) and
     `an_artist_only_correction_of_a_row_with_no_song_keeps_the_songs`.
+    `apply_to_video` is two steps, `spread_title` (the UPDATE, taking the
+    `metadata_source` it writes) and `rename_rows` (each row's files): #269's
+    title follow (`peer::follow_title`) writes a peer's title through the
+    same two, with the peer's label (a peer's operator title stays
+    `'manual'` here), renaming first and writing only once every set moved.
   - **An artist ALONE for a video with no song is refused** (review round
     2): a download keeps a correction only with its song (below), so an
     artist-only PATCH of a video no row of which has a song yet (none
