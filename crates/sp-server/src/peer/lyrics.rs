@@ -98,13 +98,17 @@ pub async fn first(ex: Option<&Arc<Exchange>>, row: &VideoLyricsRow) -> PeerStep
     }
 }
 
-/// The track here already is the peer's copy ([`Adopted::NothingNewer`]):
+/// The track here already has the peer's source at its version
+/// ([`Adopted::NothingNewer`]: source and version only, never the bytes):
 /// the job runs here (`Exchange::local`, held while paid AI is off). #264
 /// (ROZHODNUTÉ, option a): with paid AI off an operator's reprocess flag on
-/// the video can neither run here nor fetch anything new, so that very
-/// copy answers it: the flag is cleared on every row ([`answer_reprocess`]),
-/// the wait ends and the job is done. The follow (`peer::follow`) brings
-/// any later copy of the peer's. With paid AI on nothing changes.
+/// the video can neither run here nor fetch anything newer, so the copy
+/// served here answers it: the flag is cleared on every row
+/// ([`answer_reprocess`]), the wait ends and the job is done. No origin is
+/// recorded: another copy of the same source at the peer (a retranslation,
+/// a register fix) is the follow's (`peer::follow`, `changed` /
+/// `untracked`), which a recorded sha would hide. With paid AI on nothing
+/// changes.
 async fn nothing_newer(ex: &Exchange, row: &VideoLyricsRow) -> PeerStep {
     let job = Job::Lyrics;
     if !ex.may_run_here(job).await && answer_reprocess(ex, &row.youtube_id).await {

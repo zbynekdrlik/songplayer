@@ -847,14 +847,16 @@ wait for a peer that has the song", below).
   (`adopt_lyrics` → `mark_video_lyrics_complete`) clears the flag on every
   row. An operator's text, a dub and Live-Translate keep the lyrics local
   either way; SNV (paid AI on, no peer) is unchanged. A flagged row whose
-  track here already IS the peer's copy (the same source at the same
-  version: `NothingNewer`) has nothing to fetch either (#264 ROZHODNUTÉ,
-  option a, finding 6188753933): with paid AI off `lyrics::nothing_newer`
-  clears the flag on every row of the video (`answer_reprocess`, one
-  UPDATE; a row affected = a flag was set), ends the wait and answers
-  Done (INFO `exchange: an operator's reprocess is answered by the peer's
-  copy served here`); the row leaves bucket 1, so the follow brings any
-  later copy of the peer's. Without a flag, or with paid AI on, it runs
+  track here already carries the peer's source at its version
+  (`NothingNewer`: source and version only, never the bytes) has nothing
+  newer to fetch (#264 ROZHODNUTÉ, option a, finding 6188753933): with
+  paid AI off `lyrics::nothing_newer` clears the flag on every row of the
+  video (`answer_reprocess`, one UPDATE; a row affected = a flag was set),
+  ends the wait and answers Done (INFO `exchange: an operator's reprocess
+  is answered by the peer's copy served here`), recording no origin: the
+  row leaves bucket 1, and another copy of the same source at the peer is
+  the follow's (`changed` / `untracked`, which a recorded sha would hide).
+  Without a flag, or with paid AI on, it runs
   here as before (`Exchange::local`: held while off). Re-fetching the same
   copy (option b) was rejected: it moves the same bytes and changes
   nothing. The
