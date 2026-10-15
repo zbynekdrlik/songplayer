@@ -187,12 +187,14 @@ reports end-of-stream (SNV: "Remembrance" 0 frames in 9 ms; remuxed with
   engine's `video_failed` calls `repair::ask(video row)` for an early end.
   The requests are in memory (`Requests`, one per row, and one repair per
   YouTube id per process: a failed one is logged once and never retried
-  before a restart; a restart forgets them, and the next failing play asks
-  again).
+  before a restart, except a `busy` one, asked again `BUSY_RETRY_MS`
+  (10 min) later with its try given back (a Loop playlist can hold the
+  file); a restart forgets them, and the next failing play asks again).
 - **Run by the worker:** every tick (`repair::tick`, first in `run`, before
-  the upgrade) takes ONE request, whatever `video_upgrade_enabled` says,
-  behind #230's hold (`Job::VideoUpgrade`; a held request is put back
-  first).
+  the upgrade) takes ONE request due, whatever `video_upgrade_enabled`
+  says, behind #230's hold (`Job::VideoUpgrade`; a held request is put back
+  first). No disk floor (unlike the upgrade's 50 GiB): a repair writes one
+  stream copy of one song, and its `.prev` goes with S12's retention.
 - **One repair** (`repair::repair`, S11-shaped): `cached` → the old facts
   (`None` when MF reads no picture) → `Steps::codec` (MF's subtype) →
   `remux_args` (H.264 only: `-map 0:v:0 -c copy -bsf:v
@@ -200,9 +202,10 @@ reports end-of-stream (SNV: "Remembrance" 0 frames in 9 ms; remuxed with
   `unsupported`, nothing written: an AV1 OBU of type 6 is a frame) →
   `Steps::ffmpeg` into `{id}_video_repair_temp.mp4` → its facts →
   `verify_repair` (the checks `verify` shares via `plays_like`: the audio's
-  length, the near-end picture, the first picture within one frame of the
-  old one's, or of 0 when MF read no picture of it; the same rows when it
-  did; never "taller") → `swap::swap` (`.prev` kept) → V35
+  length and the near-end picture; when MF read a picture of the old file,
+  also its rows and its first picture within one frame (a stream copy
+  moves neither, so with no old picture they are not compared); never
+  "taller") → `swap::swap` (`.prev` kept) → V35
   `video_upgrade_state = 'repaired'` + `video_upgrade_at`, the cap KEPT
   (the song is still checked for an upgrade; `next_song` takes it like any
   state that is not busy or failed). V34 is untouched (a stream copy keeps
@@ -213,26 +216,34 @@ reports end-of-stream (SNV: "Remembrance" 0 frames in 9 ms; remuxed with
   (a repaired file's failed open would restore the file that never played).
 - **At the download** (`repair::check_download`, called by
   `downloader::process_next` after the normalize, before `place_video`):
-  the fresh `{id}_video_temp.mp4`'s facts; one that ends early
-  (`ends_early`: `NO_PICTURE`, or no near-end picture; an open error is not
-  one) is remuxed and renamed over itself. Not repaired = the download
-  fails (its reason on the row, the normal backoff, the audio dropped
-  unless a row records it: `drop_attempt_audio`), so it never reaches a
-  playlist. Off Windows `facts` refuses, so nothing is checked.
+  the fresh `{id}_video_temp.mp4`'s facts; one MF reads NO picture of
+  (`has_no_picture`: `NO_PICTURE`, the late-SEI case; a later stop is the
+  player's, with its 10 s slack, never the facts' 2 s near-end read; an
+  open error is not one) is remuxed and renamed over itself. Not repaired =
+  the download fails (its reason on the row, the normal backoff, the audio
+  dropped unless a row records it: `drop_attempt_audio`), so it never
+  reaches a playlist. Off Windows `facts` refuses, so nothing is checked.
+  A pair adopted from a peer (`peer::download::adopt`) is not checked: PP
+  repairs SNV's late-SEI files at their first play.
 - **The temp** is in `TEMP_RE` (`cache.rs`), swept at startup.
 - **`peer_hashes`** follows by itself (keyed by path, held only while size
   and mtime match).
 - **Logs:** INFO `video repair: asked` / `start` / `done …`, WARN `video
-  repair: not repaired - not tried again before a restart`; at a download
-  INFO `download: the video ends early … - repairing it (#277)`, ERROR
-  `download: the video ends early and was not repaired (…)`.
+  repair: not repaired - tried again only when busy (10 min), else after a
+  restart`; at a download INFO `download: the reader that plays the video
+  reads no picture of it - repairing it (#277)`, ERROR `download: the video
+  plays no picture and was not repaired (…)`.
+- **Not live-gated:** that the box's ffmpeg has the `filter_units` bsf is
+  proven by the box check below, not by a post-deploy gate (a missing one
+  would WARN `the remux: ffmpeg exited …` once per video).
 - **Box check** (the main session): play SNV `video_id=262` once; the
   worker's next tick (≤ 60 s; the first tick comes 5 min after a start)
   logs `done`, the next play passes 10 s, and the ledger shows no
   `underrun_end` from it.
-- Tests: `repair_tests.rs` (the args, `ends_early`, `verify_repair`, whole
-  repairs over real temp files, the download check, the requests and the
-  worker's step); the Fake steps script `codec` / `remux` / `repaired`.
+- Tests: `repair_tests.rs` (the args, `has_no_picture`, `verify_repair`,
+  whole repairs over real temp files, the peer hash entry after a swap,
+  the download check, the requests, a busy retry and the worker's step);
+  the Fake steps script `codec` / `remux` / `repaired`.
 
 ## The exchange
 

@@ -139,6 +139,31 @@ fn log_song_summary(
     );
 }
 
+/// #277: the song's video ended early after its `Started`: a failure, never
+/// its natural end. Its summary says `early-end` (`base` = the pacing and
+/// audio counters at the song's start), there is no play-out (the rest of
+/// its audio is no end underrun), and its `Error` carries
+/// `early_end::after_start`'s mark: it answers no Play.
+#[cfg_attr(test, mutants::skip)]
+fn ended_early(
+    pacer: &Pacer,
+    (summary_base, audio_base): (&PacingStats, &AudioStats),
+    song_start: Instant,
+    playlist_id: i64,
+    reason: &str,
+) -> DecodeResult {
+    let base = (summary_base, &pacer.stats());
+    log_song_summary(
+        pacer,
+        base,
+        audio_base,
+        song_start,
+        playlist_id,
+        "early-end",
+    );
+    DecodeResult::Error(crate::playback::early_end::after_start(reason))
+}
+
 /// The decode PRODUCER thread (#147 producer/consumer split). Owns the ENTIRE
 /// MediaFoundation decoder lifecycle on ITS thread (COM STA affinity — the thread
 /// that opens the reader must be the one that decodes / seeks / drops it), pulls
@@ -695,22 +720,10 @@ pub(crate) fn decode_and_send_paced(
                     // the resilient choice on a box with a driver-timeout history.
                     let producer_dead = producer.is_finished() && !shared.is_drained();
                     if (shared.is_drained() && !pacer.has_pending()) || producer_dead {
-                        // #277: the video ended early after the song started:
-                        // a failure, never its natural end. No play-out: the
-                        // rest of its audio is no end underrun.
+                        // #277: the video ended early after the song started.
                         if let Some(reason) = shared.failure() {
-                            let base = (&summary_base, &pacer.stats());
-                            let why = "early-end";
-                            log_song_summary(
-                                pacer,
-                                base,
-                                &audio_base,
-                                song_start,
-                                playlist_id,
-                                why,
-                            );
-                            let reason = crate::playback::early_end::after_start(&reason);
-                            break 'emit DecodeResult::Error(reason);
+                            let base = (&summary_base, &audio_base);
+                            break 'emit ended_early(pacer, base, song_start, playlist_id, &reason);
                         }
                         if producer_dead {
                             error!(

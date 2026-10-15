@@ -150,9 +150,16 @@ play, with no WARN and no failure counted.
   `video_failed` counts it (#229's run, `open_failures.last_error` names
   the file) and, for any early end, `video_upgrade::repair::ask(video
   row)` (`video-upgrade.md`, "The repair").
-- Residual: the run is reset by `Started`, so consecutive early ends AFTER
-  their start never reach the pause; before the first picture (the case
-  seen) they count like failed opens.
+- Residuals:
+  - the run is reset by `Started`, so consecutive early ends AFTER their
+    start never reach the pause; before the first picture (the case seen)
+    they count like failed opens;
+  - a decode ERROR (`next_item`'s `Err`, video or audio alike) still ends
+    the song as before (a play-out, `Ended`): which of those is a failure
+    and what to repair for it is not decided here;
+  - a file whose container says it is more than 10 s longer than its last
+    picture now fails at every play (before, the rest played on the held
+    last frame); watch the producer's WARN after a deploy.
 - Tests: `early_end_tests.rs`, `paced_producer_tests_early.rs` (the 10 s
   edge on both sides, no tail, a seek's fast-forward, a seek clears it),
   `pacer_queue_tests.rs` (the failure at the stream's end),

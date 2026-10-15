@@ -125,13 +125,14 @@ pub(crate) fn verify(
             new.height, old.height
         ));
     }
-    plays_like(old.first_ms, new, audio_ms)
+    plays_like(Some(old.first_ms), new, audio_ms)
 }
 
 /// #277: whether a repaired (remuxed) video may replace the cached one, else
 /// why not. `old` = the cached video's facts when the reader reads a picture
-/// of it at all; a file it stops on at once has none, and its first picture
-/// is then expected at the stream's start (0).
+/// of it at all. A file it stops on at once has none: its rows and its first
+/// picture are then not compared (a stream copy moves neither), only the
+/// audio's length and the near-end picture.
 pub(crate) fn verify_repair(
     old: Option<&VideoFacts>,
     new: &VideoFacts,
@@ -145,15 +146,15 @@ pub(crate) fn verify_repair(
             new.height, old.height
         ));
     }
-    plays_like(old.map_or(0, |old| old.first_ms), new, audio_ms)
+    plays_like(old.map(|old| old.first_ms), new, audio_ms)
 }
 
 /// The checks a replacement video shares (S11's step 5, #277): a length
 /// within [`DURATION_SLACK_MS`] of the audio's, a picture [`NEAR_END_MS`]
 /// before its end, and its first picture within one frame period of
-/// `first_ms`, the cached video's (lyrics and the title follow the audio
-/// clock).
-fn plays_like(first_ms: u64, new: &VideoFacts, audio_ms: u64) -> Result<(), String> {
+/// `first_ms`, the cached video's when it is known (lyrics and the title
+/// follow the audio clock).
+fn plays_like(first_ms: Option<u64>, new: &VideoFacts, audio_ms: u64) -> Result<(), String> {
     if new.duration_ms.abs_diff(audio_ms) > DURATION_SLACK_MS {
         return Err(format!(
             "it is {} ms long, the audio {audio_ms} ms",
@@ -165,6 +166,9 @@ fn plays_like(first_ms: u64, new: &VideoFacts, audio_ms: u64) -> Result<(), Stri
             "no picture {NEAR_END_MS} ms before its end decoded"
         ));
     }
+    let Some(first_ms) = first_ms else {
+        return Ok(());
+    };
     let shift_us = new.first_ms.abs_diff(first_ms) * 1000;
     if shift_us > new.frame_us {
         return Err(format!(

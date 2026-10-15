@@ -66,17 +66,20 @@ fn the_remux_copies_the_video_and_drops_its_sei_for_h264_only() {
 }
 
 #[test]
-fn a_file_ends_early_when_no_picture_or_none_near_its_end_decodes() {
+fn a_fresh_file_needs_a_repair_only_when_no_picture_decodes() {
     let plays = facts(1080, 0, 200_000);
-    assert!(!ends_early(&Ok(plays)));
+    assert!(!has_no_picture(&Ok(plays)));
     let stops = VideoFacts {
         end_decoded: false,
         ..plays
     };
-    assert!(ends_early(&Ok(stops)));
-    assert!(ends_early(&Err(NO_PICTURE.to_string())));
     assert!(
-        !ends_early(&Err("the open: no suitable transform".to_string())),
+        !has_no_picture(&Ok(stops)),
+        "a later stop is the player's to judge, with its 10 s slack"
+    );
+    assert!(has_no_picture(&Err(NO_PICTURE.to_string())));
+    assert!(
+        !has_no_picture(&Err("the open: no suitable transform".to_string())),
         "an open that fails is not mended by a remux"
     );
 }
@@ -117,17 +120,19 @@ fn a_repaired_video_must_play_like_the_cached_one() {
         verify_repair(None, &stops, 200_000),
         Err("no picture 2000 ms before its end decoded".to_string())
     );
-    // The first picture: within one frame (40 ms) of the cached one's, or
-    // of the stream's start when no picture of the cached one was read.
+    // The first picture: within one frame (40 ms) of the cached one's. With
+    // no picture of the cached one read there is nothing to compare: a
+    // stream copy moves no timestamp (a stream starting 41 ms in is kept).
     let late = facts(1080, 41, 200_000);
     assert_eq!(
-        verify_repair(None, &late, 200_000),
+        verify_repair(Some(&old), &late, 200_000),
         Err("its first picture is at 41 ms, the cached one's at 0 ms".to_string())
     );
     assert_eq!(
-        verify_repair(None, &facts(1080, 40, 200_000), 200_000),
+        verify_repair(Some(&old), &facts(1080, 40, 200_000), 200_000),
         Ok(())
     );
+    assert_eq!(verify_repair(None, &late, 200_000), Ok(()));
     let old_late = facts(1080, 41, 200_000);
     assert_eq!(verify_repair(Some(&old_late), &late, 200_000), Ok(()));
 }
@@ -142,11 +147,12 @@ fn a_repaired_video_must_play_like_the_cached_one() {
 #[tokio::test]
 async fn an_h264_video_is_remuxed_checked_swapped_and_recorded() {
     let rig = Rig::new().await;
-    let old_len = std::fs::metadata(&rig.video).unwrap().len() as i64;
+    let path = rig.video.to_string_lossy().into_owned();
+    let (old_len, old_mtime) = size_and_mtime(&rig.video);
     let entry = crate::db::models_peer::HashEntry {
-        path: rig.video.to_string_lossy().into_owned(),
+        path: path.clone(),
         size: old_len,
-        mtime_ms: 1,
+        mtime_ms: old_mtime,
         sha256: "0123456789abcdef".repeat(4),
         hashed_at_ms: 1,
     };
@@ -175,10 +181,31 @@ async fn an_h264_video_is_remuxed_checked_swapped_and_recorded() {
     assert_eq!(checks[1], (11, None, Some(REPAIRED.to_string()), Some(NOW)));
     assert_eq!(checks[2], (12, None, None, None), "another video");
     assert_eq!(rig.formats().await[0], (10, None, None));
-    // The peer hash cache follows the new bytes: the entry of the old file
-    // no longer holds for the file now under the name.
-    let now = std::fs::metadata(&rig.video).unwrap();
-    assert!(!entry.holds(now.len() as i64, 1), "another size");
+    // The peer hash cache follows the new bytes: the stored entry, made for
+    // the old file, no longer holds for the file now under the name, so the
+    // hasher's next pass hashes it again (`peer-exchange.md`).
+    let stored = crate::db::models_peer::hash_of(&rig.pool, &path)
+        .await
+        .unwrap()
+        .expect("the stored entry");
+    let (new_len, new_mtime) = size_and_mtime(&rig.video);
+    assert!(stored.holds(old_len, old_mtime), "it held for the old file");
+    assert!(
+        !stored.holds(new_len, new_mtime),
+        "not for the repaired one"
+    );
+}
+
+/// A file's size and mtime (ms), as the peer hash cache keys them.
+fn size_and_mtime(path: &Path) -> (i64, i64) {
+    let meta = std::fs::metadata(path).unwrap();
+    let mtime = meta
+        .modified()
+        .unwrap()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    (meta.len() as i64, mtime as i64)
 }
 
 #[tokio::test]
@@ -390,7 +417,10 @@ async fn a_fresh_video_that_ends_early_and_is_not_repaired_fails_the_download() 
     let checked = check_download(&steps, YT, &video, &audio, &temp(&rig)).await;
     assert_eq!(
         checked,
-        Err("the video ends early and was not repaired (Unsupported): VP90 is not H.264".into())
+        Err(
+            "the video plays no picture and was not repaired (Unsupported): VP90 is not H.264"
+                .into()
+        )
     );
     assert_eq!(read_to_string(&video), "fresh");
     assert!(!temp(&rig).exists());
@@ -402,9 +432,11 @@ async fn a_fresh_video_that_ends_early_and_is_not_repaired_fails_the_download() 
     let checked = check_download(&steps, YT, &video, &audio, &temp(&rig)).await;
     assert_eq!(
         checked,
-        Err("the video ends early and was not repaired (Refused): \
+        Err(
+            "the video plays no picture and was not repaired (Refused): \
              it is 200000 ms long, the audio 150000 ms"
-            .into())
+                .into()
+        )
     );
     assert_eq!(read_to_string(&video), "fresh");
     assert!(!temp(&rig).exists(), "the refused remux is deleted");
@@ -416,6 +448,18 @@ async fn a_fresh_video_the_reader_cannot_open_is_left_to_the_player() {
     let (video, audio) = fresh(&rig);
     let steps = Fake {
         old: Err("the open: no suitable transform".into()),
+        ..Fake::upgrading()
+    };
+    let checked = check_download(&steps, YT, &video, &audio, &temp(&rig)).await;
+    assert_eq!(checked, Ok(Checked::Plays));
+    assert!(steps.ffmpeg_runs.lock().unwrap().is_empty());
+
+    // A first picture decodes, none 2 s before the end: left to the player.
+    let steps = Fake {
+        old: Ok(VideoFacts {
+            end_decoded: false,
+            ..facts(1080, 0, 200_000)
+        }),
         ..Fake::upgrading()
     };
     let checked = check_download(&steps, YT, &video, &audio, &temp(&rig)).await;
@@ -433,12 +477,28 @@ fn a_video_row_is_asked_for_once_and_taken_oldest_first() {
     assert!(!requests.ask(3), "asked before");
     assert!(requests.is_asked(3));
     assert!(!requests.is_asked(2));
-    assert_eq!(requests.take(), Some(3));
-    assert_eq!(requests.take(), Some(1));
-    assert_eq!(requests.take(), None);
+    assert_eq!(requests.take(NOW), Some(3));
+    assert_eq!(requests.take(NOW), Some(1));
+    assert_eq!(requests.take(NOW), None);
     assert!(!requests.ask(1), "taken, still asked in this process");
     assert!(requests.first_try("abcdefghijk"));
     assert!(!requests.first_try("abcdefghijk"));
+}
+
+/// A busy repair is asked again at its due instant, behind requests due
+/// before it, and its video may be tried once more.
+#[test]
+fn a_busy_repair_waits_for_its_due_instant() {
+    let mut requests = Requests::new();
+    requests.ask(5);
+    assert_eq!(requests.take(NOW), Some(5));
+    assert!(requests.first_try("abcdefghijk"));
+    requests.retry_later(5, "abcdefghijk", NOW + 100);
+    requests.ask(6);
+    assert_eq!(requests.take(NOW), Some(6), "the due one first");
+    assert_eq!(requests.take(NOW + 99), None, "not due yet");
+    assert_eq!(requests.take(NOW + 100), Some(5), "due");
+    assert!(requests.first_try("abcdefghijk"), "tried again");
 }
 
 /// One request per tick; the two rows of the song share its file, so the
@@ -475,11 +535,33 @@ async fn a_held_background_keeps_the_request() {
     assert_eq!(held, None);
     assert!(steps.ffmpeg_runs.lock().unwrap().is_empty());
     crate::background_hold::end_hold(&rig.pool).await;
-    // The held request is first again: row 12 (another video, not
-    // downloaded in the rig's cache dir as YT is) before row 10.
-    assert_eq!(requests.lock().unwrap().take(), Some(12));
+    // The held request is first again: row 12 before row 10 (taken out here,
+    // so the tick repairs row 10's video).
+    assert_eq!(requests.lock().unwrap().take(NOW), Some(12));
     let after = tick(&rig.pool, rig.dir.path(), &requests, &steps, NOW).await;
     assert_eq!(after.map(|r| r.outcome), Some(RepairOutcome::Repaired));
+    assert_eq!(read_to_string(&rig.video), "repaired");
+}
+
+/// A player that held the file (`Busy`): the repair is asked again 10 min
+/// later and then runs, the one try not used up.
+#[tokio::test]
+async fn a_busy_repair_runs_again_ten_minutes_later() {
+    let rig = Rig::new().await;
+    let requests = Mutex::new(Requests::new());
+    requests.lock().unwrap().ask(10);
+    let busy = Fake {
+        remux: Ok(None),
+        ..Fake::repairing()
+    };
+    let first = tick(&rig.pool, rig.dir.path(), &requests, &busy, NOW).await;
+    assert_eq!(first.map(|r| r.outcome), Some(RepairOutcome::Busy));
+    let steps = Fake::repairing();
+    let due = NOW + super::super::worker::BUSY_RETRY_MS;
+    let early = tick(&rig.pool, rig.dir.path(), &requests, &steps, due - 1).await;
+    assert_eq!(early, None, "not before 10 min");
+    let again = tick(&rig.pool, rig.dir.path(), &requests, &steps, due).await;
+    assert_eq!(again.map(|r| r.outcome), Some(RepairOutcome::Repaired));
     assert_eq!(read_to_string(&rig.video), "repaired");
 }
 
