@@ -80,6 +80,7 @@ fn nothing_read_is_unknown_with_its_reason_once() {
             read_errors: vec![why.to_string()],
             checked_at_ms: Some(NOW),
             guard: WallGuard::default(),
+            songplayer_clip: Default::default(),
         }
     );
     assert_eq!(problems, [WallProblem::Unreadable(WallFact::Arena)]);

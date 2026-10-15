@@ -1515,7 +1515,10 @@ app.post("/__mock/environment-reset", (_req, res) => {
 // `sp_core::wall::WallStatus`. The mock's Resolume uses its simple output,
 // so by default the bar shows no wall segment (as on a box whose Resolume
 // drives no physical display); `POST /__mock/wall {…}` sends those fields
-// over that, `POST /__mock/wall-reset` restores it.
+// over that, `POST /__mock/wall-reset` restores it. #275: the report's
+// `songplayer_clip` (whether SongPlayer's clip runs in Resolume) is
+// `unknown` by default; the GET stamps its `now_ms` with the mock's clock at
+// each answer, as the server does with its own.
 const WALL_DEFAULT = {
   checked: true,
   state: "simple_output",
@@ -1533,10 +1536,12 @@ const WALL_DEFAULT = {
   checked_at_ms: null,
   // #254: the guard that ends a crashed or hung Arena: nothing ended.
   guard: { ends: 0, last: null, phase: "idle" },
+  // #275: SongPlayer's clip in Resolume: not read.
+  songplayer_clip: { state: "unknown", clips: [], ndi_clips: [], since_ms: null, now_ms: null },
 };
 let wall = { ...WALL_DEFAULT };
 app.get("/api/v1/wall", (_req, res) => {
-  res.json(wall);
+  res.json({ ...wall, songplayer_clip: { ...wall.songplayer_clip, now_ms: Date.now() } });
 });
 app.post("/__mock/wall", (req, res) => {
   wall = { ...WALL_DEFAULT, ...req.body };

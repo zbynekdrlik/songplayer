@@ -83,6 +83,9 @@ pub fn status_of(
         read_errors: decide::read_errors(facts),
         checked_at_ms: Some(now_ms),
         guard,
+        // #275: the Resolume driver's fact, put on by the route
+        // (`api/routes_status.rs::wall`), never a part of the wall's verdict.
+        songplayer_clip: Default::default(),
     };
     (status, verdict.problems)
 }
