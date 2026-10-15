@@ -394,9 +394,10 @@ async fn a_poll_past_its_budget_is_unknown() {
 
     driver.on_tick_at(base + secs(30)).await;
 
-    assert_eq!(
-        param_reads(&server).await,
-        1,
+    // At most the delayed first read reached Arena (under a ptrace stall the
+    // budget may run out before it even arrives: never a wall-time pin).
+    assert!(
+        param_reads(&server).await <= 1,
         "ended while the first one waited"
     );
     assert_eq!(

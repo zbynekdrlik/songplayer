@@ -201,12 +201,15 @@ impl HostDriver {
 }
 
 /// The fact of a param read that failed: an answer that does not decode as
-/// a param is SongPlayer's own reader failing (a reader fault); a status or
-/// a transport error is Arena not answering.
+/// a param (serde's own error under reqwest's) is SongPlayer's own reader
+/// failing (a reader fault); a status, a transport error or a body cut off
+/// mid-read (reqwest calls that a decode error too, review round 2) is
+/// Arena not answering.
 fn unread_param(param_id: ParamId, e: &anyhow::Error) -> Fact {
     let why = format!("param {param_id}: {e}");
     if e.downcast_ref::<reqwest::Error>()
-        .is_some_and(reqwest::Error::is_decode)
+        .and_then(std::error::Error::source)
+        .is_some_and(|source| source.is::<serde_json::Error>())
     {
         Fact::reader_fault(&why)
     } else {

@@ -279,7 +279,9 @@ keeps the dead ids until the 300 s TTL refresh, which fires no event.
   text clips but no longer tracks that param: no hold.
 - **Any other failure** (a 5xx, a transport error, the budget):
   `unknown` until the next read; nothing counted, nothing refreshed. An
-  answer that does not decode as a param (`reqwest::Error::is_decode`), a
+  answer that does not decode as a param (a `serde_json::Error` under
+  reqwest's error — reqwest's `is_decode` also covers a body cut off
+  mid-read, Arena not answering, review round 2), a
   param with no id or a value of another shape is a READER FAULT
   (`Fact::reader_fault`): SongPlayer's own reader cannot read Arena's
   answer, and the post-deploy gate fails on it (`wall.md`).

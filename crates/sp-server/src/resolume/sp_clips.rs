@@ -42,8 +42,9 @@ pub const POLL_EVERY: Duration = Duration::from_secs(30);
 
 /// The most one poll may take (review round 1): the reads run inside the
 /// driver's step, so a slow Arena REST would hold the title and lyric
-/// pushes behind it. ~27 reads take ~0.1-0.5 s on the box; past this the
-/// poll is unknown and the next one tries again.
+/// pushes behind it. ~27 reads are expected to take well under a second
+/// (not measured yet: the poll's DEBUG line carries `elapsed_ms`); past
+/// this the poll is unknown and the next one tries again.
 pub const POLL_BUDGET: Duration = Duration::from_secs(2);
 
 /// An Arena param's id (`parameter/by-id/{id}`); Arena gives every param a

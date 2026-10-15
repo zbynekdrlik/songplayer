@@ -151,7 +151,10 @@ The wall was black for 5.5 h with songs on program, and the report read
   from its start ACROSS `unknown` gaps (`Record::since`, review round 1:
   one unread poll must not restart the note's "(12 min)"); an `unknown`
   counts from when it began. The note itself is hidden for the ~30 s an
-  unread poll stands (the state is `unknown` then). `read_error` = the
+  unread poll stands (the state is `unknown` then). Known limit (review
+  round 2): the start carries across a gap of ANY length, so `none`, a
+  2 h Arena outage, `none` again reads the whole span (a clip that ran
+  only while Arena's REST hung but Arena drew is not seen). `read_error` = the
   first host's reason for an unknown, `reader_fault` = any host's reader
   fault.
 - **Wire:** `GET /api/v1/wall` adds `songplayer_clip: {state:
