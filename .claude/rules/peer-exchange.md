@@ -1190,13 +1190,16 @@ its download and in its metadata repair (rows of `REPAIR_QUEUE_WHERE`).
 Design record: #269 comment 6190388058.
 
 - **Where and how often:** `follow_title::follow_next`, in the lyrics
-  worker's tick right after the lyrics follow; the lyrics follow's own
-  machinery (`follow::FollowState<TitleWhy>`, its own copy
-  `Exchange::title_follow`, generic over the "why"): ONE video per look,
-  the next tick while a look finds one, else `FOLLOW_IDLE` (15 min);
-  `transfers_paused` (the operator's pause, #230's hold) reads nothing;
-  a node that asks no peer (SNV) reads nothing. No paid AI: it only reads
-  the peer's catalog and its `/videos` row.
+  worker's tick right after the lyrics follow, so it inherits
+  `lyrics_worker_enabled` and the #230 hold (checked before it): switching
+  the lyrics worker off at PP stops the title follow too. The lyrics
+  follow's own machinery (`follow::FollowState<TitleWhy>`, its own copy
+  `Exchange::title_follow`, generic over the "why"; the shared first step
+  `follow::look_config` and `follow::peer_reads`): ONE video per look, the
+  next tick while a look finds one, else `FOLLOW_IDLE` (15 min);
+  `transfers_paused` (the operator's pause, #230's hold) reads nothing; a
+  node that asks no peer (SNV) reads nothing. No paid AI: it only reads the
+  peer's catalog and its `/videos` row.
 - **Candidates** (`follow_title::held_titles` + the pure `candidates` /
   `wants`): every video this node holds downloaded (a row with
   `normalized = 1` that `queue_row!()` takes) with NO row in the metadata
@@ -1261,8 +1264,10 @@ Design record: #269 comment 6190388058.
   stays, a higher one is taken with the peer's label; a busy file retried;
   the pause and the hold; a node with no peer; one video per look and the
   idle wait; the repair queue left to the repair; a correction made during
-  the take; a row that no longer matches the catalog; `held_titles`'
-  rows; the pure `wants`, `candidates` and `FollowState<TitleWhy>`),
+  the take; the take waiting for the song-files lock; a row that no longer
+  matches the catalog; `held_titles`' rows; the pure `wants` (an operator's
+  title here stays even under a rank above 2), `candidates` and
+  `FollowState<TitleWhy>`),
   `lyrics/worker_tests_peer.rs::the_worker_follows_the_peers_corrected_title`.
 
 ## PP's workers on (MAIN SESSION OPS, after the release with lanes 7–9 reaches PP)
