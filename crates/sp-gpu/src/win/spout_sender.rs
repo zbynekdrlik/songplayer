@@ -21,7 +21,7 @@ use super::spout_lock::{give_back, give_back_maps, held_elsewhere, listed_sender
 use super::{Compositor, NO_TARGET, micros_since};
 use crate::error::GpuError;
 use crate::spout::{
-    SENDER_NAMES_MAP, SPOUT_FHD_SENDER_NAME, SPOUT_SENDER_NAME, check_sender_name, copy_waited,
+    SENDER_NAMES_MAP, SPOUT_FHD_SENDER_NAME, SPOUT_SENDER_NAME, check_sender_name, lost_send_error,
     map_mutex_name, status_result,
 };
 use crate::spout_lock::access_mutex_name;
@@ -62,7 +62,10 @@ static SDK: Mutex<()> = Mutex::new(());
 
 /// Run one shim call of the sender `sender` under [`SDK`], then give back
 /// any Spout lock the call left this thread holding (#243: Spout keeps a
-/// lock it was handed abandoned, `crate::spout_lock`).
+/// lock it was handed abandoned, `crate::spout_lock`). #251: a send holds
+/// [`SDK`] through its wait for the GPU's copy (well under a millisecond,
+/// bounded by `pipeline::FRAME_WAIT_LIMIT`); only the `program-max` thread
+/// sends, so no other sender waits behind it.
 fn sdk<T>(sender: &str, call: impl FnOnce() -> T) -> T {
     let _one = SDK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let out = call();
@@ -289,7 +292,6 @@ impl SpoutSender {
         let send_us = micros_since(start);
         unsafe { self.device.GetDeviceRemovedReason() }
             .map_err(|e| GpuError::removed(e.code().0 as u32))?;
-        let code = copy_waited(code, bound_ms)?;
         match after_send(self.registration, code, || first_send_facts(&self.shim)) {
             AfterSend::Shared(next) => {
                 self.check_texture_lock(send_us)?;
@@ -304,10 +306,7 @@ impl SpoutSender {
             AfterSend::Lost { code, next } => {
                 self.check_texture_lock(send_us)?;
                 self.registration = next;
-                Err(GpuError::Spout {
-                    call: "spout_sender_send",
-                    code: code as u32,
-                })
+                Err(lost_send_error(code, bound_ms))
             }
             AfterSend::Refuse(why) => {
                 let holder = self.list_holder(why);

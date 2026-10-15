@@ -239,7 +239,7 @@ of each picture, both targets drawn at the compose phase).
   - so Spout needs no keyed mutex, and `SendTexture` does not even need our
     target to be shared;
   - it is shared anyway, with Spout's own description. S1b SENDS it
-    (`SendTexture`, a GPU copy) rather than registering its handle: Spout's
+    (a GPU copy; #251 step 3: the shim's `SendSynced`, not `SendTexture`) rather than registering its handle: Spout's
     own texture is guarded by the sender mutex a receiver takes, so Arena
     never reads a frame the compositor is drawing (#251 step 3: nor one
     Spout's copy is still writing, below).
@@ -353,8 +353,12 @@ anchors are on #223 (comment 5984577044).
   members and WAITS for the copy (an event query of the device, `GetData`
   + `SwitchToThread`, bounded by `FRAME_WAIT_LIMIT`) before `SetNewFrame`
   and `AllowTextureAccess`, still under the mutex. Code 6
-  (`status::COPY_NOT_DONE`) = not done in time, announced anyway →
-  `spout::copy_waited` → `GpuError::Timeout`; a lost device is read first.
+  (`status::COPY_NOT_DONE`) = not done in time: NOT announced (the mutex is
+  let go all the same), a lost frame through `spout_state::after_send` (so
+  a first send's registration is still recorded), then
+  `spout::lost_send_error` → `GpuError::Timeout`; a lost device is read
+  first. The process-wide `SDK` lock spans the wait (only `program-max`
+  sends).
   `spout_tests.rs::the_shim_announces_a_frame_only_after_the_gpu_wrote_it`
   reads the shim source for the order (the shim compiles only on Windows).
 - Registration is lazy: Spout lists the sender at its FIRST send (it needs
@@ -389,7 +393,7 @@ anchors are on #223 (comment 5984577044).
     lock timed out during the registration: Spout's `RegisterSenderName`
     then registers nothing and `CreateSender` ignores that; or another
     program's `CleanSenders` dropped it mid-registration); nothing
-    registered (`SendTexture` failed or threw before the registration) →
+    registered (the send failed or threw before the registration) →
     `REGISTRATION_FAILED`: a retry would meet its own half-made
     registration and be renamed `_1`. A send that fails AFTER the
     registration loses one frame and leaves the sender `Unconfirmed` (never
@@ -818,7 +822,7 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   stutter, with ONE Spout layer too. Now `MaxOut::offer_with` stamps each
   job with its offer `Instant` (`MaxNext::Job(job, offered)`), the worker
   composes at once and `send_at` waits until the due instant on its
-  `SendClock`, then `SendTexture`; a compose that ran past it sends at once
+  `SendClock`, then sends (`SendSynced`); a compose that ran past it sends at once
   and counts `send_late`. Production waits on `SpinClock` (sleep to
   `SEND_SPIN_MARGIN` = 2 ms short, then spin; the decision is the pure
   `send_wait_step`); `MaxWorker::new` uses `NoWait` (tests pass made-up

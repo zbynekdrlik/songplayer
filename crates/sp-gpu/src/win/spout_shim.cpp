@@ -30,7 +30,7 @@ constexpr int kFailed = 3;
 constexpr int kException = 4;
 constexpr int kBadArgument = 5;
 // #251: the GPU did not finish the copy within the bound (or its query
-// failed); the frame was announced anyway, as spoutDX would have.
+// failed): the frame was NOT announced (one lost frame).
 constexpr int kCopyNotDone = 6;
 
 // The longest name Spout can carry: a renamed sender `<name>_<n>` (up to 11
@@ -51,7 +51,8 @@ class SyncedDX : public spoutDX {
    public:
     // 0 sent (or Spout skipped the copy: a receiver held the mutex over
     // 67 ms, as SendTexture), 3 no sender, 6 the copy not done within
-    // `bound_ms`. Throws what the SDK throws.
+    // `bound_ms` (not announced; the mutex is let go all the same). Throws
+    // what the SDK throws.
     int SendSynced(ID3D11Texture2D* texture, ID3D11Query* done, unsigned long long bound_ms) {
         D3D11_TEXTURE2D_DESC desc;
         ZeroMemory(&desc, sizeof(desc));
@@ -79,7 +80,9 @@ class SyncedDX : public spoutDX {
                 }
                 SwitchToThread();
             }
-            frame.SetNewFrame();
+            if (result == kOk) {
+                frame.SetNewFrame();
+            }
             frame.AllowTextureAccess(m_pSharedTexture);
         }
         return result;
@@ -178,7 +181,7 @@ int spout_sender_relist(void* handle) {
 // own shared texture under the sender's named mutex, wait until the GPU has
 // done it (`done`, an event query of that device, at most `bound_ms`), then
 // announce the frame; the first call registers the sender. 0 sent, 3 failed,
-// 4 exception, 6 the copy not done within the bound.
+// 4 exception, 6 the copy not done within the bound (not announced).
 int spout_sender_send_synced(void* handle, ID3D11Texture2D* texture, ID3D11Query* done,
                              unsigned long long bound_ms) {
     Sender* sender = static_cast<Sender*>(handle);
