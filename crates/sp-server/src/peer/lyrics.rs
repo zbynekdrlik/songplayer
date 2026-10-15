@@ -11,7 +11,9 @@
 //! The peer's row (`/videos`) must match its catalog and must
 //! not be the Live-Translate track; a copy of what the row already serves (the
 //! same source at the same version, e.g. the daily full-mix upgrade) is
-//! nothing newer: the job runs here. A video whose track here stands in for
+//! nothing newer: the job runs here (with paid AI off an operator's
+//! reprocess flag is then answered by that copy instead, #264,
+//! `nothing_newer`). A video whose track here stands in for
 //! a peer's copy (`peer::standin`) takes no copy through this hook: the
 //! copy goes into EVERY row of it (they serve one file), whatever its
 //! source, through the stand-in's own look, made due now; the row is put
@@ -31,7 +33,7 @@
 use std::sync::Arc;
 
 use sqlx::SqlitePool;
-use tracing::warn;
+use tracing::{info, warn};
 
 use super::Exchange;
 use super::ask::{Ask, FetchPlan, PeerStep};
@@ -86,12 +88,53 @@ pub async fn first(ex: Option<&Arc<Exchange>>, row: &VideoLyricsRow) -> PeerStep
                         .await;
                     PeerStep::Done
                 }
-                Ok(Adopted::NothingNewer) => ex.local(job, row.id, &row.youtube_id).await,
+                Ok(Adopted::NothingNewer) => nothing_newer(ex, row).await,
                 Err(e) => {
                     ex.after_failed_fetch(job, row.id, &row.youtube_id, &plan.peer.name, &e)
                         .await
                 }
             }
+        }
+    }
+}
+
+/// The track here already is the peer's copy ([`Adopted::NothingNewer`]):
+/// the job runs here (`Exchange::local`, held while paid AI is off). #264
+/// (ROZHODNUTÉ, option a): with paid AI off an operator's reprocess flag on
+/// the video can neither run here nor fetch anything new, so that very
+/// copy answers it: the flag is cleared on every row ([`answer_reprocess`]),
+/// the wait ends and the job is done. The follow (`peer::follow`) brings
+/// any later copy of the peer's. With paid AI on nothing changes.
+async fn nothing_newer(ex: &Exchange, row: &VideoLyricsRow) -> PeerStep {
+    let job = Job::Lyrics;
+    if !ex.may_run_here(job).await && answer_reprocess(ex, &row.youtube_id).await {
+        ex.end_wait(job, &row.youtube_id).await;
+        info!(
+            video_id = row.id,
+            youtube_id = %row.youtube_id,
+            "exchange: an operator's reprocess is answered by the peer's copy served here"
+        );
+        return PeerStep::Done;
+    }
+    ex.local(job, row.id, &row.youtube_id).await
+}
+
+/// Clears an operator's reprocess flag on every row of `youtube_id`;
+/// whether one was set. A failed write WARNs and answers no (the job is
+/// then held, as before).
+async fn answer_reprocess(ex: &Exchange, youtube_id: &str) -> bool {
+    let cleared = sqlx::query(
+        "UPDATE videos SET lyrics_manual_priority = 0 \
+         WHERE youtube_id = ? AND lyrics_manual_priority != 0",
+    )
+    .bind(youtube_id)
+    .execute(&ex.pool)
+    .await;
+    match cleared {
+        Ok(done) => done.rows_affected() > 0,
+        Err(e) => {
+            warn!(youtube_id, %e, "exchange: clearing a reprocess flag failed");
+            false
         }
     }
 }
