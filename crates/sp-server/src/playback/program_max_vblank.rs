@@ -66,8 +66,9 @@ pub fn compose_offset(
     budget: Duration,
 ) -> Duration {
     let period = period.as_nanos().max(1);
-    let gap =
-        (send_phase.as_nanos() % period + period - compose_phase.as_nanos() % period) % period;
+    // `send` is not reduced first: `send % period` would have the
+    // equivalent mutant `send + period` under the outer `% period`.
+    let gap = (send_phase.as_nanos() + period - compose_phase.as_nanos() % period) % period;
     let short = budget.as_nanos().saturating_sub(gap);
     let k = gap + short.div_ceil(period) * period;
     Duration::from_nanos(u64::try_from(k).unwrap_or(u64::MAX))
