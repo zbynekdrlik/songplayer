@@ -37,6 +37,8 @@
 //! output still to build (its target, its Spout open) is built after MAX's
 //! send and drawn from the next compose, unless MAX's boundary is not drawn
 //! at all (then it is built first and goes out alone, at the due instant).
+//! A device the FHD side loses after MAX's boundary went out is MAX's too:
+//! the boundary stays sent, MAX's state and log name the loss.
 //!
 //! Failures never panic the thread and never reach the program:
 //!
@@ -79,17 +81,14 @@
 
 use std::time::{Duration, Instant};
 
-use sp_gpu::{
-    ComposeStats, Composition, FHD_TARGET, GpuError, Nv12Picture, SpoutSendStats, TargetId,
-    VblankGrid,
-};
+use sp_gpu::{ComposeStats, FHD_TARGET, GpuError, SpoutSendStats, TargetId, VblankGrid};
 use tracing::{info, warn};
 
-use crate::playback::frame_buf::SharedFrame;
-use crate::playback::program_max::{MaxJob, MaxNext, MaxOut, MaxPicture};
+use crate::playback::program_max::{MaxJob, MaxNext, MaxOut};
 pub use crate::playback::program_max_gpu::{
     MaxCompositor, MaxGpu, MaxSender, SpoutGpu, is_refusal,
 };
+pub use crate::playback::program_max_ids::PictureIds;
 use crate::playback::program_max_list::{ListSide, SpoutList};
 use crate::playback::program_max_send::{
     NoWait, SendClock, SendTiming, SpinClock, send_at, wait_for,
@@ -151,75 +150,6 @@ impl LogGate {
             Some(_) => LogLine::Failing { held_back },
             None => LogLine::Recovered { held_back },
         })
-    }
-}
-
-/// The ids of the pictures the compositor is given. `sp-gpu` skips the
-/// upload of a picture whose id its slot already holds, so an id must never
-/// name other bytes: ids come from a counter, never from an address (a
-/// freed buffer's address comes back). A picture that is the SAME
-/// allocation as one of the last composed boundary's keeps that one's id;
-/// those allocations are held here, so none of them can be freed and
-/// reused while it is compared.
-#[derive(Debug, Default)]
-pub struct PictureIds {
-    next: u64,
-    held: Vec<(SharedFrame, u64)>,
-}
-
-impl PictureIds {
-    /// What `job` shows, its pictures labelled; this job's pictures are the
-    /// ones held from now on.
-    pub fn composition<'a>(&mut self, job: &'a MaxJob) -> Composition<'a> {
-        let mut labelled = Vec::with_capacity(2);
-        let composition = match job {
-            MaxJob::Black { .. } => Composition::Black,
-            MaxJob::Picture { picture, .. } => {
-                Composition::Picture(self.label(&mut labelled, picture))
-            }
-            MaxJob::Fade {
-                from,
-                to,
-                weight_q8,
-                ..
-            } => Composition::Fade {
-                from: from.as_ref().map(|p| self.label(&mut labelled, p)),
-                to: to.as_ref().map(|p| self.label(&mut labelled, p)),
-                weight_q8: *weight_q8,
-            },
-        };
-        self.held = labelled;
-        composition
-    }
-
-    /// Hold no picture any more (the compositor is gone): the frames are
-    /// freed, and every picture gets a new id.
-    pub fn forget(&mut self) {
-        self.held.clear();
-    }
-
-    /// `picture` with its id: the id of the same allocation held or already
-    /// labelled in this job, else the next one.
-    fn label<'a>(
-        &mut self,
-        labelled: &mut Vec<(SharedFrame, u64)>,
-        picture: &'a MaxPicture,
-    ) -> Nv12Picture<'a> {
-        let known = self
-            .held
-            .iter()
-            .chain(labelled.iter())
-            .find(|(frame, _)| frame.ptr_eq(&picture.video))
-            .map(|&(_, id)| id);
-        let id = match known {
-            Some(id) => id,
-            None => {
-                self.next += 1;
-                self.next
-            }
-        };
-        labelled.push((picture.video.clone(), id));
-        picture.nv12(id)
     }
 }
 
@@ -443,26 +373,38 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
             self.release_fhd();
         }
         let went = self.attempt(job, offered, now, fhd_wanted);
-        let max = self.finish_max(went.max, job, now);
+        // #251 step 2: the device the FHD side lost after MAX's boundary went
+        // out (its send, or its build after MAX's send) was MAX's too.
+        let lost = match (&went.max, &went.fhd) {
+            (Ok(_), Some(fhd)) => device_lost(fhd),
+            _ => None,
+        };
+        let max = self.finish_max(went.max, lost, job, now);
         let fhd = went.fhd.and_then(|went| self.finish_fhd(went, job, now));
         self.list.boundary(now, self.out);
         Lines { max, fhd }
     }
 
     /// Report MAX's boundary and log what changed; returns the line it
-    /// logged. (Each failure was recovered from where it happened.)
+    /// logged. (Each failure was recovered from where it happened.) A
+    /// device `lost` after it went out leaves it counted as sent, and MAX's
+    /// state and log name the loss: its next boundaries wait for the device.
     fn finish_max(
         &mut self,
         went: Result<Sent, Skip>,
+        lost: Option<GpuError>,
         job: &MaxJob,
         now: Instant,
     ) -> Option<LogLine> {
         match went {
             Ok((compose, send, timing, aligned)) => {
-                self.failing = None;
                 self.out.record_sent(compose, send);
                 self.out.record_send_timing(timing);
                 self.out.record_vblank(aligned);
+                self.failing = lost.map(|error| error.to_string());
+                if let Some(why) = &self.failing {
+                    self.out.record_lost(why);
+                }
             }
             Err(Skip::Backoff) => self.out.record_skipped(),
             Err(Skip::Unsupported) => {
@@ -563,8 +505,11 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         let max_built = self.build(Which::Max, now);
         // #239: MAX goes first, whole. An FHD output still to build (a
         // target, a Spout open) is built AFTER MAX's send and drawn from
-        // the next compose, so its cost never delays MAX's compose or send;
-        // only when MAX's boundary is not drawn at all is it built first.
+        // the next compose, so its cost never delays this boundary's MAX
+        // (an open longer than the wait to the next compose instant makes
+        // that compose late: `compose_late`); only when MAX's boundary is
+        // not drawn at all (its build failed, lost the device or waits a
+        // backoff) is it built first.
         let fhd_first = fhd_wanted && (max_built.is_err() || self.fhd.sender.is_some());
         let fhd_built = fhd_first.then(|| match device_lost(&max_built) {
             Some(error) => Err(Skip::Failed(error)),
@@ -980,6 +925,10 @@ mod tests_send;
 #[cfg(test)]
 #[path = "program_max_worker_tests_fhd.rs"]
 mod tests_fhd;
+
+#[cfg(test)]
+#[path = "program_max_worker_tests_fhd_lost.rs"]
+mod tests_fhd_lost;
 
 #[cfg(test)]
 #[path = "program_max_worker_tests_log.rs"]

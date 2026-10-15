@@ -668,6 +668,13 @@ impl MaxOut {
         stats.phase = MaxPhase::Failed(why.to_string());
     }
 
+    /// #251 step 2: the device was lost after a boundary went out (the FHD
+    /// side's send, or its build after MAX's send): the state names it,
+    /// the sent boundary stays counted and no failure is.
+    pub fn record_lost(&self, why: &str) {
+        self.lock_stats().phase = MaxPhase::Failed(why.to_string());
+    }
+
     /// A boundary was skipped while the thread waits out a backoff (the
     /// state keeps the failure that started it).
     pub fn record_skipped(&self) {

@@ -16,7 +16,7 @@ use sp_gpu::{FHD_TARGET, GpuError, VblankGrid, VblankState};
 
 use super::tests::{
     DRAW_US, Drawn, FAKE_LISTED, FHD_DRAW_US, FHD_SEND_US, FakeGpu, SEND_US, UPLOAD_US,
-    device_lost, not_registered, pic, picture, plain, spawn_loop, wait_until,
+    not_registered, pic, picture, plain, spawn_loop, wait_until,
 };
 use super::{LogLine, MAX_RETRY_BACKOFF, MaxWorker};
 use crate::playback::program_max::{FHD_OFF_SETTING, MaxJob, MaxOut};
@@ -26,14 +26,14 @@ use crate::playback::program_max_vblank::VblankSource;
 const MS: Duration = Duration::from_millis(1);
 
 /// MAX on and the FHD sender's setting on.
-fn fhd_on() -> MaxOut {
+pub(super) fn fhd_on() -> MaxOut {
     let max = MaxOut::new();
     max.set_enabled(true);
     max.set_fhd_enabled(true);
     max
 }
 
-fn black(stamp: i64) -> MaxJob {
+pub(super) fn black(stamp: i64) -> MaxJob {
     MaxJob::Black { stamp_100ns: stamp }
 }
 
@@ -48,7 +48,7 @@ const MAX_ALONE: [&str; 2] = ["max draw", "max send"];
 const FHD_BUILD: [&str; 2] = ["fhd target", "fhd sender built"];
 
 /// A refused Spout name at create (a refusal like `not_registered`).
-fn name_taken() -> GpuError {
+pub(super) fn name_taken() -> GpuError {
     GpuError::SpoutNameTaken {
         name: "SP-program".into(),
     }
@@ -387,91 +387,6 @@ fn a_failed_compositor_build_fails_both_outputs_and_waits_one_backoff() {
     assert_eq!((log.compositors_built, log.sent, log.fhd_sent), (2, 2, 1));
 }
 
-/// A lost device while MAX's sender is built is the device's: the FHD
-/// output fails with that very error, adds no target, and both wait.
-#[test]
-fn a_lost_device_while_building_max_s_sender_fails_the_fhd_output_too() {
-    let max = fhd_on();
-    let gpu = FakeGpu::default();
-    gpu.script().sender.push_back(device_lost());
-    let mut worker = MaxWorker::new(&max, gpu.clone());
-    worker.serve(&black(1), Instant::now());
-    let log = gpu.log();
-    assert_eq!(log.drops, ["compositor"]);
-    assert!(
-        log.targets_added.is_empty(),
-        "no FHD target on a lost device"
-    );
-    drop(log);
-    let status = max.status();
-    let why = format!("error: {}", device_lost());
-    assert_eq!(
-        (status.device_resets, status.state.as_str()),
-        (1, why.as_str())
-    );
-    assert_eq!(status.fhd.state, why, "the same error on the FHD output");
-}
-
-/// With MAX's sender waiting out its backoff the FHD output is built first;
-/// a device lost there is the device's: MAX names it too, nothing is drawn,
-/// one reset, and both wait the backoff.
-#[test]
-fn a_lost_device_while_building_the_fhd_output_first_fails_max_too() {
-    let max = fhd_on();
-    let gpu = FakeGpu::default();
-    gpu.script().sender.push_back(name_taken());
-    gpu.script().add_target.push_back(device_lost());
-    let mut worker = MaxWorker::new(&max, gpu.clone());
-    let t0 = Instant::now();
-    worker.serve(&black(1), t0);
-    let log = gpu.log();
-    assert_eq!(log.drops, ["compositor"]);
-    assert!(log.drawn.is_empty(), "nothing drawn on a lost device");
-    drop(log);
-    let status = max.status();
-    let why = format!("error: {}", device_lost());
-    assert_eq!(
-        (
-            status.state.as_str(),
-            status.device_resets,
-            status.sender_backoffs
-        ),
-        (why.as_str(), 1, 1),
-        "MAX names the device, never its own refusal alone"
-    );
-    assert_eq!(status.fhd.state, why);
-    worker.serve(&black(2), t0);
-    assert_eq!(
-        gpu.log().compositors_built,
-        1,
-        "lost while building: the backoff"
-    );
-}
-
-/// A device lost while the FHD output is built after MAX's send: MAX's
-/// boundary had gone out; the FHD output fails with the loss, one reset,
-/// and the rebuild waits the backoff (a loss while building).
-#[test]
-fn a_lost_device_while_building_the_fhd_output_after_max_s_send_waits_the_backoff() {
-    let max = fhd_on();
-    let gpu = FakeGpu::default();
-    gpu.script().fhd_sender.push_back(device_lost());
-    let mut worker = MaxWorker::new(&max, gpu.clone());
-    let t0 = Instant::now();
-    worker.serve(&black(1), t0);
-    let log = gpu.log();
-    assert_eq!(log.sent, 1, "MAX's boundary went out before the build");
-    assert_eq!(log.drops, ["sender", "compositor"]);
-    drop(log);
-    let status = max.status();
-    assert_eq!((status.submitted, status.device_resets), (1, 1));
-    assert_eq!(status.fhd.state, format!("error: {}", device_lost()));
-    worker.serve(&black(2), t0);
-    assert_eq!(gpu.log().compositors_built, 1, "inside the backoff");
-    let status = max.status();
-    assert_eq!((status.failed, status.fhd.failed), (1, 2), "both skipped");
-}
-
 #[test]
 fn a_failed_fhd_target_waits_its_own_backoff_and_never_stops_max() {
     let max = fhd_on();
@@ -578,154 +493,6 @@ fn a_refused_fhd_sender_is_dropped_with_its_target_and_a_new_one_waits_its_own_b
     assert_eq!(log.listed_reads, 2, "the new sender's listing is read");
     drop(log);
     assert_eq!(max.fhd_listed(), Some(FAKE_LISTED));
-}
-
-/// A lost device at the FHD send is ONE event for both outputs (one
-/// device): both senders and the compositor dropped, one reset, both
-/// rebuilt on the next job.
-#[test]
-fn a_lost_device_drops_both_senders_and_the_compositor_and_rebuilds_both() {
-    let max = fhd_on();
-    let gpu = FakeGpu::default();
-    let mut worker = MaxWorker::new(&max, gpu.clone());
-    let t0 = Instant::now();
-    worker.serve(&black(1), t0);
-    gpu.script().fhd_send.push_back(device_lost());
-    worker.serve(&black(2), t0);
-    assert!(!worker.holds_gpu());
-    assert_eq!(gpu.log().drops, ["sender", "fhd sender", "compositor"]);
-    let status = max.status();
-    assert_eq!((status.device_resets, status.submitted), (1, 2));
-    assert_eq!(status.fhd.state, format!("error: {}", device_lost()));
-    worker.serve(&black(3), t0);
-    let log = gpu.log();
-    assert_eq!(
-        (
-            log.compositors_built,
-            log.senders_built,
-            log.targets_added.len(),
-            log.fhd_senders_built
-        ),
-        (2, 2, 2, 2),
-        "both rebuilt at once"
-    );
-    drop(log);
-    worker.serve(&black(4), t0);
-    let log = gpu.log();
-    assert_eq!((log.sent, log.fhd_sent), (4, 1));
-    drop(log);
-    assert_eq!(max.status().fhd.state, "running");
-}
-
-/// MAX's boundary went out BEFORE the FHD send lost the device, so it
-/// proves nothing about the rebuilt one: lost again at the next compose
-/// (no boundary since), the rebuild waits the backoff.
-#[test]
-fn a_boundary_sent_before_the_loss_does_not_count_as_one_after_it() {
-    let max = fhd_on();
-    let gpu = FakeGpu::default();
-    let mut worker = MaxWorker::new(&max, gpu.clone());
-    let t0 = Instant::now();
-    worker.serve(&black(1), t0);
-    gpu.script().fhd_send.push_back(device_lost());
-    worker.serve(&black(2), t0);
-    assert_eq!(gpu.log().sent, 2, "MAX went out, then the FHD send lost it");
-    gpu.script().compose.push_back(device_lost());
-    worker.serve(&black(3), t0);
-    assert_eq!(
-        gpu.log().compositors_built,
-        2,
-        "the first loss rebuilds at once"
-    );
-    worker.serve(&black(4), t0);
-    assert_eq!(
-        gpu.log().compositors_built,
-        2,
-        "lost again before a boundary went out on the rebuilt device: the backoff"
-    );
-    assert_eq!(max.status().device_resets, 2);
-}
-
-/// A lost device at MAX's send fails the FHD output with it (its sender is
-/// gone with the device): nothing more is sent, one reset.
-#[test]
-fn a_lost_device_at_max_s_send_fails_the_fhd_output_with_it() {
-    let max = fhd_on();
-    let gpu = FakeGpu::default();
-    let mut worker = MaxWorker::new(&max, gpu.clone());
-    worker.serve(&black(1), Instant::now());
-    gpu.script().send.push_back(device_lost());
-    worker.serve(&black(2), Instant::now());
-    let log = gpu.log();
-    assert_eq!((log.sent, log.fhd_sent), (1, 0));
-    assert_eq!(log.drops, ["sender", "fhd sender", "compositor"]);
-    drop(log);
-    let status = max.status();
-    let why = format!("error: {}", device_lost());
-    assert_eq!(
-        (status.device_resets, status.state.as_str()),
-        (1, why.as_str())
-    );
-    assert_eq!(
-        (status.fhd.state.as_str(), status.fhd.failed),
-        (why.as_str(), 1)
-    );
-}
-
-/// A lost device at the compose fails both, and a second loss before a
-/// boundary of either output went out waits the backoff for both.
-#[test]
-fn a_second_lost_device_at_the_compose_waits_the_backoff_for_both() {
-    let max = fhd_on();
-    let gpu = FakeGpu::default();
-    gpu.script().compose.push_back(device_lost());
-    gpu.script().compose.push_back(device_lost());
-    let mut worker = MaxWorker::new(&max, gpu.clone());
-    let t0 = Instant::now();
-    worker.serve(&black(1), t0);
-    worker.serve(&black(2), t0);
-    assert_eq!(
-        gpu.log().compositors_built,
-        2,
-        "rebuilt at once, lost again"
-    );
-    worker.serve(&black(3), t0);
-    assert_eq!(gpu.log().compositors_built, 2, "now it waits the backoff");
-    let status = max.status();
-    assert_eq!(
-        (status.device_resets, status.failed, status.fhd.failed),
-        (2, 3, 3),
-        "one reset per loss; both outputs fail and skip"
-    );
-    worker.serve(&black(4), t0 + MAX_RETRY_BACKOFF);
-    worker.serve(&black(5), t0 + MAX_RETRY_BACKOFF);
-    let log = gpu.log();
-    assert_eq!((log.compositors_built, log.sent, log.fhd_sent), (3, 2, 1));
-}
-
-/// A boundary of EITHER output proves the rebuilt device: with MAX's sender
-/// in its backoff, the FHD boundary alone lets the next loss rebuild at
-/// once.
-#[test]
-fn an_fhd_boundary_alone_proves_the_rebuilt_device() {
-    let max = fhd_on();
-    let gpu = FakeGpu::default();
-    gpu.script().compose.push_back(device_lost());
-    let mut worker = MaxWorker::new(&max, gpu.clone());
-    let t0 = Instant::now();
-    worker.serve(&black(1), t0);
-    gpu.script().sender.push_back(name_taken());
-    worker.serve(&black(2), t0);
-    assert_eq!(gpu.log().fhd_sent, 1, "the FHD target went out alone");
-    gpu.script().compose.push_back(device_lost());
-    worker.serve(&black(3), t0);
-    worker.serve(&black(4), t0);
-    let log = gpu.log();
-    assert_eq!(
-        (log.compositors_built, log.fhd_sent),
-        (3, 2),
-        "an FHD boundary went out between the two losses: the rebuild does not wait"
-    );
 }
 
 #[test]
@@ -848,6 +615,8 @@ fn release_drops_both_senders_then_the_compositor() {
     let gpu = FakeGpu::default();
     let mut worker = MaxWorker::new(&max, gpu.clone());
     worker.serve(&black(1), Instant::now());
+    worker.serve(&black(2), Instant::now());
+    assert_eq!(max.fhd_listed(), Some(FAKE_LISTED), "both went out");
     worker.release();
     assert!(!worker.holds_gpu());
     assert_eq!(gpu.log().drops, ["sender", "fhd sender", "compositor"]);
@@ -864,11 +633,8 @@ fn the_fhd_sender_logs_its_own_failure_and_recovery() {
     let t0 = Instant::now();
     let lines = worker.serve_lines(&black(1), t0, t0);
     assert_eq!(
-        lines,
-        Lines {
-            max: None,
-            fhd: None
-        },
+        (lines.max, lines.fhd),
+        (None, None),
         "built: nothing to say"
     );
     gpu.script().fhd_send.push_back(lost_frame());

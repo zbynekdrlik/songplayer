@@ -728,17 +728,25 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   (#239):** an FHD output still to build (its target, its sender: a Spout
   open with `CleanSenders`, up to 67 ms per kept lock) is built AFTER MAX's
   send (`build_fhd_after`) and drawn from the next compose; its build
-  boundary reports nothing for it. Only when MAX's boundary is not drawn at
-  all (its build failed or waits a backoff, `fhd_first`) is the FHD output
-  built first and sent alone at the due instant. A device lost while
-  building the FHD output first fails MAX with it, nothing drawn. Every failure
+  boundary reports nothing for it. So the build never delays THIS
+  boundary's MAX; it still runs on the thread before the next job, so an
+  open longer than the wait to the next compose instant (33.3 ms − K)
+  makes that compose late (`compose_late`), longer by K its send too
+  (`send_late`). Only when MAX's boundary is not drawn at all (its build
+  failed, lost the device or waits a backoff, `fhd_first`) is the FHD
+  output built first and sent alone at the due instant. A device lost
+  while building the FHD output first fails MAX with it, nothing drawn. A
+  device the FHD side loses AFTER MAX's boundary went out (its send, or its
+  build after MAX's send) is MAX's too: the boundary stays counted as sent,
+  never failed, and MAX's state (`MaxOut::record_lost`) and log name the
+  loss, so MAX never reads `running` while it waits for the device. Every failure
   is recovered from where it happens (`output_failed`, `lose_device`),
   once: a lost device is ONE event for both outputs (`device_resets` +1,
   both fail with it, `device_lost` hands MAX's to the FHD side), and
   `lost_unsent` is cleared by a send of EITHER output that went out (in
   `send_max` / `send_fhd`, so a MAX boundary sent before the FHD send lost
   the device never counts as one after it).
-- **Picture ids (`PictureIds`).** S1a's residency skips the upload of an id
+- **Picture ids (`PictureIds`, `program_max_ids.rs`).** S1a's residency skips the upload of an id
   the slot holds, so an id must never name other bytes: ids come from a
   counter. A picture that is the same allocation (`SharedFrame::ptr_eq`) as
   one of the last composed boundary's keeps its id; those `Arc`s are held
@@ -1120,12 +1128,14 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   target)`) is drawn by the same compose as MAX, from the same labelled
   composition and the same uploaded textures (#251 step 2). The FHD
   output is built AFTER MAX's send (#239, "MAX goes first, whole": its
-  Spout open never delays MAX's compose or send; rare: the start, a
-  backoff's end, a lost device) and drawn from the next compose; the
+  Spout open never delays that boundary's MAX, at most the next compose,
+  `compose_late`; rare: the start, a backoff's end, a lost device) and
+  drawn from the next compose; the
   compose waits for `compose_at` and draws both targets; at `due` MAX's
   send runs, then the FHD one's (its `send_at` meets a passed instant).
-  When MAX's boundary is not drawn (its sender waits out its own backoff)
-  the FHD output is built first and goes out at the due instant alone.
+  When MAX's boundary is not drawn (its build failed, lost the device or
+  waits a backoff) the FHD output is built first and goes out at the due
+  instant alone.
   Pinned by
   `both_targets_are_composed_at_the_compose_instant_then_sent_max_first`
   (a grid, the fake clock's waits [compose_at, due, due] once both are
@@ -1186,9 +1196,12 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   "fhd send", "fhd target removed"), `Script.add_target` / `fhd_sender` /
   `fhd_send` / `listed`: the FHD output built after MAX's send, both
   targets at `compose_at`, MAX first, FHD off draws no FHD target, an FHD
-  refusal or failed build never stops MAX and takes its target off, a lost
-  device anywhere (building the FHD output first included) rebuilds both, a
-  MAX boundary sent before the loss never counts after it), WARP: sp-gpu `tests/warp.rs`
+  refusal or failed build never stops MAX and takes its target off),
+  `program_max_worker_tests_fhd_lost.rs` (a lost device anywhere, building
+  the FHD output first or after MAX's send included, rebuilds both; a loss
+  after MAX's boundary went out leaves it sent and MAX's state and log name
+  it; a MAX boundary sent before the loss never counts after it), WARP:
+  sp-gpu `tests/warp.rs`
   (one compose fills both targets, one upload per picture, a 4:3 picture
   fills MAX's width and keeps FHD's bars, a removed target), `tests/spout.rs`
   (the `SP-program` sender of the FHD target listed at 1920×1080 and read
