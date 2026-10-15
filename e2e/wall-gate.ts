@@ -9,6 +9,13 @@
  * deploy: it is logged. The gate fails only when SongPlayer's own readers
  * are broken: the report did not answer, never ran, or reads `unknown` for
  * its whole window (a read can fail once; the gate polls on).
+ *
+ * #275: the report also says whether SongPlayer's clip runs in Resolume
+ * (`songplayer_clip`). The operator may show anything on the wall (slides
+ * during a sermon), and after an Arena relaunch no clip runs until he
+ * presses a Stream Deck scene: the clip's state is LOGGED, never a failure.
+ * The gate fails only when the deployed server does not carry the fact at
+ * all (`clipFailures`).
  */
 
 /** One problem as the server names it (`sp_core::wall::WallProblemView`). */
@@ -37,6 +44,23 @@ export interface WindowsDisplay {
   width: number;
   height: number;
   hz: number;
+}
+
+/** One clip Resolume shows (`sp_core::wall_clip::ClipView`). */
+export interface ClipView {
+  layer: string;
+  clip: string;
+  source: string;
+}
+
+/** #275: SongPlayer's clip in Resolume (`sp_core::wall_clip::SongplayerClip`). */
+export interface SongplayerClip {
+  /** `running`, `none` or `unknown`. */
+  state: string;
+  clips?: ClipView[];
+  ndi_clips?: ClipView[];
+  since_ms?: number | null;
+  now_ms?: number | null;
 }
 
 /** `GET /api/v1/wall` (`sp_core::wall::WallStatus`). */
@@ -69,6 +93,9 @@ export interface WallStatus {
     last?: { at_ms: number; why: string; pid: number; error?: string | null } | null;
     phase: string;
   } | null;
+  /** #275: whether SongPlayer's clip runs in Resolume; absent from a server
+   * without #275. */
+  songplayer_clip?: SongplayerClip | null;
 }
 
 /** How long the gate waits for SongPlayer's first wall check after a
@@ -140,9 +167,36 @@ export function wallFailures(status: WallStatus | null | undefined): string[] {
   return failures;
 }
 
+/** #275: why the gate fails on the clip fact; [] = the server carries it
+ * (whatever its state: `none` and `unknown` are the operator's and Arena's,
+ * never a deploy's fault). */
+export function clipFailures(status: WallStatus | null | undefined): string[] {
+  if (status === null || status === undefined || !status.checked) return [];
+  if (!status.songplayer_clip) {
+    return ["the wall report carries no songplayer_clip (a server without #275?)"];
+  }
+  return [];
+}
+
+/** #275: the clip fact for the gate's log: its state, how long (on the
+ * server's clock), the SongPlayer clips that run and the visible NDI
+ * clips; "" from a server without it. */
+export function clipSummary(clip: SongplayerClip | null | undefined): string {
+  if (!clip) return "";
+  const names = (clips: ClipView[] | undefined) =>
+    (clips ?? []).map((c) => `${c.layer} / ${c.clip}`).join(", ");
+  const held =
+    typeof clip.since_ms === "number" && typeof clip.now_ms === "number"
+      ? ` for ${Math.round((clip.now_ms - clip.since_ms) / 1000)} s`
+      : "";
+  const running = (clip.clips ?? []).length > 0 ? ` [${names(clip.clips)}]` : "";
+  const ndi = (clip.ndi_clips ?? []).length > 0 ? ` ndi=[${names(clip.ndi_clips)}]` : "";
+  return `clip=${clip.state}${held}${running}${ndi}`;
+}
+
 /** One line for the gate's log: the state, what Resolume wants, what
- * Windows shows, NVAPI, every problem, and (#254) the guard's ends of
- * Resolume when it ended one since SongPlayer started. */
+ * Windows shows, NVAPI, every problem, (#254) the guard's ends of Resolume
+ * when it ended one since SongPlayer started, and (#275) SongPlayer's clip. */
 export function wallSummary(status: WallStatus | null | undefined): string {
   if (status === null || status === undefined) return "no answer";
   const read = status.read ?? {};
@@ -172,9 +226,11 @@ export function wallSummary(status: WallStatus | null | undefined): string {
       ? ` guard=ended ${guard.ends}x last=${guard.last?.why ?? "?"} pid ${guard.last?.pid ?? "?"}` +
         `${guard.last?.error ? ` (failed: ${guard.last.error})` : ""} phase=${guard.phase}`
       : "";
+  const clip = clipSummary(status.songplayer_clip);
   return (
     `state=${status.state} arena=${read.arena_running ?? "?"} ${wanted} ${windows} ${nvidia}` +
     (problems ? ` problems=[${problems}]` : "") +
-    ended
+    ended +
+    (clip ? ` ${clip}` : "")
   );
 }
