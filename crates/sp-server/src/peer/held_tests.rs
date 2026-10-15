@@ -368,3 +368,80 @@ async fn an_operators_reprocess_takes_the_peers_copy_while_paid_ai_is_off() {
         .unwrap();
     assert_eq!(node, "snv");
 }
+
+/// PP already serves SNV's very copy (`mtl+g35t` at the current version)
+/// in playlists 1 and 2, its audio SNV's, paid AI off; its
+/// `{yt}_lyrics.json` here reads `local`, and a lyrics wait is recorded.
+/// Returns the nodes and PP's two rows.
+async fn pp_serves_snvs_copy() -> (TestNode, TestNode, [i64; 2]) {
+    let (snv, pp, id) = snv_lyrics_pp_off(true).await;
+    let two = pp.add_video_to(2, YT).await;
+    pp.give_song(two, YT, "Way Maker", "Sinach").await;
+    pp.give_lyrics(id, YT, "mtl+g35t").await;
+    std::fs::write(pp.cache().join(format!("{YT}_lyrics.json")), b"local").unwrap();
+    start_wait(pp.pool(), YT, "lyrics", 1_000).await.unwrap();
+    (snv, pp, [id, two])
+}
+
+/// #264 (ROZHODNUTÉ, option a): with paid AI off, an operator's Reprocess
+/// of a song whose track here already IS the peer's copy (nothing newer)
+/// can neither run here nor fetch anything new: the flag is cleared on
+/// every row, the wait ends and the job is done (nothing fetched, nothing
+/// announced, the row not held). The follow brings any later copy.
+#[tokio::test]
+async fn a_reprocess_of_the_peers_copy_served_here_is_answered_while_paid_ai_is_off() {
+    let (_snv, pp, rows) = pp_serves_snvs_copy().await;
+    for row in rows {
+        mark(&pp, row, "lyrics_manual_priority = 1").await;
+    }
+    let row = lyrics_row(&pp, rows[0]).await;
+    let step = crate::peer::lyrics::first(Some(&pp.ex), &row).await;
+    assert!(matches!(step, PeerStep::Done), "answered by the copy here");
+    assert_eq!(pp.manual_flags(YT).await, vec![0, 0], "every row's flag");
+    assert_eq!(wait_rows(&pp).await, 0, "the wait is over");
+    assert_eq!(lyrics_state(&pp, rows[0]).await, (1, 0, false), "not held");
+    assert_eq!(json_at(&pp), Some(b"local".to_vec()), "nothing fetched");
+    assert!(pp.ex.board.snapshot("pp").is_empty(), "nothing announced");
+}
+
+/// #264: with paid AI on nothing changes. The copy served here runs here
+/// (nothing newer), and a reprocess flag left on a row of an inactive
+/// playlist (one the lyrics queue never acts on, so it keeps nothing
+/// local) stays as it was.
+#[tokio::test]
+async fn with_paid_ai_on_the_peers_copy_served_here_runs_here_and_keeps_a_flag() {
+    let (_snv, pp, rows) = pp_serves_snvs_copy().await;
+    set(pp.pool(), SETTING_PAID_AI_ENABLED, "true").await;
+    mark(&pp, rows[1], "lyrics_manual_priority = 1").await;
+    sqlx::query("UPDATE playlists SET is_active = 0 WHERE id = 2")
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    let row = lyrics_row(&pp, rows[0]).await;
+    let PeerStep::Local(Some(_guard)) = crate::peer::lyrics::first(Some(&pp.ex), &row).await else {
+        panic!("paid AI on: nothing newer runs here")
+    };
+    assert_eq!(pp.manual_flags(YT).await, vec![0, 1], "the flag kept");
+}
+
+/// #264: with paid AI off a reprocess flag on a row with an operator's text
+/// or a dub is left alone: the lyrics stay local, the row is held as
+/// before, its flag and the wait kept.
+#[tokio::test]
+async fn a_reprocess_flag_with_an_operators_text_or_a_dub_is_left_alone_while_paid_ai_is_off() {
+    for owner in ["lyrics_override_text = 'Moj text'", "dub_requested = 1"] {
+        let (_snv, pp, rows) = pp_serves_snvs_copy().await;
+        mark(
+            &pp,
+            rows[0],
+            &format!("lyrics_manual_priority = 1, {owner}"),
+        )
+        .await;
+        let row = lyrics_row(&pp, rows[0]).await;
+        let step = crate::peer::lyrics::first(Some(&pp.ex), &row).await;
+        assert!(matches!(step, PeerStep::Deferred), "{owner}: held");
+        assert_eq!(pp.manual_flags(YT).await, vec![1, 0], "{owner}");
+        assert_eq!(wait_rows(&pp).await, 1, "{owner}: the wait kept");
+        assert_eq!(json_at(&pp), Some(b"local".to_vec()), "{owner}");
+    }
+}
