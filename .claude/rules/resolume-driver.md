@@ -14,7 +14,8 @@ paths:
 
 `resolume/driver.rs::HostDriver` is one task per Arena host. The steady state
 runs only the light `GET /api/v1/product` liveness probe, every ~10 s with
-jitter. The ~14 MB `GET /api/v1/composition` (the clip map) runs only when the
+jitter, and (#275, below) a by-id read of SongPlayer's tracked clip params
+(~140 B each) every 30 s. The ~14 MB `GET /api/v1/composition` (the clip map) runs only when the
 pure `FullRefreshReason::decide` asks for it (#157). Inside a not-ready
 episode's fast window the driver ticks every 2 s instead (#217 addendum 2).
 
@@ -236,6 +237,50 @@ keeps the dead ids until the 300 s TTL refresh, which fires no event.
   failing→ok flip: the refresh maps the same clips and fires no event, and
   there is no `refused_ids_at` hold on this path. That is bounded by the
   failure rate; the steady state never has a refused id.
+
+## #275: SongPlayer's clip — tracked at each refresh, polled by id every 30 s
+
+`driver_sp_clips.rs` (the pure rule: `sp_clips.rs`; the wall side:
+`wall.md` "#275"). Read only: nothing triggers, connects or restores a clip.
+
+- **A full refresh** (`refresh_mapping`'s Ok arm, `note_sp_clips`): the
+  body `fetch_mapping_inner` already parsed is handed to `sp_clips::track`
+  (no new fetch), which keeps every SongPlayer (Spout) and NDI clip with
+  the ids of the params that decide whether it shows and evaluates the
+  values the body carries. It stamps `read_at` and `body_at`: a refresh is
+  the tick's read. A not-ready episode's refreshes evaluate their bodies the
+  same way (an empty composition = `unknown`).
+- **The poll** (`poll_sp_clips`, the LAST step of `on_tick_at`, after the
+  tick's refresh): only with the breaker closed, an answered probe on this
+  tick (the early return), no not-ready episode, something tracked and
+  `read_at` `POLL_EVERY` (30 s) old — so 30–42 s on the jittered ~10 s
+  ticks. It reads each tracked param once, in id order, one after another
+  (`GET /api/v1/parameter/by-id/{id}`, decoded into the typed `ParamAnswer`,
+  never `serde_json::Value`), and stops at the first that does not read: a
+  hung Arena costs one 5 s timeout per poll, never 22. SNV: 22 params (8
+  Spout + 1 NDI clips' `connected`, 4 layers and 2 groups × `bypassed` +
+  `video.opacity`, the composition's `video.opacity`).
+- **A 404** = a stale map: `refresh_stale_map(now)` (`driver_push.rs`, the
+  tail `run_push` had: the refused-id 60 s hold, `not_ready_since.get_or_insert`,
+  the refresh through `decide`, the same map = `refused_ids_at`). The poll
+  fires no RecoveryEvent of its own (the refresh's ready transition does,
+  as for a push) and never counts toward the breaker (like the param
+  probe). When no refresh evaluated a body at this `now` (`body_at`: held,
+  or the fetch failed) the fact is `unknown`.
+- **Any other failure** (a 5xx, a transport error, a body that is no param):
+  `unknown` until the next read; nothing counted, nothing refreshed.
+- **The outage:** opening the breaker (`apply_outcome`) also calls
+  `forget_sp_clips` (tracked `NotLoaded`, `unknown`) next to evicting the
+  map.
+- **Publication:** `ResolumeRegistry::add_host` builds each driver
+  `.with_sp_clip_store(sp_clip_store::global())`; one INFO per change of
+  the host's state (`SongPlayer's clip in Resolume: running -> none`). A
+  test driver gets its own leaked store (`driver_sp_clips_tests.rs::driver_on`),
+  never the process's.
+- **Tests:** `driver_sp_clips_tests.rs` on the synthetic clock: the body
+  read, the 30 s cadence (29.999 / 30 s), a relaunch caught by a 404 (one
+  RecoveryEvent, the relaunched body), a refused id held 60 s, a 500, the
+  gates, a failed probe, the outage, a composition with no SongPlayer clip.
 
 ## The driver owns the wall title (#217 addendum 3)
 
@@ -668,6 +713,11 @@ are the recovery's `on_program_lines`.
   `handle_command` stamps `Instant::now()`.
 - **Mount every route a push test PUTs to.** wiremock answers an unmatched
   request with 404, which the driver now reads as a stale id and refreshes.
+- **Mount the tracked clip params in a test whose composition carries a
+  SongPlayer (Spout) or NDI clip** (#275, `driver_sp_clips_tests.rs::params_answer`):
+  a tick 30 s after the last read polls them, and an unmounted one answers
+  404 — a stale map and a refresh. The older fixtures carry text clips
+  only, so nothing is polled there.
 - **Mount the probed param in every failing→ok tick test** that keeps a
   ready map (`GET /api/v1/parameter/by-id/{id}` → 200). An unmounted route
   answers 404, which the probe reads as a relaunch: an extra refresh, and
