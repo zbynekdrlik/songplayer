@@ -471,6 +471,49 @@ async fn an_operators_lyrics_or_a_dub_track_stay_here() {
     }
 }
 
+/// SNV made the song's lyrics again since PP took them, and PP carries an
+/// operator's reprocess flag outside its lyrics queue for now (here on a
+/// second row not downloaded yet: the queue takes it once it is, so the
+/// flag asks for a run here then, and meanwhile the follow meets the
+/// video). `paid_ai` is PP's switch. Returns PP's old JSON.
+async fn flagged_outside_the_queue(paid_ai: &str) -> (TestNode, TestNode, Vec<u8>) {
+    let (snv, pp) = snv_and_pp(&[YT]).await;
+    set(pp.pool(), "paid_ai_enabled", paid_ai).await;
+    let old = pp_took(&pp, YT, OLD_SOURCE).await;
+    second_row(&pp, YT).await;
+    sqlx::query("UPDATE videos SET lyrics_manual_priority = 1, normalized = 0 WHERE id = ?")
+        .bind(rows_of(&pp, YT).await[1])
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    (snv, pp, old)
+}
+
+/// #264 (ROZHODNUTÉ 6185176417): with paid AI on, an operator's reprocess
+/// flag keeps the lyrics this node's own (it asks for a new run here), so
+/// the follow passes the song over for `FOLLOW_KEPT`; with paid AI off that
+/// run cannot happen, so the follow takes the peer's copy into every row
+/// and the take clears the flag.
+#[tokio::test]
+async fn a_reprocess_flag_keeps_the_lyrics_from_the_follow_only_while_paid_ai_is_on() {
+    let (_snv, pp, old) = flagged_outside_the_queue("true").await;
+    let before = now_ms();
+    assert!(follow_next(Some(&pp.ex)).await.is_empty());
+    let after = now_ms();
+    assert_eq!(json_of(&pp, YT), Some(old));
+    assert!(passed_for(&pp, YT, FOLLOW_KEPT, before, after));
+
+    let (_snv, pp, _) = flagged_outside_the_queue("false").await;
+    let rows = rows_of(&pp, YT).await;
+    assert_eq!(follow_next(Some(&pp.ex)).await, rows);
+    every_row_serves(&pp, YT, NEW_SOURCE).await;
+    assert_eq!(
+        pp.manual_flags(YT).await,
+        vec![0, 0],
+        "the take clears the flag"
+    );
+}
+
 // ---- the pure decisions ----
 
 fn sha(seed: &str) -> String {

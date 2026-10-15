@@ -97,6 +97,16 @@ Every path:
     also replaces a track no peer record names (`untracked`: this
     node makes no lyrics itself); while ON such a track is the node's
     own and is kept.
+  - #264 (ROZHODNUTÉ 6185176417): an operator's reprocess flag keeps a
+    song's lyrics local (`peer::lyrics::kept_local`) only while ON: it
+    asks for a run HERE. While OFF the hook, the follow and the
+    stand-in's look take the peer's copy for it instead, and the take
+    clears the flag on every row (before, such a row was held every
+    30 min for good). When the track here already IS the peer's copy
+    (nothing newer), the hook clears the flag on every row and answers
+    done (`lyrics::nothing_newer`, option a); without a flag such a row is
+    held as before. An operator's text, a dub and Live-Translate keep
+    the lyrics local either way (`held_tests.rs`).
   - The gate lives in the exchange, so it needs one: production wires it
     into the lyrics worker on every node (`lib.rs`, `with_peer`, even with
     no peer listed). A worker built without one (a unit test's harness,

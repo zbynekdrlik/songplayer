@@ -820,8 +820,9 @@ wait for a peer that has the song", below).
   audio as fetched from SNV (`TestNode::audio_from`), the state a real PP
   has after its download; the guard's own tests change PP's bytes so that
   one branch alone decides (the record, a stored hash, a hash taken now).
-- Lyrics: never for an operator's ask here (`lyrics_manual_priority`, a
-  non-blank `lyrics_override_text`) on ANY row of the video (its rows serve
+- Lyrics: never for an operator's ask here (`lyrics_manual_priority`,
+  only while this node's paid AI is on, #264; a non-blank
+  `lyrics_override_text`) on ANY row of the video (its rows serve
   one `{yt}_lyrics.json`; review round 5: the asked row only before), never
   for a video whose `{yt}_lyrics.json` here is a dub's subtitles (any row
   of it here dub-requested or `gemini-live-translate`), a failed read →
@@ -836,6 +837,29 @@ wait for a peer that has the song", below).
   queue never takes another, so its flag is never cleared;
   `reprocess-all-stale` / `reprocess-catalog-with-new-gate` set it with no
   playlist filter, and the Reprocess route leaves `asr_gap` in place). The
+  reprocess flag counts only while this node's paid AI is on (#264,
+  ROZHODNUTÉ 6185176417: `kept_local` reads `paid_ai::enabled` once per
+  call and binds it, 0/1, a bare `?` between the Live-Translate source and
+  the version): with paid AI off the flag asks for a run this node cannot
+  make (held every 30 min for good: PP rows 166, 225, 11 and 39 after an
+  ops Reprocess), so the hook, the follow and the stand-in's look take the
+  listed peer's copy under the same audio rule, and the take
+  (`adopt_lyrics` → `mark_video_lyrics_complete`) clears the flag on every
+  row. An operator's text, a dub and Live-Translate keep the lyrics local
+  either way; SNV (paid AI on, no peer) is unchanged. A flagged row whose
+  track here already carries the peer's source at its version
+  (`NothingNewer`: source and version only, never the bytes) has nothing
+  newer to fetch (#264 ROZHODNUTÉ, option a, finding 6188753933): with
+  paid AI off `lyrics::nothing_newer` clears the flag on every row of the
+  video (`answer_reprocess`, one UPDATE; a row affected = a flag was set),
+  ends the wait and answers Done (INFO `exchange: an operator's reprocess
+  is answered by the peer's copy served here`), recording no origin: the
+  row leaves bucket 1, and another copy of the same source at the peer is
+  the follow's (`changed` / `untracked`, which a recorded sha would hide).
+  Without a flag, or with paid AI on, it runs
+  here as before (`Exchange::local`: held while off). Re-fetching the same
+  copy (option b) was rejected: it moves the same bytes and changes
+  nothing. The
   peer's `/videos` row must match its catalog (pipeline version) and must
   not be `gemini-live-translate`; the same source at the same version as
   the row already serves = nothing newer → runs here (the daily full-mix
@@ -966,9 +990,10 @@ Three rules:
       reads a row that records an audio (rows share it), else the lowest
       (review round 1: a lowest row with none kept the stand-in waiting
       forever);
-    - an operator's text or ask, a dub or a Live-Translate row on the video
-      (`lyrics::kept_local`, the hook's own query) → dropped, no peer asked
-      (a dropped stand-in also ends a spent wait its hand-off kept);
+    - an operator's text or ask (an ask only while paid AI is on, #264),
+      a dub or a Live-Translate row on the video (`lyrics::kept_local`, the
+      hook's own query) → dropped, no peer asked (a dropped stand-in also
+      ends a spent wait its hand-off kept);
     - the listed peers' catalogs (cached 60 s): the first holding the
       lyrics at this node's version (`holds`) → the audio guard's verdict
       (`Exchange::audio_verdict`, the half of `unless_peers_audio` that
@@ -1032,11 +1057,20 @@ Three rules:
   a_stand_ins_spent_bound_survives_a_pick_with_the_peer_unreachable,
   a_reprocess_left_on_an_inactive_playlists_row_does_not_keep_the_lyrics_here,
   an_operators_ask_on_another_row_of_the_video_keeps_the_lyrics_here,
-  an_operators_mark_the_queue_never_acts_on_does_not_keep_the_lyrics_here}`,
+  an_operators_mark_the_queue_never_acts_on_does_not_keep_the_lyrics_here,
+  the_kept_local_sql_binds_four_bare_parameters_in_text_order}`,
+  `held_tests.rs::{a_reprocess_flag_keeps_the_lyrics_here_only_while_paid_ai_is_on,
+  an_operators_text_or_a_dub_keeps_the_lyrics_here_while_paid_ai_is_off,
+  an_operators_reprocess_takes_the_peers_copy_while_paid_ai_is_off,
+  a_reprocess_of_the_peers_copy_served_here_is_answered_while_paid_ai_is_off,
+  with_paid_ai_on_the_peers_copy_served_here_runs_here_and_keeps_a_flag,
+  a_reprocess_flag_with_an_operators_text_or_a_dub_is_left_alone_while_paid_ai_is_off}`
+  (#264),
   `standin_tests.rs` (the supersede over two real nodes: every row, a
   parked track, the check row with an audio, the recheck, another audio,
   an operator or a dub, no row, the order, the recheck curve, every row or
-  none over, an inactive playlist's reprocess flag no owner; the stand-in
+  none over, an inactive playlist's reprocess flag no owner, nor a
+  reprocess flag while paid AI is off (#264); the stand-in
   recorded after the bound — its source read or
   unreachable — and after a failing fetch from that source only, kept as
   it was when the run is put back (no new wait on the song or on an
@@ -1089,7 +1123,8 @@ record: #264 comment 6146849106.
     node's own (an operator's reprocess result, bucket 4's ★ retry) and is
     never undone by a peer's copy.
 - **The take** (`follow::follow`): `lyrics::kept_local` (an operator's text
-  or ask the queue acts on, a dub, Live-Translate) → passed over
+  or ask the queue acts on — an ask only while paid AI is on, #264 —, a
+  dub, Live-Translate) → passed over
   `FOLLOW_KEPT` (6 h); the audio guard (`Exchange::audio_verdict`, the row
   `lyrics::audio_row` picks) → another audio passed over `FOLLOW_KEPT`, "not
   now" `FOLLOW_RETRY` (30 min); then `lyrics::take_into_rows` (shared with
@@ -1139,7 +1174,8 @@ record: #264 comment 6146849106.
   refused leaves no record, a record that failed is not fetched every
   tick, one song per look and the idle wait, untracked
   only with paid AI off, a node with no peer, the queue and a stand-in left
-  alone, an operator's lyrics or a dub kept; the pure `wants`,
+  alone, an operator's lyrics or a dub kept, a reprocess flag kept only
+  while paid AI is on (#264); the pure `wants`,
   `candidates`, `FollowState`), `lyrics/worker_tests_peer.rs::
   {the_worker_follows_the_peers_newer_lyrics,
   the_worker_fills_a_parked_row_from_the_peer}`.
@@ -1183,6 +1219,15 @@ record: #264 comment 6146849106.
    paid AI is off), `follow.last_error` null or naming a song; PP's log
    `exchange: followed the peer's lyrics` per song. Then a song SNV
    re-runs reaches PP within ~15 min of SNV's hash pass.
+7. An operator's Reprocess at PP (#264, after the release that carries
+   the paid-AI rule of `kept_local` reaches PP): rows 166, 225, 11 and 39
+   read `has_lyrics = 1` with SNV's source at v22 and
+   `lyrics_manual_priority = 0`; PP's log shows `exchange: done with a
+   peer's copy` (`job=lyrics`) or `exchange: followed the peer's lyrics`
+   once per video, and no more `paid AI is off - still held` for them.
+   A Reprocess at PP of a song that already serves SNV's copy logs
+   `exchange: an operator's reprocess is answered by the peer's copy
+   served here` once and its rows read `lyrics_manual_priority = 0`.
 
 ## Tests
 
@@ -1206,6 +1251,14 @@ record: #264 comment 6146849106.
   `TestNode::audio_from(yt, peer)` records
   this node's audio as fetched from `peer` at the sha every node's
   `give_song` audio has (`rig::song_audio_sha`).
+- To bring an operator's mark to the follow (`follow::follow`'s
+  `kept_local`), put it on a second row that is outside the lyrics queue
+  NOW but that the queue WILL take: one not downloaded yet
+  (`normalized = 0`). A row in the queue never reaches the follow (it is
+  the hook's), and a `removed_at` / test-item row is one the queue never
+  takes: `kept_local`'s operator clauses do not apply `queue_row!()`, so
+  such a fixture pins that gap instead of a real ask (#264 review round
+  1). `TestNode::manual_flags(yt)` reads every row's reprocess flag.
 - wiremock stands in for Cloudflare Access and a peer (`client_tests.rs`,
   `fetch_tests.rs`); the routes go through the real `peer::router`
   (`api_tests.rs`, `lan_tests.rs`). A real-time rate test asserts a LOWER

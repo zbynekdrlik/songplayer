@@ -22,8 +22,9 @@
 //!   peer (`peer_fetches`) that is not the one listed now, or, only while
 //!   this node's paid AI is off (it then makes no lyrics itself), a track
 //!   no peer record names (a phase-0 copy, an old attempt here).
-//! - ONE song per look: an operator's lyrics or a dub (`lyrics::kept_local`)
-//!   or a copy of another audio (`Exchange::audio_verdict`) is passed over;
+//! - ONE song per look: an operator's lyrics or a dub (`lyrics::kept_local`;
+//!   a reprocess flag only while this node's paid AI is on, #264) or a copy
+//!   of another audio (`Exchange::audio_verdict`) is passed over;
 //!   else the copy goes into every row of the video
 //!   (`lyrics::take_into_rows`: the old track is served until the
 //!   verified copy is renamed over it), and only once every row took it
