@@ -51,10 +51,6 @@ use crate::playback::program_max_send::send_due;
 /// compose's measured p99 on SNV (upload ~5–6 ms + draw ~5–9 ms).
 pub const COMPOSE_BUDGET: Duration = Duration::from_millis(14);
 
-/// The earliest a boundary is sent after its offer: the constant lead the
-/// compose fits in (`program_max_send::MAX_SEND_LEAD`).
-pub const LEAD_MIN: Duration = Duration::from_millis(12);
-
 /// How far past one period the lead may grow before a new slot is picked:
 /// above an offer's jitter (p99 0.19 ms on SNV), so the pick never flaps.
 pub const LEAD_HYSTERESIS: Duration = Duration::from_millis(3);
@@ -229,7 +225,7 @@ impl VblankPacer {
         offered: Instant,
         grid: Option<VblankGrid>,
         send_phase: Duration,
-        _compose_phase: Duration,
+        compose_phase: Duration,
     ) -> Due {
         let Some(grid) = grid else {
             self.lead = None;
@@ -240,7 +236,8 @@ impl VblankPacer {
             };
         };
         let slots = Slots::new(&grid, send_phase);
-        let earliest = offered + LEAD_MIN;
+        let lead_min = compose_offset(grid.period, send_phase, compose_phase, COMPOSE_BUDGET);
+        let earliest = offered + lead_min;
         let latest = earliest + grid.period + LEAD_HYSTERESIS;
         if let Some(lead) = self.lead {
             let kept = slots.nearest(offered + lead);
@@ -248,7 +245,7 @@ impl VblankPacer {
                 self.lead = Some(kept - offered);
                 return Due {
                     at: kept,
-                    compose_at: None,
+                    compose_at: Some(kept - lead_min),
                     repicked: false,
                 };
             }
@@ -258,7 +255,7 @@ impl VblankPacer {
         self.lead = Some(at - offered);
         Due {
             at,
-            compose_at: None,
+            compose_at: Some(at - lead_min),
             repicked,
         }
     }
