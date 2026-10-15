@@ -370,7 +370,16 @@ async fn the_route_answers_the_published_status() {
     let bytes = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
         .await
         .unwrap();
-    let answered: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(answered, serde_json::to_value(&published).unwrap());
+    let mut answered: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    // #275: the route puts the Resolume drivers' clip fact on, stamped with
+    // the server's clock at the answer (`routes_status_tests.rs` pins it).
+    let clip = answered.as_object_mut().unwrap().remove("songplayer_clip");
+    assert!(
+        clip.is_some_and(|clip| clip["now_ms"].is_i64()),
+        "the clip fact, stamped"
+    );
+    let mut published = serde_json::to_value(&published).unwrap();
+    published.as_object_mut().unwrap().remove("songplayer_clip");
+    assert_eq!(answered, published);
     global().publish(WallStatus::default());
 }

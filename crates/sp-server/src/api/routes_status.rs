@@ -81,8 +81,14 @@ pub async fn environment() -> axum::Json<sp_core::prod_env::EnvironmentStatus> {
 
 /// #259: `GET /api/v1/wall` — the LED wall report the health bar polls
 /// (`crate::wall`: Arena's own output setup against the box, read only).
+/// #275: with `songplayer_clip`, whether SongPlayer's clip runs in Arena
+/// (the Resolume host drivers' read, `resolume::sp_clip_store`), stamped
+/// with the server's clock so the dashboard reads how long against it.
 pub async fn wall() -> axum::Json<sp_core::wall::WallStatus> {
-    axum::Json(crate::wall::global().current())
+    let mut status = crate::wall::global().current();
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    status.songplayer_clip = crate::resolume::sp_clip_store::global().current(now_ms);
+    axum::Json(status)
 }
 
 #[cfg(test)]

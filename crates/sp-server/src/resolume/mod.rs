@@ -2,6 +2,8 @@
 
 pub mod driver;
 pub mod handlers;
+pub mod sp_clip_store;
+pub mod sp_clips;
 pub(crate) mod title_state;
 
 use std::collections::HashMap;
@@ -157,7 +159,8 @@ impl ResolumeRegistry {
         let (health_tx, health_rx) = watch::channel(initial);
         let driver = HostDriver::new(host.clone(), port)
             .with_recovery_channel(self.recovery_tx.clone())
-            .with_health_channel(health_tx);
+            .with_health_channel(health_tx)
+            .with_sp_clip_store(sp_clip_store::global());
 
         tokio::spawn(async move {
             driver.run(rx, shutdown).await;

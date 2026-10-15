@@ -12,6 +12,19 @@ use super::{FULL_REFRESH_RETRY, FULL_REFRESH_TTL, FullRefreshReason, HostDriver}
 use crate::resolume::title_state::{TitleAction, TitleIntent};
 use crate::resolume::{ResolumeCommand, handlers};
 
+/// What the refresh after a 404 found (`refresh_stale_map`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum StaleRefresh {
+    /// No refresh: a refused id's hold, or the retry window.
+    Held,
+    /// Refreshed, still not ready (loading, or the fetch failed).
+    NotReady,
+    /// Refreshed, the same clips: a refused id, not a relaunch.
+    SameMap,
+    /// Refreshed, SongPlayer's clips mapped anew (a relaunch).
+    Remapped,
+}
+
 impl HostDriver {
     /// Test seam (#217): empty the endpoint cache, as its 5-minute TTL running
     /// out does, AFTER a handler resolved the endpoint for its batches.
@@ -36,16 +49,9 @@ impl HostDriver {
     /// A push answered 404 marks the clip map stale. An Arena relaunch
     /// quicker than three failed probes never opens the breaker, so without
     /// this every push went to the dead ids until the 300 s TTL refresh. The
-    /// stale map starts a not-ready episode, the refresh runs through the
-    /// existing NotReady path (`decide`: a failed last attempt still waits
-    /// out the retry window), and when it maps SongPlayer's clips anew the
-    /// push is retried once (`retry_push`).
-    ///
-    /// A refresh that maps the SAME clips is no relaunch: Arena still lists
-    /// the ids it answers 404 for. No retry (it would 404 again), no event
-    /// (`refresh_mapping` fires none for an unchanged map), and no new stale
-    /// mark for `FULL_REFRESH_RETRY`: otherwise every push would cost a
-    /// ~14 MB fetch.
+    /// stale map is refreshed (`refresh_stale_map`), and when the refresh
+    /// maps SongPlayer's clips anew the push is retried once (`retry_push`).
+    /// The same clips again is a refused id: no retry (it would 404 again).
     pub(super) async fn run_push(&mut self, cmd: &ResolumeCommand, now: Instant) {
         // A command is its own step: an event from an earlier tick does not
         // cover the ready transition this push's refresh may find.
@@ -53,6 +59,22 @@ impl HostDriver {
         if !self.push(cmd).await {
             return;
         }
+        if self.refresh_stale_map(now).await == StaleRefresh::Remapped {
+            self.retry_push(cmd).await;
+        }
+    }
+
+    /// The refresh a request answered 404 asks for (a push, #217 addendum 2;
+    /// a tracked clip param of the clip poll, #275): the map is stale. It
+    /// starts a not-ready episode and refreshes through the existing
+    /// NotReady path (`decide`: a failed last attempt still waits out the
+    /// retry window).
+    ///
+    /// A refresh that maps the SAME clips is no relaunch: Arena still lists
+    /// the ids it answers 404 for. No event (`refresh_mapping` fires none for
+    /// an unchanged map), and no new stale mark for `FULL_REFRESH_RETRY`:
+    /// otherwise every push would cost a ~14 MB fetch.
+    pub(super) async fn refresh_stale_map(&mut self, now: Instant) -> StaleRefresh {
         if self
             .refused_ids_at
             .is_some_and(|at| now.duration_since(at) < FULL_REFRESH_RETRY)
@@ -61,7 +83,7 @@ impl HostDriver {
                 host = %self.host,
                 "Resolume answered 404 again for an id its composition still lists — not refreshing"
             );
-            return;
+            return StaleRefresh::Held;
         }
         // Start (or continue) the not-ready episode: an open one keeps its
         // start, so its fast window never extends.
@@ -81,7 +103,7 @@ impl HostDriver {
                 host = %self.host,
                 "Resolume answered 404 (a stale clip map): the retry window holds the refresh, the not-ready ticks fetch it"
             );
-            return;
+            return StaleRefresh::Held;
         };
         warn!(
             host = %self.host,
@@ -93,7 +115,7 @@ impl HostDriver {
             // Still not ready (the composition is loading, or the fetch
             // failed): the episode's ticks refetch, and its end fires the
             // RecoveryEvent that re-pushes the wall.
-            return;
+            return StaleRefresh::NotReady;
         }
         if self.clip_mapping == before {
             self.refused_ids_at = Some(now);
@@ -101,9 +123,9 @@ impl HostDriver {
                 host = %self.host,
                 "Resolume still lists the ids it answered 404 for — not a relaunch: no retry, no new refresh for 60 s"
             );
-            return;
+            return StaleRefresh::SameMap;
         }
-        self.retry_push(cmd).await;
+        StaleRefresh::Remapped
     }
 
     /// The one retry after a refresh that mapped SongPlayer's clips anew. That

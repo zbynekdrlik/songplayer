@@ -10,6 +10,7 @@ use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
 
 use crate::resolume::ResolumeCommand;
+use crate::resolume::sp_clips;
 
 const RESOLUTION_TTL: Duration = Duration::from_secs(300); // 5 minutes
 
@@ -314,6 +315,8 @@ pub struct HostDriver {
     /// What the driver last did to the `#sp-title` clips: every title command
     /// acts only on a difference (#217 addendum 3, `title_state.rs`).
     title: crate::resolume::title_state::WallTitle,
+    /// #275: whether SongPlayer's clip runs in Arena (`driver_sp_clips.rs`).
+    sp_clips: sp_clips::Watch,
     /// Set via `with_recovery_channel` builder; never accessed directly.
     recovery_tx: Option<tokio::sync::broadcast::Sender<crate::resolume::RecoveryEvent>>,
     /// Set via `with_health_channel` builder; never accessed directly.
@@ -346,6 +349,7 @@ impl HostDriver {
             stale_id_seen: AtomicBool::new(false),
             refused_ids_at: None,
             title: crate::resolume::title_state::WallTitle::new(),
+            sp_clips: sp_clips::Watch::default(),
             recovery_tx: None,
             health_tx: None,
         }
@@ -458,6 +462,7 @@ impl HostDriver {
         ) {
             self.run_full_refresh(reason, now).await;
         }
+        self.poll_sp_clips(now).await;
     }
 
     /// The period until the next liveness tick: `NOT_READY_TICK` on a
@@ -586,6 +591,7 @@ impl HostDriver {
                 // starts a new one, so a relaunch whose composition is still
                 // loading gets a fresh fast window, not an old one's tail (#217).
                 self.not_ready_since = None;
+                self.forget_sp_clips();
                 warn!(host = %self.host, "circuit breaker opened — clip cache evicted");
             }
         }
@@ -693,7 +699,8 @@ impl HostDriver {
     /// `GET /api/v1/composition`
     pub(crate) async fn refresh_mapping(&mut self, now: Instant) -> Result<(), anyhow::Error> {
         match self.fetch_mapping_inner().await {
-            Ok(new_mapping) => {
+            Ok((new_mapping, sp)) => {
+                self.note_sp_clips(sp, now);
                 self.last_full_attempt_failed = false;
                 let by_failure = self.not_ready_by_failure.take();
                 let ready = has_songplayer_clips(&new_mapping);
@@ -764,7 +771,7 @@ impl HostDriver {
 
     async fn fetch_mapping_inner(
         &mut self,
-    ) -> Result<HashMap<String, Vec<ClipInfo>>, anyhow::Error> {
+    ) -> Result<(HashMap<String, Vec<ClipInfo>>, sp_clips::Read), anyhow::Error> {
         let ep = self.ensure_endpoint().await?;
         let url = format!("{}/api/v1/composition", ep.base_url);
         let req = self.client.get(&url);
@@ -775,7 +782,7 @@ impl HostDriver {
             .await?
             .error_for_status()?;
         let body: serde_json::Value = resp.json().await?;
-        Ok(parse_composition(&body))
+        Ok((parse_composition(&body), sp_clips::track(&body)))
     }
 
     /// Resolve the host to an endpoint, caching the result for 5 minutes, and
@@ -959,6 +966,9 @@ mod push;
 
 #[path = "driver_probe.rs"]
 mod probe;
+
+#[path = "driver_sp_clips.rs"]
+mod sp_clips_poll;
 
 #[cfg(test)]
 #[path = "driver_tests.rs"]
