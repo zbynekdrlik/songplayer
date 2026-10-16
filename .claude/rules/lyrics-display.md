@@ -103,7 +103,11 @@ leader's calls in parentheses. Song 361 "Redeemed" had wall lines of up to
     glued to the word before it (dropped when it would come first);
   - a line that is ONLY asides keeps its words without the brackets, so the
     wall never blanks a line the room sings (`(Hallelujah)`); one whose
-    words are only interjections (`(Oh)`) then leaves by the rule below;
+    words are only interjections (`(Oh)`) then leaves by the rule below.
+    So does a line whose words OUTSIDE its asides are only interjections:
+    it is read with only its brackets gone (`asides::unbracketed`, part 2
+    review round 1): `Oh (Hallelujah)` → `Oh Hallelujah`, `Yeah, (I'm
+    free)` → `I'm free`, `Oh (yeah)` leaves;
   - a line with no parenthesis, or with parentheses that do not pair up, is
     returned untouched.
 - The fixtures hold no `(`.
@@ -115,9 +119,9 @@ asides; design 6224751018 + the edge rule 6223162067). The owner saw "One
 more time we say" + "Oh." as "Ešte raz hovoríme Och." (16.10.2026); on SNV
 1353 EN lines (4.1 %) of 349 songs were only interjections.
 
-- `build_plan` takes `shown_lines`: each line without its asides, then
-  through `interjections::shown`, each kept line with its index in the
-  track. It groups and schedules the kept lines, then maps each group
+- `build_plan` takes `shown_lines`: each line without its asides (or with
+  only its brackets gone, above), then through `interjections::shown`, each
+  kept line with its index in the track. It groups and schedules the kept lines, then maps each group
   back: `src_range = kept[first]..kept[last] + 1`. A left-out line inside
   a group is in its range; one between two display lines is in none. No
   production code reads `src_range`.
@@ -129,6 +133,15 @@ more time we say" + "Oh." as "Ešte raz hovoríme Och." (16.10.2026); on SNV
   languages, with its time. The previous display line holds through it by
   the hold rules (until the next line shows; a gap now over 8 s blanks the
   wall). A line with NO EN words (a dub line) is never left out.
+- **Its sentence end goes back to the line before it**
+  (`interjections::hand_back`, review round 1): the last line kept takes
+  the left-out line's final `. ! ? …`, EN and SK each, unless it ends a
+  sentence itself or is empty, by the same `ended` as an end run inside a
+  line. Without it "One more time we say" + "Oh." + "I still believe it."
+  became ONE wall line lit 5 s before its second sentence was sung (the
+  #217 failure). The wall and the Presenter strip a line's final mark, so
+  the carried `.` is never seen; it only closes the sentence. 221's line
+  8 `for you. Let's go for the` ends in the `.` of its left-out line 9.
 - **Edges go only where a mark (`, . ; : ! ? …`, the asides' `GLUED`)
   separates them.**
   - The LONGEST leading run of set words whose last word carries a mark:
@@ -154,11 +167,18 @@ more time we say" + "Oh." as "Ešte raz hovoríme Och." (16.10.2026); on SNV
   (`Yes, Lord` / `Áno, Pane` stays), and a line with no SK changes only EN.
 - A line that followed a left-out capitalised `Oh,` keeps its own lower-case
   start (What A God `what a God, what a God.`), as every wall line that
-  starts mid-sentence does.
+  starts mid-sentence does (`find nobody no.`). A capital handed forward
+  needs a sentence-start notion the plan does not have; not done.
+- **Kept as they are (review round 1, noted):** a lone punctuation token
+  is a word outside the set, so it stops a run (`Oh , yeah` → `Oh ,`,
+  `Oh - yeah` stays whole); a line with unpaired parentheses keeps
+  them (`We sing (oh,`). The two-word minimum on the Slovak follow keeps
+  `Ó, slobodní` whole under `Oh, we are free` → `We are free`: the main
+  session's call if the wall should drop that `Ó,` too.
 - Display-only: NO `LYRICS_PIPELINE_VERSION` bump; the karaoke view keeps
   the raw track.
-- Tests: `display_plan_interjections_tests.rs` (the census lines, through
-  `build_plan`), `display_plan_fixture_tests.rs`
+- Tests: `display_plan_interjections_tests.rs` (the census lines and the
+  hand-back, through `build_plan`), `display_plan_fixture_tests.rs`
   `fixture_lines_of_only_interjections_are_in_no_wall_line` and
   `fixture_interjections_at_a_line_edge_go_where_a_mark_separates_them`.
   The fixture oracles read the shown lines through `shown_lines` (`Shown`).
