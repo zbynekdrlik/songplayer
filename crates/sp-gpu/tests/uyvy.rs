@@ -169,22 +169,26 @@ fn black_is_limited_range_black_everywhere() {
     assert_uyvy_matches(&uyvy, &bgra, FHD, "black");
 }
 
-/// Ten composes in a row, two pictures in turn: each readback reads at once
-/// (never `DXGI_ERROR_WAS_STILL_DRAWING`: the ring of three wraps three
-/// times) and holds THAT compose's picture, never an older copy.
+/// Ten composes in a row, three pictures in turn: each readback reads at
+/// once (never `DXGI_ERROR_WAS_STILL_DRAWING`: the ring of three wraps
+/// three times) and holds THAT compose's picture. With three pictures over
+/// a ring of three, every other staging texture holds another picture (or
+/// nothing yet), so a read of any slot but the newest fails the reference.
 #[test]
 fn ten_composes_in_a_row_each_read_back_without_a_wait() {
     let mut compositor = fhd_with_uyvy();
     let (stride, a) = pattern(1920, 1080, 3);
     let (_, b) = pattern(1920, 1080, 200);
+    let (_, c) = pattern(1920, 1080, 97);
     let pictures = [
         Composition::Picture(picture(1, 1920, 1080, stride, &a)),
         Composition::Picture(picture(2, 1920, 1080, stride, &b)),
+        Composition::Picture(picture(3, 1920, 1080, stride, &c)),
     ];
     let mut last: Option<Vec<u8>> = None;
     for i in 0..10 {
         let (stats, uyvy, bgra) =
-            compose_and_read(&mut compositor, TargetId::PRIMARY, &pictures[i % 2]);
+            compose_and_read(&mut compositor, TargetId::PRIMARY, &pictures[i % 3]);
         assert!(stats.uyvy_us.is_some(), "compose {i}: the pass ran");
         assert_uyvy_matches(&uyvy, &bgra, FHD, &format!("compose {i}"));
         if let Some(previous) = &last {
@@ -255,6 +259,36 @@ fn a_removed_target_takes_its_uyvy_pass_with_it() {
     let stats = compositor.compose(&narrow).expect("MAX composes on");
     assert_eq!(stats.uyvy_us, None, "no pass after its target went");
     assert!(!compositor.disable_uyvy(), "nothing left to disable");
+}
+
+/// The pass belongs to its own target: removing ANOTHER target keeps it
+/// and its newest copy. Here the pass's target is drawn first and the
+/// other one after it, so the pass also runs with another target left
+/// bound as the output.
+#[test]
+fn removing_another_target_keeps_the_pass() {
+    let mut compositor = fhd_with_uyvy();
+    let other = compositor
+        .add_target(FHD_TARGET)
+        .unwrap_or_else(|e| panic!("WARP must add a second target: {e}"));
+    let (stride, data) = pattern(1280, 720, 17);
+    let plain = Composition::Picture(picture(1, 1280, 720, stride, &data));
+    let (_, uyvy, bgra) = compose_and_read(&mut compositor, TargetId::PRIMARY, &plain);
+    assert_uyvy_matches(&uyvy, &bgra, FHD, "the first of two targets");
+
+    assert!(compositor.remove_target(other));
+    let mut kept = Vec::new();
+    assert_eq!(
+        compositor.read_uyvy(&mut kept),
+        Ok(true),
+        "the pass and its newest copy stay"
+    );
+    assert_eq!(kept, uyvy, "the same copy");
+    let (stride, next) = pattern(1920, 1080, 61);
+    let after = Composition::Picture(picture(2, 1920, 1080, stride, &next));
+    let (stats, uyvy, bgra) = compose_and_read(&mut compositor, TargetId::PRIMARY, &after);
+    assert!(stats.uyvy_us.is_some(), "the pass still runs");
+    assert_uyvy_matches(&uyvy, &bgra, FHD, "after the other target went");
 }
 
 /// Disabled, the pass reads nothing and costs nothing; enabled again (or
