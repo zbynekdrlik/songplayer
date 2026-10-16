@@ -1,7 +1,8 @@
 //! What one composed frame and one Spout send cost: the telemetry S2
 //! publishes as `max.upload_us_p99` / `max.draw_us_p99` /
 //! `max.send_us_p99` (#223 R3-2), and (#251 step 2) each target's own part
-//! of the draw (`max.fhd.draw_us_p99`).
+//! of the draw (`max.fhd.draw_us_p99`); #279 P1a: the UYVY pass's part
+//! (`ComposeStats::uyvy_us`).
 
 use std::time::Instant;
 
@@ -21,6 +22,11 @@ pub struct ComposeStats {
     /// of each, 0 when every picture was resident): what crossed from RAM
     /// to the GPU, the number the GPU-resident path must take to 0.
     pub upload_bytes: u64,
+    /// #279 P1a: the UYVY pass's own part of the draw, µs (its pass and its
+    /// staging copy, from the end of the last target until the GPU had
+    /// finished them, as [`target_draws_us`] counts a target's); `None`
+    /// when no UYVY pass is enabled (`Compositor::enable_uyvy`).
+    pub uyvy_us: Option<u64>,
 }
 
 /// #251 step 2: each target's own part of one compose's draw, µs, in draw

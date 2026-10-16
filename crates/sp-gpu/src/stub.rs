@@ -2,7 +2,8 @@
 //! and no Spout, so neither is ever built. They have the portable part of
 //! the Windows API (`new`, `with_size`, `new_warp`, `compose`, `read_back`,
 //! `adapter`, `size`, #251 step 2's `add_target` / `remove_target` /
-//! `target_size` / `draw_us` / `read_back_target`; the sender's `new`,
+//! `target_size` / `draw_us` / `read_back_target`, #279 P1a's
+//! `enable_uyvy` / `disable_uyvy` / `read_uyvy`; the sender's `new`,
 //! `new_fhd`, `for_target`, `send`, `size`, `name`, `registration`; the
 //! registry readers), so a cross-platform caller
 //! compiles everywhere. The Direct3D accessors (`device`, `render_target`,
@@ -109,6 +110,27 @@ impl Compositor {
     /// Never runs (no value exists). `mutants::skip`: as `compose`.
     #[cfg_attr(test, mutants::skip)]
     pub fn read_back_target(&mut self, _id: TargetId) -> Result<Vec<u8>, GpuError> {
+        match self.0 {}
+    }
+
+    /// #279 P1a. Never runs (no value exists). `mutants::skip`: as
+    /// `compose`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn enable_uyvy(&mut self, _target: TargetId) -> Result<(), GpuError> {
+        match self.0 {}
+    }
+
+    /// #279 P1a. Never runs (no value exists). `mutants::skip`: as
+    /// `compose`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn disable_uyvy(&mut self) -> bool {
+        match self.0 {}
+    }
+
+    /// #279 P1a. Never runs (no value exists). `mutants::skip`: as
+    /// `compose`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn read_uyvy(&mut self, _out: &mut Vec<u8>) -> Result<bool, GpuError> {
         match self.0 {}
     }
 }

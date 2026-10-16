@@ -49,8 +49,9 @@ pub(super) fn desc(
     }
 }
 
-/// `CreateTexture2D` with no initial data.
-fn texture(
+/// `CreateTexture2D` with no initial data (#279 P1a: the UYVY pass's
+/// textures too, `uyvy.rs`).
+pub(super) fn texture(
     device: &ID3D11Device,
     desc: &D3D11_TEXTURE2D_DESC,
 ) -> Result<ID3D11Texture2D, GpuError> {
@@ -62,8 +63,9 @@ fn texture(
     })
 }
 
-/// A shader view of the whole texture.
-fn shader_view(
+/// A shader view of the whole texture (#279 P1a: the UYVY pass reads its
+/// target through one).
+pub(super) fn shader_view(
     device: &ID3D11Device,
     texture: &ID3D11Texture2D,
 ) -> Result<ID3D11ShaderResourceView, GpuError> {

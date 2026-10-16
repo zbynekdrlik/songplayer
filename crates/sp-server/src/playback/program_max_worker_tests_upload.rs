@@ -35,6 +35,7 @@ pub(super) fn fake_stats(composition: &Composition<'_>) -> ComposeStats {
         draw_us: DRAW_US,
         uploads: u32::try_from(pictures.len()).unwrap_or(u32::MAX),
         upload_bytes,
+        uyvy_us: None,
     }
 }
 

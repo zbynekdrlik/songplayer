@@ -63,17 +63,23 @@ fn blob_bytes(blob: &ID3DBlob) -> &[u8] {
     }
 }
 
-/// Compile one entry point of [`SHADER`] with `D3DCompile`
-/// (d3dcompiler_47.dll, part of Windows): at runtime, once per device, so the
-/// build needs no shader toolchain and WARP and the GPU run the same source.
-fn compile(entry: PCSTR, target: PCSTR, stage: &'static str) -> Result<Vec<u8>, GpuError> {
+/// Compile one entry point of the HLSL `source` (reported as `name`:
+/// [`SHADER`], #279 P1a `uyvy.hlsl`) with `D3DCompile` (d3dcompiler_47.dll,
+/// part of Windows): at runtime, once per device, so the build needs no
+/// shader toolchain and WARP and the GPU run the same source.
+pub(super) fn compile(
+    (source, name): (&str, PCSTR),
+    entry: PCSTR,
+    target: PCSTR,
+    stage: &'static str,
+) -> Result<Vec<u8>, GpuError> {
     let mut code: Option<ID3DBlob> = None;
     let mut errors: Option<ID3DBlob> = None;
     let result = unsafe {
         D3DCompile(
-            SHADER.as_ptr().cast::<c_void>(),
-            SHADER.len(),
-            s!("compose.hlsl"),
+            source.as_ptr().cast::<c_void>(),
+            source.len(),
+            name,
             None,
             None,
             entry,
@@ -106,14 +112,15 @@ fn compile(entry: PCSTR, target: PCSTR, stage: &'static str) -> Result<Vec<u8>, 
 }
 
 /// Unwrap an out-parameter a successful create call must have set.
-fn created<T>(value: Option<T>, call: &'static str) -> Result<T, GpuError> {
+pub(super) fn created<T>(value: Option<T>, call: &'static str) -> Result<T, GpuError> {
     value.ok_or(GpuError::NoObject { call })
 }
 
 impl Pipeline {
     pub fn new(device: &ID3D11Device) -> Result<Self, GpuError> {
-        let vertex_code = compile(s!("vs_main"), s!("vs_5_0"), "vertex")?;
-        let pixel_code = compile(s!("ps_main"), s!("ps_5_0"), "pixel")?;
+        let source = (SHADER, s!("compose.hlsl"));
+        let vertex_code = compile(source, s!("vs_main"), s!("vs_5_0"), "vertex")?;
+        let pixel_code = compile(source, s!("ps_main"), s!("ps_5_0"), "pixel")?;
         let mut vertex: Option<ID3D11VertexShader> = None;
         unsafe { device.CreateVertexShader(&vertex_code, None, Some(&mut vertex)) }
             .map_err(|e| failed("CreateVertexShader", &e))?;
@@ -270,8 +277,9 @@ fn blend(device: &ID3D11Device) -> Result<ID3D11BlendState, GpuError> {
     created(blend, "CreateBlendState")
 }
 
-/// Solid, no culling (the strip's winding does not matter), no scissor.
-fn raster(device: &ID3D11Device) -> Result<ID3D11RasterizerState, GpuError> {
+/// Solid, no culling (the strip's winding does not matter), no scissor
+/// (#279 P1a: the UYVY pass's triangle too, `uyvy.rs`).
+pub(super) fn raster(device: &ID3D11Device) -> Result<ID3D11RasterizerState, GpuError> {
     let desc = D3D11_RASTERIZER_DESC {
         FillMode: D3D11_FILL_SOLID,
         CullMode: D3D11_CULL_NONE,

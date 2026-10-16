@@ -8,7 +8,8 @@
 //! the Linux mutation gate (`.cargo/mutants.toml`, like
 //! `sp-decoder/src/video/`) and is proven on WARP on `windows-latest`: the
 //! compositor by the pixel pins (`tests/warp.rs`), the sender by
-//! `tests/spout.rs`.
+//! `tests/spout.rs`. #279 P1a: the UYVY pass (`uyvy.rs`, its decisions the
+//! pure `crate::uyvy`) by `tests/uyvy.rs`.
 
 mod device;
 mod pipeline;
@@ -18,6 +19,7 @@ mod spout_lock;
 mod spout_registry;
 mod spout_sender;
 mod textures;
+mod uyvy;
 mod vblank;
 mod video_device;
 
@@ -48,9 +50,11 @@ use crate::quad::QuadConstants;
 use crate::residency::{Resident, Upload, swap_slots, upload_for};
 use crate::stats::{ComposeStats, target_draws_us};
 use crate::targets::{TargetId, Targets};
+use crate::uyvy::UYVY_STAGING;
 use device::DeviceUse;
 use pipeline::{Pipeline, Quad};
 use textures::{PlaneTextures, RenderTarget};
+use uyvy::UyvyPass;
 
 /// The error of a failed Direct3D / DXGI call, classified by its HRESULT.
 fn failed(call: &'static str, error: &windows::core::Error) -> GpuError {
@@ -67,6 +71,12 @@ const NO_TEXTURES: GpuError = GpuError::NoObject {
 /// removed): the caller's bug, reported instead of reading another target.
 const NO_TARGET: GpuError = GpuError::NoObject {
     call: "the compositor's target (no such id)",
+};
+
+/// #279 P1a: a UYVY readback with no UYVY pass (never enabled, disabled,
+/// or its target removed): the caller's bug.
+const NO_UYVY: GpuError = GpuError::NoObject {
+    call: "the UYVY pass (not enabled)",
 };
 
 /// Whole microseconds since `start`.
@@ -118,6 +128,8 @@ pub struct Compositor {
     pipeline: Pipeline,
     targets: Targets<Drawn>,
     slots: [Option<PlaneTextures>; 2],
+    /// #279 P1a: the UYVY pass of one target, while enabled.
+    uyvy: Option<UyvyPass>,
     /// Ties the compositor to its thread (a raw pointer is neither `Send`
     /// nor `Sync`).
     thread_bound: PhantomData<*const ()>,
@@ -199,6 +211,7 @@ impl Compositor {
             pipeline,
             targets: Targets::new(primary),
             slots: [None, None],
+            uyvy: None,
             thread_bound: PhantomData,
         })
     }
@@ -223,13 +236,62 @@ impl Compositor {
 
     /// #251 step 2: stop drawing the target `id` (a sender made on it keeps
     /// its own reference to the texture until it is dropped). Whether it was
-    /// there: the primary target is never removed.
+    /// there: the primary target is never removed. #279 P1a: a UYVY pass of
+    /// that target goes with it.
     pub fn remove_target(&mut self, id: TargetId) -> bool {
         let removed = self.targets.remove(id).is_some();
         if removed {
             info!("sp-gpu: render target removed");
+            if self.uyvy.take_if(|pass| pass.target == id).is_some() {
+                info!("sp-gpu: UYVY pass removed with its target");
+            }
         }
         removed
+    }
+
+    /// #279 P1a: convert the target `target` to UYVY in every later
+    /// [`compose`](Self::compose), after the targets' draws: a pass into an
+    /// `R8G8B8A8_UNORM` texture of half its width (one texel per pixel
+    /// pair, `crate::uyvy`), copied into a ring of `UYVY_STAGING` staging
+    /// textures before the compose's one wait, for
+    /// [`read_uyvy`](Self::read_uyvy). It replaces a pass already enabled,
+    /// and nothing is read before the next compose. A target of odd width
+    /// is [`GpuError::UyvyOddWidth`], an id the compositor does not hold
+    /// [`GpuError::NoObject`]; a refused or failed call leaves the
+    /// compositor as it was.
+    pub fn enable_uyvy(&mut self, target: TargetId) -> Result<(), GpuError> {
+        let drawn = self.targets.get(target).ok_or(NO_TARGET)?;
+        let size = (drawn.spec.width, drawn.spec.height);
+        let pass = UyvyPass::new(&self.device, target, &drawn.render.texture, size)?;
+        self.uyvy = Some(pass);
+        info!(
+            width = size.0,
+            height = size.1,
+            staging = UYVY_STAGING,
+            "sp-gpu: UYVY pass enabled (read back without a wait)"
+        );
+        Ok(())
+    }
+
+    /// #279 P1a: stop the UYVY pass; whether one was enabled.
+    pub fn disable_uyvy(&mut self) -> bool {
+        let disabled = self.uyvy.take().is_some();
+        if disabled {
+            info!("sp-gpu: UYVY pass disabled");
+        }
+        disabled
+    }
+
+    /// #279 P1a: the UYVY of the last compose that finished, into `out`
+    /// (cleared first): `width × 2` bytes a row (U Y0 V Y1 per pixel pair),
+    /// `height` rows, packed, of the target [`enable_uyvy`](Self::enable_uyvy)
+    /// named. `Ok(false)`, `out` untouched, when no compose finished since
+    /// the pass was enabled. The map never waits: the compose already waited
+    /// for its copy, so `DXGI_ERROR_WAS_STILL_DRAWING` is an error that names
+    /// it ([`GpuError::Api`]). No pass enabled is [`GpuError::NoObject`].
+    pub fn read_uyvy(&mut self, out: &mut Vec<u8>) -> Result<bool, GpuError> {
+        let pass = self.uyvy.as_ref().ok_or(NO_UYVY)?;
+        pass.read(&self.context, out)
     }
 
     /// The adapter the compositor runs on.
@@ -295,8 +357,12 @@ impl Compositor {
     /// every target is drawn from those textures in draw order (the primary
     /// first), each placed by its own rule ([`Composition::layers_on`]); one
     /// flush and one wait for all of them, each target's own part kept for
-    /// [`draw_us`](Self::draw_us). A [`GpuError::DeviceLost`] means the
-    /// compositor must be rebuilt.
+    /// [`draw_us`](Self::draw_us). #279 P1a: with a UYVY pass enabled, the
+    /// pass and its staging copy run after the targets, inside the same
+    /// flush and wait (their part is `ComposeStats::uyvy_us`); the copy
+    /// counts for [`read_uyvy`](Self::read_uyvy) only once the compose
+    /// finished. A [`GpuError::DeviceLost`] means the compositor must be
+    /// rebuilt.
     pub fn compose(&mut self, composition: &Composition<'_>) -> Result<ComposeStats, GpuError> {
         let pictures = composition.pictures();
         let planes = pictures
@@ -361,20 +427,31 @@ impl Compositor {
             self.pipeline.draw(&self.context, &drawn.render, &quads);
             unsafe { self.context.End(&drawn.done) };
         }
-        let queries: Vec<&ID3D11Query> = self.targets.iter().map(|(_, d)| &d.done).collect();
+        if let Some(pass) = &self.uyvy {
+            pass.draw(&self.context)?;
+        }
+        let mut queries: Vec<&ID3D11Query> = self.targets.iter().map(|(_, d)| &d.done).collect();
+        let targets_drawn = queries.len();
+        queries.extend(self.uyvy.as_ref().map(|pass| &pass.done));
         let done = pipeline::wait_until_each_done(&self.context, &queries)?;
         let draw_us = micros_since(draw_start);
+        // The targets' parts in draw order, then the UYVY pass's, if any.
         let parts = target_draws_us(draw_start, &done);
-        for ((_, drawn), part) in self.targets.iter_mut().zip(parts) {
+        for ((_, drawn), &part) in self.targets.iter_mut().zip(&parts) {
             drawn.draw_us = Some(part);
         }
+        let uyvy_us = parts.get(targets_drawn).copied();
         unsafe { self.device.GetDeviceRemovedReason() }
             .map_err(|e| GpuError::removed(e.code().0 as u32))?;
+        if let Some(pass) = &mut self.uyvy {
+            pass.ring.written();
+        }
         Ok(ComposeStats {
             upload_us,
             draw_us,
             uploads,
             upload_bytes,
+            uyvy_us,
         })
     }
 

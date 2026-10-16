@@ -116,6 +116,7 @@ async fn get_program_reports_the_max_block() {
             draw_us: 300,
             uploads: 1,
             upload_bytes: 3_110_400,
+            uyvy_us: None,
         },
         SpoutSendStats {
             send_us: 900,
