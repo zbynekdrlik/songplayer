@@ -74,6 +74,12 @@
 //! what the GPU-resident video path needs (shared NV12 by NT handle and
 //! keyed mutex, its plane views, a `DO_NOT_WAIT` readback); the report, its
 //! verdict and every rule that reads an answer are the pure [`probe`].
+//!
+//! #279 P1a: the compositor converts one target (the FHD program) to UYVY
+//! for NDI on the GPU (`Compositor::enable_uyvy`): a pass into a half-width
+//! `R8G8B8A8_UNORM` texture, copied into a ring of staging textures inside
+//! the compose, read back without a wait (`Compositor::read_uyvy`). Its
+//! conversion, its CPU model and its ring are the pure [`uyvy`].
 
 mod adapter;
 mod color;
@@ -90,6 +96,7 @@ mod spout_lock;
 pub mod spout_state;
 mod stats;
 mod targets;
+pub mod uyvy;
 mod vblank;
 
 #[cfg(not(windows))]

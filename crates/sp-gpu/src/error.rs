@@ -104,6 +104,10 @@ pub enum GpuError {
     /// could not start, or ended before it reported; the text names it.
     #[error("{0}")]
     Thread(String),
+    /// #279 P1a: the UYVY pass packs pixel PAIRS, so its target must be of
+    /// even width (`uyvy::uyvy_size`); nothing was made.
+    #[error("the UYVY pass needs a target of even width, this one is {width} pixels wide")]
+    UyvyOddWidth { width: u32 },
 }
 
 /// #243: " (held by <holder>)" for a refusal whose lock a program kept,
