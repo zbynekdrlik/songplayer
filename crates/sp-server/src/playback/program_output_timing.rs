@@ -14,7 +14,8 @@
 //!   FOH hears — the VBAN thread sends a block's first packet two slots
 //!   after its boundary);
 //! - `submit_us`: the video side — the canvas fit or a fade's picture
-//!   (#223), then the NDI submit call.
+//!   (#223), then the NDI submit call (#279 P1b: from the GPU readback,
+//!   the NDI submit alone).
 //!
 //! [`BoundaryTiming`] (pure, Linux-tested; its window and WARN rate limit
 //! are `stat_window.rs`'s, shared with the VBAN thread's `VbanStallLog`)
@@ -32,6 +33,7 @@
 
 use serde::Serialize;
 use sp_core::genlock::UNITS_PER_SECOND;
+use tracing::warn;
 
 use crate::playback::stat_window::{TwoBucketWorst, WarnLimiter, Worst};
 
@@ -214,6 +216,27 @@ pub fn utc_label(t_100ns: i64) -> String {
     chrono::DateTime::from_timestamp(secs, nanos)
         .map(|t| t.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
         .unwrap_or_default()
+}
+
+/// #210: the WARN of a boundary whose VBAN hand-off came after its block's
+/// first packet was due (over VBAN's send latency L, part 2): its three
+/// figures, the boundary as its wire stamp and in UTC (to line up with a
+/// dev1 capture), and how many such boundaries the rate limit skipped since
+/// the WARN before it. The decision is `BoundaryTiming::observe`'s (tested);
+/// logging only. (Moved out of `program_output.rs` for its 1000-line cap,
+/// #279 P1b.)
+#[cfg_attr(test, mutants::skip)]
+pub fn warn_late_boundary(late: &LateBoundary) {
+    let wire = crate::playback::fleet_shift::wire_100ns(late.stamp_100ns);
+    warn!(
+        boundary_100ns = wire,
+        boundary_utc = %utc_label(wire),
+        ready_late_us = late.sample.ready_late_us,
+        vban_feed_late_us = late.sample.vban_feed_late_us,
+        submit_us = late.sample.submit_us,
+        suppressed = late.suppressed,
+        "program output: a boundary's VBAN audio was handed over after its first packet was due (over VBAN's send latency) — its packets go out late, back to back"
+    );
 }
 
 #[cfg(test)]

@@ -1914,6 +1914,22 @@ function programBody() {
       // #239: the SP-program Spout sender (1920x1080) next to MAX.
       fhd: mockFhdStatus(),
     },
+    // #279 P1b: NDI SP-program's source (mirrors `ndi_feed::NdiStatus`).
+    // `program_ndi_source` is `gpu` only when it says so (trimmed); the mock
+    // has no GPU, like the Linux server: nothing is read back, so NDI stays
+    // on the CPU canvas.
+    ndi: {
+      setting: String(settings.program_ndi_source ?? "").trim() === "gpu" ? "gpu" : "cpu",
+      source: "cpu",
+      delay_slots: 0,
+      fourcc: "NV12",
+      repeats: 0,
+      readback_late: 0,
+      feed_coalesced: 0,
+      switches: 0,
+      readback_us_p99: 0,
+      uyvy_us_p99: 0,
+    },
   };
 }
 // #239: `max.fhd` (mirrors `FhdStatus`). Its setting is ON unless it says

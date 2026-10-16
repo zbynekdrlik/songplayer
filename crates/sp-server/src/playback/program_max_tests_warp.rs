@@ -13,7 +13,10 @@
 //! `max.fhd.listed_*`, says so too) and its texture holds the same pictures
 //! fitted into 1920×1080. #267: a third, 4:3 boundary fills MAX's whole
 //! width (no black column at either side), while the FHD sender keeps the
-//! NDI `SP-program`'s bars.
+//! NDI `SP-program`'s bars. #279 P1b: then NDI `SP-program` from the GPU
+//! readback ([`check_ndi_from_the_readback`]): a 1920×1080 `ProgramOutput`
+//! in gpu mode sends each boundary one boundary late as UYVY, the FHD
+//! target's own picture, for a Source boundary and a fade.
 //!
 //! The readback takes no Spout mutex, so each picture is served until both
 //! senders sent it TWICE (the run's first picture one boundary more: the
@@ -27,13 +30,15 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use sp_core::config::NdiSource;
 use sp_core::genlock::{GENLOCK_GRID_FPS, floor_boundary_100ns, strict_next_boundary_100ns};
+use sp_gpu::uyvy::{UYVY_TOLERANCE, reference as uyvy_reference};
 use sp_gpu::{
     CANVAS_HEIGHT, CANVAS_WIDTH, Composition, Compositor, FHD_FIT, FHD_HEIGHT, FHD_WIDTH, GpuError,
     Layer, Nv12Picture, SpoutSender, TargetId, read_shared_texture, reference, spout_sender_info,
 };
 use sp_ndi::test_util::MockNdiBackend;
-use sp_ndi::{AudioFrame, NdiSender};
+use sp_ndi::{AudioFrame, FourCCVideoType, NdiSender};
 
 use super::MaxOut;
 use crate::playback::frame_buf::SharedFrame;
@@ -260,6 +265,88 @@ fn serve_twice(
     assert_eq!((status.failed, status.fhd.failed), (0, 0), "{status:?}");
 }
 
+/// The gpu-mode `SP-program` sender of [`check_ndi_from_the_readback`], kept
+/// across its calls (its delay line holds a pair from one to the next): a
+/// 1920×1080 `ProgramOutput` on the mock NDI, offering to `max`.
+struct NdiRig {
+    backend: Arc<MockNdiBackend>,
+    out: ProgramOutput<MockNdiBackend>,
+}
+
+impl NdiRig {
+    fn new(max: &Arc<MaxOut>) -> Self {
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend.clone(), PROGRAM_NDI_NAME, false, false)
+            .expect("mock sender");
+        let out = ProgramOutput::fhd(sender).with_max(max.clone());
+        Self { backend, out }
+    }
+}
+
+/// #279 P1b: switch NDI to the GPU readback and serve `job` on `rig` from
+/// boundary `*next` on, each boundary once the one before was read back
+/// AND sent on the FHD Spout sender (so its picture is in the feed and the
+/// shared texture holds the same picture), three boundaries: the third
+/// sends the second's pair (one boundary late). Its NDI picture is UYVY,
+/// 1920×1080, stride 3840, and every byte is within `UYVY_TOLERANCE` of
+/// `sp_gpu::uyvy::reference` of the FHD target's own BGRA, read through the
+/// Spout FHD sender's texture (the same picture: every boundary served
+/// shows `job`).
+fn check_ndi_from_the_readback(
+    max: &Arc<MaxOut>,
+    rig: &mut NdiRig,
+    job: impl Fn(i64) -> ProgramJob,
+    what: &str,
+    next: &mut usize,
+) {
+    max.set_ndi_source(NdiSource::Gpu);
+    for _ in 0..3 {
+        let before = max.status().fhd.submitted;
+        let stamp = at(*next);
+        rig.out.submit(job(stamp));
+        *next += 1;
+        wait_until("the boundary was read back and sent", || {
+            max.ndi.newest_stamp() == Some(stamp) && max.status().fhd.submitted > before
+        });
+    }
+    assert_eq!(
+        rig.backend.last_async_video_fourcc(),
+        Some(FourCCVideoType::UYVY),
+        "{what}: NDI's picture is the readback"
+    );
+    let video = rig
+        .backend
+        .calls()
+        .into_iter()
+        .rev()
+        .find(|call| call.starts_with("send_video_async("))
+        .expect("a picture went out");
+    assert!(
+        video.ends_with(",UYVY,1920x1080,stride=3840,30/1)"),
+        "{what}: {video}"
+    );
+    let wire = rig.out.wire_frame().expect("a picture went out").clone();
+    let info = spout_sender_info(TEST_FHD_SENDER)
+        .expect("Spout's registry reads")
+        .expect("the FHD sender is listed");
+    let bgra = read_shared_texture(&info).expect("a second WARP device reads it");
+    let want = uyvy_reference(&bgra, FHD_WIDTH, FHD_HEIGHT);
+    assert_eq!(wire.len(), want.len(), "{what}: 2 bytes a pixel");
+    let over: Vec<(usize, u8, u8)> = wire
+        .iter()
+        .zip(&want)
+        .enumerate()
+        .filter(|(_, (got, want))| got.abs_diff(**want) > UYVY_TOLERANCE)
+        .map(|(i, (got, want))| (i, *got, *want))
+        .collect();
+    assert!(
+        over.is_empty(),
+        "{what}: {} bytes outside the tolerance, first (index, got, want): {:?}",
+        over.len(),
+        &over[..over.len().min(10)]
+    );
+}
+
 #[test]
 fn the_program_output_composes_on_warp_and_shares_it_over_spout() {
     let max = Arc::new(MaxOut::new());
@@ -400,6 +487,29 @@ fn the_program_output_composes_on_warp_and_shares_it_over_spout() {
         bgra(&frame, FHD_WIDTH, 1680, 540),
         [0, 0, 0, 255],
         "the right bar"
+    );
+
+    // #279 P1b: NDI `SP-program` from the GPU readback, the 720p picture
+    // and then the fade.
+    let source = |stamp: i64| {
+        ProgramJob::Source(SubmitJob {
+            video_tc_100ns: stamp,
+            ..one.clone()
+        })
+    };
+    let mut rig = NdiRig::new(&max);
+    check_ndi_from_the_readback(&max, &mut rig, source, "a Source boundary", &mut next);
+    check_ndi_from_the_readback(&max, &mut rig, mix, "a fade boundary", &mut next);
+    let ndi = max.ndi_status();
+    assert_eq!(
+        (ndi.source, ndi.fourcc, ndi.delay_slots, ndi.switches),
+        ("gpu", "UYVY", 1, 1),
+        "{ndi:?}"
+    );
+    assert_eq!(
+        (ndi.repeats, ndi.readback_late, ndi.feed_coalesced),
+        (0, 0, 0),
+        "every boundary's picture came before it was sent: {ndi:?}"
     );
 
     max.stop();
