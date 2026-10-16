@@ -177,6 +177,12 @@ fn a_pick_names_its_source_and_a_change_is_a_switch() {
 #[test]
 fn the_uyvy_black_is_limited_range_black_in_every_pair() {
     assert_eq!(UYVY_BLACK_PAIR, [128, 16, 128, 16]);
+    let black = [0, 0, 0, 255];
+    assert_eq!(
+        sp_gpu::uyvy::pack_pair(black, black),
+        UYVY_BLACK_PAIR,
+        "the GPU pass's own conversion of a black pair (one rule)"
+    );
     let black = black_uyvy(6, 3);
     assert_eq!(black.len(), 6 * 3 * 2, "3 pairs a row, 3 rows");
     assert!(black.chunks(4).all(|pair| pair == UYVY_BLACK_PAIR));

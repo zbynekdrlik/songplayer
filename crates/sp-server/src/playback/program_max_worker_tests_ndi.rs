@@ -204,6 +204,11 @@ fn ndi_back_on_the_canvas_disables_the_pass() {
     );
     assert_eq!(log.uyvy_enabled, 2);
     drop(log);
+    assert_eq!(
+        taken(&max, 1),
+        None,
+        "the pass went off: the feed let its pictures go"
+    );
     assert_eq!(taken(&max, 2), None, "boundary 2 was not read back");
     assert_eq!(taken(&max, 3), Some(fake_uyvy(3)));
 }

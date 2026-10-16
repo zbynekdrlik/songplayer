@@ -255,11 +255,14 @@ fn a_switch_to_the_gpu_holds_one_boundary_and_back_skips_one() {
 /// A readback that only ever arrives after its boundary went out (every
 /// picture late): the feed keeps nothing fresh, so 31 slots after the last
 /// picture it kept NDI falls back to the canvas, never repeating one
-/// picture for good.
+/// picture for good. Back on the GPU after that automatic fallback, a
+/// picture that did not come repeats the last read-back one (only the
+/// setting's switch forgets it): never a black frame.
 #[test]
 fn a_readback_that_is_always_late_falls_back_to_the_canvas() {
     let mut rig = rig(NdiSource::Gpu);
-    rig.max.ndi.push(at(0), uyvy(1));
+    let p0 = uyvy(1);
+    rig.max.ndi.push(at(0), p0.clone());
     rig.out.submit(source(0, 0.25));
     rig.out.submit(source(1, 0.25));
     for k in 2..=30 {
@@ -289,6 +292,21 @@ fn a_readback_that_is_always_late_falls_back_to_the_canvas() {
         ("cpu", 29, 29, 2),
         "{status:?}"
     );
+    // A picture on time again: back to the GPU (b32 held), and b32's own
+    // picture did not come.
+    rig.max.ndi.push(at(31), uyvy(3));
+    rig.out.submit(source(32, 0.25));
+    rig.out.submit(source(33, 0.25));
+    assert_eq!(
+        rig.backend.last_async_video_fourcc(),
+        Some(FourCCVideoType::UYVY)
+    );
+    assert!(
+        wire(&rig).ptr_eq(&p0),
+        "the last read-back picture, not the black"
+    );
+    let status = rig.max.ndi_status();
+    assert_eq!((status.switches, status.repeats), (3, 30), "{status:?}");
 }
 
 #[test]
