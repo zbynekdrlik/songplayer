@@ -1427,6 +1427,12 @@ build step, and WARP and the RTX run the same source. A compile error is
     `ID3D11Asynchronous`).
   - `None` for an optional interface or `HMODULE` parameter infers.
   - `GetData` maps `S_FALSE` to `Ok`: read the BOOL it writes.
+  - Any binding that ends in `.ok()` reads EVERY non-negative HRESULT as
+    `Ok`: `IDXGIKeyedMutex::AcquireSync`'s `WAIT_TIMEOUT` (0x102) and
+    `WAIT_ABANDONED` (0x80) included (#279 P0). Where a success code
+    means "not acquired", call the vtable entry
+    (`(Interface::vtable(x).AcquireSync)(Interface::as_raw(x), ..)`) and
+    judge the raw HRESULT in a pure fn (`probe::acquire_step`).
 - `tests/warp.rs` is `#![cfg(windows)]`. The `Build (Windows)` job runs it
   (`cargo test --workspace`). Linux compiles it to an empty test binary.
 - S2's sp-server side (`playback/program_max.rs`, `program_max_worker.rs`)

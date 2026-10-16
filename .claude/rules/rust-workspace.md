@@ -1304,6 +1304,14 @@ the worktree"), and not every time (#221 L4a). Write the anchor-asserted edit
 to a script in the lane's scratchpad and run `python3 <script> <path>` as its
 own command, then fmt / commit in separate commands.
 
+**Splitting one file's changes across two commits with no `add -p`**
+(interactive staging is unavailable; #279 P0: `win/mod.rs` held both the
+probe's `mod` line and the upload counting). Copy the finished file to the
+scratchpad, write the first commit's version (the file at HEAD plus only
+that commit's anchor-asserted edits), stage and commit it, then copy the
+finished file back for the next commit. Each commit then compiles on its
+own.
+
 ## "Never blocks / never waits" tests: gates and thread names, never wall-time thresholds (#212 follow-up)
 
 The gating Coverage job runs every test under `cargo tarpaulin`'s ptrace, and
