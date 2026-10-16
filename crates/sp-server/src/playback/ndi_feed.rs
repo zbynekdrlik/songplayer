@@ -42,6 +42,10 @@ pub const NDI_FEED_DEPTH: usize = 3;
 /// for NDI to come from the GPU; further, the CPU canvas sends it.
 pub const NDI_FEED_STALE_SLOTS: i64 = 30;
 
+/// At most one log line of a change of NDI's source per this much timeline
+/// (100 ns; 5 s); every switch is counted all the same (`ndi.switches`).
+pub const NDI_SWITCH_LOG_EVERY_100NS: i64 = 50_000_000;
+
 /// The constant UYVY black: one pixel pair `U Y0 V Y1` of BT.709
 /// limited-range black, what the GPU's pass makes of the cleared target.
 pub const UYVY_BLACK_PAIR: [u8; 4] = [128, 16, 128, 16];
@@ -118,6 +122,12 @@ impl FeedCore {
         let picture = kept.remove(&stamp_100ns);
         self.pictures = kept;
         picture
+    }
+
+    /// The pictures go (the pass is off: nothing will take them); the
+    /// counters and the freshness stay.
+    pub fn clear(&mut self) {
+        self.pictures.clear();
     }
 
     /// The stamp of the newest picture kept (served since or not): a
@@ -288,7 +298,13 @@ impl NdiFeed {
         self.lock().core.take(stamp_100ns)
     }
 
-    /// The stamp of the newest picture pushed: the readback's freshness.
+    /// The `program-max` thread, its UYVY pass off: let the pictures go
+    /// (`FeedCore::clear`), so no 4 MB buffer stays out of `frame_pool`.
+    pub fn clear(&self) {
+        self.lock().core.clear();
+    }
+
+    /// The stamp of the newest picture kept: the readback's freshness.
     pub fn newest_stamp(&self) -> Option<i64> {
         self.lock().core.newest()
     }

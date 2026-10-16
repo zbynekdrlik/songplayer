@@ -51,6 +51,9 @@ pub(super) struct NdiPass {
     /// log: they outlive a compositor, like MAX's.
     failing: Option<String>,
     log: LogGate,
+    /// The enable's own log: a pass that keeps failing to enable is said
+    /// once (not at every retry), its recovery once.
+    enable_log: LogGate,
 }
 
 impl NdiPass {
@@ -75,20 +78,26 @@ impl<G: MaxGpu> MaxWorker<'_, G> {
                 info!("program max: NDI's UYVY readback is off");
             }
             self.ndi.forget();
+            // Nothing takes them any more: no 4 MB buffer stays pinned.
+            self.out.ndi.clear();
             return;
         }
         if self.ndi.on || self.ndi.retry_at.is_some_and(|at| now < at) {
             return;
         }
+        let at = elapsed_100ns(self.started, now);
         match compositor.enable_uyvy(TargetId::PRIMARY) {
             Ok(()) => {
                 self.ndi.on = true;
                 self.ndi.retry_at = None;
+                self.ndi.enable_log.observe(at, None);
                 info!("program max: NDI's UYVY readback is on (SP-program from the GPU)");
             }
             Err(error) => {
                 self.ndi.retry_at = Some(now + MAX_RETRY_BACKOFF);
-                warn!(%error, "program max: NDI's UYVY pass could not be enabled - tried again after the backoff");
+                let why = error.to_string();
+                let line = self.ndi.enable_log.observe(at, Some(&why));
+                log_enable_failed(line.as_ref(), &why);
             }
         }
     }
@@ -129,6 +138,19 @@ impl<G: MaxGpu> MaxWorker<'_, G> {
             job.stamp_100ns(),
         );
         line
+    }
+}
+
+/// The WARN of a UYVY pass that could not be enabled, once per failing
+/// spell (`LogGate`'s decision, tested; logging only).
+#[cfg_attr(test, mutants::skip)]
+fn log_enable_failed(line: Option<&LogLine>, why: &str) {
+    if let Some(LogLine::Failing { held_back }) = line {
+        warn!(
+            error = why,
+            held_back = *held_back,
+            "program max: NDI's UYVY pass could not be enabled - tried again after each backoff"
+        );
     }
 }
 

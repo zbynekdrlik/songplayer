@@ -507,7 +507,10 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// #251 step 4: before the video side, wait while the boundary lies in
     /// the quiet window after the primary's vblank (`program_video_quiet.rs`).
     fn wait_video_quiet(&mut self) {
-        if let Some(max) = &self.max {
+        // #279 P1b: with MAX off nothing goes out over Spout for Arena.
+        if let Some(max) = &self.max
+            && max.max_wanted()
+        {
             super::program_video_quiet::wait_out(&max.video, &mut *self.video_clock);
         }
     }

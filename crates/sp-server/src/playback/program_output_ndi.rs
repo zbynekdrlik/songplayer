@@ -47,10 +47,12 @@ use tracing::{info, warn};
 use super::{PROGRAM_STANDBY_H, PROGRAM_STANDBY_W, Pair, ProgramOutput};
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::ndi_feed::{
-    BlackUyvy, CpuWhy, NdiPick, NdiSwitch, ndi_source_for, ndi_switch, uyvy_len,
+    BlackUyvy, CpuWhy, NDI_SWITCH_LOG_EVERY_100NS, NdiPick, NdiSwitch, ndi_source_for, ndi_switch,
+    uyvy_len,
 };
 use crate::playback::program_burn;
 use crate::playback::program_item::ItemFrame;
+use crate::playback::stat_window::WarnLimiter;
 
 // The GPU reads back the compositor's primary target, the FHD program: the
 // size `SP-program`'s canvas always is (#223).
@@ -97,10 +99,16 @@ pub(super) struct NdiLine {
     source: NdiSource,
     /// The pair held for the next boundary (from the GPU).
     held: Option<Held>,
-    /// The last read-back picture sent: what a missing one repeats.
+    /// The last read-back picture sent: what a missing one repeats. An
+    /// automatic fallback to the canvas keeps it; the setting's switch
+    /// forgets it.
     last: Option<SharedFrame>,
     /// The constant UYVY black, sent before any picture came.
     black: BlackUyvy,
+    /// At most one switch line per `NDI_SWITCH_LOG_EVERY_100NS` of the
+    /// timeline (a readback flapping at the staleness edge never floods
+    /// the log; every switch is counted all the same).
+    switch_log: WarnLimiter,
 }
 
 impl<B: NdiBackend> ProgramOutput<B> {
@@ -123,12 +131,18 @@ impl<B: NdiBackend> ProgramOutput<B> {
         };
         let pick = ndi_source_for(setting, newest, stamp_100ns);
         let switch = ndi_switch(self.ndi.source, pick);
-        log_switch(switch);
+        let log_limit = &mut self.ndi.switch_log;
+        log_switch(switch.and_then(|switch| {
+            let suppressed = log_limit.admit(stamp_100ns, NDI_SWITCH_LOG_EVERY_100NS)?;
+            Some((switch, suppressed))
+        }));
         self.ndi.source = pick.source();
         let (start, sent, repeated) = match pick {
-            NdiPick::Cpu(_) => {
+            NdiPick::Cpu(why) => {
                 self.ndi.held = None;
-                self.ndi.last = None;
+                if why == CpuWhy::Setting {
+                    self.ndi.last = None;
+                }
                 let start = self.submit_video(pair, stamp_100ns, shown, now);
                 (start, stamp_100ns, false)
             }
@@ -231,21 +245,23 @@ impl<B: NdiBackend> ProgramOutput<B> {
     }
 }
 
-/// The one line of a change of NDI's source (the decision is
-/// `ndi_switch`'s, tested; logging only).
+/// The one line of a change of NDI's source, with the switches its rate
+/// limit held back before it (the decisions are `ndi_switch`'s and
+/// `WarnLimiter`'s, tested; logging only).
 #[cfg_attr(test, mutants::skip)]
-fn log_switch(switch: Option<NdiSwitch>) {
+fn log_switch(switch: Option<(NdiSwitch, u64)>) {
     match switch {
-        Some(NdiSwitch::ToGpu) => info!(
+        Some((NdiSwitch::ToGpu, suppressed)) => info!(
+            suppressed,
             "program output: NDI SP-program now from the GPU readback (UYVY, one boundary late)"
         ),
-        Some(NdiSwitch::ToCpu(CpuWhy::Setting)) => info!(
+        Some((NdiSwitch::ToCpu(CpuWhy::Setting), suppressed)) => info!(
             reason = CpuWhy::Setting.as_str(),
-            "program output: NDI SP-program falls back to the CPU canvas"
+            suppressed, "program output: NDI SP-program falls back to the CPU canvas"
         ),
-        Some(NdiSwitch::ToCpu(why)) => warn!(
+        Some((NdiSwitch::ToCpu(why), suppressed)) => warn!(
             reason = why.as_str(),
-            "program output: NDI SP-program falls back to the CPU canvas"
+            suppressed, "program output: NDI SP-program falls back to the CPU canvas"
         ),
         None => {}
     }
