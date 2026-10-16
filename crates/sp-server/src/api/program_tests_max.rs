@@ -20,6 +20,10 @@ async fn get_program_reports_the_max_block() {
     // nest the macro deep).
     let mut max_block = json["max"].clone();
     let fhd = max_block.as_object_mut().expect("an object").remove("fhd");
+    let video_quiet = max_block
+        .as_object_mut()
+        .expect("an object")
+        .remove("video_quiet");
     assert_eq!(
         max_block,
         serde_json::json!({
@@ -76,6 +80,17 @@ async fn get_program_reports_the_max_block() {
             "send_us_p99": 0,
         })),
         "#239: the SP-program Spout sender, off while MAX is; #251 step 2: no upload of its own"
+    );
+    assert_eq!(
+        video_quiet,
+        Some(serde_json::json!({
+            "from_us": 3000,
+            "to_us": 10500,
+            "grid": false,
+            "waits": 0,
+            "wait_us_max": 0,
+        })),
+        "#251 step 4: the video side's quiet window, no grid while MAX is off"
     );
     assert_eq!(json["ndi_name"], PROGRAM_NDI_NAME, "the program stays flat");
     assert!(json["outputs"].is_array(), "the other blocks stay");
