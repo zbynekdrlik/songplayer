@@ -166,7 +166,8 @@ pub fn program_max_compose_phase_us(raw: Option<&str>) -> u64 {
 /// video side (the canvas fit, the NDI submit) would start inside
 /// [`program_video_quiet_from_us`, `program_video_quiet_to_us`) waits until
 /// its end, so it never loads the memory bus while Arena reads Spout. A
-/// window whose start is not before its end is off.
+/// window whose start is not before its end, or that ends past one refresh
+/// of the display (16.7 ms at 60 Hz), is off.
 pub const SETTING_PROGRAM_VIDEO_QUIET_FROM_MS: &str = "program_video_quiet_from_ms";
 /// #251 step 4: the quiet window's end, ms after the vblank.
 pub const SETTING_PROGRAM_VIDEO_QUIET_TO_MS: &str = "program_video_quiet_to_ms";

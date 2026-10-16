@@ -38,12 +38,12 @@ pub struct QuietWindow {
 }
 
 /// When the video side of a boundary at `now` may start: `None` = at once
-/// (no grid, a window that is off — its start not before its end — or
-/// longer than one refresh, or `now` outside it); else the window's end in
-/// this refresh.
+/// (no grid, a window ending past one refresh, or `now` outside it — a
+/// window whose start is not before its end holds no instant, so it is
+/// off); else the window's end in this refresh.
 pub fn video_start(now: Instant, grid: Option<VblankGrid>, window: QuietWindow) -> Option<Instant> {
     let grid = grid?;
-    if window.from >= window.to || window.to > grid.period {
+    if window.to > grid.period {
         return None;
     }
     let phase = phase_after_vblank(&grid, now);

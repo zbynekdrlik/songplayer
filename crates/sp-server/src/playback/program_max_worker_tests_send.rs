@@ -192,7 +192,7 @@ fn the_worker_publishes_its_grid_for_the_video_quiet_window() {
     // 5 ms after its vblank: inside the window, wait to 10.5 ms.
     let end = offered + 9 * MS + MS / 2;
     assert_eq!(max.video.start_at(offered + 4 * MS), Some(end));
-    assert!(max.status().video_quiet.grid);
+    assert!(max.video.status(offered + 4 * MS).grid);
 
     let max = MaxOut::new();
     let (clock, _list) = FakeClock::at(offered + 4 * MS);
@@ -201,7 +201,7 @@ fn the_worker_publishes_its_grid_for_the_video_quiet_window() {
         .with_vblank(Box::new(FakeVblank(None)));
     worker.serve_offered(&job(1), offered, offered + 4 * MS);
     assert_eq!(max.video.start_at(offered + 4 * MS), None, "no grid");
-    assert!(!max.status().video_quiet.grid);
+    assert!(!max.video.status(offered + 4 * MS).grid);
 }
 
 /// The wall's grid of the test above (a vblank 1 ms before the offer,
