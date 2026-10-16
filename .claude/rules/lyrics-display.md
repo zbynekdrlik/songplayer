@@ -102,11 +102,66 @@ leader's calls in parentheses. Song 361 "Redeemed" had wall lines of up to
   - the words join again with one space, and a lone `, . ; : ! ? …` is
     glued to the word before it (dropped when it would come first);
   - a line that is ONLY asides keeps its words without the brackets, so the
-    wall never blanks a line the room sings;
+    wall never blanks a line the room sings (`(Hallelujah)`); one whose
+    words are only interjections (`(Oh)`) then leaves by the rule below;
   - a line with no parenthesis, or with parentheses that do not pair up, is
     returned untouched.
-- The fixtures hold no `(`, so every #217 pin stands.
+- The fixtures hold no `(`.
 - The karaoke view keeps the raw text.
+
+**#280 part 2: bare interjections are left out**
+(`display_plan_interjections.rs`, a child of `display_plan.rs`, after the
+asides; design 6224751018 + the edge rule 6223162067). The owner saw "One
+more time we say" + "Oh." as "Ešte raz hovoríme Och." (16.10.2026); on SNV
+1353 EN lines (4.1 %) of 349 songs were only interjections.
+
+- `build_plan` takes `shown_lines`: each line without its asides, then
+  through `interjections::shown`, each kept line with its index in the
+  track. It groups and schedules the kept lines, then maps each group
+  back: `src_range = kept[first]..kept[last] + 1`. A left-out line inside
+  a group is in its range; one between two display lines is in none. No
+  production code reads `src_range`.
+- **The EN line is the judge.** The EN set: `oh ooh oooh oh-oh whoa woah woo
+  yeah yea hey ah aah uh mm mmm hmm na la ay ayy eh`, compared lower-case
+  with the marks around a word stripped. `yes` is NOT in it: a sung "yes" is
+  content.
+- **A line whose EN words are ALL interjections leaves the plan**, both
+  languages, with its time. The previous display line holds through it by
+  the hold rules (until the next line shows; a gap now over 8 s blanks the
+  wall). A line with NO EN words (a dub line) is never left out.
+- **Edges go only where a mark (`, . ; : ! ? …`, the asides' `GLUED`)
+  separates them.**
+  - The LONGEST leading run of set words whose last word carries a mark:
+    `Yeah, let's dance.` → `Let's dance.`, `Oh, oh Lord, you are good` →
+    `Oh Lord, you are good`.
+  - The LONGEST trailing run of set words whose PRECEDING word ends in a
+    mark: `Say whoa oh. Yeah.` → `Say whoa oh.` (the whole set run `whoa oh.
+    Yeah.` is not separated from `Say`, the shorter one is).
+  - At least two words must stay, else the line stays whole (`Oh, God.`).
+  - Not cut: `Say whoa oh.`, `Oh Lord, you're beautiful` (no mark), and an
+    interjection in the middle (`clean, yeah, I'm free indeed`).
+  - The first word left takes a capital when the line's first word had one.
+  - **The last word keeps its own sentence end, else takes the line's
+    final sentence end** (`free indeed, yeah.` → `free indeed.`, `like you.
+    Oh,` → `like you.`, `Is he worthy? Yeah.` → `Is he worthy?`). The
+    design's literal "the run's mark replaces the kept one" would make
+    `like you,` of the last; its own example and reason ("a sentence end
+    survives") rule it. A cut can therefore END a sentence the raw line did
+    not (221's `like you. Oh,`).
+- **SK follows only an EN cut:** at most as many SK words at that edge, each
+  from `och ó o oh jé jej hej áno jeah yeah ach ah uh mm hm wow ou`, by the
+  same separation and two-word rule. So `áno` / `o` never go on their own
+  (`Yes, Lord` / `Áno, Pane` stays), and a line with no SK changes only EN.
+- A line that followed a left-out capitalised `Oh,` keeps its own lower-case
+  start (What A God `what a God, what a God.`), as every wall line that
+  starts mid-sentence does.
+- Display-only: NO `LYRICS_PIPELINE_VERSION` bump; the karaoke view keeps
+  the raw track.
+- Tests: `display_plan_interjections_tests.rs` (the census lines, through
+  `build_plan`), `display_plan_fixture_tests.rs`
+  `fixture_lines_of_only_interjections_are_in_no_wall_line` and
+  `fixture_interjections_at_a_line_edge_go_where_a_mark_separates_them`.
+  The fixture oracles read the shown lines through `shown_lines` (`Shown`).
 
 **Never bump `LYRICS_PIPELINE_VERSION` for a display change.** The stored JSON
 and the pipeline are untouched. Regrouping lines in the pipeline instead
@@ -185,7 +240,8 @@ one only together with the design record on #217.
     unsanitized overlapping ★-tier mtl times — can leave the middle one at
     zero length.) The chant's lines are up for 400–1200 ms each,
     and the sentence after it shows 400 ms late
-    (`a_chant_of_short_sentences_falls_at_most_400_ms_behind`).
+    (`a_chant_of_short_sentences_falls_at_most_400_ms_behind`; it chants
+    "Sing!" since #280 part 2, as a "Hey!" line now leaves the plan).
   - Four sentences 1 s apart still show −800, 0, +200 and +400 ms
     (`in_a_fast_run_of_short_sentences_each_keeps_1200_ms`).
   - Every fixture pin is unchanged. The worst delay on the fixtures is
@@ -250,14 +306,19 @@ one only together with the design record on #217.
   boundary (`x − 1` → old line, `x` → new line) for the mutation gate.
 - **The fixtures are real songs**, loaded via `include_str!` +
   `CARGO_MANIFEST_DIR` (`crates/sp-server/tests/fixtures/`):
-  - `lyrics_6KuPjo1diLg.json` (What A God, 191 lines): 137 wall lines,
-    19 600 ms blank (3 breaks), shortest up 1200 ms, 41 full leads / 79
-    exact / 1 late.
+  - `lyrics_6KuPjo1diLg.json` (What A God, 191 lines): 135 wall lines,
+    24 900 ms blank (4 breaks), shortest up 1200 ms, 41 full leads / 77
+    exact / 1 late. Lines 11 / 61 / 127 / 187 (`Oh,` `Yeah.` `Oh.` `Oh,`)
+    are left out (#280); without line 61 a 9.1 s gap blanks the wall from
+    222.1 s to 227.4 s.
   - `lyrics_335.json` (105 lines): 68 wall lines, 28 400 ms blank (2
     breaks), shortest up 1682 ms, 13 / 53 / 0; "Now his will be done." and
     "Lift up your banners and practice your praise." are whole.
-  - `lyrics_221.json` (75 lines): 53 wall lines, 31 700 ms blank (4
-    breaks), shortest up 1253 ms, 9 / 40 / 0.
+  - `lyrics_221.json` (75 lines): 51 wall lines, 40 300 ms blank (5
+    breaks), shortest up 1253 ms, 8 / 39 / 0. Lines 9 / 74 (`Yeah. Yeah.`,
+    `Hey.`) are left out (#280).
+  - Before #280 part 2 the pins were 137 / 68 / 53 wall lines, (3, 19 600)
+    / (2, 28 400) / (4, 31 700) and 41/79/1, 13/53/0, 9/40/0.
   - The pins: `fixture_no_wall_line_is_up_for_less_than_1200_ms` (wall
     lines, shortest), `fixture_lead_counts` (full / exact / late),
     `fixture_the_wall_blanks_only_in_instrumental_breaks` (breaks, blank).
@@ -274,4 +335,5 @@ one only together with the design record on #217.
   that simulation skipped the char check for a line that ends a sentence (so
   such a line could push its display line past 72 chars); at 72 the code gave
   59/51/123 (review round 2). Since `MAX_CHARS` = 52 in BOTH languages
-  (29.9.2026) the pins are 68/53/137.
+  (29.9.2026) the pins were 68/53/137, and since #280 part 2 (lines of only
+  interjections leave the plan) they are 68/51/135.
