@@ -400,6 +400,19 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
 - dxcam's output on SNV: `Output[1]` 7680×1080 (`Output[0]` is the 4K
   primary). Read it with `python -c "import dxcam;
   print(dxcam.output_info())"`.
+- **It grabs one strip band, never the whole output** (`SP_WALL_REGION`,
+  ci.yml: `0,160,7680,312`). A full 7680×1080 grab is too slow to time
+  each refresh: the reader exits 5 ("only 2 intervals timed within
+  1.67 ms"). At Arena's mapping on 16.10.2026 the wall clip's strips land
+  on rows 170–308, 315–332 (a cut band) and 715–880 of that output; the
+  band 160–312 polls at 16.6 ms with no blind picture. Find the rows
+  again after any change to Arena's wall mapping: one `camera.grab()` of
+  the output while a wall clip plays, then `wall_frames.strip_rows` on
+  `cell_profile(sample_columns(picture, (0, 1)))`.
+- **The first manual take (16.10.2026 19:00Z, `wall-30` through MAX on
+  L4 / L5):** verdict `defects`: 521 jumps back and 1040 of 1708 boundaries
+  held the wrong number of refreshes in 40 s. So the gate was red on the
+  day it landed, as the owner saw the wall.
 
 ## Box procedure (main session, once per box)
 
