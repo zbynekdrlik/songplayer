@@ -141,6 +141,15 @@ fn log_value(position: u32, min: f64, max: f64) -> f64 {
     min * ((max / min).ln() * share).exp()
 }
 
+/// What a band card's slider shows (the #200 drag gate): while the operator
+/// drags it, the position under the pointer; else the position of the
+/// band's value. A log slider's snapped value maps back to a position a
+/// step or ten away at low Q / low frequency, which would make the thumb
+/// jump under the pointer.
+pub fn slider_shown<T>(dragging: bool, dragged: T, value: T) -> T {
+    if dragging { dragged } else { value }
+}
+
 /// A frequency's position on the band card's frequency slider (log scale).
 pub fn freq_slider(hz: f64) -> u32 {
     log_position(hz, FREQ_MIN_HZ, FREQ_MAX_HZ)

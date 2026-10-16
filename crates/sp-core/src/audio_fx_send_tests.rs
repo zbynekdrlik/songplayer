@@ -58,19 +58,19 @@ fn one_request_in_flight_and_the_latest_change_follows_it() {
     assert!(!gate.busy());
 }
 
-/// #278 review round 2: a send unanswered for 10 s is given up, and the
-/// settings as they are now go out again (what the server holds is
-/// unknown); its answer then leaves the gate clean, and the throttle counts
-/// from the new send.
+/// #278 review rounds 2-3: a send unanswered for 10 s is given up as
+/// landed: the gate is free, nothing is sent again unless something changed
+/// meanwhile (the panel itself watches the given-up request).
 #[test]
-fn an_unanswered_send_is_given_up_and_the_settings_go_out_again() {
+fn an_unanswered_send_given_up_frees_the_gate() {
     let mut gate = SendGate::default();
     assert_eq!(gate.changed(T), SendStep::Send);
-    assert_eq!(gate.gave_up(T + 10_000.0), SendStep::Send);
-    assert!(gate.busy(), "the new send is in flight");
-    assert_eq!(gate.landed(T + 10_005.0), SendStep::Idle);
+    assert_eq!(gate.landed(T + 10_000.0), SendStep::Idle);
     assert!(!gate.busy());
-    assert_eq!(gate.changed(T + 10_020.0), SendStep::WaitMs(30.0));
+    // A change made while it hung goes out at the give-up.
+    assert_eq!(gate.changed(T + 10_100.0), SendStep::Send);
+    assert_eq!(gate.changed(T + 10_200.0), SendStep::Idle);
+    assert_eq!(gate.landed(T + 20_100.0), SendStep::Send);
 }
 
 /// A change within 50 ms of the last send's START waits for the rest of

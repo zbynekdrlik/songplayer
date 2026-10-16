@@ -418,10 +418,16 @@ body {
     fill: var(--eq-kind);
     stroke: #fff;
     stroke-width: 2;
+    pointer-events: none;
+}
+/* The invisible grip on top of the dot takes the pointer and the wheel. */
+.playlist-audio-curve .eq-handle-grip {
+    fill: transparent;
     cursor: grab;
     touch-action: none;
 }
-.playlist-audio-curve .eq-handle.dragging .eq-handle-dot { cursor: grabbing; stroke-width: 3; }
+.playlist-audio-curve .eq-handle.dragging .eq-handle-grip { cursor: grabbing; }
+.playlist-audio-curve .eq-handle.dragging .eq-handle-dot { stroke-width: 3; }
 .playlist-audio-curve .eq-handle.off .eq-handle-dot { opacity: 0.35; }
 .playlist-audio-curve .eq-handle-number {
     fill: #fff;

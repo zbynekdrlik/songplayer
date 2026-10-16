@@ -14,7 +14,7 @@ use leptos::prelude::*;
 use sp_core::audio_fx::{BandKind, EqBand, GAIN_MAX_DB, GAIN_MIN_DB, default_band, with_kind};
 use sp_core::audio_fx_view::{
     SLIDER_STEPS, freq_label, freq_slider, gain_label, q_label, q_slider, slider_freq, slider_q,
-    snap_gain,
+    slider_shown, snap_gain,
 };
 
 use crate::components::playlist_audio::EqEdit;
@@ -23,14 +23,17 @@ use crate::components::playlist_audio::EqEdit;
 struct Row {
     label: &'static str,
     testid: &'static str,
-    title: &'static str,
+    title: Signal<&'static str>,
     min: String,
     max: String,
     step: &'static str,
 }
 
 /// One slider row: the label, the slider, its value (`<testid>-value`); a
-/// double-click anywhere on the row resets the value.
+/// double-click anywhere on the row resets the value. While the pointer
+/// drags the thumb, the slider shows the pointer's position (#200's drag
+/// gate, `slider_shown`): the band's snapped value maps back to a nearby
+/// position, which would make the thumb jump under the pointer.
 fn param_row(
     row: Row,
     value: Signal<String>,
@@ -40,8 +43,11 @@ fn param_row(
     reset: impl Fn() + 'static,
     edit: EqEdit,
 ) -> impl IntoView {
+    let title = row.title;
+    let dragging = RwSignal::new(false);
+    let dragged = RwSignal::new(String::new());
     view! {
-        <div class="eq-param" title=row.title on:dblclick=move |_| reset()>
+        <div class="eq-param" title=move || title.get() on:dblclick=move |_| reset()>
             <span class="eq-param-label">{row.label}</span>
             <input
                 type="range"
@@ -49,11 +55,26 @@ fn param_row(
                 min=row.min
                 max=row.max
                 step=row.step
-                prop:value=move || value.get()
+                prop:value=move || slider_shown(dragging.get(), dragged.get(), value.get())
                 prop:disabled=move || disabled.get()
-                on:input=move |ev| slid(event_target_value(&ev))
-                on:change=move |_| edit.finish()
-                on:pointerup=move |_| edit.finish()
+                on:pointerdown=move |_| {
+                    dragged.set(value.get_untracked());
+                    dragging.set(true);
+                }
+                on:input=move |ev| {
+                    let raw = event_target_value(&ev);
+                    dragged.set(raw.clone());
+                    slid(raw);
+                }
+                on:change=move |_| {
+                    dragging.set(false);
+                    edit.finish();
+                }
+                on:pointerup=move |_| {
+                    dragging.set(false);
+                    edit.finish();
+                }
+                on:pointercancel=move |_| dragging.set(false)
             />
             <span class="eq-param-value" data-testid=format!("{}-value", row.testid)>
                 {move || shown.get()}
@@ -74,7 +95,7 @@ pub(crate) fn band_card(edit: EqEdit, id: u64) -> impl IntoView {
         Row {
             label: "Frekvencia",
             testid: "band-freq",
-            title: "Dvojklik vráti frekvenciu na predvolenú pre tento typ",
+            title: Signal::derive(|| "Dvojklik vráti frekvenciu na predvolenú pre tento typ"),
             min: "0".to_string(),
             max: SLIDER_STEPS.to_string(),
             step: "1",
@@ -94,7 +115,13 @@ pub(crate) fn band_card(edit: EqEdit, id: u64) -> impl IntoView {
         Row {
             label: "Zisk",
             testid: "band-gain",
-            title: "Dvojklik vráti zisk na 0 dB",
+            title: Signal::derive(move || {
+                if uses_gain.get() {
+                    "Dvojklik vráti zisk na 0 dB"
+                } else {
+                    "Orezanie basov a výšok zisk nepoužíva"
+                }
+            }),
             min: GAIN_MIN_DB.to_string(),
             max: GAIN_MAX_DB.to_string(),
             step: "0.1",
@@ -132,7 +159,7 @@ pub(crate) fn band_card(edit: EqEdit, id: u64) -> impl IntoView {
         Row {
             label: "Q",
             testid: "band-q",
-            title: "Dvojklik vráti Q na predvolené pre tento typ",
+            title: Signal::derive(|| "Dvojklik vráti Q na predvolené pre tento typ"),
             min: "0".to_string(),
             max: SLIDER_STEPS.to_string(),
             step: "1",

@@ -64,7 +64,9 @@ separate one-song playlist in mode Single).
   under the Player, modelled on iemmixer's `iem-ui/src/components/eq_modal.rs`.
   It loads on first open and shows its fields ONLY once the load landed
   ("Načítavam…" before: an edit made earlier was overwritten by the load,
-  CI run 37975959175; `/__mock/playlist-audio-delay` reproduces it).
+  CI run 37975959175; `/__mock/playlist-audio-delay` reproduces it). A
+  load that lands after the panel was torn down (navigation) writes
+  nothing (`loaded.try_get_untracked()`, sp-ui-frontend.md).
   - `playlist_audio.rs`: the state (`EqEdit`, all `Copy` handles: `fx`, a
     band id per `fx.eq` entry in `ids`, the cards' `order`, the send gate,
     the status), the volume row, "Pridať pásmo" (one button per type,
@@ -84,7 +86,13 @@ separate one-song playlist in mode Single).
     ENABLED band's own curve `band_path` (its filter alone, no volume; off
     = `d=""`) in its type's colour (`--eq-kind` on `.kind-<name>`); one
     handle per band at `handle_xy` (a high-/low-pass on the 0 dB line).
-  - **A handle's drag**: `pointerdown` captures the pointer on the circle
+  - **A handle** = its dot (`circle.eq-handle-dot`, `HANDLE_R` 9, no
+    pointer events), its number, and on top an invisible GRIP
+    (`circle.eq-handle-grip`, `GRIP_R` 22 box units: a phone draws the
+    800-unit box ~340 px wide, where the dot alone is ~4 px) that takes
+    the pointer and the wheel. Specs aim at the grip, read the dot's
+    `cx` / `cy`.
+  - **A handle's drag**: `pointerdown` captures the pointer on the grip
     (`set_pointer_capture`), `pointermove` maps the pointer into the box
     (`to_box` over the SVG's own `getBoundingClientRect`: the SVG has NO
     border or padding, its frame is an `outline` drawn inside, else the
@@ -118,7 +126,13 @@ separate one-song playlist in mode Single).
     on a row (`band-<field>-value`, `playlist-audio-gain-value`) resets
     that value to the type's default (the volume to 0 dB); the greyed gain
     row of a high-/low-pass resets nothing (it keeps the gain it does not
-    use for a later shelf or peak).
+    use for a later shelf or peak) and its tooltip says so (a reactive
+    `title`: "Orezanie basov a výšok zisk nepoužíva"). Each slider has
+    the #200 drag gate: while the pointer holds its thumb it shows the
+    pointer's own position (`audio_fx_view::slider_shown`), never the
+    snapped value mapped back (a log slider's snap would make the thumb
+    jump under the pointer); `change` / `pointerup` end it,
+    `pointercancel` too.
   - **Live, no "Použiť"**: every change is `PUT …/audio` of the settings
     AS THEY ARE at the send. The rule is the pure
     `sp_core::audio_fx_send::SendGate` (`changed` / `flush` / `landed` /
@@ -128,12 +142,17 @@ separate one-song playlist in mode Single).
     an add, a remove) sends at once. A slider commits on `pointerup` AND
     `change` (#200: never on `change` alone); a lost release costs nothing,
     the armed timer still sends the last value. An answer is awaited
-    `ANSWER_TIMEOUT_MS` (10 s), then given up (`SendGate::gave_up`:
-    the settings as they are go out again, since what the server holds
-    is unknown; "Uloženie zlyhalo: server neodpovedá — skúšam znova"), so
-    a server that never answers cannot hold the gate in flight. A request
-    given up can still land later and briefly hold an older value, until
-    the re-send lands. `validate` runs before
+    `ANSWER_TIMEOUT_MS` (10 s), then given up through `SendGate::landed`
+    ("Uloženie zlyhalo: server neodpovedá", nothing re-sent: a server
+    that does not answer is not hammered), so it never holds the gate in
+    flight and the next change goes out. The given-up request is still
+    watched (`EqEdit::late_answer`): when it lands with the settings
+    unchanged since, it was the save ("Uložené"); when newer settings
+    went out meanwhile it may have landed OVER them, so they are sent once
+    more. Residual: the server writes the row, then the register, per
+    request, so two PUTs that overlap there (only a given-up one and its
+    successor) can leave the register a step behind the row until the
+    re-send. `validate` runs before
     every send (`FxError::sk` on the status line). Status line: "Ukladám…"
     while busy, then "Uložené", or "Uloženie zlyhalo: …".
   - The playing song follows each PUT through the DSP's 50 ms crossfade;
@@ -157,11 +176,17 @@ separate one-song playlist in mode Single).
   Mock knobs `/__mock/playlist-audio{,-reset,-set,-delay,-put-delay,-put-status}`
   (a reset also makes a delayed PUT that arrived before it store nothing):
   `/__mock/playlist-audio` returns `{puts: [{id, body, at, done}], last,
-  stored}` (arrival / answer on the mock's clock: the drag test holds the
+  stored}` (arrival / answer on the mock's clock; with `-put-delay` every
+  PUT starts after the one before was answered). The drag test holds the
   button down after 20 quick moves and needs the latest position on the
-  server BEFORE the release, in fewer than 20 PUTs ≥ 40 ms apart; with
-  `-put-delay` every PUT starts after the one before was answered); the
-  mock answers PUT 204 and 400 with the server's texts.
+  server BEFORE the release, in fewer than 20 PUTs; it times the
+  throttle where it runs, in the page (an `addInitScript` wrapper of
+  `window.fetch` records `performance.now()` per PUT …/audio — gloo-net
+  calls the global `fetch` with a `Request`), ≥ 45 ms apart, never by
+  the mock's arrivals (a loaded runner delays them). The give-up test
+  delays answers 13 / 16 s: given up at 10 s, the late answer counts,
+  and a stale one landing over a newer save is followed by a re-send.
+  The mock answers PUT 204 and 400 with the server's texts.
 - Post-deploy `e2e/post-deploy-playlist-audio.spec.ts` (SNV; not in PP's
   subset), the owner's own path (#278 review round 1): picks a playlist
   that is not decoding (health `transport`) with room for a band, checks

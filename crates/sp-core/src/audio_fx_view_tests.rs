@@ -5,8 +5,8 @@
 use super::{
     BOX_H, BOX_W, CURVE_POINTS, DB_GRID, FREQ_GRID, SLIDER_STEPS, WHEEL_Q_FACTOR, WheelTurn,
     band_path, display_order, dragged, fill_path, freq_label, freq_slider, gain_label, handle_xy,
-    q_label, q_slider, slider_freq, slider_q, snap_freq, snap_gain, snap_q, to_box, wheel_q,
-    x_freq, y_db,
+    q_label, q_slider, slider_freq, slider_q, slider_shown, snap_freq, snap_gain, snap_q, to_box,
+    wheel_q, x_freq, y_db,
 };
 use crate::audio_fx::{
     BandKind, CURVE_DB_MAX, CURVE_DB_MIN, DEFAULT_Q, EqBand, PlaylistFx, curve_path, db_y,
@@ -189,6 +189,15 @@ fn the_values_read_as_the_panel_shows_them() {
     assert_eq!(q_label(DEFAULT_Q), "Q 0,71");
     assert_eq!(q_label(1.0), "Q 1,00");
     assert_eq!(q_label(12.0), "Q 10,00");
+}
+
+/// #278 review round 3: while dragged, a slider shows the pointer's
+/// position, else its value's.
+#[test]
+fn a_dragged_slider_shows_the_pointers_position() {
+    assert_eq!(slider_shown(true, "523", "520"), "523");
+    assert_eq!(slider_shown(false, "523", "520"), "520");
+    assert_eq!(slider_shown(true, 7_u32, 9), 7);
 }
 
 /// The frequency slider is a log scale over 0 … 1000; a position reads back

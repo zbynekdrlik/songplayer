@@ -259,10 +259,12 @@ impl EqEdit {
             return;
         }
         let path = format!("/api/v1/playlists/{}/audio", self.playlist_id);
+        let sent = fx.clone();
         leptos::task::spawn_local(async move {
             // An answer that never comes must not hold the gate in flight:
-            // it is given up, and the settings as they are go out again.
-            let put = Box::pin(api::put_json_empty(&path, &fx));
+            // it is given up after `ANSWER_TIMEOUT_MS`, and the request is
+            // still watched (it may land later, over a newer save).
+            let put = Box::pin(async move { api::put_json_empty(&path, &fx).await });
             let give_up = Box::pin(TimeoutFuture::new(ANSWER_TIMEOUT_MS));
             let text = match select(put, give_up).await {
                 Either::Left((answer, _)) => {
@@ -274,13 +276,35 @@ impl EqEdit {
                         Ok(()) => SAVED.to_string(),
                     }
                 }
-                Either::Right(_) => {
-                    self.step(SendGate::gave_up);
-                    "Uloženie zlyhalo: server neodpovedá — skúšam znova".to_string()
+                Either::Right((_, put)) => {
+                    self.step(SendGate::landed);
+                    leptos::task::spawn_local(self.late_answer(put, sent));
+                    "Uloženie zlyhalo: server neodpovedá".to_string()
                 }
             };
             let _ = self.status.try_set(text);
         });
+    }
+
+    /// A send given up that still lands: with the settings unchanged since,
+    /// it saved them after all; with newer ones, it may have landed over
+    /// their save, so they go out once more.
+    async fn late_answer(
+        self,
+        put: impl std::future::Future<Output = Result<(), String>>,
+        sent: PlaylistFx,
+    ) {
+        if put.await.is_err() {
+            return;
+        }
+        let Some(now) = self.fx.try_get_untracked() else {
+            return;
+        };
+        if now != sent {
+            self.step(SendGate::changed);
+        } else if self.gate.try_with_value(SendGate::busy) == Some(false) {
+            let _ = self.status.try_set(SAVED.to_string());
+        }
     }
 }
 
@@ -355,7 +379,10 @@ pub fn PlaylistAudio(playlist_id: i64) -> impl IntoView {
             let path = format!("/api/v1/playlists/{playlist_id}/audio");
             match api::get::<AudioView>(&path).await {
                 Ok(view) => {
-                    if edit.fx.try_get_untracked().is_none() {
+                    // Gone (navigation), or a load started earlier (the
+                    // panel closed and opened again before it landed)
+                    // already landed: never overwrite what was edited since.
+                    if loaded.try_get_untracked() != Some(false) {
                         return;
                     }
                     edit.take_stored(PlaylistFx {

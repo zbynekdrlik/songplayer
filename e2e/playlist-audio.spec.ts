@@ -102,7 +102,7 @@ async function cardBand(card: Locator): Promise<Band> {
 /** Where a handle's dot is drawn now, in page px (its centre). */
 async function dotCentre(page: Page, handle: Locator): Promise<{ x: number; y: number }> {
   await page.getByTestId("playlist-audio-curve").scrollIntoViewIfNeeded();
-  const box = await handle.locator("circle").boundingBox();
+  const box = await handle.locator("circle.eq-handle-grip").boundingBox();
   if (!box) throw new Error("the handle has no box");
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
@@ -275,14 +275,32 @@ test("dragging a peak's handle moves its frequency and gain live, throttled, bef
   page,
   request,
 }) => {
+  // The page's own send instants (performance.now() at each fetch of a PUT
+  // …/audio): the throttle is the page's rule, so it is timed where it runs,
+  // never by the mock's arrival clock (a loaded runner delays arrivals).
+  await page.addInitScript(() => {
+    const sends: number[] = [];
+    (window as unknown as { __audioSends: number[] }).__audioSends = sends;
+    const original = window.fetch.bind(window);
+    window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+      if (method === "PUT" && url.endsWith("/audio")) sends.push(performance.now());
+      return original(input, init);
+    };
+  });
   await openPanel(page);
   await addBand(page, request, "peak");
   const handle = page.getByTestId("playlist-audio-handle");
   const card = page.getByTestId("playlist-audio-band");
   const dPath = page.getByTestId("playlist-audio-path");
   const flat = await dPath.getAttribute("d");
-  const cxBefore = Number(await handle.locator("circle").getAttribute("cx"));
-  const cyBefore = Number(await handle.locator("circle").getAttribute("cy"));
+  const sendsNow = () =>
+    page.evaluate(() => (window as unknown as { __audioSends: number[] }).__audioSends.slice());
+  const sendsBefore = (await sendsNow()).length;
+  expect(sendsBefore, "the new band's own PUT went through the page's fetch").toBeGreaterThanOrEqual(1);
+  const cxBefore = Number(await handle.locator("circle.eq-handle-dot").getAttribute("cx"));
+  const cyBefore = Number(await handle.locator("circle.eq-handle-dot").getAttribute("cy"));
   const sentBefore = (await puts(request)).length;
 
   // 20 quick moves with the button still down.
@@ -301,13 +319,15 @@ test("dragging a peak's handle moves its frequency and gain live, throttled, bef
     gain_db: 0,
     eq: [held],
   });
-  // Throttled: 20 changes, far fewer PUTs, each starting ≥ 50 ms after the
-  // one before (40 ms: the mock's clock reads arrivals).
+  // Throttled: 20 changes, fewer PUTs, the page starting each one ≥ 50 ms
+  // after the one before (45: performance.now() is coarsened in a page).
   const live = (await puts(request)).slice(sentBefore);
   expect(live.length).toBeGreaterThanOrEqual(1);
   expect(live.length, "20 moves, throttled").toBeLessThan(20);
-  for (let i = 1; i < live.length; i++) {
-    expect(live[i].at - live[i - 1].at, `PUT ${i}`).toBeGreaterThanOrEqual(40);
+  const sends = (await sendsNow()).slice(sendsBefore);
+  expect(sends.length, "every PUT the mock saw was sent by the page").toBe(live.length);
+  for (let i = 1; i < sends.length; i++) {
+    expect(sends[i] - sends[i - 1], `send ${i}`).toBeGreaterThanOrEqual(45);
   }
   await page.mouse.up();
 
@@ -321,8 +341,8 @@ test("dragging a peak's handle moves its frequency and gain live, throttled, bef
   await expect(card.getByTestId("band-freq-value")).toHaveText(freqLabel(final.freq_hz));
   await expect(card.getByTestId("band-gain-value")).toHaveText(gainLabel(final.gain_db));
   // The handle and the curve moved with it.
-  expect(Number(await handle.locator("circle").getAttribute("cx"))).toBeGreaterThan(cxBefore + 50);
-  expect(Number(await handle.locator("circle").getAttribute("cy"))).toBeLessThan(cyBefore - 10);
+  expect(Number(await handle.locator("circle.eq-handle-dot").getAttribute("cx"))).toBeGreaterThan(cxBefore + 50);
+  expect(Number(await handle.locator("circle.eq-handle-dot").getAttribute("cy"))).toBeLessThan(cyBefore - 10);
   await expect(dPath).not.toHaveAttribute("d", flat ?? "");
   await expect(page.getByTestId("playlist-audio-status")).toHaveText("Uložené");
 });
@@ -393,12 +413,12 @@ test("a high-pass handle moves on its frequency only (#278)", async ({ page, req
   await openPanel(page);
   await addBand(page, request, "high_pass");
   const handle = page.getByTestId("playlist-audio-handle");
-  const cyBefore = await handle.locator("circle").getAttribute("cy");
+  const cyBefore = await handle.locator("circle.eq-handle-dot").getAttribute("cy");
   await dragHandle(page, handle, 120, -60);
   const final = await cardBand(page.getByTestId("playlist-audio-band"));
   expect(final.freq_hz).toBeGreaterThan(80);
   expect(final.gain_db).toBe(0);
-  await expect(handle.locator("circle")).toHaveAttribute("cy", cyBefore ?? "");
+  await expect(handle.locator("circle.eq-handle-dot")).toHaveAttribute("cy", cyBefore ?? "");
   await expect.poll(() => lastPut(request), { timeout: 1000 }).toEqual({ gain_db: 0, eq: [final] });
 });
 
@@ -601,25 +621,46 @@ test("a save the server refuses says so, and the next change goes out (#278)", a
   }
 });
 
-test("an unanswered save is given up after 10 s and sent again (#278)", async ({
+test("an unanswered save is given up after 10 s, and its late answer still counts (#278)", async ({
   page,
   request,
 }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(90_000);
+  const status = page.getByTestId("playlist-audio-status");
+  const storedBands = async () =>
+    ((await (await request.get("/__mock/playlist-audio")).json()).stored[String(PID)]?.eq ?? []).length;
   await openPanel(page);
-  await request.post("/__mock/playlist-audio-put-delay", { data: { ms: 15_000 } });
+
+  // 1. The answer comes after 13 s: the panel gives up at 10 s and sends
+  // nothing more; the late answer, with the settings unchanged since, is
+  // the save after all.
+  await request.post("/__mock/playlist-audio-put-delay", { data: { ms: 13_000 } });
   await page.getByTestId("playlist-audio-add-peak").click();
-  await expect(page.getByTestId("playlist-audio-status")).toHaveText("Ukladám…");
-  // Given up at 10 s; the settings as they are go out again.
-  await expect(page.getByTestId("playlist-audio-status")).toHaveText(
-    "Uloženie zlyhalo: server neodpovedá — skúšam znova",
-    { timeout: 13_000 },
-  );
-  await expect.poll(async () => (await puts(request)).length, { timeout: 3000 }).toBe(2);
+  await expect(status).toHaveText("Ukladám…");
+  await expect(status).toHaveText("Uloženie zlyhalo: server neodpovedá", { timeout: 12_000 });
+  expect(await puts(request), "no second request").toHaveLength(1);
+  await expect(status).toHaveText("Uložené", { timeout: 8_000 });
+  expect(await puts(request)).toHaveLength(1);
+  expect(await storedBands()).toBe(1);
+
+  // 2. A change made while a given-up request still waits goes out at once
+  // (the gate is free); the stale request then lands OVER it, so the
+  // panel sends its settings once more.
+  await request.post("/__mock/playlist-audio-put-delay", { data: { ms: 16_000 } });
+  await page.getByTestId("playlist-audio-add-low_shelf").click();
+  await expect(status).toHaveText("Uloženie zlyhalo: server neodpovedá", { timeout: 12_000 });
+  await request.post("/__mock/playlist-audio-put-delay", { data: { ms: 0 } });
+  await page.getByTestId("playlist-audio-add-high_shelf").click();
+  await expect(status).toHaveText("Uložené", { timeout: 5_000 });
+  await expect.poll(async () => (await puts(request)).length, { timeout: 12_000 }).toBe(4);
   const sent = await puts(request);
-  expect(sent[1].body).toEqual(sent[0].body);
-  expect(sent[1].at - sent[0].at).toBeGreaterThanOrEqual(9_500);
-  expect(sent[0].done, "the first was still unanswered").toBeNull();
+  expect(sent.map((p) => p.body.eq.length)).toEqual([1, 2, 3, 3]);
+  expect(sent[2].at, "the new change went out while the given-up one waited").toBeLessThan(
+    sent[1].done!,
+  );
+  expect(sent[3].at, "sent again after the stale one landed").toBeGreaterThanOrEqual(sent[1].done!);
+  await expect.poll(storedBands, { timeout: 5_000 }).toBe(3);
+  await expect(status).toHaveText("Uložené");
 });
 
 test("a band switched off or removed leaves the curve and is sent live (#242, #278)", async ({

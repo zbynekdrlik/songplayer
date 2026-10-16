@@ -23,6 +23,9 @@ use crate::components::playlist_audio::EqEdit;
 
 /// A handle's radius and how far above it its number sits (box units).
 const HANDLE_R: f64 = 9.0;
+/// The handle's invisible grip around its dot (box units): a phone draws
+/// the 800-unit box ~340 px wide, where the dot alone is ~4 px.
+const GRIP_R: f64 = 22.0;
 const NUMBER_ABOVE: f64 = 14.0;
 /// Where the grid's labels sit, off the box's edges.
 const LABEL_EDGE: f64 = 14.0;
@@ -125,6 +128,20 @@ fn handle(
                 r=HANDLE_R
                 cx=move || { at().map(|p| p.0) }
                 cy=move || { at().map(|p| p.1) }
+            />
+            <text
+                class="eq-handle-number"
+                x=move || { at().map(|p| p.0) }
+                y=move || { at().map(|p| p.1 - NUMBER_ABOVE) }
+            >
+                {move || edit.number(id).map(|n| n.to_string()).unwrap_or_default()}
+            </text>
+            // The grip on top takes the pointer and the wheel.
+            <circle
+                class="eq-handle-grip"
+                r=GRIP_R
+                cx=move || { at().map(|p| p.0) }
+                cy=move || { at().map(|p| p.1) }
                 on:pointerdown=move |ev: web_sys::PointerEvent| {
                     if ev.button() != 0 {
                         return;
@@ -159,13 +176,6 @@ fn handle(
                     );
                 }
             />
-            <text
-                class="eq-handle-number"
-                x=move || { at().map(|p| p.0) }
-                y=move || { at().map(|p| p.1 - NUMBER_ABOVE) }
-            >
-                {move || edit.number(id).map(|n| n.to_string()).unwrap_or_default()}
-            </text>
         </g>
     }
 }
