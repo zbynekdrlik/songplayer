@@ -132,7 +132,8 @@ pub enum Composition<'a> {
 /// The texture slot a picture is uploaded into. A plain picture and a fade's
 /// outgoing side use [`Slot::Outgoing`], a fade's incoming side
 /// [`Slot::Incoming`]; a picture already resident in its slot is not
-/// uploaded again (`residency::upload_for`).
+/// uploaded again (`residency::upload_for`), nor one resident in the other
+/// slot: the slots trade places first (#251, `residency::swap_slots`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Slot {
     Outgoing,

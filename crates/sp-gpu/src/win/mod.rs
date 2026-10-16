@@ -43,7 +43,7 @@ use crate::adapter::AdapterInfo;
 use crate::composition::{CANVAS_HEIGHT, CANVAS_WIDTH, Composition, Fit, MAX_FIT, Target};
 use crate::error::GpuError;
 use crate::quad::QuadConstants;
-use crate::residency::{Resident, Upload, upload_for};
+use crate::residency::{Resident, Upload, swap_slots, upload_for};
 use crate::stats::{ComposeStats, target_draws_us};
 use crate::targets::{TargetId, Targets};
 use device::DeviceUse;
@@ -286,7 +286,9 @@ impl Compositor {
     /// Draw one boundary into every render target and wait until the GPU
     /// has finished them. Every picture is checked first: a picture that is
     /// not whole NV12 fails the call before anything is uploaded or drawn
-    /// (each target keeps the last frame). #251 step 2: each picture
+    /// (each target keeps the last frame). #251: the two slots first trade
+    /// places when that saves uploads ([`swap_slots`]: a fade's incoming
+    /// picture is the next fade's outgoing one). #251 step 2: each picture
     /// ([`Composition::pictures`]) is uploaded ONCE into its slot, then
     /// every target is drawn from those textures in draw order (the primary
     /// first), each placed by its own rule ([`Composition::layers_on`]); one
@@ -301,6 +303,17 @@ impl Compositor {
             .collect::<Result<Vec<_>, _>>()?;
 
         let upload_start = Instant::now();
+        let resident = self
+            .slots
+            .each_ref()
+            .map(|s| s.as_ref().map(|t| t.resident.id));
+        let mut wanted = [None; 2];
+        for (slot_of, picture) in &pictures {
+            wanted[slot_of.index()] = Some(picture.id);
+        }
+        if swap_slots(resident, wanted) {
+            self.slots.swap(0, 1);
+        }
         let mut uploads = 0;
         for ((slot_of, picture), planes) in pictures.iter().zip(&planes) {
             let slot = &mut self.slots[slot_of.index()];
