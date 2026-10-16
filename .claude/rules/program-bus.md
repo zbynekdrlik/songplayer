@@ -13,6 +13,7 @@ paths:
   - "crates/sp-server/src/playback/program_output*.rs"
   - "crates/sp-server/src/playback/program_trace*.rs"
   - "crates/sp-server/src/playback/program_video_quiet*.rs"
+  - "crates/sp-server/src/lyrics/heavy_quiet*.rs"
   - "crates/sp-server/src/playback/handle_pipeline_event*.rs"
   - "crates/sp-server/src/playback/program_canvas*.rs"
   - "crates/sp-server/src/playback/band_pool*.rs"
@@ -160,6 +161,21 @@ output of its own and feeds this bus alone (`pipeline-testability.md`).
   `audio_slews=`, `late_holds=`, `underruns=`; a rise of `shallow_depth`
   goes to camera-box, their issue 1302). Tests:
   `program_video_quiet_tests.rs` (the order through a recording clock).
+  Measured (`wall-25`, a whole drift cycle, exact identity): 31 → 14 jumps
+  back per minute, the 4–8 ms band 72–78 → 8–12 (#251 comment 6207475131).
+- #251 step 5: a heavy CPU child (`HeavyStepPlan::paced`: the wall in use;
+  never a GPU child, it may hold a driver lock Arena needs) is HELD for the
+  same window of every refresh: `lyrics/heavy_quiet.rs` — the pure
+  `quiet_step` (run until `from`, pause until `to`, run to the next
+  refresh's `from`; no fresh grid or a window past a refresh = run, look
+  again in 100 ms) and the Windows `QuietPacer` (a `heavy-quiet-<pid>`
+  thread, `NtSuspendProcess` / `NtResumeProcess` from ntdll `raw-dylib`,
+  the grid read from the installed bus's `max().video.fresh_grid`, the
+  child always resumed before the thread ends). `ChildJobGuard` holds it
+  and drops it before the job handle closes; every heavy spawn site passes
+  `plan.paced()` to `assign_child_job`. The child runs ~55 % of the time
+  while the wall plays (a CPU step ~1.8× longer); one INFO when paced, one
+  with `pauses` when it ends.
 - #223 S2: between `feed_outputs` and `submit_video`, `serve` offers the
   boundary to `SP-program-MAX` (`offer_max` → `program_max::MaxOut`, on
   `ProgramBus::max()`): the NATIVE picture of a forwarded pair, both native
