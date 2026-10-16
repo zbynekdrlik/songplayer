@@ -13,8 +13,9 @@ use sp_core::lyrics::LyricsLine;
 
 /// A word made only of these is glued to the word before it when the
 /// words are joined again (`clean (Oh), yeah` → `clean, yeah`), and dropped
-/// at the start of a line (`(Oh), yeah` → `yeah`).
-const GLUED: [char; 7] = [',', '.', ';', ':', '!', '?', '…'];
+/// at the start of a line (`(Oh), yeah` → `yeah`). The interjection rule
+/// reads the same marks as the ones that separate an edge run.
+pub(super) const GLUED: [char; 7] = [',', '.', ';', ':', '!', '?', '…'];
 
 /// `line` as the display plan reads it: its English and its Slovak each
 /// through [`drop_asides`]; times and words unchanged.

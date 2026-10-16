@@ -251,7 +251,7 @@ fn shown_lines(lines: &[LyricsLine]) -> Vec<(usize, LyricsLine)> {
     lines
         .iter()
         .enumerate()
-        .map(|(i, line)| (i, asides::without_asides(line)))
+        .filter_map(|(i, line)| interjections::shown(asides::without_asides(line)).map(|l| (i, l)))
         .collect()
 }
 

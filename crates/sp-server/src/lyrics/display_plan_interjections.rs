@@ -25,6 +25,143 @@
 //! Display-only: the stored JSON, the karaoke view and the pipeline are
 //! untouched.
 
+use sp_core::lyrics::LyricsLine;
+
+use super::asides::GLUED;
+use super::{CLOSERS, SENTENCE_ENDS, final_mark};
+
+/// The English interjections, compared lower-case with the punctuation
+/// around the word stripped (census on SNV, design 6224751018). `yes` is not
+/// one: a sung "yes" is content.
+const EN: [&str; 21] = [
+    "oh", "ooh", "oooh", "oh-oh", "whoa", "woah", "woo", "yeah", "yea", "hey", "ah", "aah", "uh",
+    "mm", "mmm", "hmm", "na", "la", "ay", "ayy", "eh",
+];
+
+/// The Slovak words that go where the English line lost an interjection at
+/// that edge (the translator's `Och`, `Ó`, `Jeah`, and the `Áno` it made of
+/// a sung "yeah").
+const SK: [&str; 17] = [
+    "och", "ó", "o", "oh", "jé", "jej", "hej", "áno", "jeah", "yeah", "ach", "ah", "uh", "mm",
+    "hm", "wow", "ou",
+];
+
+/// The fewest words an edge cut may leave: `Oh, God.` stays whole.
+const MIN_KEPT: usize = 2;
+
+/// `line` as the wall shows it: `None` when its English is only
+/// interjections, else with the edge runs its punctuation separates gone
+/// (see the module docs). Times and word timings are unchanged.
+pub(super) fn shown(line: LyricsLine) -> Option<LyricsLine> {
+    let words: Vec<&str> = line.en.split_whitespace().collect();
+    if !words.is_empty() && words.iter().all(|word| is_in(&EN, word)) {
+        return None;
+    }
+    let cut = edge_cut(&words, &EN, (words.len(), words.len()));
+    let en = trimmed(&line.en, &words, cut);
+    let sk = line.sk.as_deref().map(|sk| {
+        let words: Vec<&str> = sk.split_whitespace().collect();
+        trimmed(sk, &words, edge_cut(&words, &SK, cut))
+    });
+    Some(LyricsLine { en, sk, ..line })
+}
+
+/// Whether `word`, lower-case with the punctuation around it stripped, is
+/// one of `set`.
+fn is_in(set: &[&str], word: &str) -> bool {
+    let bare = word
+        .trim_matches(|c: char| !c.is_alphanumeric())
+        .to_lowercase();
+    set.contains(&bare.as_str())
+}
+
+/// The final mark of `word` (closing quotes and brackets read past) when it
+/// is one of `marks`.
+fn mark_in(word: &str, marks: &[char]) -> Option<char> {
+    final_mark(word).filter(|c| marks.contains(c))
+}
+
+/// How many words go at the start and at the end of `words`: the longest
+/// run of `set` words at each edge, at most `most` words, whose last word
+/// carries a mark ([`GLUED`]) at the start, or whose preceding word does at
+/// the end. Nothing goes when fewer than [`MIN_KEPT`] words would stay.
+fn edge_cut(words: &[&str], set: &[&str], most: (usize, usize)) -> (usize, usize) {
+    let in_set = |word: &&&str| is_in(set, word);
+    let marked = |word: &str| mark_in(word, &GLUED).is_some();
+    let start_run = words.iter().take_while(in_set).count().min(most.0);
+    // The first word never belongs to the end run: it is the one before it.
+    let end_run = words.iter().skip(1).rev().take_while(in_set).count();
+    let k = (1..=start_run).rev().find(|&k| marked(words[k - 1]));
+    let m = (1..=end_run.min(most.1))
+        .rev()
+        .find(|&m| marked(words[words.len() - m - 1]));
+    let (k, m) = (k.unwrap_or(0), m.unwrap_or(0));
+    if k + m + MIN_KEPT <= words.len() {
+        (k, m)
+    } else {
+        (0, 0)
+    }
+}
+
+/// `text` (split into `words`) without its first `cut.0` and last `cut.1`
+/// words, joined with one space; `text` as it is when nothing goes. The
+/// first word left takes a capital when the line's first word had one, and
+/// the last takes the line's final sentence end (`. ! ? …`) unless it ends a
+/// sentence itself: `free indeed, yeah.` → `free indeed.`, `like you. Oh,` →
+/// `like you.`.
+fn trimmed(text: &str, words: &[&str], (k, m): (usize, usize)) -> String {
+    if (k, m) == (0, 0) {
+        return text.to_string();
+    }
+    let mut kept: Vec<String> = words[k..words.len() - m]
+        .iter()
+        .map(|word| word.to_string())
+        .collect();
+    if is_capitalised(words[0]) {
+        kept[0] = capitalised(&kept[0]);
+    }
+    let line_end = words.last().and_then(|word| mark_in(word, &SENTENCE_ENDS));
+    if let (Some(end), Some(last)) = (line_end, kept.last_mut())
+        && mark_in(last, &SENTENCE_ENDS).is_none()
+    {
+        *last = with_mark(last, end);
+    }
+    kept.join(" ")
+}
+
+/// Whether the first letter of `word` is a capital.
+fn is_capitalised(word: &str) -> bool {
+    word.chars()
+        .find(|c| c.is_alphabetic())
+        .is_some_and(char::is_uppercase)
+}
+
+/// `word` with its first letter a capital.
+fn capitalised(word: &str) -> String {
+    match word.char_indices().find(|(_, c)| c.is_alphabetic()) {
+        Some((at, c)) => replaced(word, (at, c), c.to_uppercase()),
+        None => word.to_string(),
+    }
+}
+
+/// `word` with its final mark (the last char before any closing quote or
+/// bracket) replaced by `mark`.
+fn with_mark(word: &str, mark: char) -> String {
+    match word
+        .char_indices()
+        .rev()
+        .find(|(_, c)| !CLOSERS.contains(c))
+    {
+        Some(found) => replaced(word, found, mark),
+        None => word.to_string(),
+    }
+}
+
+/// `word` with the char `c` at byte `at` replaced by `with`.
+fn replaced(word: &str, (at, c): (usize, char), with: impl std::fmt::Display) -> String {
+    format!("{}{with}{}", &word[..at], &word[at + c.len_utf8()..])
+}
+
 #[cfg(test)]
 #[path = "display_plan_interjections_tests.rs"]
 mod tests;
