@@ -428,6 +428,25 @@ fn a_capital_left_out_at_a_sentence_start_goes_to_the_next_line() {
         sung(700, 2_000, "what a God.", "aký Boh."),
     ];
     assert_eq!(wall_texts(&lines), [texts(1..2, "What a God.", "aký Boh.")]);
+    // A kept line's sentence end is read after its own cut: "like you. Oh,"
+    // ends in "." once its "Oh," is gone, so the next "Oh," begins one.
+    let lines = [
+        sung(
+            0,
+            1_500,
+            "There is no one like you. Oh,",
+            "Nikto nie je ako ty. Ó,",
+        ),
+        sung(1_700, 2_000, "Oh,", "Ó,"),
+        sung(2_200, 3_500, "what a God.", "aký Boh."),
+    ];
+    assert_eq!(
+        wall_texts(&lines),
+        [
+            texts(0..1, "There is no one like you.", "Nikto nie je ako ty."),
+            texts(2..3, "What a God.", "Aký Boh."),
+        ]
+    );
     // Through a lower-case left-out line that goes on the same sentence.
     let lines = [
         sung(0, 1_000, "We sing.", "Spievame."),
@@ -469,6 +488,34 @@ fn a_capital_left_out_inside_a_sentence_or_with_its_sentence_stays_there() {
             texts(0..1, "We sing.", "Spievame."),
             texts(2..3, "what a God.", "aký Boh."),
         ]
+    );
+}
+
+#[test]
+fn a_word_that_starts_with_a_digit_takes_no_capital() {
+    // Review round 4: the capital went to the first LETTER, inside the word
+    // ("3Rd", "10,000 Reasons"). Only a first char that is a letter is
+    // raised.
+    assert_eq!(
+        wall("Oh, 3rd day He rose", Some("Ó, 3. dňa vstal")),
+        shows("3rd day He rose", Some("3. dňa vstal"))
+    );
+    let lines = [
+        sung(0, 500, "Oh,", "Ó,"),
+        sung(
+            700,
+            2_000,
+            "10,000 reasons to sing.",
+            "10 000 dôvodov spievať.",
+        ),
+    ];
+    assert_eq!(
+        wall_texts(&lines),
+        [texts(
+            1..2,
+            "10,000 reasons to sing.",
+            "10 000 dôvodov spievať."
+        )]
     );
 }
 
