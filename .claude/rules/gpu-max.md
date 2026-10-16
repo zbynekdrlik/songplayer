@@ -216,7 +216,8 @@ of each picture, both targets drawn at the compose phase).
   from those textures (each through its own viewport, `QuadConstants` and
   render target), ends each target's event query after its draw, flushes
   ONCE and waits for them in order (`pipeline::wait_until_each_done`).
-  `ComposeStats::draw_us` covers every target; `draw_us(id)` is a target's
+  `ComposeStats::draw_us` covers every target (#279 P1a: and a UYVY pass
+  with its copy); `draw_us(id)` is a target's
   OWN part (from the end of the target before, the first draw command for
   the first, until its query passed: the pure `stats::target_draws_us`).
   WARP pins: `tests/warp.rs` "one compose fills both targets", "each
@@ -1289,7 +1290,8 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   quad on the RTX is well under a millisecond. If S2 measures the spin as a
   cost, it can read the query a boundary later instead: Spout's copy is
   ordered after the draw on the same context and needs no wait. #251 step
-  2: every target drawn (one query per target, one flush, one wait);
+  2: every target drawn (one query per target, one flush, one wait;
+  #279 P1a: a UYVY pass and its staging copy after them, its own query);
   `Compositor::draw_us(id)` = a target's own part (`target_draws_us`), the
   FHD one is `max.fhd.draw_us_p99`.
 - `uploads`: 0, 1 or 2 pictures uploaded, whatever the targets.
@@ -1400,7 +1402,9 @@ CPU canvas (`program_canvas.rs`, `nv12_mix.rs`).
   writes `saturate(float4(U, Y0, V, Y1))`: a texel's four bytes in memory
   are one UYVY pair. Y′ is each pixel's own; Cb/Cr are the conversion of
   the pair's AVERAGE RGB (the conversion is linear, so this equals the
-  average of their Cb/Cr).
+  average of their Cb/Cr): a chroma sample centred between the pair, not
+  BT.709's co-sited one (the design's choice: two exact `Load`s, no
+  filter tap).
 - **Binding order matters.** The pass binds its own RTV FIRST, which takes
   the program target off the output stage, and only then the target's SRV:
   D3D11 force-unbinds an input that is still bound as an output, and the
@@ -1413,13 +1417,16 @@ CPU canvas (`program_canvas.rs`, `nv12_mix.rs`).
   the pass's). Only once that wait passed and `GetDeviceRemovedReason` is
   clean does the ring move on (`StagingRing::written`), so a failed compose
   leaves the newest copy readable. `ComposeStats::uyvy_us` is the pass's
-  own part of the draw (the part after the targets' in `target_draws_us`),
-  `None` with no pass.
+  own part of the draw (the pure `stats::split_uyvy_part`: the part after
+  the targets' in `target_draws_us`), `None` with no pass;
+  `ComposeStats::draw_us` then covers the pass and its copy too.
 - **`read_uyvy(&mut out)`.** `Ok(false)`, `out` untouched, before any
   compose finished since the enable. Otherwise it maps
   `staging[ring.newest()]` with `READ | D3D11_MAP_FLAG_DO_NOT_WAIT` (the
-  copy is complete: the compose waited), `out.clear()`, `unpad_rows_into`
-  (width × 2 bytes a row, packed), unmaps, `Ok(true)`.
+  copy is complete: the compose waited) through `textures::map_rows_into`
+  (the one mapped-rows reader, `read_back`'s too: `out` cleared once
+  mapped, `unpad_rows_into`, width × 2 bytes a row, packed, unmapped),
+  `Ok(true)`.
   `DXGI_ERROR_WAS_STILL_DRAWING` is a `GpuError::Api` whose call
   (`uyvy::STILL_DRAWING_CALL`) names it, never a wait (`uyvy::map_failed`;
   a lost device stays `DeviceLost`). No pass is `NoObject`.
@@ -1427,7 +1434,7 @@ CPU canvas (`program_canvas.rs`, `nv12_mix.rs`).
   the full-range `(r, g, b, 1)`, already divided by 255 (the UNORM the
   target stores). It is derived from `KR` / `KB` and is the inverse of
   `color.rs`'s `BT709_LIMITED_TO_FULL`. It reaches the shader as f32
-  (`uyvy::matrix_f32`, `constants_bytes`); `uyvy.hlsl`'s `cbuffer Uyvy` is
+  (`uyvy::rows_f32`, `constants_bytes`); `uyvy.hlsl`'s `cbuffer Uyvy` is
   `to_y`, `to_u`, `to_v`, in that order.
 - **The CPU model and its tolerance.** `uyvy::pack_pair(left, right)`
   (BGRA in, `[U, Y0, V, Y1]` out, f32 like the shader, then
@@ -1450,14 +1457,23 @@ CPU canvas (`program_canvas.rs`, `nv12_mix.rs`).
 
   WARP `tests/uyvy.rs`, on FHD targets: a 1440p picture; a 4:3 picture
   whose bar pairs are exactly `[128, 16, 128, 16]` and whose picture pairs
-  never are; a 50 % fade; Black. Each is within ±1 of the reference of its
-  own BGRA readback. Also: 10 composes in a row, each `read_uyvy`
-  `Ok(true)` with that compose's picture (the ring wraps 3×, never
-  `WAS_STILL_DRAWING`); `Ok(false)` before a compose; an odd width
+  are not, in rows 0, 540 and 1079 (a scratch model of the composite puts
+  each ≥ 11 codes from it there); a 50 % fade; Black. Each is within ±1 of
+  the reference of its own BGRA readback. Also: 10 composes in a row of
+  THREE pictures in turn, each `read_uyvy` `Ok(true)` with that compose's
+  picture (the ring wraps 3×, never `WAS_STILL_DRAWING`; with two pictures
+  over a ring of three, a read of the slot being written would hold the
+  same picture and pass); `Ok(false)` before a compose; an odd width
   refused; the production shape (MAX's compositor with `FHD_TARGET` added,
-  the pass on it), where a removed target takes its pass; disable and
-  re-enable start afresh. The worst difference goes to stderr: read it in
-  the Build (Windows) log.
+  the pass on it), where a removed target takes its pass; removing ANOTHER
+  target keeps the pass and its newest copy; disable and re-enable start
+  afresh. The worst difference goes to stderr: read it in the Build
+  (Windows) log.
+- **For P1b (review round 1, a property, not a defect).** The NDI picture
+  then goes NV12 limited → full-range 8-bit BGRA (saturated) → limited
+  UYVY. Sub-black, super-white and out-of-gamut values clip where today's
+  CPU NV12 canvas passes them through, and the two roundings cost about
+  ±1 code against today: P1b's colour and A/V gates must expect it.
 
 ## HLSL at runtime
 
@@ -1482,7 +1498,8 @@ build step, and WARP and the RTX run the same source. A compile error is
   (the output pick, the refresh count and fit, the staleness bound),
   #251 step 2's `targets` (a compositor's targets: ids, draw order, the
   primary kept), `stats::target_draws_us` (each target's part of the
-  draw), #279 P0's `probe` (the report, the verdict, `acquire_step`,
+  draw; #279 P1a: `split_uyvy_part`, the UYVY pass's part), #279 P0's
+  `probe` (the report, the verdict, `acquire_step`,
   `feature_step`, `pixel_step`, `content_step`, `probe_picture`, `Vram`)
   and #279 P1a's `uyvy` (the conversion rows and their constant buffer,
   the pair model and the reference, the size rule, the map error, the
