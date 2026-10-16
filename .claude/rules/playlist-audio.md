@@ -53,6 +53,23 @@ separate one-song playlist in mode Single).
   still runs WAITS for its end (`pending`, the latest wins: cutting a fade
   short jumps); a volume-only change keeps the filter state. The default sound (0 dB, no enabled band) is BIT-IDENTICAL
   passthrough — never multiply by 1.0 "to be safe" outside a ramp.
+  - **#278: a new cascade fades in WARMED, never from zero state.** The
+    processor keeps the last `WARM_MS` (300 ms, `warm_frames(rate)`) of
+    its input, interleaved, in `history`. It keeps it in passthrough too,
+    so the first band added to an untouched playlist is warmed. `fade_to`
+    runs the new cascade over that history before the fade.
+  - The live panel sends an edit every 50 ms during a drag. From zero
+    state, a narrow boost dragged across a tone rang up inside every fade:
+    a wobble at the drag's rate, at -28 dB rms of error.
+  - Measured with a line-by-line Python model (#278 comment 6224608759):
+    the warm-up takes that case to -131 dB, and the limits' worst
+    (20 Hz, Q 10) from -35 to -51 dB.
+  - A state-carrying coefficient switch was modelled and rejected: -33 dB
+    on a plain Q 1 drag.
+  - The exact-window test feeds a reference processor ONLY the last 14 400
+    frames and compares bit for bit after the fade. A slow 20 Hz Q 10
+    filter makes one frame more or less, or a window that never forgets,
+    visible.
 - **API**: `GET /api/v1/playlists/{id}/audio` → `{gain_db, eq, generation}`;
   `PUT` (raw `Bytes` → `serde_json::from_slice::<PlaylistFx>`, so a bad body
   is 400 `audio body: …`, a limit 400 with `FxError`'s text) → 204 with no
