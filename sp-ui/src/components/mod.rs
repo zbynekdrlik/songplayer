@@ -20,7 +20,9 @@ pub mod lyrics_view;
 pub mod lyrics_song_row;
 pub mod ndi_health;
 pub mod player;
-pub mod playlist_audio; // #242 a playlist's own volume + EQ
+pub mod playlist_audio; // #242 a playlist's own volume + EQ (#278: live, a real curve)
+pub mod playlist_audio_band; // #278 one EQ band's card
+pub mod playlist_audio_curve; // #278 the EQ's curve, grid and draggable handles
 pub mod playlist_card;
 pub mod preview_video;
 pub mod program_control; // #209 the Program control (NDI SP-program)

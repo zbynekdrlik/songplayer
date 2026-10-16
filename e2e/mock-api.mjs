@@ -404,14 +404,20 @@ app.patch("/api/v1/videos/:id", (req, res) => {
 // #242: a playlist's own volume + EQ. Mirrors the real handlers: GET
 // answers the row's settings + the live generation, PUT validates
 // (sp_core::audio_fx limits) and answers 204 with no body, an unknown
-// playlist is 404. `/__mock/playlist-audio` reads every PUT body sent
-// and the stored settings; `/__mock/playlist-audio-reset` clears both,
-// `/__mock/playlist-audio-set {id, fx}` seeds a row.
+// playlist is 404. `/__mock/playlist-audio` reads every PUT sent
+// (`{id, body, at, done}`: when it arrived and when it was answered, the
+// mock's ms clock), the LAST body (`last`, #278: the panel sends live) and
+// the stored settings; `/__mock/playlist-audio-reset` clears them all and
+// both delays, `/__mock/playlist-audio-set {id, fx}` seeds a row.
 const AUDIO_KINDS = ["high_pass", "low_shelf", "peak", "high_shelf", "low_pass"];
 let playlistAudio = new Map();
 let playlistAudioPuts = [];
 // How long GET …/audio waits before it answers (`/__mock/playlist-audio-delay`).
 let playlistAudioDelayMs = 0;
+// #278: how long PUT …/audio waits before it answers
+// (`/__mock/playlist-audio-put-delay {ms}`): a slow server, to prove the
+// panel never has two requests in flight.
+let playlistAudioPutDelayMs = 0;
 function playlistAudioOf(id) {
   return playlistAudio.get(id) ?? { gain_db: 0, eq: [], generation: 0 };
 }
@@ -452,9 +458,14 @@ app.get("/api/v1/playlists/:id/audio", async (req, res) => {
   }
   res.json(playlistAudioOf(id));
 });
-app.put("/api/v1/playlists/:id/audio", (req, res) => {
+app.put("/api/v1/playlists/:id/audio", async (req, res) => {
   const id = Number(req.params.id);
-  playlistAudioPuts.push({ id, body: req.body });
+  const put = { id, body: req.body, at: Date.now(), done: null };
+  playlistAudioPuts.push(put);
+  if (playlistAudioPutDelayMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, playlistAudioPutDelayMs));
+  }
+  put.done = Date.now();
   const refusal = playlistAudioRefusal(req.body);
   if (refusal) {
     res.status(400).type("text/plain").send(refusal);
@@ -476,16 +487,25 @@ app.put("/api/v1/playlists/:id/audio", (req, res) => {
   res.status(204).end();
 });
 app.get("/__mock/playlist-audio", (_req, res) => {
-  res.json({ puts: playlistAudioPuts, stored: Object.fromEntries(playlistAudio) });
+  res.json({
+    puts: playlistAudioPuts,
+    last: playlistAudioPuts.length > 0 ? playlistAudioPuts[playlistAudioPuts.length - 1].body : null,
+    stored: Object.fromEntries(playlistAudio),
+  });
 });
 app.post("/__mock/playlist-audio-reset", (_req, res) => {
   playlistAudio = new Map();
   playlistAudioPuts = [];
   playlistAudioDelayMs = 0;
+  playlistAudioPutDelayMs = 0;
   res.status(204).end();
 });
 app.post("/__mock/playlist-audio-delay", (req, res) => {
   playlistAudioDelayMs = Number(req.body.ms) || 0;
+  res.status(204).end();
+});
+app.post("/__mock/playlist-audio-put-delay", (req, res) => {
+  playlistAudioPutDelayMs = Number(req.body.ms) || 0;
   res.status(204).end();
 });
 app.post("/__mock/playlist-audio-set", (req, res) => {
