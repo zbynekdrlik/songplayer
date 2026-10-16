@@ -1,0 +1,95 @@
+//! #278: when the playlist EQ panel sends its settings.
+//!
+//! There is no "Použiť" any more: every change (a drag, a slider, a
+//! switch, the volume) goes to `PUT /api/v1/playlists/{id}/audio` live, and
+//! the playing song follows through the server's 50 ms crossfade. The panel
+//! sends the settings AS THEY ARE at the send (the latest value wins), at
+//! most one request every [`THROTTLE_MS`], never a second one while one is
+//! in flight, and a drag's end sends at once ([`SendGate::flush`]) so its
+//! last position is never left waiting. The rule is this pure state
+//! machine; the panel only carries out its [`SendStep`]s.
+
+/// The least time between the starts of two sends, ms.
+pub const THROTTLE_MS: f64 = 50.0;
+
+/// What the panel does now.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SendStep {
+    /// Nothing.
+    Idle,
+    /// Send the settings as they are now; call [`SendGate::landed`] when
+    /// the answer is in (or the send was given up).
+    Send,
+    /// Arm ONE timer for this many ms, then call [`SendGate::tick`].
+    WaitMs(f64),
+}
+
+/// The panel's send state. All times are one monotonic clock, ms.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct SendGate {
+    /// When the last send started.
+    last_start_ms: Option<f64>,
+    /// A send waits for its answer.
+    in_flight: bool,
+    /// The settings changed since the last send started.
+    dirty: bool,
+    /// A drag ended: send the change without waiting for the throttle.
+    flush: bool,
+    /// A timer is armed for the throttle's end.
+    armed: bool,
+}
+
+impl SendGate {
+    /// The operator changed something.
+    pub fn changed(&mut self, now_ms: f64) -> SendStep {
+        self.dirty = true;
+        self.next(now_ms)
+    }
+
+    /// A drag (or another gesture) ended: its last value goes out at once,
+    /// or the moment the request in flight is answered.
+    pub fn flush(&mut self, now_ms: f64) -> SendStep {
+        self.flush = self.dirty;
+        self.next(now_ms)
+    }
+
+    /// The request in flight was answered (or given up).
+    pub fn landed(&mut self, now_ms: f64) -> SendStep {
+        self.in_flight = false;
+        self.next(now_ms)
+    }
+
+    /// The armed timer fired.
+    pub fn tick(&mut self, now_ms: f64) -> SendStep {
+        self.armed = false;
+        self.next(now_ms)
+    }
+
+    /// A change waits or a request runs: the status line says "Ukladám…".
+    pub fn busy(&self) -> bool {
+        self.dirty || self.in_flight
+    }
+
+    fn next(&mut self, now_ms: f64) -> SendStep {
+        if !self.dirty || self.in_flight {
+            return SendStep::Idle;
+        }
+        let due = self.last_start_ms.map_or(now_ms, |at| at + THROTTLE_MS);
+        if self.flush || now_ms >= due {
+            self.dirty = false;
+            self.flush = false;
+            self.in_flight = true;
+            self.last_start_ms = Some(now_ms);
+            return SendStep::Send;
+        }
+        if self.armed {
+            return SendStep::Idle;
+        }
+        self.armed = true;
+        SendStep::WaitMs(due - now_ms)
+    }
+}
+
+#[cfg(test)]
+#[path = "audio_fx_send_tests.rs"]
+mod tests;

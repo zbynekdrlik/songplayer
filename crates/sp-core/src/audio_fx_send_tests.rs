@@ -1,0 +1,116 @@
+//! #278: the EQ panel's send gate — live, at most one send per 50 ms, the
+//! latest value winning, one request in flight, a drag's end at once.
+//! Every step was derived from a scratch model of the gate, which also ran
+//! each listed mutant against these scripts.
+//! Wired via `#[cfg(test)] #[path = "audio_fx_send_tests.rs"] mod tests;`.
+
+use super::{SendGate, SendStep, THROTTLE_MS};
+
+/// The clock starts away from 0 so a time that is wrongly multiplied or
+/// subtracted shows.
+const T: f64 = 1000.0;
+
+#[test]
+fn the_throttle_is_fifty_ms() {
+    assert_eq!(THROTTLE_MS, 50.0);
+}
+
+/// Nothing changed: nothing is sent, whatever wakes the gate.
+#[test]
+fn nothing_is_sent_before_a_change() {
+    let mut gate = SendGate::default();
+    assert!(!gate.busy());
+    assert_eq!(gate.flush(T), SendStep::Idle);
+    assert_eq!(gate.tick(T), SendStep::Idle);
+    assert_eq!(gate.landed(T), SendStep::Idle);
+    assert!(!gate.busy());
+}
+
+/// The first change goes out at once; its answer leaves the gate clean.
+#[test]
+fn the_first_change_is_sent_at_once() {
+    let mut gate = SendGate::default();
+    assert_eq!(gate.changed(T), SendStep::Send);
+    assert!(gate.busy(), "a request is in flight");
+    assert_eq!(gate.landed(T + 5.0), SendStep::Idle);
+    assert!(!gate.busy());
+    // A change long after the last send goes out at once again.
+    assert_eq!(gate.changed(T + 200.0), SendStep::Send);
+}
+
+/// While a request is in flight nothing else is sent, however many
+/// changes come and however late (no timer either: the answer wakes the
+/// gate); the latest settings go out when it is answered.
+#[test]
+fn one_request_in_flight_and_the_latest_change_follows_it() {
+    let mut gate = SendGate::default();
+    assert_eq!(gate.changed(T), SendStep::Send);
+    assert_eq!(gate.changed(T + 10.0), SendStep::Idle);
+    assert_eq!(gate.changed(T + 20.0), SendStep::Idle);
+    assert_eq!(gate.tick(T + 50.0), SendStep::Idle);
+    assert_eq!(gate.changed(T + 300.0), SendStep::Idle);
+    assert!(gate.busy());
+    // Answered: the waiting change (the latest settings) goes out.
+    assert_eq!(gate.landed(T + 400.0), SendStep::Send);
+    assert!(gate.busy());
+    assert_eq!(gate.landed(T + 420.0), SendStep::Idle);
+    assert!(!gate.busy());
+}
+
+/// A change within 50 ms of the last send's START waits for the rest of
+/// the window: one timer, and its tick sends; a tick at exactly the
+/// window's end sends.
+#[test]
+fn a_change_inside_the_window_waits_for_its_end() {
+    let mut gate = SendGate::default();
+    assert_eq!(gate.changed(T), SendStep::Send);
+    assert_eq!(gate.landed(T + 5.0), SendStep::Idle);
+    assert_eq!(gate.changed(T + 20.0), SendStep::WaitMs(30.0));
+    assert!(gate.busy(), "a change waits");
+    assert_eq!(gate.changed(T + 30.0), SendStep::Idle, "the timer is armed");
+    // A tick before the window's end (a stale timer) re-arms for the rest.
+    assert_eq!(gate.tick(T + 45.0), SendStep::WaitMs(5.0));
+    assert_eq!(gate.tick(T + 50.0), SendStep::Send);
+    assert_eq!(gate.landed(T + 60.0), SendStep::Idle);
+    // The window counts from the LAST send's start (T + 50).
+    assert_eq!(gate.changed(T + 70.0), SendStep::WaitMs(30.0));
+    assert_eq!(gate.tick(T + 100.0), SendStep::Send);
+}
+
+/// A drag's end sends its last value at once, inside the window too; with
+/// a request in flight, the moment it is answered. A flush with nothing
+/// changed sends nothing and leaves no mark behind.
+#[test]
+fn a_drag_end_flushes_its_last_value() {
+    let mut gate = SendGate::default();
+    assert_eq!(gate.changed(T), SendStep::Send);
+    assert_eq!(gate.landed(T + 5.0), SendStep::Idle);
+    assert_eq!(gate.changed(T + 10.0), SendStep::WaitMs(40.0));
+    assert_eq!(gate.flush(T + 12.0), SendStep::Send, "inside the window");
+    assert_eq!(gate.landed(T + 15.0), SendStep::Idle);
+    // The armed timer fires later and finds nothing to send.
+    assert_eq!(gate.tick(T + 50.0), SendStep::Idle);
+
+    // In flight: the flush waits for the answer, then skips the window.
+    assert_eq!(gate.changed(T + 100.0), SendStep::Send);
+    assert_eq!(gate.changed(T + 110.0), SendStep::Idle);
+    assert_eq!(gate.flush(T + 111.0), SendStep::Idle);
+    assert_eq!(
+        gate.landed(T + 115.0),
+        SendStep::Send,
+        "T + 150 not yet reached"
+    );
+    assert_eq!(gate.landed(T + 120.0), SendStep::Idle);
+
+    // A flush with nothing changed: no send, and the next change waits for
+    // the window as usual (the flush did not stick).
+    assert_eq!(gate.flush(T + 130.0), SendStep::Idle);
+    assert_eq!(gate.changed(T + 140.0), SendStep::WaitMs(25.0));
+    assert_eq!(gate.flush(T + 141.0), SendStep::Send);
+    assert_eq!(gate.landed(T + 142.0), SendStep::Idle);
+    // The flushed send cleared its mark: the next change waits (its timer
+    // is the one still armed), and the window counts from T + 141.
+    assert_eq!(gate.changed(T + 143.0), SendStep::Idle);
+    assert_eq!(gate.tick(T + 165.0), SendStep::WaitMs(26.0));
+    assert_eq!(gate.tick(T + 191.0), SendStep::Send);
+}
