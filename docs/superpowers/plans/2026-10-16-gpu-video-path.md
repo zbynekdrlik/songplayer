@@ -625,7 +625,7 @@ Order: the NDI readback must exist before decode may stay on the GPU. Otherwise 
 
 ### P1a: the UYVY pass (sp-gpu)
 
-- A UYVY target on the compositor (960×1080 R8G8B8A8), the pass shader, the staging ring (3), `read_ndi(&mut Vec<u8>)`; `reference.rs` gains `uyvy.rs`.
+- A UYVY target on the compositor (960×1080 R8G8B8A8), the pass shader, the staging ring (3), `Compositor::read_uyvy(&mut Vec<u8>)`; the CPU reference of the pass is the pure `uyvy.rs` (`uyvy::reference`), next to `reference.rs` (design comment 6216639388).
 - **WARP:** UYVY within ±1 of the reference computed from the BGRA read back; `DO_NOT_WAIT` after the compose wait never returns `WAS_STILL_DRAWING`.
 
 ### P1b: NDI from the GPU

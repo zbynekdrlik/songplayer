@@ -1409,8 +1409,9 @@ CPU canvas (`program_canvas.rs`, `nv12_mix.rs`).
   the program target off the output stage, and only then the target's SRV:
   D3D11 force-unbinds an input that is still bound as an output, and the
   pass would read zeros. Both are unbound after the draw. Its blend state
-  is the default (`OMSetBlendState(None, ..)`): the compositor's additive
-  blend would add onto the last frame.
+  is the default (`OMSetBlendState(None, ..)`): the compositor's blend
+  adds onto the last frame AND writes R, G, B only, so the alpha byte
+  (Y1) would never be written.
 - **In `compose`.** After the targets' draws: the pass, a `CopyResource`
   into `staging[ring.slot_to_write()]` and its event query, all inside the
   ONE flush and wait (`wait_until_each_done`: the targets' queries, then
@@ -1424,9 +1425,11 @@ CPU canvas (`program_canvas.rs`, `nv12_mix.rs`).
   compose finished since the enable. Otherwise it maps
   `staging[ring.newest()]` with `READ | D3D11_MAP_FLAG_DO_NOT_WAIT` (the
   copy is complete: the compose waited) through `textures::map_rows_into`
-  (the one mapped-rows reader, `read_back`'s too: `out` cleared once
-  mapped, `unpad_rows_into`, width × 2 bytes a row, packed, unmapped),
-  `Ok(true)`.
+  (the compositor's mapped-rows reader, `read_back`'s too; it refuses
+  more rows than the texture has: `out` cleared once mapped,
+  `unpad_rows_into`, width × 2 bytes a row, packed, unmapped), `Ok(true)`.
+  On `Ok(false)` or an error `out` keeps what it held: P1b must never
+  send it then.
   `DXGI_ERROR_WAS_STILL_DRAWING` is a `GpuError::Api` whose call
   (`uyvy::STILL_DRAWING_CALL`) names it, never a wait (`uyvy::map_failed`;
   a lost device stays `DeviceLost`). No pass is `NoObject`.
