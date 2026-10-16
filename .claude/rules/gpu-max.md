@@ -1293,6 +1293,9 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   `Compositor::draw_us(id)` = a target's own part (`target_draws_us`), the
   FHD one is `max.fhd.draw_us_p99`.
 - `uploads`: 0, 1 or 2 pictures uploaded, whatever the targets.
+- #279 P1a `uyvy_us`: the UYVY pass's own part of the draw (its pass and
+  staging copy, after the targets' parts), `None` with no pass enabled.
+  Not yet on the API: P1b publishes it with the NDI feed.
 - #279 P0 `upload_bytes`: the plane bytes those uploads wrote
   (`Planes::upload_bytes`: luma a byte a texel, chroma two a U/V pair, the
   stride's padding not counted; 0 when every picture was resident). The
@@ -1373,11 +1376,96 @@ answers per step is NOT documented, so the test asserts only the proven
 verdict consistent with the steps) and writes every answer, the verdict and
 the report's JSON to stderr: read WARP's answer in the CI log.
 
+## The UYVY pass (#279 P1a: `uyvy.rs`, `uyvy.hlsl`, `win/uyvy.rs`)
+
+Design: #279 comment 6216639388; plan
+`docs/superpowers/plans/2026-10-16-gpu-video-path.md` §4.4, §5.5. NOT
+wired yet: P1b feeds the NDI `SP-program` from it (the one-slot delay, the
+`UYVY` FourCC, the burn on UYVY). Today `SP-program`'s NDI picture is the
+CPU canvas (`program_canvas.rs`, `nv12_mix.rs`).
+
+- **What it makes.** `Compositor::enable_uyvy(target)`, for a target of
+  EVEN width (`uyvy::uyvy_size`, else `GpuError::UyvyOddWidth`; an id the
+  compositor does not hold is `NoObject`): an `R8G8B8A8_UNORM` texture of
+  width/2 × height (one texel per pixel pair) and its RTV, an SRV of the
+  target's BGRA texture, an immutable 48-byte cbuffer
+  (`uyvy::constants_bytes`), its own event query, and `UYVY_STAGING` = 3
+  staging textures (`CPU_ACCESS_READ`). One pass per compositor: enabling
+  again replaces it (a new ring: nothing to read before the next compose),
+  `disable_uyvy` drops it, and `remove_target` of its target drops it too.
+  A refused or failed enable leaves the compositor as it was.
+- **The pass.** One full-target triangle (`SV_VertexID`, no vertex buffer,
+  `pipeline::raster`: no culling). The pixel shader at texel (x, y)
+  `Load`s the target's pixels (2x, y) and (2x + 1, y), no filter, and
+  writes `saturate(float4(U, Y0, V, Y1))`: a texel's four bytes in memory
+  are one UYVY pair. Y′ is each pixel's own; Cb/Cr are the conversion of
+  the pair's AVERAGE RGB (the conversion is linear, so this equals the
+  average of their Cb/Cr).
+- **Binding order matters.** The pass binds its own RTV FIRST, which takes
+  the program target off the output stage, and only then the target's SRV:
+  D3D11 force-unbinds an input that is still bound as an output, and the
+  pass would read zeros. Both are unbound after the draw. Its blend state
+  is the default (`OMSetBlendState(None, ..)`): the compositor's additive
+  blend would add onto the last frame.
+- **In `compose`.** After the targets' draws: the pass, a `CopyResource`
+  into `staging[ring.slot_to_write()]` and its event query, all inside the
+  ONE flush and wait (`wait_until_each_done`: the targets' queries, then
+  the pass's). Only once that wait passed and `GetDeviceRemovedReason` is
+  clean does the ring move on (`StagingRing::written`), so a failed compose
+  leaves the newest copy readable. `ComposeStats::uyvy_us` is the pass's
+  own part of the draw (the part after the targets' in `target_draws_us`),
+  `None` with no pass.
+- **`read_uyvy(&mut out)`.** `Ok(false)`, `out` untouched, before any
+  compose finished since the enable. Otherwise it maps
+  `staging[ring.newest()]` with `READ | D3D11_MAP_FLAG_DO_NOT_WAIT` (the
+  copy is complete: the compose waited), `out.clear()`, `unpad_rows_into`
+  (width × 2 bytes a row, packed), unmaps, `Ok(true)`.
+  `DXGI_ERROR_WAS_STILL_DRAWING` is a `GpuError::Api` whose call
+  (`uyvy::STILL_DRAWING_CALL`) names it, never a wait (`uyvy::map_failed`;
+  a lost device stays `DeviceLost`). No pass is `NoObject`.
+- **The colour.** `uyvy::RGB_FULL_TO_BT709_LIMITED`: rows Y′, Cb, Cr over
+  the full-range `(r, g, b, 1)`, already divided by 255 (the UNORM the
+  target stores). It is derived from `KR` / `KB` and is the inverse of
+  `color.rs`'s `BT709_LIMITED_TO_FULL`. It reaches the shader as f32
+  (`uyvy::matrix_f32`, `constants_bytes`); `uyvy.hlsl`'s `cbuffer Uyvy` is
+  `to_y`, `to_u`, `to_v`, in that order.
+- **The CPU model and its tolerance.** `uyvy::pack_pair(left, right)`
+  (BGRA in, `[U, Y0, V, Y1]` out, f32 like the shader, then
+  `reference::unorm8`) and `uyvy::reference(bgra, w, h)`. `UYVY_TOLERANCE`
+  = 1 code: two exact `Load`s, f32 maths, one rounding per byte. The WARP
+  pins compare with the reference computed from the SAME target's BGRA
+  readback, so the composite's own tolerance never adds to it, and any
+  picture works (smoothness is the composite's premise, not this one's).
+- **Tests.** Linux `uyvy_tests.rs`, every pin from a scratch Python model
+  with numpy f32:
+  - the rows from KR/KB, the inversion within 1e-9 both ways round, the
+    f32 pins and the cbuffer bytes;
+  - the HLSL source read for the cbuffer order, the two `Load` offsets,
+    the average and the output order;
+  - the BT.709 bars → their limited-range codes (`color_tests.rs`'s table
+    the other way), mixed pairs, alpha never read;
+  - the reference's rows, a short frame and an odd last column;
+  - the size rule, the map error, and the ring (wrap, read before any
+    write, write after a read).
+
+  WARP `tests/uyvy.rs`, on FHD targets: a 1440p picture; a 4:3 picture
+  whose bar pairs are exactly `[128, 16, 128, 16]` and whose picture pairs
+  never are; a 50 % fade; Black. Each is within ±1 of the reference of its
+  own BGRA readback. Also: 10 composes in a row, each `read_uyvy`
+  `Ok(true)` with that compose's picture (the ring wraps 3×, never
+  `WAS_STILL_DRAWING`); `Ok(false)` before a compose; an odd width
+  refused; the production shape (MAX's compositor with `FHD_TARGET` added,
+  the pass on it), where a removed target takes its pass; disable and
+  re-enable start afresh. The worst difference goes to stderr: read it in
+  the Build (Windows) log.
+
 ## HLSL at runtime
 
 `compose.hlsl` (`include_str!`) is compiled by `D3DCompile`
 (d3dcompiler_47.dll, which ships with Windows 10/11 and windows-latest) once
-per `Compositor`, `vs_5_0` / `ps_5_0` at feature level 11.0+. No fxc/dxc
+per `Compositor`, `vs_5_0` / `ps_5_0` at feature level 11.0+. #279 P1a:
+`uyvy.hlsl` is compiled the same way when a UYVY pass is enabled
+(`pipeline::compile` takes the source and its name). No fxc/dxc
 build step, and WARP and the RTX run the same source. A compile error is
 `GpuError::Shader` with the compiler's log.
 
@@ -1394,8 +1482,11 @@ build step, and WARP and the RTX run the same source. A compile error is
   (the output pick, the refresh count and fit, the staleness bound),
   #251 step 2's `targets` (a compositor's targets: ids, draw order, the
   primary kept), `stats::target_draws_us` (each target's part of the
-  draw) and #279 P0's `probe` (the report, the verdict, `acquire_step`,
-  `feature_step`, `pixel_step`, `content_step`, `probe_picture`, `Vram`).
+  draw), #279 P0's `probe` (the report, the verdict, `acquire_step`,
+  `feature_step`, `pixel_step`, `content_step`, `probe_picture`, `Vram`)
+  and #279 P1a's `uyvy` (the conversion rows and their constant buffer,
+  the pair model and the reference, the size rule, the map error, the
+  staging ring).
   Keep
   it that way: logic added inside `win/` is untested by the gate.
   `win/vblank.rs` only calls DXGI / Win32 (`EnumOutputs`, `GetDesc`, which
