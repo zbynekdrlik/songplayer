@@ -1116,3 +1116,37 @@ the existing components (#256: no redesign); design record on #266.
   `e2e/player-paused.spec.ts` (the label, the preview offered only while
   decoding, the idle line, a running preview kept through a pause and the
   resume, same element); sp-core pins in `player_view_tests_status.rs`.
+
+## Pointer, wheel and focus on a live SVG control (#278, the playlist EQ)
+
+Learned on the EQ panel (`playlist-audio.md` has its own details); they
+hold for any draggable control the dashboard grows:
+
+- **A direct `on:wheel` is NOT passive.** Leptos CSR here attaches each
+  `on:` listener to its element (no delegation), so `preventDefault()`
+  in it keeps the page still. A spec proves it by reading `scrollY`
+  BEFORE the wheel and comparing after (comparing to 0 is a tautology).
+- **Never give a pointer-mapped SVG a CSS border or padding.**
+  `getBoundingClientRect` includes them, so `clientX − rect.left` mapped
+  over `rect.width` is off by the border (a level drag read −0,1 dB).
+  Draw the frame with `outline` + a negative `outline-offset`.
+- **A small hit target gets an invisible grip, and the drag keeps its
+  grab offset.** A 9-unit dot in an 800-unit box is ~4 px on a phone:
+  put a transparent circle on top that takes the pointer (`fill:
+  transparent`, `touch-action: none`, the dot `pointer-events: none`),
+  and move the value BY the pointer's travel from where it took hold —
+  an absolute mapping jumps the value to the pointer on the first move.
+- **A keyed `<For>` that MOVES a row takes the focus from a control in
+  it** (the browser re-inserts the node). Read `document.activeElement`
+  before the reorder and give it back in `request_animation_frame` with
+  `FocusOptions { preventScroll: true }` (web-sys feature `FocusOptions`),
+  so the page never jumps.
+- **Time a client-side throttle in the PAGE, not at the mock.** An
+  `addInitScript` that wraps `window.fetch` and records
+  `performance.now()` per request sees every send (gloo-net 0.6 calls the
+  GLOBAL `fetch` with a `Request` object: read `input.url` /
+  `input.method`); the mock's arrival times include the runner's load.
+- **A mock route that delays its answer needs a reset epoch.** A delayed
+  handler still waiting when the next test's `reset` runs must answer but
+  store nothing (`playlistAudioEpoch` in `e2e/mock-api.mjs`), or one test
+  writes into the next.

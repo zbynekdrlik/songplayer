@@ -445,7 +445,7 @@ test("a handle taken off its centre moves by the pointer's travel, never jumps t
   await page.mouse.move(at.x + 4, at.y);
   // 4 px of travel: the frequency by 4 px's worth of the log axis (3
   // decades over the curve's width), the gain not at all. A band that
-  // jumped to the pointer would land ~12 % higher and ~1,6 dB up.
+  // jumped to the pointer would land ≥ 12 % higher and ~1,6 dB up.
   await expect.poll(async () => (await cardBand(card)).freq_hz, { timeout: 2000 }).not.toBe(1000);
   const nudged = await cardBand(card);
   const travel = Math.exp((Math.log(1000) * 4) / drawn.width);

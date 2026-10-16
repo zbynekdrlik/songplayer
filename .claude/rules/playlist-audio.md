@@ -151,18 +151,18 @@ separate one-song playlist in mode Single).
     ("Uloženie zlyhalo: server neodpovedá", nothing re-sent: a server
     that does not answer is not hammered), so it never holds the gate in
     flight and the next change goes out. The given-up request is still
-    watched (`EqEdit::watch_late_answer`, the pure `audio_fx_send::
-    late_answer`): when newer settings went out meanwhile it may have
-    landed OVER them — an error too, the server may have written the row
-    before it failed — so they are sent once more; landing ok over
-    unchanged settings with nothing going out, it was the save
-    ("Uložené"). The status texts and `answer_sk` live in
-    `audio_fx_send` too. Residual: the server writes the row, then the register, per
-    request, so two PUTs that overlap there (only a given-up one and its
-    successor) can leave the register a step behind the row until the
-    re-send. `validate` runs before
-    every send (`FxError::sk` on the status line). Status line: "Ukladám…"
-    while busy, then "Uložené", or "Uloženie zlyhalo: …".
+    watched (`EqEdit::watch_late_answer`, the pure
+    `audio_fx_send::late_answer`): when newer settings went out meanwhile
+    it may have landed OVER them — an error too, the server may have
+    written the row before it failed — so they are sent once more;
+    landing ok over unchanged settings with nothing going out, it was the
+    save ("Uložené"). The status texts and `answer_sk` live in
+    `audio_fx_send` too. Residual: the server writes the row, then the
+    register, per request, so two PUTs that overlap there (only a
+    given-up one and its successor) can leave the register a step behind
+    the row until the re-send. `validate` runs before every send
+    (`FxError::sk` on the status line). Status line: "Ukladám…" while
+    busy, then "Uložené", or "Uloženie zlyhalo: …".
   - The playing song follows each PUT through the DSP's 50 ms crossfade;
     back-to-back PUTs queue in its `pending` (the latest wins).
 
