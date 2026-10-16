@@ -12,7 +12,9 @@
 //! Windows-only. The vblank tracker (#223 follow-up) has no output to wait
 //! on here: `VblankTracker::start` reports `Unsupported`. Nor (#243
 //! follow-up) has Spout's sender list: `spout_list_holder` and
-//! `ListSentinel::start` report `Unsupported`.
+//! `ListSentinel::start` report `Unsupported`. Nor (#279 P0) is there a GPU
+//! to probe: `probe_gpu` reports `Unsupported` (the tests' `probe_warp` /
+//! `probe_on_listed_adapter` are Windows-only).
 
 use std::convert::Infallible;
 use std::marker::PhantomData;
@@ -21,6 +23,7 @@ use std::time::Instant;
 use crate::adapter::AdapterInfo;
 use crate::composition::{Composition, Fit, Target};
 use crate::error::GpuError;
+use crate::probe::GpuProbe;
 use crate::spout::SharedTextureInfo;
 use crate::spout_lock::{LockHolder, SentinelEnd};
 use crate::spout_state::Registration;
@@ -239,13 +242,23 @@ pub fn spout_sender_info(_name: &str) -> Result<Option<SharedTextureInfo>, GpuEr
     Err(GpuError::Unsupported)
 }
 
+/// #279 P0: [`GpuError::Unsupported`]: no Direct3D to probe off Windows.
+pub fn probe_gpu() -> Result<GpuProbe, GpuError> {
+    Err(GpuError::Unsupported)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        Compositor, ListSentinel, VblankTracker, spout_list_holder, spout_sender_info,
+        Compositor, ListSentinel, VblankTracker, probe_gpu, spout_list_holder, spout_sender_info,
         spout_sender_names,
     };
     use crate::error::GpuError;
+
+    #[test]
+    fn off_windows_the_gpu_cannot_be_probed() {
+        assert_eq!(probe_gpu(), Err(GpuError::Unsupported));
+    }
 
     #[test]
     fn off_windows_spout_s_list_is_neither_read_nor_waited_on() {

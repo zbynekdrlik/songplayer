@@ -21,8 +21,9 @@ use crate::picture::{Nv12Picture, Planes};
 use crate::readback::{mapped_len, unpad_rows};
 use crate::residency::Resident;
 
-/// A one-mip, one-sample 2D texture's description.
-fn desc(
+/// A one-mip, one-sample 2D texture's description (#279 P0: the probe's
+/// textures too, `probe.rs`).
+pub(super) fn desc(
     width: u32,
     height: u32,
     format: DXGI_FORMAT,

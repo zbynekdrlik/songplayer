@@ -6,6 +6,8 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+# #279 P0: the probe report and its verdict serialize for the diag route.
+serde = { workspace = true }
 sp-core = { path = "../sp-core" }
 thiserror = { workspace = true }
 tracing = { workspace = true }
@@ -39,6 +41,8 @@ cc = "1"
 # Placeholder crate that defines the `mutants::skip` attribute as a no-op,
 # letting cargo-mutants exclude specific functions from mutation testing.
 mutants = "0.0.4"
+# #279 P0: the probe report's JSON shape is pinned in probe_tests.rs.
+serde_json = { workspace = true }
 
 # #223 S1b: tests/spout.rs reads Spout's `MaxSenders` registry value before
 # it fills Spout's list (the same `windows` 0.58, one more feature).

@@ -12,6 +12,7 @@
 
 mod device;
 mod pipeline;
+mod probe;
 mod receiver;
 mod spout_lock;
 mod spout_registry;
@@ -32,6 +33,7 @@ use windows::Win32::Graphics::Dxgi::IDXGIResource;
 use windows::core::Interface;
 
 pub use device::adapters;
+pub use probe::{probe_gpu, probe_on_listed_adapter, probe_warp};
 pub use receiver::read_shared_texture;
 pub use spout_lock::{ListSentinel, mutex_holder, spout_list_holder};
 pub use spout_registry::{spout_sender_info, spout_sender_names};

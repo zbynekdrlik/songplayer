@@ -69,12 +69,18 @@
 //! #243 follow-up: [`spout_list_holder`] names the program that holds
 //! Spout's sender list ([`LockHolder`]), and a [`ListSentinel`] waits on
 //! that lock to give it back the moment the holder exits ([`SentinelEnd`]).
+//!
+//! #279 P0: [`probe_gpu`] asks the picked adapter, on two devices of it,
+//! what the GPU-resident video path needs (shared NV12 by NT handle and
+//! keyed mutex, its plane views, a `DO_NOT_WAIT` readback); the report, its
+//! verdict and every rule that reads an answer are the pure [`probe`].
 
 mod adapter;
 mod color;
 mod composition;
 mod error;
 mod picture;
+pub mod probe;
 mod quad;
 mod readback;
 pub mod reference;
@@ -124,11 +130,12 @@ pub use vblank::{
 
 #[cfg(not(windows))]
 pub use stub::{
-    Compositor, ListSentinel, SpoutSender, VblankTracker, spout_list_holder, spout_sender_info,
-    spout_sender_names,
+    Compositor, ListSentinel, SpoutSender, VblankTracker, probe_gpu, spout_list_holder,
+    spout_sender_info, spout_sender_names,
 };
 #[cfg(windows)]
 pub use win::{
     Compositor, ListSentinel, SpoutSender, VblankTracker, VideoDevice, adapters, mutex_holder,
-    read_shared_texture, spout_list_holder, spout_sender_info, spout_sender_names,
+    probe_gpu, probe_on_listed_adapter, probe_warp, read_shared_texture, spout_list_holder,
+    spout_sender_info, spout_sender_names,
 };

@@ -2264,6 +2264,8 @@ version = "0.84.0-dev.3"
 dependencies = [
  "cc",
  "mutants",
+ "serde",
+ "serde_json",
  "sp-core",
  "thiserror",
  "tracing",
