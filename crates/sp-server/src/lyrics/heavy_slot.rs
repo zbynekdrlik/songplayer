@@ -535,18 +535,12 @@ pub(crate) struct ChildJobGuard {
     // exits (this guard drops). Read in Drop, so never `dead_code`.
     #[cfg(windows)]
     sampler: Option<tokio::task::AbortHandle>,
-    // #251 step 5: the pacer that holds this child while Arena reads Spout;
-    // dropped (the child resumed) before the job handle closes.
-    #[cfg(windows)]
-    pacer: Option<crate::lyrics::heavy_quiet::QuietPacer>,
 }
 
 #[cfg(windows)]
 impl Drop for ChildJobGuard {
     #[cfg_attr(test, mutants::skip)] // closes an OS Job handle — only the kernel can observe it (KILL_ON_JOB_CLOSE); no in-process oracle
     fn drop(&mut self) {
-        // #251 step 5: stop pacing first, so the child runs again.
-        drop(self.pacer.take());
         // #168: stop sampling this child's page faults (it is exiting).
         if let Some(s) = &self.sampler {
             s.abort();
@@ -568,12 +562,11 @@ impl Drop for ChildJobGuard {
 /// host) PLUS the #203 containment currently published by the workers
 /// ([`current_containment`]): the CPU hard cap, the core affinity, and the
 /// child's lowered memory priority. Best-effort: any failure logs and returns a
-/// no-op guard (the child still has `kill_on_drop` as its own net). #251 step
-/// 5: a `paced` child (`HeavyStepPlan::paced`) is also held while Arena reads
-/// Spout (`heavy_quiet.rs`). Non-Windows: a no-op guard.
+/// no-op guard (the child still has `kill_on_drop` as its own net). Non-Windows:
+/// a no-op guard.
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
-pub(crate) fn assign_child_job(child: &tokio::process::Child, paced: bool) -> ChildJobGuard {
+pub(crate) fn assign_child_job(child: &tokio::process::Child) -> ChildJobGuard {
     let pid = child.id();
     let handle = match pid {
         Some(pid) => assign_win_job(
@@ -594,21 +587,13 @@ pub(crate) fn assign_child_job(child: &tokio::process::Child, paced: bool) -> Ch
     // #168: start logging this child's page-fault rate (`heavy child faults/s`),
     // aborted by the guard's Drop when the child exits.
     let sampler = pid.map(crate::lyrics::heavy_faults::spawn_fault_sampler);
-    // #251 step 5: only a contained child (kill-on-close) is ever held.
-    let pacer = pid
-        .filter(|_| paced && handle.is_some())
-        .and_then(crate::lyrics::heavy_quiet::QuietPacer::start);
-    ChildJobGuard {
-        handle,
-        sampler,
-        pacer,
-    }
+    ChildJobGuard { handle, sampler }
 }
 
 /// Non-Windows: no Job Object, no-op guard.
 #[cfg(not(windows))]
 #[cfg_attr(test, mutants::skip)]
-pub(crate) fn assign_child_job(_child: &tokio::process::Child, _paced: bool) -> ChildJobGuard {
+pub(crate) fn assign_child_job(_child: &tokio::process::Child) -> ChildJobGuard {
     ChildJobGuard {}
 }
 

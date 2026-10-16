@@ -126,9 +126,8 @@ impl VideoQuiet {
         }
     }
 
-    /// The grid read within `sp_gpu::VBLANK_STALE` of `now`, else none
-    /// (#251 step 5: the heavy child's pacer reads it too).
-    pub fn fresh_grid(&self, now: Instant) -> Option<VblankGrid> {
+    /// The grid read within `sp_gpu::VBLANK_STALE` of `now`, else none.
+    fn fresh_grid(&self, now: Instant) -> Option<VblankGrid> {
         let (grid, seen) = self.lock().grid?;
         grid_is_fresh(seen, now).then_some(grid)
     }

@@ -188,10 +188,29 @@ of each picture, both targets drawn at the compose phase).
   `program_transition::nv12_whole` checks too: one rule for the CPU and the
   GPU path. Both saturate at `usize::MAX`, so the check that guards the
   `unsafe` upload reads can never pass on a wrapped product.
-- The slot is per side, as dispatched. At a fade's end the incoming picture
-  is drawn as a plain picture from the `Outgoing` slot, so a held incoming
-  picture is uploaded once more (one upload; a live song brings a new id
-  every boundary anyway).
+- The slot is per side, as dispatched. Before its uploads `compose` lets the
+  two slots TRADE PLACES when that saves uploads (#251, pure
+  `residency::swap_slots(resident ids, wanted ids)`: fewer uploads after the
+  trade), so a picture resident in the other slot is never uploaded again:
+  a fade's incoming picture is the next fade's outgoing one (every boundary
+  of a 24/25 fps song is such a fade, #251's blend), and a fade's end draws
+  its incoming picture alone from `Outgoing`. Without the trade every
+  picture of a blended song went up twice (~60 4K uploads/s instead of 25).
+  WARP pin: `tests/warp.rs::a_chain_of_fades_uploads_each_picture_once`.
+- **Uploads are what disturbs Arena** (#251 comment 6212436810, SNV
+  16.10.2026). An INDEPENDENT Spout sender was shown on the wall, and
+  SongPlayer's program work alone was varied:
+  - SongPlayer blending a 25 fps clip: 56-86 jumps back per 40 s;
+  - one picture per boundary: 20-31;
+  - Blank (MAX still composing and sending black): 0-3;
+  - MAX off: 5-14.
+
+  the GPU scheduling priority class (D3DKMT), HAGS,
+  Arena's CPU priority or cores and NVIDIA threaded optimization changed
+  nothing. An upload is a CPU copy into driver memory plus a PCIe DMA,
+  which is memory bandwidth, like the synthetic `paced_burner.py`. Every
+  upload saved is measurable on the wall. The end state is GPU decode
+  straight into the compositor's textures, with no upload at all.
 - #251 step 2: the slots belong to the COMPOSITOR, not to a target.
   `compose` checks and uploads `pictures()` once, then draws every target
   from those textures (each through its own viewport, `QuadConstants` and

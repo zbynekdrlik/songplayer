@@ -208,7 +208,7 @@ async fn run_once(
         .context("failed to spawn lyrics-alignment-mtl run.py")?;
     // #162: cap the child's memory (Windows Job Object) so an OOM kills the
     // child, not the host. Held (with the slot) until the child exits below.
-    let _job = crate::lyrics::heavy_slot::assign_child_job(&child, plan.paced());
+    let _job = crate::lyrics::heavy_slot::assign_child_job(&child);
     let mut stderr_buf = Vec::new();
     if let Some(mut stderr) = child.stderr.take() {
         // Best-effort capture; a read failure just leaves an empty tail.

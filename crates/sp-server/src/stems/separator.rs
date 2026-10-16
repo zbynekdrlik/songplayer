@@ -165,7 +165,7 @@ pub async fn separate_stems(
     let mut child = cmd.spawn().context("failed to spawn separate-stems")?;
     // #162: cap the child's memory (Windows Job Object) so an OOM kills the
     // child, not the host. Held (with the slot) until the child exits below.
-    let _job = crate::lyrics::heavy_slot::assign_child_job(&child, plan.paced());
+    let _job = crate::lyrics::heavy_slot::assign_child_job(&child);
     // Drain stdout/stderr into buffers in the background so the pipes never fill
     // and deadlock the child (#171: the stall waiter below only calls
     // `child.wait()`, not `wait_with_output`, so we must drain the pipes

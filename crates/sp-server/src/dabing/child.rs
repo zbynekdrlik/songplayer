@@ -140,7 +140,7 @@ pub async fn run_live_translate(
     );
 
     let mut child = cmd.spawn().context("failed to spawn dub live-translate")?;
-    let _job = crate::lyrics::heavy_slot::assign_child_job(&child, plan.paced());
+    let _job = crate::lyrics::heavy_slot::assign_child_job(&child);
     let stdout_task = child
         .stdout
         .take()
