@@ -178,19 +178,29 @@ more time we say" + "Oh." as "Ešte raz hovoríme Och." (16.10.2026); on SNV
   the SK, so `Ó, slobodní` under `Oh, we are free` → `Slobodní`). So `áno` /
   `o` never go on their own (`Yes, Lord` / `Áno, Pane` stays), and a line
   with no SK changes only EN.
-- A line that followed a left-out capitalised `Oh,` keeps its own lower-case
-  start (What A God `what a God, what a God.`), as every wall line that
-  starts mid-sentence does (`find nobody no.`). A capital handed forward
-  (when the last kept line ends a sentence) is cosmetic and outside the
-  design; not done, the main session's call.
-- **Kept as they are (review round 1, noted):** a lone punctuation token
-  is a word outside the set, so it stops a run (`Oh , yeah` → `Oh ,`,
-  `Oh - yeah` stays whole); a line with unpaired parentheses keeps
-  them (`We sing (oh,`).
+- **A left-out line that BEGAN a sentence hands its capital on**
+  (follow-up 1, supervisor): `shown_lines` tracks whether the next line
+  begins a sentence (the first line does; then each line by its own
+  sentence end, `ends_sentence`). A left-out line that begins one gives
+  the next line kept its EN and SK capitals, each language by its own
+  (`interjections::capitals` / `with_capitals`), unless it ends its
+  sentence itself (`Oh.`). What A God's `what a God, what a God.` and
+  `more than the silver and gold to you.` now start with a capital; a
+  line left out inside a sentence hands none, so `We sing` + `Oh,` +
+  `what a God.` stays `We sing what a God.`, as a wall line that starts
+  mid-sentence does (`find nobody no.`).
+- **A lone mark is glued to the word before it** (follow-up 2): `shown`
+  reads a line's words through the asides' `join_words`, so a token made
+  only of `, . ; : ! ? …` never stops a run (`Oh , yeah, I'm free` →
+  `I'm free`, `Oh , oh` leaves). A dash is not a mark: `Oh - yeah` stays
+  whole. A line with nothing to cut is returned as it is.
+- **Kept as it is (noted):** a line with unpaired parentheses keeps them
+  (`We sing (oh,`). Compound chants (`whoa-oh-oh`, `uh-huh`) are not in the
+  decided set.
 - Display-only: NO `LYRICS_PIPELINE_VERSION` bump; the karaoke view keeps
   the raw track.
-- Tests: `display_plan_interjections_tests.rs` (the census lines and the
-  hand-back, through `build_plan`), `display_plan_fixture_tests.rs`
+- Tests: `display_plan_interjections_tests.rs` (the census lines, the
+  hand-back, the capital and the lone mark, through `build_plan`), `display_plan_fixture_tests.rs`
   `fixture_lines_of_only_interjections_are_in_no_wall_line` and
   `fixture_interjections_at_a_line_edge_go_where_a_mark_separates_them`.
   The fixture oracles read the shown lines through `shown_lines` (`Shown`).
