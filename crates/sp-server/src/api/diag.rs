@@ -67,8 +67,8 @@ pub async fn post_decode_bench(
         (status, why).into_response()
     };
     let ask = gpu_probe::ask(req.probe, req.file.as_deref(), req.seconds, req.hw);
-    let (file, seconds) = match ask {
-        Ok(BenchAsk::Decode { file, seconds, .. }) => (file, seconds),
+    let (file, seconds, hw) = match ask {
+        Ok(BenchAsk::Decode { file, seconds, hw }) => (file, seconds, hw),
         Ok(BenchAsk::Probe) => return post_gpu_probe(&state).await,
         Err(why) => return refuse(StatusCode::BAD_REQUEST, why.to_string()),
     };
@@ -90,7 +90,7 @@ pub async fn post_decode_bench(
         let why = "a decode-bench run is in progress".to_string();
         return refuse(StatusCode::CONFLICT, why);
     };
-    let mode = DecodeMode::from_hw_flag(req.hw);
+    let mode = DecodeMode::from_hw_flag(hw);
     match decode_bench::run(path, file.to_string(), max_wall, mode, slot).await {
         BenchOutcome::Report(report) => (report_status(&report), Json(report)).into_response(),
         BenchOutcome::Unsupported => {
@@ -98,7 +98,7 @@ pub async fn post_decode_bench(
             refuse(StatusCode::NOT_IMPLEMENTED, why)
         }
         BenchOutcome::Failed(why) => {
-            warn!(file = ?req.file, %why, "decode-bench: the run failed");
+            warn!(file, %why, "decode-bench: the run failed");
             (StatusCode::INTERNAL_SERVER_ERROR, why).into_response()
         }
     }

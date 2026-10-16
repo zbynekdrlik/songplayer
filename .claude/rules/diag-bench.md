@@ -200,8 +200,10 @@ failed`).
   a `probe` that is not a bool is axum's 422).
 - It runs `sp_gpu::probe_gpu()` (`gpu-max.md` "The capability probe") on a
   blocking thread holding the bench's slot (409 while any bench runs): two
-  devices on the compositor's adapter, five steps, read-only, nothing of the
-  program path touched.
+  devices on the compositor's adapter (A with the video API like the decode
+  device, B BGRA like the compositor), five steps, the keyed-mutex step
+  reading A's bytes back on B; read-only, nothing of the program path
+  touched.
 - 200 `{verdict {kind: gpu_resident_ok | needs_fallback, step, error},
   probe {<step>: {ok, error?}}, adapter, adapters [{name, vendor_id,
   device_id, vram_mb, software}], vram {budget_mb, used_mb} | null,

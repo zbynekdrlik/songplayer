@@ -2,8 +2,9 @@
 
 use super::{
     DXGI_ERROR_UNSUPPORTED, DXGI_ERROR_WAS_STILL_DRAWING, E_INVALIDARG, PROBE_CLEAR,
-    PROBE_CLEAR_BYTES, ProbeError, ProbeReport, ProbeStep, S_OK, Verdict, Vram, WAIT_ABANDONED,
-    WAIT_TIMEOUT, acquire_step, feature_step, hresult_detail, pixel_step,
+    PROBE_CLEAR_BYTES, PROBE_NV12_HEIGHT, PROBE_NV12_WIDTH, ProbeError, ProbeReport, ProbeStep,
+    S_OK, Verdict, Vram, WAIT_ABANDONED, WAIT_TIMEOUT, acquire_step, content_step, feature_step,
+    hresult_detail, pixel_step, probe_picture,
 };
 use crate::error::GpuError;
 
@@ -282,5 +283,41 @@ fn video_memory_is_floored_to_whole_mib() {
     assert_eq!(
         serde_json::to_value(Vram::from_bytes(8 * mib, 2 * mib)).unwrap(),
         serde_json::json!({"budget_mb": 8, "used_mb": 2})
+    );
+}
+
+/// A's picture: 256×144 NV12 packed (36 864 luma + 18 432 chroma bytes),
+/// byte `i` = `i mod 251`.
+#[test]
+fn the_probe_picture_numbers_its_bytes_mod_251() {
+    assert_eq!((PROBE_NV12_WIDTH, PROBE_NV12_HEIGHT), (256, 144));
+    let picture = probe_picture();
+    assert_eq!(picture.len(), 55_296);
+    assert_eq!(
+        (picture[0], picture[250], picture[251], picture[252]),
+        (0, 250, 0, 1)
+    );
+    assert_eq!(picture[55_295], 75, "55 295 mod 251");
+}
+
+/// B must read back exactly the bytes A wrote.
+#[test]
+fn b_must_read_back_what_a_wrote() {
+    const CALL: &str = "the shared NV12 as B read it back";
+    assert_eq!(content_step(CALL, Some(probe_picture())), Ok(()));
+    let mut stale = probe_picture();
+    stale[40_000] ^= 1;
+    assert_eq!(
+        content_step(CALL, Some(stale)),
+        Err(ProbeError::refused(CALL, "read other bytes than A wrote"))
+    );
+    assert_eq!(
+        content_step(CALL, Some(vec![0; 55_296])),
+        Err(ProbeError::refused(CALL, "read other bytes than A wrote")),
+        "an untouched (zeroed) texture"
+    );
+    assert_eq!(
+        content_step(CALL, None),
+        Err(ProbeError::refused(CALL, "mapped no whole picture"))
     );
 }

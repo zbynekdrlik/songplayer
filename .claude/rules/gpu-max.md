@@ -1296,27 +1296,42 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
 - #279 P0 `upload_bytes`: the plane bytes those uploads wrote
   (`Planes::upload_bytes`: luma a byte a texel, chroma two a U/V pair, the
   stride's padding not counted; 0 when every picture was resident). The
-  worker records it with `uploads` for each SENT boundary at the instant it
-  served it (`MaxOut::record_uploads`, `program_max_upload.rs`, a child of
-  `program_max.rs`): `max.upload_mb_s` (10^6 bytes) and `max.uploads_per_s`
-  = everything after the oldest boundary of the 900-boundary window, at
-  most `UPLOAD_RATE_SPAN` (30 s) before the newest, over the time since
-  it, to a tenth. One upload serves both targets: the FHD sender adds
-  none (`max.fhd` has no upload figure). The GPU-resident path's number:
-  `upload_mb_s` = 0 with a hardware-decodable song on program. Tests: the
-  window on made-up instants (`program_max_upload_tests.rs`), the worker
-  over the fake GPU (`program_max_worker_tests_upload.rs`; the fake's
-  compose uploads every picture of its composition by sp-gpu's rule, it
-  keeps no residency), the WARP pins in `tests/warp.rs`.
+  worker records it with `uploads` for EVERY compose that ran, at the
+  instant it served the boundary (`MaxWorker::draw` →
+  `MaxOut::record_uploads`, `program_max_upload.rs`, a child of
+  `program_max.rs`): a boundary whose Spout send then failed moved its
+  bytes all the same; a failed compose is not counted. `max.upload_mb_s`
+  (10^6 bytes) and `max.uploads_per_s` = everything after the oldest of
+  the last 900 composes, at most `UPLOAD_RATE_SPAN` (30 s) before the
+  newest, over the time since it, to a tenth. While MAX composes nothing
+  (off, quiesced, a backoff) they keep their last value: read them with
+  `max.state` `running`. One upload serves both targets: the FHD sender
+  adds none (`max.fhd` has no upload figure). The GPU-resident path's
+  number: `upload_mb_s` = 0 with a hardware-decodable song on program.
+  Tests: the window on made-up instants (`program_max_upload_tests.rs`),
+  the worker over the fake GPU (`program_max_worker_tests_upload.rs`; the
+  fake's compose uploads every picture of its composition by sp-gpu's
+  rule, it keeps no residency), the WARP pins in `tests/warp.rs`.
+- `SpoutSendStats::send_us` (S1b, for `max.send_us_p99`): the shim's
+  `SendSynced` (the sender-mutex wait, the copy, the flush, the wait until
+  the GPU has DONE that copy, then the announce; at the first send also the
+  shared texture's creation and the registration; #251 step 3 moved the
+  #223 follow-up's wait from after `SendTexture` to before the announce), so
+  `max.send_at_us_*` is when Spout's shared texture really holds the frame,
+  relative to the program's offer: its spread is the GPU's delay of the
+  copy (Arena reads the texture on its own 60 Hz clock).
 
 ## The capability probe (#279 P0, `probe.rs` + `win/probe.rs`)
 
-The GPU-resident design (`docs/superpowers/plans/2026-10-16-gpu-video-path.md`
-§4.2–§4.3) shares NV12 textures from per-playlist producer devices to the
-one compositor device. `probe_gpu()` asks the picked adapter whether that
-holds, on TWO devices of it (A = a producer, B = the compositor,
-`DeviceUse::Probe`: BGRA, adapter list at DEBUG), each step on its own (a
-step that needs the shared texture makes its own):
+The GPU-resident design of epic #279 (its plan §4.2–§4.3; the P0 design
+comment 6215400662) shares NV12 textures from per-playlist producer devices
+to the one compositor device. `probe_gpu()` asks the picked adapter whether
+that holds, on TWO devices of it (A = a producer, made with the video API
+like Media Foundation's decode device, `DeviceUse::VideoDecode`; B = the
+compositor, `DeviceUse::Probe`: BGRA, adapter list at DEBUG; `probe_warp` and
+`probe_on_listed_adapter` make A BGRA too, since WARP refuses the video
+API), each step on its own (a step that needs the shared texture makes its
+own):
 
 1. `extended_resource_sharing`: `CheckFeatureSupport(D3D11_OPTIONS)`
    `.ExtendedResourceSharing` on A and B;
@@ -1325,11 +1340,14 @@ step that needs the shared texture makes its own):
    `IDXGIResource1::CreateSharedHandle`, `ID3D11Device1::OpenSharedResource1`
    on B (the NT handle closed after the open);
 3. `nv12_keyed_mutex_roundtrip`: A `AcquireSync(0, 1000 ms)`, copies an
-   NV12 picture in, flushes, `ReleaseSync(1)`; B `AcquireSync(1, 0 ms)`,
-   `ReleaseSync(1)`. **`AcquireSync`'s `WAIT_TIMEOUT` (0x102) and
-   `WAIT_ABANDONED` (0x80) are SUCCESS codes: the `windows` crate's `Result`
-   reads them `Ok`.** The glue calls the vtable entry for the raw HRESULT
-   and the pure `acquire_step` accepts only `S_OK`;
+   NV12 picture in (`probe_picture`: byte i = i mod 251), flushes,
+   `ReleaseSync(1)`; B `AcquireSync(1, 0 ms)`, copies the texture to an NV12
+   staging copy, maps it (the UV plane at `RowPitch × Height`), releases
+   key 1, and its packed bytes must be A's (`content_step`): sharing proven
+   by content, not only by an open. **`AcquireSync`'s `WAIT_TIMEOUT`
+   (0x102) and `WAIT_ABANDONED` (0x80) are SUCCESS codes: the `windows`
+   crate's `Result` reads them `Ok`.** The glue calls the vtable entry for
+   the raw HRESULT and the pure `acquire_step` accepts only `S_OK`;
 4. `nv12_srv_r8_r8g8`: R8_UNORM and R8G8_UNORM views on B's opened NV12;
 5. `uyvy_target_and_staging_do_not_wait`: on B an R8G8B8A8 960×1080 render
    target, cleared, copied to staging, the copy waited for (an event query,
@@ -1354,14 +1372,6 @@ answers per step is NOT documented, so the test asserts only the proven
 (the devices, their adapter, a definite answer naming its call per step, a
 verdict consistent with the steps) and writes every answer, the verdict and
 the report's JSON to stderr: read WARP's answer in the CI log.
-- `SpoutSendStats::send_us` (S1b, for `max.send_us_p99`): the shim's
-  `SendSynced` (the sender-mutex wait, the copy, the flush, the wait until
-  the GPU has DONE that copy, then the announce; at the first send also the
-  shared texture's creation and the registration; #251 step 3 moved the
-  #223 follow-up's wait from after `SendTexture` to before the announce), so
-  `max.send_at_us_*` is when Spout's shared texture really holds the frame,
-  relative to the program's offer: its spread is the GPU's delay of the
-  copy (Arena reads the texture on its own 60 Hz clock).
 
 ## HLSL at runtime
 
@@ -1385,7 +1395,8 @@ build step, and WARP and the RTX run the same source. A compile error is
   #251 step 2's `targets` (a compositor's targets: ids, draw order, the
   primary kept), `stats::target_draws_us` (each target's part of the
   draw) and #279 P0's `probe` (the report, the verdict, `acquire_step`,
-  `feature_step`, `pixel_step`, `Vram`). Keep
+  `feature_step`, `pixel_step`, `content_step`, `probe_picture`, `Vram`).
+  Keep
   it that way: logic added inside `win/` is untested by the gate.
   `win/vblank.rs` only calls DXGI / Win32 (`EnumOutputs`, `GetDesc`, which
   needs the `Win32_Graphics_Gdi` feature, `WaitForVBlank`,

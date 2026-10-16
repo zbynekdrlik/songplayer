@@ -398,8 +398,6 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     ) -> Option<LogLine> {
         match went {
             Ok((compose, send, timing, aligned)) => {
-                self.out
-                    .record_uploads(now, compose.upload_bytes, compose.uploads);
                 self.out.record_sent(compose, send);
                 self.out.record_send_timing(timing);
                 self.out.record_vblank(aligned);
@@ -721,6 +719,9 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         };
         match compositor.compose(&composition) {
             Ok(compose) => {
+                // #279 P0: what crossed to the GPU, whatever the sends do.
+                let (bytes, pictures) = (compose.upload_bytes, compose.uploads);
+                self.out.record_uploads(now, bytes, pictures);
                 let fhd_draw_us = self.fhd.target.map_or(0, |t| compositor.draw_us(t));
                 Ok(Composed {
                     compose,

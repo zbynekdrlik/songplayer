@@ -34,8 +34,10 @@ use crate::error::GpuError;
 use crate::probe::{
     CONSUMER_ACQUIRE_MS, GpuProbe, KEY_CONSUMER, KEY_PRODUCER, PROBE_CLEAR, PROBE_CLEAR_BYTES,
     PROBE_NV12_HEIGHT, PROBE_NV12_WIDTH, PROBE_UYVY_HEIGHT, PROBE_UYVY_WIDTH, PRODUCER_ACQUIRE_MS,
-    ProbeError, ProbeReport, ProbeStep, Vram, acquire_step, feature_step, pixel_step,
+    ProbeError, ProbeReport, ProbeStep, Vram, acquire_step, content_step, feature_step, pixel_step,
+    probe_picture,
 };
+use crate::readback::{mapped_len, unpad_rows};
 
 /// A failed call's HRESULT.
 fn code(error: &windows::core::Error) -> u32 {
@@ -43,17 +45,19 @@ fn code(error: &windows::core::Error) -> u32 {
 }
 
 /// The probe on the adapter `pick_adapter` chooses (the compositor's: the
-/// RTX on SNV): two devices on it, every step, and its video memory.
+/// RTX on SNV): two devices on it, every step, and its video memory. A is
+/// made like a producer, the device Media Foundation decodes on (the video
+/// API, `DeviceUse::VideoDecode`), B like the compositor (BGRA).
 /// `GpuError::NoAdapter` when there is none; a device that cannot be made
 /// fails the whole probe (no step can run without it).
 pub fn probe_gpu() -> Result<GpuProbe, GpuError> {
-    let a = device::create_on_picked(DeviceUse::Probe)?;
+    let a = device::create_on_picked(DeviceUse::VideoDecode)?;
     let b = device::create_on_picked(DeviceUse::Probe)?;
     Ok(run(a, b.0, device::adapters()?))
 }
 
-/// The probe on two WARP devices: for CI (`tests/probe.rs`). Not for
-/// production.
+/// The probe on two WARP devices, both BGRA (WARP refuses the video API,
+/// `video-decode.md`): for CI (`tests/probe.rs`). Not for production.
 #[doc(hidden)]
 pub fn probe_warp() -> Result<GpuProbe, GpuError> {
     let a = device::create_warp(DeviceUse::Probe)?;
@@ -63,7 +67,9 @@ pub fn probe_warp() -> Result<GpuProbe, GpuError> {
 
 /// The probe on DXGI's adapter `index` (`adapters()`' order), whatever
 /// `pick_adapter` would say: `probe_gpu`'s path on a CI box whose only
-/// adapter is the Basic Render Driver. Not for production.
+/// adapter is the Basic Render Driver, with A BGRA (whether that driver
+/// makes the video device is not proven, `video-decode.md`). Not for
+/// production.
 #[doc(hidden)]
 pub fn probe_on_listed_adapter(index: usize) -> Result<GpuProbe, GpuError> {
     let a = device::create_on_listed(index, DeviceUse::Probe)?;
@@ -188,15 +194,13 @@ fn acquire(mutex: &IDXGIKeyedMutex, key: u64, milliseconds: u32) -> u32 {
     hresult.0 as u32
 }
 
-/// Step 3: A acquires key 0, writes the shared texture (a copy of an NV12
-/// picture made with initial data), releases key 1; B acquires key 1 with
-/// a 0 ms timeout and releases key 1.
+/// Step 3: A acquires key 0, writes the shared texture (a copy of
+/// `probe_picture`, made with initial data), releases key 1; B acquires key
+/// 1 with a 0 ms timeout, reads the texture back, releases key 1; the bytes
+/// must be A's (`content_step`).
 fn keyed_round_trip(a: &Device, b: &Device) -> ProbeStep {
     let shared = shared_nv12(a, b)?;
-    let (width, height) = (PROBE_NV12_WIDTH as usize, PROBE_NV12_HEIGHT as usize);
-    let picture: Vec<u8> = (0..width * height * 3 / 2)
-        .map(|i| (i % 251) as u8)
-        .collect();
+    let picture = probe_picture();
     let init = D3D11_SUBRESOURCE_DATA {
         pSysMem: picture.as_ptr().cast(),
         SysMemPitch: PROBE_NV12_WIDTH,
@@ -230,8 +234,54 @@ fn keyed_round_trip(a: &Device, b: &Device) -> ProbeStep {
         "IDXGIKeyedMutex::AcquireSync (B, key 1, 0 ms)",
         acquire(&on_b, KEY_CONSUMER, CONSUMER_ACQUIRE_MS),
     )?;
+    let read = read_nv12(b, &shared.opened);
     unsafe { on_b.ReleaseSync(KEY_CONSUMER) }
-        .map_err(|e| ProbeError::failed("IDXGIKeyedMutex::ReleaseSync (B, key 1)", code(&e)))
+        .map_err(|e| ProbeError::failed("IDXGIKeyedMutex::ReleaseSync (B, key 1)", code(&e)))?;
+    content_step("the shared NV12 as B read it back", read?)
+}
+
+/// The NV12 texture `opened` on B, copied to a staging copy and mapped: its
+/// rows packed (`None` when the mapping holds no whole picture). The mapped
+/// NV12 is Direct3D's layout: the UV plane follows the luma at
+/// `RowPitch × Height`, so it is `Height × 3/2` rows `RowPitch` apart.
+fn read_nv12(b: &Device, opened: &ID3D11Texture2D) -> Result<Option<Vec<u8>>, ProbeError> {
+    let (device, context) = b;
+    let read = D3D11_CPU_ACCESS_READ.0 as u32;
+    let desc = textures::desc(
+        PROBE_NV12_WIDTH,
+        PROBE_NV12_HEIGHT,
+        DXGI_FORMAT_NV12,
+        D3D11_USAGE_STAGING,
+        0,
+        read,
+        0,
+    );
+    let staging = texture(device, &desc, None, "CreateTexture2D (NV12 staging on B)")?;
+    let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+    unsafe {
+        context.CopyResource(&staging, opened);
+        context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+    }
+    .map_err(|e| ProbeError::failed("Map (B's NV12 staging copy)", code(&e)))?;
+    let pitch = mapped.RowPitch as usize;
+    let (row, rows) = (
+        PROBE_NV12_WIDTH as usize,
+        PROBE_NV12_HEIGHT as usize * 3 / 2,
+    );
+    let packed = match mapped_len(pitch, row, rows) {
+        Some(len) if !mapped.pData.is_null() => {
+            // SAFETY: the mapped NV12 staging texture is `rows` rows `pitch`
+            // bytes apart (`pitch` ≥ `row`, `mapped_len`), so its first `len`
+            // bytes end with the last UV row's pixels, inside the mapping,
+            // which stays mapped until the Unmap below.
+            let bytes =
+                unsafe { std::slice::from_raw_parts(mapped.pData.cast::<u8>().cast_const(), len) };
+            unpad_rows(bytes, pitch, row, rows)
+        }
+        _ => None,
+    };
+    unsafe { context.Unmap(&staging, 0) };
+    Ok(packed)
 }
 
 /// A shader view of `texture` as `format` (one plane of an NV12 texture).

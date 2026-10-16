@@ -1,6 +1,6 @@
-//! #279 P0: the `program-max` thread reports what each sent boundary's
-//! compose uploaded (`max.upload_mb_s`, `max.uploads_per_s`), at the
-//! instant it served the boundary, on the fake GPU. The fake's compose
+//! #279 P0: the `program-max` thread reports what each compose uploaded
+//! (`max.upload_mb_s`, `max.uploads_per_s`), at the instant it served the
+//! boundary, on the fake GPU. The fake's compose
 //! uploads every picture of its composition ([`fake_stats`]: it keeps no
 //! residency; sp-gpu's WARP pins prove the real compositor's), so a Black
 //! boundary uploads nothing.
@@ -58,7 +58,7 @@ fn the_fake_uploads_each_picture_of_its_composition() {
 /// Eleven boundaries 100 ms apart, each a new 1920×1080 picture: ten
 /// uploads after the first in one second.
 #[test]
-fn each_sent_boundary_s_upload_is_counted_at_the_instant_it_was_served() {
+fn each_compose_s_upload_is_counted_at_the_instant_it_was_served() {
     let max = MaxOut::new();
     let mut worker = MaxWorker::new(&max, FakeGpu::default());
     let t0 = Instant::now();
@@ -93,27 +93,29 @@ fn a_black_boundary_uploads_nothing() {
     );
 }
 
-/// A boundary that did not go out (its Spout frame lost) is not counted:
-/// the rates cover the sent boundaries, like the `*_us_p99` windows.
+/// Every compose that ran is counted, even one whose Spout frame was then
+/// lost (its bytes crossed all the same); a compose that failed is not.
 #[test]
-fn a_boundary_that_did_not_go_out_is_not_counted() {
+fn every_compose_that_ran_is_counted_whatever_its_send() {
     let max = MaxOut::new();
     let gpu = FakeGpu::default();
     let mut worker = MaxWorker::new(&max, gpu.clone());
     let t0 = Instant::now();
     worker.serve(&plain(1, &picture(1920, 1080)), t0);
+    gpu.script().compose.push_back(GpuError::Timeout(10_000));
+    worker.serve(&plain(2, &picture(1920, 1080)), t0 + 1_000 * MS);
     gpu.script().send.push_back(GpuError::Spout {
         call: "spout_sender_send",
         code: 3,
     });
-    worker.serve(&plain(2, &picture(1920, 1080)), t0 + 1_000 * MS);
     worker.serve(&plain(3, &picture(1920, 1080)), t0 + 2_000 * MS);
+    worker.serve(&plain(4, &picture(1920, 1080)), t0 + 3_000 * MS);
     let status = max.status();
-    assert_eq!((status.submitted, status.failed), (2, 1));
+    assert_eq!((status.submitted, status.failed), (2, 2));
     assert_eq!(
         (status.upload_mb_s, status.uploads_per_s),
-        (1.6, 0.5),
-        "one picture after the first in 2 s (the lost boundary's not counted)"
+        (2.1, 0.7),
+        "the composes at 2 s (its frame lost) and 3 s after the first, in 3 s"
     );
 }
 
@@ -129,7 +131,11 @@ fn the_fhd_sender_adds_no_upload() {
         let fresh = picture(1920, 1080);
         worker.serve(&plain(i64::from(i), &fresh), t0 + 100 * MS * i);
     }
-    assert!(gpu.log().fhd_sent >= 9, "the FHD sender sends too");
+    assert_eq!(
+        gpu.log().fhd_sent,
+        10,
+        "the FHD sender, built after MAX's first send, sends from the 2nd"
+    );
     let status = max.status();
     assert_eq!((status.upload_mb_s, status.uploads_per_s), (31.1, 10.0));
 }

@@ -6,14 +6,17 @@
 //! (epic #279) is judged by one number: `max.upload_mb_s` = 0 with a
 //! hardware-decodable song on program.
 //!
-//! Each sent boundary records the plane bytes its ONE compose uploaded
+//! Every compose that ran records the plane bytes it uploaded
 //! (`sp_gpu::ComposeStats::upload_bytes`, both targets drawn from the same
 //! upload, so the FHD sender adds nothing) and the pictures it uploaded,
-//! at the instant the thread served it. The rates are counted over the
-//! window of the last [`MAX_STAT_WINDOW`] sent boundaries that are at most
-//! [`UPLOAD_RATE_SPAN`] older than the newest (a window that spans a time
-//! MAX was off would read too low): everything after the oldest boundary,
-//! divided by the time since it.
+//! at the instant the thread served the boundary (`MaxWorker::draw`): a
+//! boundary whose Spout send then failed moved its bytes all the same. The
+//! rates are counted over the last [`MAX_STAT_WINDOW`] composes that are at
+//! most [`UPLOAD_RATE_SPAN`] older than the newest (a window that spans a
+//! time MAX was off would read too low): everything after the oldest
+//! compose, divided by the time since it. While MAX composes nothing (off,
+//! quiesced, waiting a backoff) the rates keep their last value: read them
+//! with `max.state` `running`.
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -24,16 +27,17 @@ use super::{MAX_STAT_WINDOW, MaxOut};
 /// second.
 pub const UPLOAD_RATE_SPAN: Duration = Duration::from_secs(30);
 
-/// One megabyte, as the design's byte budget counts it (§5.12: 10^6).
+/// One megabyte, as #279's byte budget counts it: 10^6 bytes.
 const MB: f64 = 1_000_000.0;
 
-/// The sent boundaries' uploads: (served at, plane bytes, pictures).
+/// The composes' uploads: (served at, plane bytes, pictures).
 #[derive(Clone, Debug, Default)]
 pub(super) struct Uploads(VecDeque<(Instant, u64, u32)>);
 
 impl Uploads {
-    /// A boundary served `at` whose compose uploaded `bytes` in `pictures`
-    /// pictures (0 and 0 when every picture was resident, or for Black).
+    /// A compose of a boundary served `at` that uploaded `bytes` in
+    /// `pictures` pictures (0 and 0 when every picture was resident, or for
+    /// Black).
     pub(super) fn push(&mut self, at: Instant, bytes: u64, pictures: u32) {
         self.0.push_back((at, bytes, pictures));
         if self.0.len() > MAX_STAT_WINDOW {
@@ -49,7 +53,7 @@ impl Uploads {
     }
 
     /// (MB/s, pictures/s) over the window, each to a tenth; 0 below two
-    /// boundaries or over no time.
+    /// composes or over no time.
     pub(super) fn rates(&self) -> (f64, f64) {
         let (Some(&(first, ..)), Some(&(last, ..))) = (self.0.front(), self.0.back()) else {
             return (0.0, 0.0);
@@ -84,8 +88,8 @@ pub fn tenth(x: f64) -> f64 {
 }
 
 impl MaxOut {
-    /// #279 P0: a sent boundary served `at` uploaded `bytes` in `pictures`
-    /// pictures (`ComposeStats::upload_bytes` / `uploads`).
+    /// #279 P0: a compose of a boundary served `at` uploaded `bytes` in
+    /// `pictures` pictures (`ComposeStats::upload_bytes` / `uploads`).
     pub fn record_uploads(&self, at: Instant, bytes: u64, pictures: u32) {
         self.lock_stats().uploads.push(at, bytes, pictures);
     }

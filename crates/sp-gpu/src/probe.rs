@@ -2,8 +2,8 @@
 //! asked of the GPU itself (pure: the report, the verdict and every rule
 //! that reads an answer; the Direct3D calls are `win/probe.rs`).
 //!
-//! The epic's design (`docs/superpowers/plans/2026-10-16-gpu-video-path.md`
-//! §4.2–§4.4) decodes each playlist on its own producer device into shared
+//! The design of epic #279 (its plan §4.2–§4.4; the P0 design comment
+//! 6215400662) decodes each playlist on its own producer device into shared
 //! NV12 textures and composes them on ONE compositor device. That rests on
 //! five capabilities, each probed on its own on two devices of one adapter
 //! (device A = a producer, device B = the compositor):
@@ -16,8 +16,12 @@
 //!    (`IDXGIResource1::CreateSharedHandle`) opened on B
 //!    (`ID3D11Device1::OpenSharedResource1`);
 //! 3. `nv12_keyed_mutex_roundtrip`: A acquires key 0 with a bounded wait,
-//!    writes the texture, releases key 1; B acquires key 1 with a 0 ms
-//!    timeout (the compositor never blocks), releases key 1;
+//!    writes the texture ([`probe_picture`]), releases key 1; B acquires key
+//!    1 with a 0 ms timeout (the compositor never blocks), copies the
+//!    texture to a staging copy and reads it back, releases key 1: the
+//!    bytes must be the ones A wrote ([`content_step`]), so a driver that
+//!    opens the handle but shares no content, or whose mutex does not order
+//!    the copy, fails;
 //! 4. `nv12_srv_r8_r8g8`: R8 (luma) and R8G8 (chroma) shader views on the
 //!    NV12 texture B opened, the views the compositor samples;
 //! 5. `uyvy_target_and_staging_do_not_wait`: on B, an R8G8B8A8 960×1080
@@ -58,7 +62,7 @@ pub const E_INVALIDARG: u32 = 0x8007_0057;
 /// does not change what the driver allows).
 pub const PROBE_NV12_WIDTH: u32 = 256;
 pub const PROBE_NV12_HEIGHT: u32 = 144;
-/// The UYVY pass's render target (design §5.6, P1a): 1920 / 2 pixel pairs
+/// The UYVY pass's render target (#279 P1a): 1920 / 2 pixel pairs
 /// per row, one R8G8B8A8 texel per pair, 1080 rows.
 pub const PROBE_UYVY_WIDTH: u32 = 960;
 pub const PROBE_UYVY_HEIGHT: u32 = 1080;
@@ -223,6 +227,27 @@ impl ProbeReport {
             }
         }
         Verdict::GpuResidentOk
+    }
+}
+
+/// The probe's NV12 picture as A writes it: [`PROBE_NV12_WIDTH`] ×
+/// [`PROBE_NV12_HEIGHT`], rows packed, the UV plane right after the luma;
+/// byte `i` is `i mod 251`, so a stale, shifted or half-written copy reads
+/// differently.
+pub fn probe_picture() -> Vec<u8> {
+    let len = (PROBE_NV12_WIDTH * PROBE_NV12_HEIGHT * 3 / 2) as usize;
+    (0..len).map(|i| (i % 251) as u8).collect()
+}
+
+/// What B read back of the shared texture (its NV12 rows packed; `None`
+/// when the mapping gave no whole picture) against [`probe_picture`].
+pub fn content_step(call: &'static str, got: Option<Vec<u8>>) -> ProbeStep {
+    match got {
+        None => Err(ProbeError::refused(call, "mapped no whole picture")),
+        Some(got) if got != probe_picture() => {
+            Err(ProbeError::refused(call, "read other bytes than A wrote"))
+        }
+        Some(_) => Ok(()),
     }
 }
 

@@ -246,9 +246,10 @@ pub struct MaxStatus {
     pub draw_us_p99: u64,
     pub send_us_p99: u64,
     /// #279 P0: the plane bytes the composes moved from RAM to the GPU, MB/s
-    /// (10^6), and the pictures uploaded per second, over the sent
-    /// boundaries of the window (at most [`UPLOAD_RATE_SPAN`]); one upload
-    /// serves both targets, so `fhd` adds none (`program_max_upload.rs`).
+    /// (10^6), and the pictures uploaded per second, over the last
+    /// [`MAX_STAT_WINDOW`] composes (at most [`UPLOAD_RATE_SPAN`]); one
+    /// upload serves both targets, so `fhd` adds none
+    /// (`program_max_upload.rs`).
     pub upload_mb_s: f64,
     pub uploads_per_s: f64,
     /// When the frames were in Spout's shared texture after the program

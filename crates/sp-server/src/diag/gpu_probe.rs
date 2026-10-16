@@ -2,7 +2,8 @@
 //! {"probe": true}` (`api::diag`). It asks the box's own GPU, on two devices
 //! of the adapter the compositor takes (`sp_gpu::probe_gpu`), whether the
 //! GPU-resident video path's device model holds (shared NV12 by NT handle
-//! and keyed mutex, its plane views, a `DO_NOT_WAIT` readback), and names
+//! and keyed mutex, its content read back across, its plane views, a
+//! `DO_NOT_WAIT` readback), and names
 //! every adapter DXGI lists and the adapter's video memory. It is read-only:
 //! nothing of the program path is touched, its devices live only for the
 //! run. It takes the decode bench's slot (one bench at a time, 409).
