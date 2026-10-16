@@ -116,7 +116,7 @@ fn texture(
     let init = init.map(|init| init as *const D3D11_SUBRESOURCE_DATA);
     unsafe { device.CreateTexture2D(desc, init, Some(&mut texture)) }
         .map_err(|e| ProbeError::failed(call, code(&e)))?;
-    texture.ok_or(ProbeError::refused(call, "gave no object"))
+    texture.ok_or_else(|| ProbeError::refused(call, "gave no object"))
 }
 
 /// The probe's NV12 texture description.
@@ -304,10 +304,9 @@ fn uyvy_readback(b: &Device) -> ProbeStep {
     let mut view: Option<ID3D11RenderTargetView> = None;
     unsafe { device.CreateRenderTargetView(&target, None, Some(&mut view)) }
         .map_err(|e| ProbeError::failed("CreateRenderTargetView (R8G8B8A8)", code(&e)))?;
-    let view = view.ok_or(ProbeError::refused(
-        "CreateRenderTargetView (R8G8B8A8)",
-        "gave no object",
-    ))?;
+    let view = view.ok_or_else(|| {
+        ProbeError::refused("CreateRenderTargetView (R8G8B8A8)", "gave no object")
+    })?;
     let read = D3D11_CPU_ACCESS_READ.0 as u32;
     let staging_desc = textures::desc(
         size.0,
