@@ -5,6 +5,10 @@ paths:
   - "crates/sp-server/src/playback/program_max*.rs"
   - "crates/sp-server/src/playback/program_output_tests_max.rs"
   - "crates/sp-server/src/api/program_tests_max.rs"
+  - "crates/sp-server/src/playback/ndi_feed*.rs"
+  - "crates/sp-server/src/playback/program_output_ndi*.rs"
+  - "crates/sp-server/src/playback/program_output_tests_ndi.rs"
+  - "crates/sp-server/src/api/program_tests_ndi.rs"
   - "src-tauri/resources/THIRD-PARTY-NOTICES.txt"
   - "e2e/post-deploy-max.spec.ts"
   - "e2e/max-gate*.ts"
@@ -22,7 +26,10 @@ since S1b, its Spout sender (below); S2 wires both into the program output
 wiring" below). #239: the same thread also sends the FHD program as the
 Spout sender `SP-program` (1920×1080), "The FHD Spout sender" below; #251
 step 2: from a SECOND TARGET of the same compositor (one device, one upload
-of each picture, both targets drawn at the compose phase).
+of each picture, both targets drawn at the compose phase). #279 P1b: the
+FHD program is that compositor's PRIMARY target and MAX's the ADDED one, and
+the FHD target also feeds NDI `SP-program` (a UYVY readback, one slot late:
+"NDI `SP-program` from the GPU readback" below).
 
 ## What one boundary draws (`composition.rs`)
 
@@ -90,7 +97,9 @@ of each picture, both targets drawn at the compose phase).
   - #251 step 2: `add_target(target) -> Result<TargetId, GpuError>` adds a
     target (a shared BGRA render target + its own event query) drawn by
     every later compose; `remove_target(id)` stops it (never the
-    primary). sp-server adds `FHD_TARGET` to MAX's compositor. The ids and
+    primary). sp-server's production compositor's primary is
+    `FHD_TARGET` and it adds `MAX_TARGET` while MAX is on (#279 P1b; #251
+    step 2 added `FHD_TARGET` to MAX's). The ids and
     the draw order (primary first, then as added; an id never reused) are
     the pure `targets.rs` `Targets<T>`, which `win/mod.rs` holds its
     targets in.
@@ -738,10 +747,12 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   GPU's compose held behind a gate, six more boundaries reach NDI and VBAN
   within the bound, `coalesced` 4, MAX then draws boundary 0 and the newest
   two).
-- The consumer's `next(holding)`: `Stop` wins; while off, `Release` when it
+- The consumer's `next(holding)`: `Stop` wins; while nothing wants the
+  compositor (#279 P1b: MAX off AND NDI on the canvas), `Release` when it
   holds GPU objects; else the next job. `set_enabled(false)` drops the
-  queued jobs and wakes it; `attach()` returns the guard whose drop stops
-  the offers (a dead thread never leaves a stale "running").
+  queued jobs (unless NDI still wants the compositor) and wakes it;
+  `attach()` returns the guard whose drop stops the offers (a dead thread
+  never leaves a stale "running").
 - The queue and the stats are two locks: an API read takes the queue lock
   only to copy two fields (`enabled`, `coalesced`), copies the p99 windows
   under the stats lock and sorts them after it.
@@ -749,15 +760,17 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
 ### The `program-max` thread (`program_max_worker.rs`)
 
 - `run_max_loop(out, gpu)`: `attach`, then `next` → `serve` / `release` /
-  exit. The GPU is the `MaxGpu` trait (`compositor()`, `sender(&c)`,
-  `fhd_sender(&c, target)`; `MaxCompositor::{compose, adapter, add_target,
-  remove_target, draw_us}`, `MaxSender::{send, listed_size}`; since #251
-  step 2 in `program_max_gpu.rs`, re-exported by the worker), so every
-  decision is Linux-tested on a fake (`program_max_worker_tests.rs`: ONE
+  exit. The GPU is the `MaxGpu` trait (`compositor()`, `sender(&c,
+  target)`, `fhd_sender(&c, target)`; `MaxCompositor::{compose, adapter,
+  add_target, remove_target, draw_us, enable_uyvy, disable_uyvy,
+  read_uyvy}`, `MaxSender::{send, listed_size}`; since #251 step 2 in
+  `program_max_gpu.rs`, re-exported by the worker), so every decision is
+  Linux-tested on a fake (`program_max_worker_tests.rs`: ONE
   `FakeCompositor` minting target ids with the real `sp_gpu::Targets`).
-  Production is `SpoutGpu` (`Compositor::new()` on the picked adapter,
-  `SpoutSender::new` = `SP-program-MAX`), spawned by `start_max` on Windows
-  as thread `program-max`.
+  Production is `SpoutGpu` (#279 P1b: `Compositor::with_size` of
+  `FHD_TARGET` on the picked adapter, `SpoutSender::for_target(&c, max,
+  SPOUT_SENDER_NAME)` = `SP-program-MAX` of the MAX target the worker adds),
+  spawned by `start_max` on Windows as thread `program-max`.
 - The objects are built ON the thread at the first job (none is `Send`)
   and dropped senders first (MAX's, then the FHD one), then the compositor
   (they hold references into its device and targets).
@@ -1126,7 +1139,9 @@ and Arena's side stay in the box gate below.
 ### The WARP proof (`program_max_tests_warp.rs`, Windows only)
 
 A `ProgramOutput` (mock NDI) offers to a real `run_max_loop` whose GPU is
-`Compositor::new_warp()` + `SpoutSender::with_name(…, "SP-program-MAX-s2-warp-test")`.
+the production topology on WARP (#279 P1b): `Compositor::new_warp_with_size`
+of the FHD target + `SpoutSender::for_target(…, max, "SP-program-MAX-s2-warp-test")`
+of the MAX target the worker adds.
 A 1280×720 Source boundary, then a 21:9 → 720p Mix boundary (slot 4 of 9):
 Spout's registry lists the sender at 3840×2160 format 87, and its shared
 texture read on a SECOND WARP device (`sp_gpu::read_shared_texture`,
@@ -1139,9 +1154,16 @@ GPU proves the earlier send's copy done (the last copy writes the same
 bytes). #267: then a 4:3 Source boundary (960×720). MAX
 fills its width: the layer covers columns 0..3840, and no pixel of either
 edge column is black. The FHD sender keeps its bars, black at columns 239
-and 1680. #251 step 2: the FHD sender is `for_target` of the target the
-worker adds to the same WARP compositor (the production `add_target` of
-`sp_gpu::Compositor`), so both read-backs come from one compose.
+and 1680. The FHD sender is `for_target` of the WARP compositor's primary
+(#279 P1b; MAX's target is the one the worker adds, the production
+`add_target` of `sp_gpu::Compositor`), so both read-backs come from one
+compose. #279 P1b: then NDI `SP-program` from the GPU readback
+(`check_ndi_from_the_readback`): a 1920×1080 `ProgramOutput` in gpu mode
+on the same thread sends each boundary one boundary late as UYVY 1920×1080
+stride 3840, and every byte is within `UYVY_TOLERANCE` of
+`sp_gpu::uyvy::reference` of the FHD sender's texture (the same picture),
+for a Source boundary and a fade; `ndi` reads `gpu`, one switch, 0
+repeats / late / coalesced.
 
 ### The FHD Spout sender `SP-program` (#239)
 
@@ -1151,9 +1173,10 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
 
 - sp-gpu: `SpoutSender::new_fhd(&c, target)` = `SPOUT_FHD_SENDER_NAME` =
   `SP-program` (Arena: `SPOUT_SP-program`), the sender of the compositor's
-  target `target`. #251 step 2: that target is `FHD_TARGET` (1920×1080,
-  `FHD_FIT`) ADDED to MAX's compositor (`Compositor::add_target`), never a
-  second compositor: one device, one upload of each picture, one compose.
+  target `target`. #279 P1b: that target is the compositor's PRIMARY,
+  `FHD_TARGET` (1920×1080, `FHD_FIT`; #251 step 2 had added it to MAX's
+  compositor), never a second compositor: one device, one upload of each
+  picture, one compose.
   `Compositor::with_size(w, h, fit)` / doc-hidden `new_warp_with_size` stay
   for tests (a compositor whose primary is another size).
   `read_shared_texture` reads at the size the sender's map lists.
@@ -1165,9 +1188,9 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   program.
 - The `program-max` thread (`program_max_worker.rs`): while
   `MaxOut::fhd_wanted` (the setting AND MAX on), the FHD OUTPUT (its
-  target on MAX's compositor + its sender, `Output`, built on the thread:
-  `MaxCompositor::add_target(FHD_TARGET)`, then `MaxGpu::fhd_sender(&c,
-  target)`) is drawn by the same compose as MAX, from the same labelled
+  sender of the compositor's primary, `Output`, built on the thread:
+  `MaxGpu::fhd_sender(&c, TargetId::PRIMARY)`) is drawn by the same compose
+  as MAX, from the same labelled
   composition and the same uploaded textures (#251 step 2). The FHD
   output is built AFTER MAX's send (#239, "MAX goes first, whole": its
   Spout open never delays that boundary's MAX, at most the next compose,
@@ -1184,14 +1207,17 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   built, the fake's `order` at each wait),
   `the_fhd_output_is_built_after_max_s_send_then_drawn_by_the_same_compose`
   and `the_fhd_build_never_delays_max_s_send`.
-  The FHD target exists only while its sender lives: a refused FHD sender
-  or a failed FHD build drops its sender and takes the target off the
-  compositor (`drop_fhd`), so nothing is drawn for it during its own
-  backoff; a refused or failed MAX sender never stops the FHD output, and
-  the other way round. Switched off (`fhd_wanted` false), the FHD sender
-  and target go at the next boundary and its backoff is forgotten
-  (`release_fhd`); MAX off releases everything (MAX's sender, the FHD
-  sender, then the compositor).
+  #279 P1b: the FHD target is the primary, drawn by every compose whatever
+  its sender does; it is MAX's target that exists only while MAX's sender
+  lives: a refused or failed MAX build drops MAX's sender and takes its
+  target off (`drop_max`), so nothing is drawn for MAX during its backoff.
+  A refused or failed FHD sender drops that sender only (`drop_fhd`); a
+  refused or failed MAX sender never stops the FHD output, and the other
+  way round. Switched off (`fhd_wanted` false), the FHD sender goes at the
+  next boundary and its backoff is forgotten (`release_fhd`); MAX off with
+  NDI on the canvas releases everything (MAX's sender, the FHD sender, then
+  the compositor), MAX off with NDI from the GPU only MAX's sender and
+  target (`release_max`).
 - After its first good boundary the thread reads Spout's registry entry of
   the FHD sender once (`MaxSender::listed_size` →
   `spout_sender_info(name)`, a receiver's read; `None` = read again next
@@ -1232,13 +1258,16 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   and `sender_backoffs` +0. It runs on SNV and in PP's subset.
 - Tests: `program_max_fhd_tests.rs` (rule, records, JSON names, setting,
   task), `program_max_worker_tests_fhd.rs` (the fake GPU: ONE
-  `FakeCompositor` that draws the FHD target when one was added, `Log`
-  `targets_added` / `targets_removed` / `fhd_drawn` / `fhd_*` / `order`
-  ("fhd target", "fhd sender built", "max draw", "fhd draw", "max send",
-  "fhd send", "fhd target removed"), `Script.add_target` / `fhd_sender` /
-  `fhd_send` / `listed`: the FHD output built after MAX's send, both
-  targets at `compose_at`, MAX first, FHD off draws no FHD target, an FHD
-  refusal or failed build never stops MAX and takes its target off),
+  `FakeCompositor` whose primary is the FHD target and which draws MAX's
+  while one was added, `Log` `targets_added` / `targets_removed` /
+  `fhd_drawn` / `fhd_*` / `order` ("fhd sender built", "fhd draw", "max
+  draw" — the primary first —, "max send", "fhd send", "max target
+  removed"; #279 P1b also "ndi on", "ndi read", "ndi off"),
+  `Script.add_target` / `fhd_sender` / `fhd_send` / `listed`: the FHD output
+  built after MAX's send, both targets at `compose_at`, MAX first, FHD off
+  sends nothing, an FHD refusal or failed build never stops MAX, a failed
+  MAX target or sender waits MAX's own backoff while the FHD output goes
+  out),
   `program_max_worker_tests_fhd_lost.rs` (a lost device anywhere, building
   the FHD output first or after MAX's send included, rebuilds both; a loss
   after MAX's boundary went out leaves it sent and MAX's state and log name
@@ -1297,7 +1326,8 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
 - `uploads`: 0, 1 or 2 pictures uploaded, whatever the targets.
 - #279 P1a `uyvy_us`: the UYVY pass's own part of the draw (its pass and
   staging copy, after the targets' parts), `None` with no pass enabled.
-  Not yet on the API: P1b publishes it with the NDI feed.
+  #279 P1b publishes it as `ndi.uyvy_us_p99` (over the last 900
+  readbacks).
 - #279 P0 `upload_bytes`: the plane bytes those uploads wrote
   (`Planes::upload_bytes`: luma a byte a texel, chroma two a U/V pair, the
   stride's padding not counted; 0 when every picture was resident). The
@@ -1381,10 +1411,10 @@ the report's JSON to stderr: read WARP's answer in the CI log.
 ## The UYVY pass (#279 P1a: `uyvy.rs`, `uyvy.hlsl`, `win/uyvy.rs`)
 
 Design: #279 comment 6216639388; plan
-`docs/superpowers/plans/2026-10-16-gpu-video-path.md` §4.4, §5.5. NOT
-wired yet: P1b feeds the NDI `SP-program` from it (the one-slot delay, the
-`UYVY` FourCC, the burn on UYVY). Today `SP-program`'s NDI picture is the
-CPU canvas (`program_canvas.rs`, `nv12_mix.rs`).
+`docs/superpowers/plans/2026-10-16-gpu-video-path.md` §4.4, §5.5. #279
+P1b wires it: NDI `SP-program` from the readback, one slot late, the `UYVY`
+FourCC, the burn on UYVY (next section), switched by `program_ndi_source`
+(default: the CPU canvas, `program_canvas.rs`, `nv12_mix.rs`).
 
 - **What it makes.** `Compositor::enable_uyvy(target)`, for a target of
   EVEN width (`uyvy::uyvy_size`, else `GpuError::UyvyOddWidth`; an id the
@@ -1478,6 +1508,166 @@ CPU canvas (`program_canvas.rs`, `nv12_mix.rs`).
   CPU NV12 canvas passes them through, and the two roundings cost about
   ±1 code against today: P1b's colour and A/V gates must expect it.
 
+## NDI `SP-program` from the GPU readback (#279 P1b)
+
+Design: #279 comment 6218637444; plan
+`docs/superpowers/plans/2026-10-16-gpu-video-path.md` §4.4, §5.1, §5.5,
+§5.6, §5.8, §5.9, §8 R2, §9 P1b. The NDI picture was a CPU canvas picture
+(a fit, or a fused fade on the band pool: ~6 MB of RAM traffic per
+boundary, at the drifting offer phase). The compositor already draws the
+same FHD program, so NDI takes ONE 4 MB UYVY readback of it, made at the
+fixed compose phase. Switched by `program_ndi_source`; a deploy changes
+nothing on air (default `cpu`).
+
+### Topology
+
+- The production compositor's PRIMARY target is the FHD program
+  (`SpoutGpu::compositor` = `Compositor::with_size` of `FHD_TARGET`),
+  there for the compositor's life. MAX's 3840×2160 target is ADDED
+  (`add_target(MAX_TARGET)`, `MaxWorker::make_max`) only while MAX is
+  wanted, with its sender `SpoutSender::for_target(&c, max,
+  SPOUT_SENDER_NAME)`, and taken off with it (`drop_max`: the sender
+  first, then `remove_target`). The FHD Spout sender is `new_fhd(&c,
+  TargetId::PRIMARY)`.
+- The thread takes jobs while ANYTHING wants the compositor
+  (`Queue::wanted` = `program_max_enabled` OR `program_ndi_source` =
+  `gpu`). `set_enabled(false)` / `set_ndi_source(cpu)` drop the queue only
+  when nothing wants it, and wake the thread; with nothing wanted it
+  releases everything as before.
+- `MaxOut::max_wanted` = enabled OR NDI not on the GPU (a job with NDI on
+  the canvas means MAX on), `ndi_wanted` = NDI on the GPU; `fhd_wanted` is
+  unchanged (the FHD Spout sender still needs MAX on, `fhd_off_reason`).
+- MAX off with NDI on the GPU: MAX's sender and target go (`release_max`),
+  the compositor keeps composing the FHD target for NDI, `max.state` reads
+  `off` and MAX counts nothing.
+- MAX's order (built first, sent first, whole, #239), its phases, its
+  backoffs and its telemetry are unchanged.
+
+### The readback (`program_max_ndi.rs`, a child of the worker)
+
+- `MaxWorker::ndi_pass(wanted)`: P1a's UYVY pass is enabled on the PRIMARY
+  while NDI is wanted, disabled otherwise (the canvas mode pays no
+  readback). A failed enable is tried again only after
+  `MAX_RETRY_BACKOFF` (it makes textures and compiles a shader). The pass
+  goes with the compositor (`NdiPass::forget` in `drop_gpu`): a rebuilt
+  compositor enables it again.
+- After each compose, at the compose instant and BEFORE the Spout sends
+  (a 67 ms Spout lock wait never delays NDI): `read_back` maps the newest
+  staging copy (`read_uyvy`, never a wait) into a `frame_pool` buffer of
+  `uyvy_len(1920, 1080)` = 4 147 200 B and pushes it into `MaxOut::ndi`
+  under the boundary's stamp, with the map + copy time and
+  `ComposeStats::uyvy_us`.
+- A `MaxJob::Black` maps nothing: the feed gets ONE cached constant UYVY
+  black (`BlackUyvy`, every pair `[128, 16, 128, 16]`).
+- Nothing is pushed for a boundary that is not composed (coalesced, a
+  failed compose, a lost device, a backoff) or whose readback fails (one
+  WARN per `MAX_LOG_EVERY_100NS`): the `SP-program` sender repeats.
+- The compose runs with no Spout output to go out while the pass is ON
+  (`attempt`: `max_ok || fhd_ready || self.ndi.on`). The design said
+  `|| ndi_wanted`: a pass that could not be enabled reads nothing back, so
+  that compose would draw for nobody.
+- A readback that came proves the device like a sent boundary: it clears
+  `lost_unsent` (with MAX off nothing else goes out), so a later loss
+  rebuilds at once; a failed readback proves nothing.
+
+### The feed (`ndi_feed.rs`, pure, `MaxOut::ndi`)
+
+- `FeedCore`: a stamp-keyed map of at most `NDI_FEED_DEPTH` = 3 pictures,
+  over it the OLDEST goes (`feed_coalesced`); `take(stamp)` returns that
+  stamp's picture and drops every older one; a push at or before the last
+  stamp served is dropped (`readback_late`); `newest()` = the last push's
+  stamp, late or not (the readback's freshness).
+- `NdiFeed` = the core + NDI's telemetry under ONE short lock per call:
+  neither thread waits on the other.
+
+### The delay line (`program_output_ndi.rs`, an impl split of `ProgramOutput`)
+
+- `serve` = `split` → `limit` → `feed_outputs` (VBAN, b) → `offer_max`
+  (b) → the quiet wait → `submit_ndi`.
+- `ndi_source_for(setting, newest, b)` (pure): `gpu` while the setting
+  says `gpu` AND the feed's newest picture is at most
+  `NDI_FEED_STALE_SLOTS` = 30 grid slots (1 s) behind b; else `cpu` with
+  its why (`setting`, `no_readback`, `stale`). A compositor that cannot
+  run (off Windows — every Linux test and the CI box —, no adapter, a 3 s
+  device backoff) never freezes NDI.
+- cpu: `submit_video` as before (the NV12 canvas), stamped b.
+- gpu: the pair held at b − 1 goes out: its audio after the limiter
+  (moved in, no copy; the standby silence for a standby pair), its stamps
+  (a forwarded pair's audio stamp; the program's own block on its
+  boundary), its item frame (the burn), and `feed.take(b − 1)` as UYVY,
+  the canvas's size, stride `width · 2` (`PixelFormat::Uyvy`). Then b is
+  held. A picture that did not come, or is not whole UYVY for the canvas,
+  repeats the last one sent (`ndi.repeats`), the constant black before
+  any: never a wait. No canvas fit, no fade picture, no band-pool work: a
+  fade's audio is crossfaded in `split`, its picture is the compositor's
+  fade; a mixed boundary joins `MixRun.boundaries` when it goes out
+  (`fitted` and `max_picture_us` stay 0).
+- A switch: to the GPU holds b and sends nothing (one missing frame); to
+  the canvas drops the held pair (and forgets the last picture) and b goes
+  out on the canvas (one frame skipped). One INFO (to the GPU, or back for
+  the setting) or WARN (back for `no_readback` / `stale`) per switch,
+  counted in `ndi.switches`; the setting flip is one.
+- `health.timing.submit_us` is the NDI submit alone from the GPU. The
+  trace's `wire_100ns` is the wire stamp of the stamp NDI got
+  (`TraceWriter::record_sent`; b's own when nothing went out).
+- The canvas is `FHD_TARGET`'s size in production (a const assert in
+  `program_output_ndi.rs`); the tests use small canvases and fill the feed
+  themselves.
+
+### sp-ndi, the setting, the API
+
+- `FourCCVideoType::UYVY` = `0x5956_5955` (= `receive::FOURCC_UYVY`),
+  `PixelFormat::Uyvy` (`PixelFormat::four_cc`, one mapping for the sync
+  and the async sends), `FrameSubmitter::submit_frame_at_boundary_owned(..,
+  format)` (every caller passes `Nv12` but the delay line);
+  `MockNdiBackend::last_async_video_fourcc` (asserted in sp-ndi too: the
+  per-package mutation gate).
+- `program_ndi_source` (`sp_core::config::program_ndi_source`): exactly
+  `gpu` (trimmed) is the GPU, anything else the canvas; read with MAX's
+  settings every 5 s (`program_max_phase.rs`, `load_ndi_source`), no
+  restart. Temporary: deleted in P5.
+- `GET /api/v1/program` (and the cut answer) → `ndi {setting, source,
+  delay_slots, fourcc, repeats, readback_late, feed_coalesced, switches,
+  readback_us_p99, uyvy_us_p99}` (`NdiStatus`; `source` = the last
+  boundary's, `delay_slots` 1 from the GPU, `fourcc` `UYVY` / `NV12`; the
+  p99s over the last 900 readbacks). The mock serves `setting` from its
+  store and `source: "cpu"` (no GPU).
+- The burn on UYVY: `program_burn::burned_uyvy` (`test-item-burn.md`).
+
+### Tests
+
+`ndi_feed_tests.rs` (the depth, take and drop-older, late, coalesce,
+freshness, the 30-slot edge both ways, the switches, the status and its
+900-window), `program_output_tests_ndi.rs` (over the mock NDI with a feed
+the test fills: b's audio to VBAN at b and to NDI at b + 1 with b's
+stamps, the repeat and the black, a short picture never sent, both
+switches, stale, a fade, the trace's stamp), `program_output_tests_order.rs`
+(VBAN before any NDI call from the GPU), `program_max_tests_ndi.rs` (the
+queue's rules, the setting), `program_max_worker_tests_ndi.rs` (the fake's
+`order`: the readback after the compose and before MAX's send, Black, MAX
+off, the pass off, the enable's backoff, a failed readback, a lost device,
+`lost_unsent`, a coalesce's gap), `api/program_tests_ndi.rs`,
+`program_burn_tests_uyvy.rs`, sp-ndi's FourCC tests, and the WARP proof
+above.
+
+### The gates on the box (the main session)
+
+1. Deploy in cpu mode: every existing gate holds; the wall measured
+   before and after.
+2. Tell camera-box what changes on `SP-program` (plan §8 R2): the FourCC
+   NV12 → UYVY, a constant +33.3 ms arrival lag, its genlock FIFO
+   `shallow_depth` +1 expected and stable.
+3. Flip SNV to `gpu`: an NDI receiver reads 1920×1080 UYVY; `ndi.repeats`
+   and `readback_late` +0 over 10 min of songs and fades; the A/V gate
+   (`post-deploy-av-sync.spec.ts`), `max-gate` and cg OBS's `genlock-fifo
+   audit` hold.
+4. The plan's §7 A/B: `program_ndi_source` gpu vs cpu, ≥ 46 one-minute
+   blocks, binned by offer phase.
+
+The colour (P1a review round 1): NV12 limited → full-range BGRA (clipped)
+→ limited UYVY, about ±1 code against the canvas; sub-black and
+super-white clip. The A/V and colour gates must expect it.
+
 ## HLSL at runtime
 
 `compose.hlsl` (`include_str!`) is compiled by `D3DCompile`
@@ -1559,7 +1749,10 @@ build step, and WARP and the RTX run the same source. A compile error is
   `MaxCompositor for sp_gpu::Compositor`'s `add_target` /
   `remove_target` / `draw_us` are glue too (`mutants::skip`; the WARP
   real-loop test drives them on Windows); `SpoutGpu::fhd_compositor` is
-  gone (no second compositor). #243
+  gone (no second compositor). #279 P1b: its `enable_uyvy` /
+  `disable_uyvy` / `read_uyvy` are glue too (the decisions are
+  `program_max_ndi.rs`'s, over the fake), and `SpoutGpu::sender` takes
+  the MAX target. #243
   follow-up: `SpoutListLock`'s `holder`, `sentinel_ended` and
   `stop_sentinel` are glue too (`mutants::skip`); its `start_sentinel`
   stays gated (`off_windows_the_production_list_is_neither_read_nor_waited_on`),

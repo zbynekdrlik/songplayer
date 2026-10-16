@@ -3,6 +3,7 @@ paths:
   - "crates/sp-server/src/playback/program_burn*.rs"
   - "crates/sp-server/src/playback/program_item*.rs"
   - "crates/sp-server/src/playback/program_output_tests_burn.rs"
+  - "crates/sp-server/src/playback/program_output_ndi*.rs"
   - "crates/sp-server/src/playback/handle_pipeline_event_tests_item.rs"
   - "crates/sp-server/src/test_item*.rs"
   - "crates/sp-server/src/api/test_item*.rs"
@@ -43,6 +44,18 @@ audio" and "SongPlayer holds the rig lease" stay parked on camera-box.
 - The paint: luma 16 / 235, chroma 128, nothing outside the square, into a
   COPY (`burned`): the canvas picture can be the source's own allocation,
   which `SP-program-MAX` and the Spout FHD sender hold — they never carry it.
+- #279 P1b: from the GPU readback `SP-program` is UYVY (`U Y0 V Y1` per
+  pixel pair, rows of `width · 2` bytes), so the delay line
+  (`program_output_ndi.rs`, `ProgramOutput::burn` with
+  `PixelFormat::Uyvy`) burns with `burned_uyvy(video, width, height,
+  frame, gen_ts_ns)`: the same `geometry` and modules, into a COPY
+  (`paint_uyvy`: the luma bytes of the square by module, 16 / 235; the U
+  and V of every pair the square covers 128 — at a 1 px module the square
+  ends on an odd pixel, and that pair's chroma goes neutral too). The burn
+  goes out with the boundary it shows: its item frame and wire stamp
+  travel with the held pair, one slot late. `program_burn_tests_uyvy.rs`:
+  the bytes pixel by pixel, the same luma as the NV12 burn, and an rqrr
+  round trip reading every odd byte.
 - `program_burn_tests.rs` decodes the painted canvas with rqrr 0.9.3
   (camera-box's decoder; dev-dependency WITHOUT default features, or it
   drags `image` into the lock) on white, grey and black, and next to two
