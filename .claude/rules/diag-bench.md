@@ -45,7 +45,9 @@ try {
 } catch { $_.ErrorDetails.Message }
 ```
 
-The body has two required fields and one optional:
+A decode run's body has two required fields and one optional (#279: the
+handler, not axum, requires `file` and `seconds` unless `"probe": true`,
+below):
 
 - `file`: a bare file name. No `/`, `\` or `:`, no `..`, no control
   characters, at most 255 bytes. No trailing `.` or space (Windows strips
@@ -67,11 +69,13 @@ Answers:
 - **200:** the report.
 - **500:** the report of a run the decoder ended, at open or mid-run. It
   carries `error` and the pictures decoded so far.
-- **400:** a bad name, or `seconds` out of range.
+- **400:** a bad name, `seconds` out of range, or (#279) a missing `file`
+  / `seconds`.
 - From axum, before the handler runs (NOT logged): **400** for a body that is
-  not JSON, **422** for one that is not the two fields (one missing, a
-  negative or a fractional `seconds`) or whose `hw` is not a bool, **415**
-  without `Content-Type: application/json`.
+  not JSON, **422** for a field of the wrong type (a negative or a
+  fractional `seconds`, a `hw` or `probe` that is not a bool), **415**
+  without `Content-Type: application/json`. A missing `file` or `seconds`
+  is the handler's 400 (#279).
 - **404:** no such sample. The body names the path it looked at.
 - **409:** a run is in progress. One run at a time per process. A 409 that
   never clears means the decoder hangs inside `open` or `next_frame`: the
@@ -187,6 +191,31 @@ failed`).
   refusal, and one WARN `decode-bench: the run failed` for a 500 without a
   report.
 
+### `{"probe": true}`: the GPU capability probe (#279 P0)
+
+- The same route, with `{"probe": true}` and NO other field
+  (`diag/gpu_probe.rs::ask`: a probe with `file`, `seconds` or `hw` is a
+  400; a request that is no probe and lacks `file` or `seconds` is a 400
+  too: both are optional in the body since #279, so no longer axum's 422;
+  a `probe` that is not a bool is axum's 422).
+- It runs `sp_gpu::probe_gpu()` (`gpu-max.md` "The capability probe") on a
+  blocking thread holding the bench's slot (409 while any bench runs): two
+  devices on the compositor's adapter, five steps, read-only, nothing of the
+  program path touched.
+- 200 `{verdict {kind: gpu_resident_ok | needs_fallback, step, error},
+  probe {<step>: {ok, error?}}, adapter, adapters [{name, vendor_id,
+  device_id, vram_mb, software}], vram {budget_mb, used_mb} | null,
+  vram_error}`; an error is `{call, hresult: "0x…", detail}`. 500 when no
+  adapter or device could be had (the text names it); 501 off Windows.
+  INFO `decode-bench: GPU probe start` / `done: <verdict, adapter, steps>`,
+  INFO `decode-bench: no probe` for a 409 / 501, WARN `the GPU probe failed`.
+- Record the SNV and PP answers on #279 (P0's gate).
+
+```bash
+curl -s -X POST http://10.77.9.201:8920/api/v1/diag/decode-bench \
+  -H 'content-type: application/json' -d '{"probe":true}'
+```
+
 ## `POST /api/v1/diag/fit-bench`: what the program canvas fit costs (#223 S10a)
 
 - `{"width", "height", "frames"}`: an even size from 2×2 to 3840×2160, 1 to
@@ -236,6 +265,11 @@ curl -s -X POST http://10.77.9.201:8920/api/v1/diag/fit-bench \
     the adapter rule (named only on a hardware path) lives there.
 - `diag/fit_bench.rs`: the fit bench (`check`, `synthetic`, `report` tested;
   `run` the timed loops); route tests `api/diag_tests_fit.rs`.
+- `diag/gpu_probe.rs` (#279 P0): `ask` (the request's two shapes),
+  `ProbeAnswer` (+ its log `summary`) and `run` (the probe a parameter, the
+  slot dropped before the answer, a panic a 500), Linux-tested in
+  `gpu_probe_tests.rs`; route tests `api/diag_tests_probe.rs` (501 off
+  Windows; on the Windows job the real probe answers or names why not).
 - `api/diag.rs`: the handlers.
   - `AppState.decode_bench` holds the dir and the gate.
   - Every test state builds its own, so the 409 test cannot race another

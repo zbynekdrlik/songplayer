@@ -1054,7 +1054,8 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   reads it back); no restart.
 - `GET /api/v1/program` (and the cut answer) → `max {enabled, state, width:
   3840, height: 2160, submitted, coalesced, failed, upload_us_p99,
-  draw_us_p99, send_us_p99, send_at_us_p50/p99/max, send_late,
+  draw_us_p99, send_us_p99, upload_mb_s, uploads_per_s (#279 P0, below),
+  send_at_us_p50/p99/max, send_late,
   vblank_output, vblank_state, vblank_tracking, vblank_period_ns, vblank_phase_us,
   compose_phase_us, send_off_grid, send_phase_us_p50/p99,
   compose_phase_us_p50/p99, compose_late, slot_repicks, device_resets,
@@ -1292,6 +1293,67 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   `Compositor::draw_us(id)` = a target's own part (`target_draws_us`), the
   FHD one is `max.fhd.draw_us_p99`.
 - `uploads`: 0, 1 or 2 pictures uploaded, whatever the targets.
+- #279 P0 `upload_bytes`: the plane bytes those uploads wrote
+  (`Planes::upload_bytes`: luma a byte a texel, chroma two a U/V pair, the
+  stride's padding not counted; 0 when every picture was resident). The
+  worker records it with `uploads` for each SENT boundary at the instant it
+  served it (`MaxOut::record_uploads`, `program_max_upload.rs`, a child of
+  `program_max.rs`): `max.upload_mb_s` (10^6 bytes) and `max.uploads_per_s`
+  = everything after the oldest boundary of the 900-boundary window, at
+  most `UPLOAD_RATE_SPAN` (30 s) before the newest, over the time since
+  it, to a tenth. One upload serves both targets: the FHD sender adds
+  none (`max.fhd` has no upload figure). The GPU-resident path's number:
+  `upload_mb_s` = 0 with a hardware-decodable song on program. Tests: the
+  window on made-up instants (`program_max_upload_tests.rs`), the worker
+  over the fake GPU (`program_max_worker_tests_upload.rs`; the fake's
+  compose uploads every picture of its composition by sp-gpu's rule, it
+  keeps no residency), the WARP pins in `tests/warp.rs`.
+
+## The capability probe (#279 P0, `probe.rs` + `win/probe.rs`)
+
+The GPU-resident design (`docs/superpowers/plans/2026-10-16-gpu-video-path.md`
+§4.2–§4.3) shares NV12 textures from per-playlist producer devices to the
+one compositor device. `probe_gpu()` asks the picked adapter whether that
+holds, on TWO devices of it (A = a producer, B = the compositor,
+`DeviceUse::Probe`: BGRA, adapter list at DEBUG), each step on its own (a
+step that needs the shared texture makes its own):
+
+1. `extended_resource_sharing`: `CheckFeatureSupport(D3D11_OPTIONS)`
+   `.ExtendedResourceSharing` on A and B;
+2. `nv12_shared_nthandle`: a 256×144 NV12 texture on A,
+   `BIND_SHADER_RESOURCE`, `SHARED_NTHANDLE | SHARED_KEYEDMUTEX`,
+   `IDXGIResource1::CreateSharedHandle`, `ID3D11Device1::OpenSharedResource1`
+   on B (the NT handle closed after the open);
+3. `nv12_keyed_mutex_roundtrip`: A `AcquireSync(0, 1000 ms)`, copies an
+   NV12 picture in, flushes, `ReleaseSync(1)`; B `AcquireSync(1, 0 ms)`,
+   `ReleaseSync(1)`. **`AcquireSync`'s `WAIT_TIMEOUT` (0x102) and
+   `WAIT_ABANDONED` (0x80) are SUCCESS codes: the `windows` crate's `Result`
+   reads them `Ok`.** The glue calls the vtable entry for the raw HRESULT
+   and the pure `acquire_step` accepts only `S_OK`;
+4. `nv12_srv_r8_r8g8`: R8_UNORM and R8G8_UNORM views on B's opened NV12;
+5. `uyvy_target_and_staging_do_not_wait`: on B an R8G8B8A8 960×1080 render
+   target, cleared, copied to staging, the copy waited for (an event query,
+   `pipeline::wait_until_each_done`), mapped `READ` +
+   `D3D11_MAP_FLAG_DO_NOT_WAIT`, its first texel read back as the clear.
+
+Each step is `Ok` or a `ProbeError { call, hresult, detail }` (hresult 0 =
+the call succeeded but answered no); `ProbeReport::verdict` =
+`gpu_resident_ok`, or `needs_fallback` naming the first failed step in the
+report's order (the design's R1 fallback). A device that cannot be made
+fails the whole probe (`GpuError`). `GpuProbe` also carries the adapter,
+every adapter DXGI lists and the adapter's local VRAM
+(`IDXGIAdapter3::QueryVideoMemoryInfo`, `Vram {budget_mb, used_mb}`, or the
+error). Pure + serde in `probe.rs` (Linux-tested, `probe_tests.rs`); the
+stub's `probe_gpu` is `Unsupported`; `probe_warp` / `probe_on_listed_adapter`
+are doc-hidden, Windows only. The box runs it through
+`POST /api/v1/diag/decode-bench {"probe": true}` (`diag-bench.md`).
+
+WARP (`tests/probe.rs`): two WARP devices, the listed Basic Render Driver
+and the picked adapter (none on `windows-latest`: `NoAdapter`). What WARP
+answers per step is NOT documented, so the test asserts only the proven
+(the devices, their adapter, a definite answer naming its call per step, a
+verdict consistent with the steps) and writes every answer, the verdict and
+the report's JSON to stderr: read WARP's answer in the CI log.
 - `SpoutSendStats::send_us` (S1b, for `max.send_us_p99`): the shim's
   `SendSynced` (the sender-mutex wait, the copy, the flush, the wait until
   the GPU has DONE that copy, then the announce; at the first send also the
@@ -1321,8 +1383,9 @@ build step, and WARP and the RTX run the same source. A compile error is
   name, the list sentinel's steps), `vblank`
   (the output pick, the refresh count and fit, the staleness bound),
   #251 step 2's `targets` (a compositor's targets: ids, draw order, the
-  primary kept) and `stats::target_draws_us` (each target's part of the
-  draw). Keep
+  primary kept), `stats::target_draws_us` (each target's part of the
+  draw) and #279 P0's `probe` (the report, the verdict, `acquire_step`,
+  `feature_step`, `pixel_step`, `Vram`). Keep
   it that way: logic added inside `win/` is untested by the gate.
   `win/vblank.rs` only calls DXGI / Win32 (`EnumOutputs`, `GetDesc`, which
   needs the `Win32_Graphics_Gdi` feature, `WaitForVBlank`,
