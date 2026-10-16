@@ -319,8 +319,9 @@ fn a_left_out_first_line_is_in_no_range() {
 
 #[test]
 fn a_line_whose_end_run_went_ends_its_sentence() {
-    // 221's "like you. Oh,": with "Oh," gone the line ends in "." and
-    // closes its wall line, where the "," joined it to the next sentence.
+    // The shape of 221's "like you. Oh,": with "Oh," gone the line ends in
+    // "." and closes its wall line, where the "," joined it to the next
+    // sentence. (In 221 itself the 52-char limit already split there.)
     let plan = build_plan(
         &[
             sung(0, 2_000, "There's no one", "Nikto nie je"),
@@ -342,6 +343,41 @@ fn a_line_whose_end_run_went_ends_its_sentence() {
                 Some("Nikto nie je ako ty.")
             ),
             (2..3, "There is none.", Some("Nie je nikto.")),
+        ]
+    );
+}
+
+#[test]
+fn a_dub_line_keeps_its_words_whatever_its_english() {
+    // Review round 2: a dub line's English is the whole sentences matched to
+    // it by time (#184 H5), not its translation, so a "Yeah." there must not
+    // take the dub's own Slovak subtitle off the wall.
+    let lines = [
+        sung(0, 3_000, "Oh, we praise him.", "Ó, chválime ho."),
+        sung(3_000, 5_000, "", "Áno."),
+        sung(
+            5_000,
+            6_000,
+            "Yeah.",
+            "Áno, a preto ho chválime celým srdcom.",
+        ),
+    ];
+    let got: Vec<WallLine> = build_plan(&lines, DisplayProfile::Speech)
+        .into_iter()
+        .map(|d| (d.src_range, d.show_ms, d.hide_ms, d.en, d.sk))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            wall_line(0..1, 0, 3_000, "Oh, we praise him.", "Ó, chválime ho."),
+            wall_line(1..2, 3_000, 5_000, "", "Áno."),
+            wall_line(
+                2..3,
+                5_000,
+                9_000,
+                "Yeah.",
+                "Áno, a preto ho chválime celým srdcom."
+            ),
         ]
     );
 }
@@ -411,10 +447,10 @@ fn a_cut_that_would_leave_one_word_leaves_the_line_whole() {
         shows("Oh, God.", Some("Ó, Bože."))
     );
     // A Slovak line of only interjections under an English end cut: its
-    // first word is never part of the end run, so it stays whole.
+    // first word is never part of the end run, so one word stays.
     assert_eq!(
         wall("We sing, oh, yeah.", Some("Áno, áno.")),
-        shows("We sing.", Some("Áno, áno."))
+        shows("We sing.", Some("Áno."))
     );
 }
 
@@ -468,10 +504,11 @@ fn slovak_follows_an_english_cut_only() {
         wall("Yeah, I'm free", Some("Áno som slobodný")),
         shows("I'm free", Some("Áno som slobodný"))
     );
-    // And never down to one word.
+    // Down to one word (review round 2: the wall shows the Slovak, and the
+    // English cut already showed that edge to be separate).
     assert_eq!(
         wall("Oh, we are free", Some("Ó, slobodní")),
-        shows("We are free", Some("Ó, slobodní"))
+        shows("We are free", Some("Slobodní"))
     );
 }
 

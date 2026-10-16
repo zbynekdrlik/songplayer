@@ -74,7 +74,9 @@ struct Shown {
 
 impl Shown {
     fn of(track: &LyricsTrack) -> Self {
-        let (kept, lines) = shown_lines(&track.lines).into_iter().unzip();
+        let (kept, lines) = shown_lines(&track.lines, DisplayProfile::Song)
+            .into_iter()
+            .unzip();
         Self { lines, kept }
     }
 
@@ -565,6 +567,7 @@ fn fixture_interjections_at_a_line_edge_go_where_a_mark_separates_them() {
         (0, 10..11, "What a God, what a God.", "Aký Boh, aký Boh."),
         // The line after a left-out "Oh," keeps its own words.
         (0, 12..13, "what a God, what a God.", "aký Boh, aký Boh."),
+        // After the left-out line 187 "Oh,".
         (
             0,
             188..190,

@@ -221,7 +221,8 @@ impl DisplayPlan {
 /// then schedule (see the module docs).
 pub fn build_plan(lines: &[LyricsLine], profile: DisplayProfile) -> Vec<DisplayLine> {
     // The index in the track of each shown line, and the line as shown.
-    let (kept, shown): (Vec<usize>, Vec<LyricsLine>) = shown_lines(lines).into_iter().unzip();
+    let (kept, shown): (Vec<usize>, Vec<LyricsLine>) =
+        shown_lines(lines, profile).into_iter().unzip();
     let lines = &shown[..];
     let groups = group_lines(lines);
     let spans = schedule(lines, &groups, profile);
@@ -250,7 +251,7 @@ pub fn build_plan(lines: &[LyricsLine], profile: DisplayProfile) -> Vec<DisplayL
 /// interjections. A line that is only interjections is left out and hands
 /// its sentence end back to the line before it; one whose words outside its
 /// asides are only interjections is read with only its brackets gone.
-fn shown_lines(lines: &[LyricsLine]) -> Vec<(usize, LyricsLine)> {
+fn shown_lines(lines: &[LyricsLine], _profile: DisplayProfile) -> Vec<(usize, LyricsLine)> {
     let mut kept: Vec<(usize, LyricsLine)> = Vec::with_capacity(lines.len());
     for (i, line) in lines.iter().enumerate() {
         let read = asides::without_asides(line);
