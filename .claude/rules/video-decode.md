@@ -158,6 +158,16 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   keeps its reader. (#221 lane 3 deleted the SDK-clocked path, which
   stayed software.)
 - Toggle: `PATCH /api/v1/settings {"video_hw_decode": "true"}`; no restart.
+- **Never switch SNV (or PP) to software decode while it plays to a room**
+  (#251 comment 6221372473, 16.10.2026, during an event). With the setting
+  off, every song from 17:01 to 17:43Z opened in software. The Dante
+  Virtual Soundcard's ASIO callbacks then came late or early, 12–40 a
+  minute against 4–8 (the out-3 risks of the audio fault ledger). Dante
+  Controller showed SNV's packets red, and the audio popped at FOH. It
+  stopped with the first GPU-decoded song. The total CPU stayed at 1–2 %:
+  MF's software decoder is BURSTY, not heavy on average, so a CPU reading
+  never clears it. Software decode did not cure the wall judder either.
+  The setting stays `true` on SNV.
 - `GET /api/v1/status` → `video_decode {hw_decode, hw_requested,
   gpu_decodes, mf_software, open_fallbacks, mid_stream_fallbacks,
   path_changes, last_fallback}` (the setting + the counters; counts of FILES since the
