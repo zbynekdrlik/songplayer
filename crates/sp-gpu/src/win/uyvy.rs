@@ -169,9 +169,10 @@ impl UyvyPass {
         Ok(())
     }
 
-    /// The newest finished copy's rows into `out` (cleared first): `width ×
-    /// 4` bytes a row (one UYVY pair per texel), `height` rows, packed.
-    /// `Ok(false)`, `out` untouched, before any compose finished a copy.
+    /// The newest finished copy's rows into `out` (cleared once mapped):
+    /// `width × 4` bytes a row (one UYVY pair per texel), `height` rows,
+    /// packed. `Ok(false)` before any compose finished a copy; on
+    /// `Ok(false)` or an error `out` keeps what it held.
     /// The map never waits (`D3D11_MAP_FLAG_DO_NOT_WAIT`): the compose
     /// already waited for the copy, so a copy still drawing is an error
     /// ([`map_failed`]).

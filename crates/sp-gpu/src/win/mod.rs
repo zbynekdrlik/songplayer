@@ -283,10 +283,12 @@ impl Compositor {
     }
 
     /// #279 P1a: the UYVY of the last compose that finished, into `out`
-    /// (cleared first): `width × 2` bytes a row (U Y0 V Y1 per pixel pair),
-    /// `height` rows, packed, of the target [`enable_uyvy`](Self::enable_uyvy)
-    /// named. `Ok(false)`, `out` untouched, when no compose finished since
-    /// the pass was enabled. The map never waits: the compose already waited
+    /// (cleared once mapped): `width × 2` bytes a row (U Y0 V Y1 per pixel
+    /// pair), `height` rows, packed, of the target
+    /// [`enable_uyvy`](Self::enable_uyvy) named. `Ok(false)` when no compose
+    /// finished since the pass was enabled; on `Ok(false)` or an error `out`
+    /// keeps what it held (never send it then). The map never waits: the
+    /// compose already waited
     /// for its copy, so `DXGI_ERROR_WAS_STILL_DRAWING` is an error that names
     /// it ([`GpuError::Api`]). No pass enabled is [`GpuError::NoObject`].
     pub fn read_uyvy(&mut self, out: &mut Vec<u8>) -> Result<bool, GpuError> {

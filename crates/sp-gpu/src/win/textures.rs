@@ -1,7 +1,8 @@
 //! The textures: the shared BGRA render target (3840×2160 for MAX; #239:
 //! 1920×1080 for the `SP-program` sender), a slot's two plane textures (Y as
-//! R8, UV as R8G8), and the staging copy for readback (#279 P1a: the one
-//! mapped-rows reader, `map_rows_into`, the UYVY readback's too).
+//! R8, UV as R8G8), and the staging copy for readback (#279 P1a: the
+//! compositor's mapped-rows reader, `map_rows_into`, the UYVY readback's
+//! too).
 
 use std::ffi::c_void;
 
@@ -231,12 +232,16 @@ pub(super) fn read_back(
     Ok(packed)
 }
 
-/// Map `staging` (subresource 0) for reading with the map `flags`, put its
+/// Map `staging` (subresource 0, a texture of 4 bytes a texel: BGRA, or the
+/// UYVY pass's RGBA) for reading with the map `flags`, put its
 /// first `row` bytes of each of its `rows` rows into `out` (cleared once
-/// the map succeeded; the mapped rows may be padded), and unmap it. A
-/// failed `Map` is `map_error` of its HRESULT (the caller names it, #279
-/// P1a: the UYVY readback's `DO_NOT_WAIT` map, `uyvy::map_failed`); a
-/// mapping that does not hold the rows is [`GpuError::NoObject`].
+/// the map succeeded, untouched on an error; the mapped rows may be
+/// padded), and unmap it. A failed `Map` is `map_error` of its HRESULT
+/// (the caller names it, #279 P1a: the UYVY readback's `DO_NOT_WAIT` map,
+/// `uyvy::map_failed`). More rows or a longer row than the texture has, or
+/// a mapping that does not hold the rows, is [`GpuError::NoObject`]: the
+/// unsafe slice below never reaches past the mapping, whatever the caller
+/// passes.
 pub(super) fn map_rows_into(
     context: &ID3D11DeviceContext,
     staging: &ID3D11Texture2D,
@@ -245,15 +250,19 @@ pub(super) fn map_rows_into(
     out: &mut Vec<u8>,
     map_error: impl FnOnce(u32) -> GpuError,
 ) -> Result<(), GpuError> {
+    let mut desc = D3D11_TEXTURE2D_DESC::default();
+    unsafe { staging.GetDesc(&mut desc) };
+    let held = rows <= desc.Height as usize && row <= desc.Width as usize * 4;
     let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
     unsafe { context.Map(staging, 0, D3D11_MAP_READ, flags, Some(&mut mapped)) }
         .map_err(|e| map_error(e.code().0 as u32))?;
     let pitch = mapped.RowPitch as usize;
     let packed = match mapped_len(pitch, row, rows) {
-        Some(len) if !mapped.pData.is_null() => {
-            // SAFETY: the mapped staging texture is `rows` rows `pitch` bytes
+        Some(len) if held && !mapped.pData.is_null() => {
+            // SAFETY: the mapped staging texture holds its `desc.Height` ≥
+            // `rows` rows of `desc.Width × 4` ≥ `row` bytes, `pitch` bytes
             // apart (`pitch` ≥ `row`, `mapped_len`), so its first `len`
-            // bytes end with the last row's texels, inside the mapping,
+            // bytes end inside its last asked row, inside the mapping,
             // which stays mapped until the Unmap below.
             let bytes =
                 unsafe { std::slice::from_raw_parts(mapped.pData.cast::<u8>().cast_const(), len) };
