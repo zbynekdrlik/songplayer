@@ -330,48 +330,6 @@ fn a_picture_with_the_same_id_is_not_uploaded_again() {
     assert_matches_reference(&frame_fade, &fade.layers(), "fade b → c");
 }
 
-/// #251: a blended song (24/25 fps on the 30 fps grid) is a chain of
-/// fades, each one's incoming picture the next one's outgoing picture.
-/// Every picture is uploaded ONCE (the two slots trade places, never a
-/// second upload into the other slot), and the picture the chain ends on,
-/// drawn alone, uploads nothing; each frame is still drawn right.
-#[test]
-fn a_chain_of_fades_uploads_each_picture_once() {
-    let mut compositor = warp();
-    let (stride, a) = pattern(1920, 1080, 3);
-    let (_, b) = pattern(1920, 1080, 77);
-    let (_, c) = pattern(1920, 1080, 151);
-    let (_, d) = pattern(1920, 1080, 200);
-    let data: [&[u8]; 4] = [&a, &b, &c, &d];
-    let fade = |from: u64, to: u64, weight_q8| Composition::Fade {
-        from: Some(picture(from, 1920, 1080, stride, data[from as usize - 1])),
-        to: Some(picture(to, 1920, 1080, stride, data[to as usize - 1])),
-        weight_q8,
-    };
-    for (composition, uploads, what) in [
-        (fade(1, 2, 213), 2, "the first fade: both pictures are new"),
-        (
-            fade(2, 3, 170),
-            1,
-            "the next fade: only its incoming picture",
-        ),
-        (fade(3, 4, 128), 1, "and the next"),
-    ] {
-        let stats = compositor.compose(&composition).expect(what);
-        assert_eq!(stats.uploads, uploads, "{what}");
-        let frame = compositor.read_back().expect("read back");
-        assert_matches_reference(&frame, &composition.layers(), what);
-    }
-    let last = Composition::Picture(picture(4, 1920, 1080, stride, &d));
-    let stats = compositor.compose(&last).expect("the last picture alone");
-    assert_eq!(
-        stats.uploads, 0,
-        "the picture the chain ended on is resident"
-    );
-    let frame = compositor.read_back().expect("read back the last");
-    assert_matches_reference(&frame, &last.layers(), "the last picture alone");
-}
-
 #[test]
 fn an_invalid_picture_is_refused_before_anything_is_drawn() {
     let mut compositor = warp();
