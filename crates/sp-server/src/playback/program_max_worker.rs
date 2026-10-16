@@ -96,62 +96,14 @@ use crate::playback::program_max_send::{
 use crate::playback::program_max_vblank::{
     Aligned, Due, VblankLog, VblankPacer, VblankSource, phase_after_vblank_us,
 };
-use crate::playback::stat_window::WarnLimiter;
+#[path = "program_max_log.rs"]
+mod gate;
+pub use gate::{LogGate, LogLine, MAX_LOG_EVERY_100NS, elapsed_100ns};
 
 /// How long the thread waits before it builds again after a refused sender,
 /// a failed build or a second lost device in a row ("a few seconds", the
 /// S1b carry-over).
 pub const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(3);
-
-/// At most one log line of the thread's state (a failure WARN or a
-/// recovery INFO) per 5 s of its time (100 ns).
-pub const MAX_LOG_EVERY_100NS: i64 = 50_000_000;
-
-/// The thread's time at `now` since `since`, in 100 ns (the unit of
-/// `WarnLimiter`); 0 before `since`.
-pub fn elapsed_100ns(since: Instant, now: Instant) -> i64 {
-    let ns = now.saturating_duration_since(since).as_nanos();
-    i64::try_from(ns / 100).unwrap_or(i64::MAX)
-}
-
-/// The line the log writes for one boundary ([`LogGate::observe`]).
-#[derive(Debug, PartialEq, Eq)]
-pub enum LogLine {
-    /// Boundaries do not go out (a WARN with the reason).
-    Failing { held_back: u64 },
-    /// Boundaries go out again (an INFO).
-    Recovered { held_back: u64 },
-}
-
-/// What the log last said about the thread, and its rate limit. Pure: the
-/// worker logs the line it returns.
-#[derive(Debug, Default)]
-pub struct LogGate {
-    limiter: WarnLimiter,
-    /// What the log last said: `None` = boundaries go out (also the start),
-    /// `Some(why)` = they do not, because of `why`.
-    logged: Option<String>,
-}
-
-impl LogGate {
-    /// The state after a boundary at `at_100ns` (`failing` = why boundaries
-    /// do not go out, `None` = they do). A line when the state differs from
-    /// what the log last said, at most one per [`MAX_LOG_EVERY_100NS`]; a
-    /// difference held back is written by the first boundary after the
-    /// window, as the state is then (`held_back` = the boundaries held
-    /// back since the last line).
-    pub fn observe(&mut self, at_100ns: i64, failing: Option<&str>) -> Option<LogLine> {
-        if self.logged.as_deref() == failing {
-            return None;
-        }
-        let held_back = self.limiter.admit(at_100ns, MAX_LOG_EVERY_100NS)?;
-        self.logged = failing.map(str::to_owned);
-        Some(match failing {
-            Some(_) => LogLine::Failing { held_back },
-            None => LogLine::Recovered { held_back },
-        })
-    }
-}
 
 /// Why an output's boundary did not go out.
 #[derive(Clone, Debug)]
@@ -942,3 +894,7 @@ mod tests_log;
 #[cfg(test)]
 #[path = "program_max_worker_tests_upload.rs"]
 mod tests_upload;
+
+#[cfg(test)]
+#[path = "program_max_worker_tests_release.rs"]
+mod tests_release;
