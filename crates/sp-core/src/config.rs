@@ -161,6 +161,37 @@ pub fn program_max_compose_phase_us(raw: Option<&str>) -> u64 {
     phase_ms_as_us(raw, DEFAULT_PROGRAM_MAX_COMPOSE_PHASE_US)
 }
 
+/// #251 step 4: the quiet window of the `SP-program` video side, in ms after
+/// each vblank of the primary display (decimals allowed): a boundary whose
+/// video side (the canvas fit, the NDI submit) would start inside
+/// [`program_video_quiet_from_us`, `program_video_quiet_to_us`) waits until
+/// its end, so it never loads the memory bus while Arena reads Spout. A
+/// window whose start is not before its end is off.
+pub const SETTING_PROGRAM_VIDEO_QUIET_FROM_MS: &str = "program_video_quiet_from_ms";
+/// #251 step 4: the quiet window's end, ms after the vblank.
+pub const SETTING_PROGRAM_VIDEO_QUIET_TO_MS: &str = "program_video_quiet_to_ms";
+/// #251 step 4: the default window, µs: 3–10.5 ms after the vblank. SNV
+/// 16.10.2026: a memory burst at +6 ms made Arena show the older picture
+/// 15–50× more often, and the video sides starting at +4…+10 ms were the
+/// bad bands; at most 7.5 ms of delay keeps camera-box's arrival-latched
+/// FIFO in its budget (cross-session answer, #251 comment 6206228023).
+pub const DEFAULT_PROGRAM_VIDEO_QUIET_FROM_US: u64 = 3_000;
+pub const DEFAULT_PROGRAM_VIDEO_QUIET_TO_US: u64 = 10_500;
+
+/// #251 step 4: a stored `program_video_quiet_from_ms` in µs, by the rule of
+/// [`program_max_vblank_phase_us`]; else
+/// [`DEFAULT_PROGRAM_VIDEO_QUIET_FROM_US`].
+pub fn program_video_quiet_from_us(raw: Option<&str>) -> u64 {
+    phase_ms_as_us(raw, DEFAULT_PROGRAM_VIDEO_QUIET_FROM_US)
+}
+
+/// #251 step 4: a stored `program_video_quiet_to_ms` in µs, by the rule of
+/// [`program_max_vblank_phase_us`]; else
+/// [`DEFAULT_PROGRAM_VIDEO_QUIET_TO_US`].
+pub fn program_video_quiet_to_us(raw: Option<&str>) -> u64 {
+    phase_ms_as_us(raw, DEFAULT_PROGRAM_VIDEO_QUIET_TO_US)
+}
+
 /// A stored phase in ms as µs: from 0 up to (not including) 1000 ms,
 /// rounded to the µs; anything else is `default`.
 fn phase_ms_as_us(raw: Option<&str>, default: u64) -> u64 {
@@ -589,6 +620,27 @@ mod tests {
         assert_eq!(program_max_compose_phase_us(Some("1000")), 13_000);
         assert_eq!(program_max_compose_phase_us(Some("-1")), 13_000);
         assert_eq!(program_max_compose_phase_us(Some("13ms")), 13_000);
+    }
+
+    /// #251 step 4: the video side's quiet window is two phases by the same
+    /// rule, 3–10.5 ms by default.
+    #[test]
+    fn the_video_quiet_window_is_two_phases_three_to_ten_and_a_half_ms() {
+        assert_eq!(
+            SETTING_PROGRAM_VIDEO_QUIET_FROM_MS,
+            "program_video_quiet_from_ms"
+        );
+        assert_eq!(
+            SETTING_PROGRAM_VIDEO_QUIET_TO_MS,
+            "program_video_quiet_to_ms"
+        );
+        assert_eq!(program_video_quiet_from_us(None), 3_000);
+        assert_eq!(program_video_quiet_to_us(None), 10_500);
+        assert_eq!(program_video_quiet_from_us(Some(" 4.25\n")), 4_250);
+        assert_eq!(program_video_quiet_to_us(Some("0")), 0, "0 is a phase");
+        assert_eq!(program_video_quiet_from_us(Some("1000")), 3_000);
+        assert_eq!(program_video_quiet_to_us(Some("-2")), 10_500);
+        assert_eq!(program_video_quiet_to_us(Some("12")), 12_000);
     }
 
     /// #223 S3b: hardware decode is OFF unless the setting says exactly

@@ -172,6 +172,38 @@ fn on_a_refresh_grid_the_worker_sends_in_its_slot_at_the_phase_setting() {
     assert_eq!(status.vblank_state, Some("ticking"));
 }
 
+/// #251 step 4: the grid the worker paces on is published for the
+/// `SP-program` video side's quiet window (3–10.5 ms by default); with no
+/// grid, none is.
+#[test]
+fn the_worker_publishes_its_grid_for_the_video_quiet_window() {
+    let max = MaxOut::new();
+    let offered = Instant::now();
+    let grid = VblankGrid {
+        at: offered - MS,
+        period: 16 * MS,
+    };
+    let (clock, _list) = FakeClock::at(offered + 4 * MS);
+    let mut worker = MaxWorker::new(&max, FakeGpu::default())
+        .with_clock(Box::new(clock))
+        .with_vblank(Box::new(FakeVblank(Some(grid))));
+    assert_eq!(max.video.start_at(offered + 4 * MS), None, "none yet");
+    worker.serve_offered(&job(1), offered, offered + 4 * MS);
+    // 5 ms after its vblank: inside the window, wait to 10.5 ms.
+    let end = offered + 9 * MS + MS / 2;
+    assert_eq!(max.video.start_at(offered + 4 * MS), Some(end));
+    assert!(max.status().video_quiet.grid);
+
+    let max = MaxOut::new();
+    let (clock, _list) = FakeClock::at(offered + 4 * MS);
+    let mut worker = MaxWorker::new(&max, FakeGpu::default())
+        .with_clock(Box::new(clock))
+        .with_vblank(Box::new(FakeVblank(None)));
+    worker.serve_offered(&job(1), offered, offered + 4 * MS);
+    assert_eq!(max.video.start_at(offered + 4 * MS), None, "no grid");
+    assert!(!max.status().video_quiet.grid);
+}
+
 /// The wall's grid of the test above (a vblank 1 ms before the offer,
 /// 16 ms apart), the send phase 5 ms.
 fn grid_test_worker<'a>(

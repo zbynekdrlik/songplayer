@@ -12,7 +12,7 @@ use tokio::sync::broadcast;
 use super::{
     MAX_HANDOFF_BOUND, MAX_NOT_RUNNING, MAX_SETTINGS_POLL, MaxJob, MaxNext, MaxOut, MaxPhase,
     MaxPicture, load_max_compose_phase_us, load_max_enabled, load_max_vblank_phase_us,
-    run_max_settings_task, start_max, state_label,
+    load_video_quiet_us, run_max_settings_task, start_max, state_label,
 };
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_max_send::SendTiming;
@@ -359,6 +359,7 @@ fn the_max_block_has_its_api_names() {
             "vblank_phase_us",
             "vblank_state",
             "vblank_tracking",
+            "video_quiet",
             "width",
         ]
     );
@@ -487,6 +488,23 @@ fn the_compose_phase_is_applied_and_reports_a_change() {
     assert_eq!(max.vblank_phase(), Duration::from_millis(14), "its own");
 }
 
+/// #251 step 4: the video side's quiet window is read with
+/// `sp_core::config`'s rule, each end on its own.
+#[tokio::test]
+async fn the_video_quiet_window_is_read_in_microseconds() {
+    use crate::db::models::set_setting;
+    let pool = settings_pool().await;
+    assert_eq!(load_video_quiet_us(&pool).await.unwrap(), (3_000, 10_500));
+    set_setting(&pool, "program_video_quiet_from_ms", "2.5")
+        .await
+        .unwrap();
+    assert_eq!(load_video_quiet_us(&pool).await.unwrap(), (2_500, 10_500));
+    set_setting(&pool, "program_video_quiet_to_ms", "9")
+        .await
+        .unwrap();
+    assert_eq!(load_video_quiet_us(&pool).await.unwrap(), (2_500, 9_000));
+}
+
 /// Poll `done` on the runtime until it holds (bounded: 20 s).
 async fn eventually(what: &str, done: impl Fn() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -531,6 +549,14 @@ async fn the_settings_task_applies_every_change_and_stops_max_at_shutdown() {
         max.compose_phase() == Duration::from_millis(12)
     })
     .await;
+    set_setting(&pool, "program_video_quiet_to_ms", "8")
+        .await
+        .unwrap();
+    eventually("the video quiet window applied", || {
+        max.video.window().to == Duration::from_millis(8)
+    })
+    .await;
+    assert_eq!(max.video.window().from, Duration::from_millis(3));
 
     let _consumer = max.attach();
     assert!(max.accepting());

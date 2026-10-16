@@ -104,6 +104,7 @@ use crate::playback::program_bus::{
 use crate::playback::program_canvas::{Canvas, FadeSide};
 use crate::playback::program_item::{ItemFrame, ItemTrack, ProgramItem};
 use crate::playback::program_max::{MaxJob, MaxOut, MaxPicture};
+use crate::playback::program_max_send::{NoWait, SendClock};
 use crate::playback::program_output_timing::{BoundaryMarks, LateBoundary, utc_label};
 use crate::playback::program_trace::{JobShape, ProgramTrace, TraceWriter};
 use crate::playback::program_transition::{
@@ -167,6 +168,8 @@ pub struct ProgramOutput<B: NdiBackend> {
     /// #223 S2: the `SP-program-MAX` hand-off each boundary is offered to,
     /// after VBAN's block and before the video side.
     max: Option<Arc<MaxOut>>,
+    /// #251 step 4: the clock the video side waits out the quiet window on.
+    video_clock: Box<dyn SendClock + Send>,
     /// #147: the program trace's writer: one record per served boundary.
     trace: Option<TraceWriter>,
     /// #228: the item record (marks in, the item on air out) and the burn
@@ -345,6 +348,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
             limiter: PeakLimiter::new(PROGRAM_AUDIO_RATE_HZ),
             limited_through: None,
             max: None,
+            video_clock: Box::new(NoWait),
             trace: None,
             item: None,
             track: ItemTrack::default(),
@@ -372,6 +376,13 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// #223 S2: also offer every boundary to `SP-program-MAX`.
     pub fn with_max(mut self, max: Arc<MaxOut>) -> Self {
         self.max = Some(max);
+        self
+    }
+
+    /// #251 step 4: wait out the video side's quiet window on `clock`
+    /// (production: `SpinClock`; the default `NoWait` never waits).
+    pub fn with_video_clock(mut self, clock: Box<dyn SendClock + Send>) -> Self {
+        self.video_clock = clock;
         self
     }
 
@@ -486,6 +497,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
         let ends_run = !matches!(pair, Pair::Mix { .. });
         let shown = self.observe_item(&pair, source, stamp_100ns); // #228
         let submit_start_100ns = self.submit_video(pair, stamp_100ns, shown, &now);
+        self.wait_video_quiet();
         let submitted_100ns = now();
         if ends_run {
             self.end_mix_run();
@@ -502,6 +514,14 @@ impl<B: NdiBackend> ProgramOutput<B> {
             trace.record(&marks, source, shape, k);
         }
         marks
+    }
+
+    /// #251 step 4: before the video side, wait while the boundary lies in
+    /// the quiet window after the primary's vblank (`program_video_quiet.rs`).
+    fn wait_video_quiet(&mut self) {
+        if let Some(max) = &self.max {
+            super::program_video_quiet::wait_out(&max.video, &mut *self.video_clock);
+        }
     }
 
     /// The tests' shorthand: [`serve`](Self::serve) with no clock; the stamp.
@@ -928,6 +948,7 @@ fn spawn_program_thread(backend: Option<super::SharedNdiBackend>, bus: Arc<Progr
             let mut out = ProgramOutput::fhd(sender)
                 .with_outputs(bus.outputs().clone())
                 .with_max(bus.max().clone())
+                .with_video_clock(Box::new(super::program_max_send::SpinClock))
                 .with_item(bus.item().clone())
                 .with_trace(bus.trace());
             // #215 addendum 3 + #223 follow-up: how many threads paint a mixed

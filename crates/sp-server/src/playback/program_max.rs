@@ -75,6 +75,7 @@ use crate::playback::loop_stats::percentile_ceil;
 use crate::playback::program_max_list::ListHolderStatus;
 use crate::playback::program_max_send::SendTiming;
 use crate::playback::program_max_vblank::{Aligned, VblankLog, vblank_log};
+use crate::playback::program_video_quiet::{VideoQuiet, VideoQuietStatus};
 use crate::playback::submit_handoff::{HandoffOutcome, SubmitJob, SubmitQueue};
 
 #[path = "program_max_fhd.rs"]
@@ -85,7 +86,7 @@ mod quiesce;
 pub use quiesce::{MAX_STOP_WAIT, QUIESCE_EXPIRY, stop_and_wait};
 #[path = "program_max_phase.rs"]
 mod phase;
-pub use phase::{load_max_compose_phase_us, load_max_vblank_phase_us};
+pub use phase::{load_max_compose_phase_us, load_max_vblank_phase_us, load_video_quiet_us};
 
 /// How many MAX jobs wait for the `program-max` thread: two, then the oldest
 /// is dropped (coalesced) — revision 2's D4 hand-off.
@@ -314,6 +315,8 @@ pub struct MaxStatus {
     /// #239: the `SP-program` Spout sender (1920×1080) the thread runs next
     /// to MAX.
     pub fhd: FhdStatus,
+    /// #251 step 4: the `SP-program` video side's quiet window.
+    pub video_quiet: VideoQuietStatus,
 }
 
 /// The hand-off's shared state (one lock, shared with the program thread).
@@ -429,6 +432,9 @@ pub struct MaxOut {
     stats: Mutex<Stats>,
     /// #239: the FHD sender's telemetry (`program_max_fhd.rs`).
     fhd: Mutex<fhd::FhdStats>,
+    /// #251 step 4: the refresh grid this thread paces on, for the
+    /// `SP-program` video side's quiet window (`program_video_quiet.rs`).
+    pub video: VideoQuiet,
     /// Tests: run inside every offer, before its lock — what the program
     /// thread has done by then.
     #[cfg(test)]
@@ -508,6 +514,7 @@ impl MaxOut {
                 list_holder: None,
             }),
             fhd: Mutex::new(fhd::FhdStats::new()),
+            video: VideoQuiet::default(),
             #[cfg(test)]
             on_offer: Mutex::new(None),
         }
@@ -830,6 +837,7 @@ impl MaxOut {
             adapter,
             list_holder,
             fhd: self.fhd_status(fhd_enabled, enabled),
+            video_quiet: self.video.status(Instant::now()),
         }
     }
 }

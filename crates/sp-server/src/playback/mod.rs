@@ -85,6 +85,7 @@ pub mod program_trace; // #147: SP-program's per-boundary trace ring + clump det
 pub mod program_trace_log; // #147: the trace's once-a-minute clump summary (task)
 pub mod program_transition; // #215: transition window + crossfade math (pure, Linux-tested)
 pub mod program_transition_settings; // #221 L5: the transition settings → the bus's spec (task)
+pub mod program_video_quiet; // #251 step 4: SP-program's video side never starts in Arena's read window
 pub(crate) mod recovery; // + the RecoveryEvent → engine forwarder lib.rs spawns
 #[cfg(test)]
 pub(crate) mod resample_quality; // #233: the resamplers' measured quality (THD+N, images), tests only

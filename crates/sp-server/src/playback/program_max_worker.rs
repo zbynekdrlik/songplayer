@@ -747,6 +747,8 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
             log_vblank(self.out.record_vblank_state(v.state(now)), &**v);
             v.grid(now)
         });
+        // #251 step 4: the SP-program video side waits on the same grid.
+        self.out.video.publish_grid(grid, now);
         let send_phase = self.out.vblank_phase();
         let compose_phase = self.out.compose_phase();
         let due = self.pacer.due(offered, grid, send_phase, compose_phase);
