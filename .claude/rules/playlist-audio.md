@@ -75,6 +75,14 @@ separate one-song playlist in mode Single).
   is 400 `audio body: …`, a limit 400 with `FxError`'s text) → 204 with no
   body (`put_json_empty` on the dashboard); 404 for an unknown playlist,
   nothing written on any refusal.
+  - **#278: the row and the live register are written under ONE lock**
+    (`api::playlist_audio::WRITES`, a tokio Mutex for every playlist), so
+    the register always holds what the row was last written with.
+  - Without it, an earlier PUT (the panel gives a send up after 10 s, and
+    its successor may overlap it) could set the register after the later
+    one wrote the row.
+  - The test holds the lock and checks that a PUT writes neither until
+    the lock is released.
 - **Dashboard (#278 rebuilt it; design comment 6221171333, the owner's
   ROZHODNUTÉ 6220698978: "the EQ processes correctly, the UI is the
   problem")**: the collapsed "Zvuk playlistu" panel on the playlist card,
