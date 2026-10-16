@@ -52,9 +52,77 @@ pub enum BandKind {
 }
 
 impl BandKind {
+    /// Every band type, low to high: the order the dashboard offers them in.
+    pub const ALL: [BandKind; 5] = [
+        BandKind::HighPass,
+        BandKind::LowShelf,
+        BandKind::Peak,
+        BandKind::HighShelf,
+        BandKind::LowPass,
+    ];
+
     /// Whether the band's gain shapes it (not for a high-/low-pass).
     pub fn uses_gain(self) -> bool {
         !matches!(self, BandKind::HighPass | BandKind::LowPass)
+    }
+
+    /// Its name on the wire (the API's `kind`) and in the dashboard's CSS.
+    pub fn name(self) -> &'static str {
+        match self {
+            BandKind::HighPass => "high_pass",
+            BandKind::LowShelf => "low_shelf",
+            BandKind::Peak => "peak",
+            BandKind::HighShelf => "high_shelf",
+            BandKind::LowPass => "low_pass",
+        }
+    }
+
+    /// The type a name names (`None`: no band type).
+    pub fn from_name(name: &str) -> Option<BandKind> {
+        BandKind::ALL.into_iter().find(|kind| kind.name() == name)
+    }
+
+    /// Its label on the dashboard.
+    pub fn label_sk(self) -> &'static str {
+        match self {
+            BandKind::HighPass => "Orezanie basov (horná priepusť)",
+            BandKind::LowShelf => "Basy (šelf)",
+            BandKind::Peak => "Pásmo (zvon)",
+            BandKind::HighShelf => "Výšky (šelf)",
+            BandKind::LowPass => "Orezanie výšok (dolná priepusť)",
+        }
+    }
+}
+
+/// The band a new band of `kind` starts as (#278: its own type's frequency
+/// and Q, never 1 kHz for every type): a high-pass at 80 Hz, a low shelf at
+/// 120 Hz, a peak at 1 kHz with Q 1, a high shelf at 8 kHz, a low-pass at
+/// 16 kHz; the rest at [`DEFAULT_Q`]; 0 dB, on.
+pub fn default_band(kind: BandKind) -> EqBand {
+    let (freq_hz, q) = match kind {
+        BandKind::HighPass => (80.0, DEFAULT_Q),
+        BandKind::LowShelf => (120.0, DEFAULT_Q),
+        BandKind::Peak => (1000.0, 1.0),
+        BandKind::HighShelf => (8000.0, DEFAULT_Q),
+        BandKind::LowPass => (16_000.0, DEFAULT_Q),
+    };
+    EqBand {
+        kind,
+        freq_hz,
+        gain_db: 0.0,
+        q,
+        enabled: true,
+    }
+}
+
+/// `band` turned into `kind`: that type's frequency and Q, its own gain and
+/// on / off kept (a high-/low-pass keeps the gain it does not use, for a
+/// later shelf or peak).
+pub fn with_kind(band: &EqBand, kind: BandKind) -> EqBand {
+    EqBand {
+        gain_db: band.gain_db,
+        enabled: band.enabled,
+        ..default_band(kind)
     }
 }
 
