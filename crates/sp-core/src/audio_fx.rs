@@ -94,13 +94,23 @@ impl BandKind {
     }
 }
 
-/// The band a new band of `kind` starts as: 0 dB, on.
+/// The band a new band of `kind` starts as (#278: its own type's frequency
+/// and Q, never 1 kHz for every type): a high-pass at 80 Hz, a low shelf at
+/// 120 Hz, a peak at 1 kHz with Q 1, a high shelf at 8 kHz, a low-pass at
+/// 16 kHz; the rest at [`DEFAULT_Q`]; 0 dB, on.
 pub fn default_band(kind: BandKind) -> EqBand {
+    let (freq_hz, q) = match kind {
+        BandKind::HighPass => (80.0, DEFAULT_Q),
+        BandKind::LowShelf => (120.0, DEFAULT_Q),
+        BandKind::Peak => (1000.0, 1.0),
+        BandKind::HighShelf => (8000.0, DEFAULT_Q),
+        BandKind::LowPass => (16_000.0, DEFAULT_Q),
+    };
     EqBand {
         kind,
-        freq_hz: 1000.0,
+        freq_hz,
         gain_db: 0.0,
-        q: DEFAULT_Q,
+        q,
         enabled: true,
     }
 }
