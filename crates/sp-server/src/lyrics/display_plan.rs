@@ -40,6 +40,10 @@
 //!    instrumental break (a gap over [`LONG_GAP_MS`]) and after the last line,
 //!    it leaves [`HOLD_TAIL_MS`] after its sung end instead.
 //!
+//! #280: every source line is first read without its parenthesised asides
+//! (`display_plan_asides.rs`), so the grouping, the char limit and the shown
+//! text all see the shorter line.
+//!
 //! The dashboard karaoke view (`LyricsState::update`) keeps the raw track and
 //! its word timing. Only the wall and the Presenter read this plan. The
 //! constants are documented in `.claude/rules/lyrics-display.md`.
@@ -49,6 +53,9 @@ use std::ops::Range;
 use sp_core::lyrics::LyricsLine;
 
 use crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE;
+
+#[path = "display_plan_asides.rs"]
+mod asides;
 
 /// The most a `Song` line appears on the wall before it is sung, so the room
 /// can pre-read it. Only into a pause of [`SUSTAIN_MARGIN_MS`] after the
@@ -203,6 +210,9 @@ impl DisplayPlan {
 /// Turn a track's sung lines into its display lines under `profile`: group
 /// them into sentences, then schedule (see the module docs).
 pub fn build_plan(lines: &[LyricsLine], profile: DisplayProfile) -> Vec<DisplayLine> {
+    // #280: the wall and the Presenter leave out the parenthesised asides.
+    let shown: Vec<LyricsLine> = lines.iter().map(asides::without_asides).collect();
+    let lines = &shown[..];
     let groups = group_lines(lines);
     let spans = schedule(lines, &groups, profile);
     groups
