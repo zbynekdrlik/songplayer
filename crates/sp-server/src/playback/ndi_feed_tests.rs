@@ -7,11 +7,11 @@ use sp_core::config::NdiSource;
 use sp_core::genlock::{GENLOCK_GRID_FPS, grid_boundary_100ns};
 
 use super::{
-    BlackUyvy, CpuWhy, FeedCore, NDI_FEED_DEPTH, NDI_FEED_STALE_SLOTS, NDI_STAT_WINDOW, NdiFeed,
-    NdiPick, NdiSwitch, Pushed, UYVY_BLACK_PAIR, black_uyvy, delay_slots, fourcc, ndi_source_for,
-    ndi_switch, uyvy_len,
+    BlackUyvy, CpuWhy, FeedCore, NDI_FEED_DEPTH, NDI_FEED_STALE_SLOTS, NdiFeed, NdiPick, NdiSwitch,
+    Pushed, UYVY_BLACK_PAIR, black_uyvy, delay_slots, fourcc, ndi_source_for, ndi_switch, uyvy_len,
 };
 use crate::playback::frame_buf::SharedFrame;
+use crate::playback::program_max::MAX_STAT_WINDOW;
 
 /// A grid index of 2026: 1.76e9 s · 30.
 const K0: i64 = 52_800_000_000;
@@ -91,18 +91,20 @@ fn a_picture_read_back_after_its_boundary_was_sent_is_late() {
 }
 
 #[test]
-fn the_newest_stamp_is_the_last_pushed_late_or_not() {
+fn the_newest_stamp_is_the_last_picture_kept_never_a_late_one() {
     let mut feed = FeedCore::default();
     assert_eq!(feed.newest(), None);
     feed.push(b(1), pic(1));
     assert_eq!(feed.newest(), Some(b(1)));
-    feed.take(b(4));
+    assert!(feed.take(b(4)).is_none());
     feed.push(b(3), pic(3));
     assert_eq!(
         feed.newest(),
-        Some(b(3)),
-        "a late picture still says the GPU runs"
+        Some(b(1)),
+        "a late picture never entered the feed: no sign of a fresh readback"
     );
+    feed.push(b(5), pic(5));
+    assert_eq!(feed.newest(), Some(b(5)), "an on-time one is");
 }
 
 /// The rule's 30-slot edge on both sides, and a setting flip.
@@ -257,10 +259,11 @@ fn the_status_counts_what_both_threads_recorded() {
     assert_eq!((status.source, status.switches), ("cpu", 2));
 }
 
-/// The windows keep the last `NDI_STAT_WINDOW` figures: the oldest goes.
+/// The windows keep the last `MAX_STAT_WINDOW` figures (MAX's window):
+/// the oldest goes.
 #[test]
 fn the_readback_window_keeps_the_last_900() {
-    assert_eq!(NDI_STAT_WINDOW, 900);
+    assert_eq!(MAX_STAT_WINDOW, 900);
     let feed = NdiFeed::default();
     feed.record_readback(5_000, Some(5_000));
     feed.record_readback(1, Some(1));
@@ -272,7 +275,7 @@ fn the_readback_window_keeps_the_last_900() {
     for _ in 0..30 {
         feed.record_readback(9_000, Some(9_000));
     }
-    for _ in 0..NDI_STAT_WINDOW - 30 {
+    for _ in 0..MAX_STAT_WINDOW - 30 {
         feed.record_readback(2, Some(2));
     }
     let status = feed.status(NdiSource::Gpu);

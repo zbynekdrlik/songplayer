@@ -16,7 +16,7 @@ use sp_gpu::{GpuError, MAX_TARGET};
 use super::tests::{
     Drawn, FakeGpu, UYVY_US, device_lost, fake_uyvy, not_registered, pic, picture, plain,
 };
-use super::{MAX_RETRY_BACKOFF, MaxWorker};
+use super::{LogLine, MAX_LOG_EVERY_100NS, MAX_RETRY_BACKOFF, MaxWorker};
 use crate::playback::ndi_feed::{UYVY_BLACK_PAIR, uyvy_len};
 use crate::playback::program_max::{MaxJob, MaxOut};
 
@@ -233,6 +233,45 @@ fn a_failed_enable_is_tried_again_after_the_backoff() {
     assert_eq!(gpu.log().uyvy_enabled, 1, "the backoff over: on");
     assert_eq!(taken(&max, 3), Some(fake_uyvy(3)));
     assert_eq!(max.status().submitted, 3, "MAX never waited for NDI");
+}
+
+/// With MAX off NDI's compose is the compositor's only one: a failed build
+/// is logged once (`Lines::ndi`, a WARN), nothing while it holds, and once
+/// composes come back one INFO, after the log's window. With MAX on, MAX's
+/// own line names it (`Lines::ndi` stays quiet).
+#[test]
+fn with_max_off_a_failing_compositor_is_logged_for_ndi() {
+    let max = ndi_on(false);
+    let gpu = FakeGpu::default();
+    gpu.script().compositor.push_back(GpuError::NoAdapter);
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    let a = picture(4, 2);
+    let t0 = Instant::now();
+    let lines = worker.serve_lines(&plain(1, &a), t0, t0);
+    assert_eq!(lines.ndi, Some(LogLine::Failing { held_back: 0 }));
+    assert_eq!(
+        (lines.max, lines.fhd),
+        (None, None),
+        "MAX and FHD not wanted"
+    );
+    let lines = worker.serve_lines(&plain(2, &a), t0, t0);
+    assert_eq!(lines.ndi, None, "still failing: said once");
+    let back = t0 + MAX_RETRY_BACKOFF;
+    let lines = worker.serve_lines(&plain(3, &a), back, back);
+    assert_eq!(lines.ndi, None, "composes again, inside the log's window");
+    assert_eq!(max.ndi.newest_stamp(), Some(3));
+    let window = Duration::from_nanos(MAX_LOG_EVERY_100NS as u64 * 100);
+    let later = t0 + window;
+    let lines = worker.serve_lines(&plain(4, &a), later, later);
+    assert_eq!(lines.ndi, Some(LogLine::Recovered { held_back: 1 }));
+
+    let max = ndi_on(true);
+    let gpu = FakeGpu::default();
+    gpu.script().compositor.push_back(GpuError::NoAdapter);
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    let lines = worker.serve_lines(&plain(1, &a), t0, t0);
+    assert_eq!(lines.max, Some(LogLine::Failing { held_back: 0 }));
+    assert_eq!(lines.ndi, None, "MAX's line names it");
 }
 
 /// MAX off and the pass refused: nothing wants a compose (no output can go

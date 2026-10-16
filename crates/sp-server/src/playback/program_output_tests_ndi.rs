@@ -252,6 +252,45 @@ fn a_switch_to_the_gpu_holds_one_boundary_and_back_skips_one() {
     assert_eq!((status.switches, status.repeats), (3, 1), "{status:?}");
 }
 
+/// A readback that only ever arrives after its boundary went out (every
+/// picture late): the feed keeps nothing fresh, so 31 slots after the last
+/// picture it kept NDI falls back to the canvas, never repeating one
+/// picture for good.
+#[test]
+fn a_readback_that_is_always_late_falls_back_to_the_canvas() {
+    let mut rig = rig(NdiSource::Gpu);
+    rig.max.ndi.push(at(0), uyvy(1));
+    rig.out.submit(source(0, 0.25));
+    rig.out.submit(source(1, 0.25));
+    for k in 2..=30 {
+        rig.out.submit(source(k, 0.25));
+        // Boundary k − 1 went out (a repeat) before its picture came.
+        rig.max.ndi.push(at(k - 1), uyvy(2));
+        assert_eq!(
+            rig.backend.last_async_video_fourcc(),
+            Some(FourCCVideoType::UYVY),
+            "boundary {k}: from the GPU"
+        );
+    }
+    rig.out.submit(source(31, 0.25));
+    assert_eq!(
+        rig.backend.last_async_video_fourcc(),
+        Some(FourCCVideoType::NV12),
+        "31 slots after the last picture kept"
+    );
+    let status = rig.max.ndi_status();
+    assert_eq!(
+        (
+            status.source,
+            status.repeats,
+            status.readback_late,
+            status.switches
+        ),
+        ("cpu", 29, 29, 2),
+        "{status:?}"
+    );
+}
+
 #[test]
 fn a_stale_readback_falls_back_to_the_canvas() {
     let mut rig = rig(NdiSource::Gpu);

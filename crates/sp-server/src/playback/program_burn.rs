@@ -255,7 +255,9 @@ fn burned_with(
     let modules = qr_modules(&payload(SONGPLAYER_RUN_ID, frame, gen_ts_ns))?;
     let mut out = sp_decoder::frame_pool::take(video.len());
     out.extend_from_slice(video);
-    paint(&mut out, &modules);
+    // Slices: a closure parameter is no coercion site (`&mut Vec` would not
+    // become `&mut [u8]` through `impl FnOnce`).
+    paint(&mut out[..], &modules[..]);
     Some(SharedFrame::new(out))
 }
 

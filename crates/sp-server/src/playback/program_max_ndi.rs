@@ -17,13 +17,20 @@
 //!   constant UYVY black. A boundary that is not composed (coalesced, a
 //!   failed compose, a lost device, a backoff) pushes nothing: the
 //!   `SP-program` sender repeats the last picture.
+//! - With MAX off, NDI's compose is the compositor's only one: its failures
+//!   (a build, a compose) are logged like MAX's ([`MaxWorker::finish_ndi`],
+//!   one WARN when composes stop, one INFO when they come back, through a
+//!   `LogGate`), never lost behind MAX's `off`.
 
 use std::time::Instant;
 
 use sp_gpu::{FHD_TARGET, TargetId};
 use tracing::{info, warn};
 
-use super::{MAX_LOG_EVERY_100NS, MAX_RETRY_BACKOFF, MaxCompositor, MaxGpu, MaxWorker};
+use super::{
+    LogGate, LogLine, MAX_LOG_EVERY_100NS, MAX_RETRY_BACKOFF, MaxCompositor, MaxGpu, MaxWorker,
+    Skip, Wants, elapsed_100ns,
+};
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::ndi_feed::{BlackUyvy, uyvy_len};
 use crate::playback::program_max::{MaxJob, MaxOut};
@@ -40,6 +47,10 @@ pub(super) struct NdiPass {
     black: BlackUyvy,
     /// At most one WARN of a failed readback per `MAX_LOG_EVERY_100NS`.
     warn: WarnLimiter,
+    /// Why the compose for NDI alone fails (`None`: it composes), and its
+    /// log: they outlive a compositor, like MAX's.
+    failing: Option<String>,
+    log: LogGate,
 }
 
 impl NdiPass {
@@ -80,6 +91,63 @@ impl<G: MaxGpu> MaxWorker<'_, G> {
                 warn!(%error, "program max: NDI's UYVY pass could not be enabled - tried again after the backoff");
             }
         }
+    }
+}
+
+/// What the compose for NDI alone reports (`Went::ndi`): only while NDI
+/// is wanted and MAX is not (MAX's own report covers the device otherwise),
+/// and only when something was attempted — `drawn` = the build's error or
+/// the compose's outcome; `None` (no compose: the pass is not on, its
+/// enable already WARNed) says nothing.
+pub(super) fn ndi_report(
+    wants: Wants,
+    drawn: Option<Result<(), Skip>>,
+) -> Option<Result<(), Skip>> {
+    if wants.ndi && !wants.max { drawn } else { None }
+}
+
+impl<G: MaxGpu> MaxWorker<'_, G> {
+    /// Log what the compose for NDI alone did (`went`): composed, or failed
+    /// (a backoff or `Unsupported` changes nothing); returns the line the
+    /// log wrote ([`LogGate`]: each change once per `MAX_LOG_EVERY_100NS`).
+    pub(super) fn finish_ndi(
+        &mut self,
+        went: Result<(), Skip>,
+        job: &MaxJob,
+        now: Instant,
+    ) -> Option<LogLine> {
+        match went {
+            Ok(()) => self.ndi.failing = None,
+            Err(Skip::Failed(error)) => self.ndi.failing = Some(error.to_string()),
+            Err(Skip::Backoff | Skip::Unsupported) => {}
+        }
+        let at = elapsed_100ns(self.started, now);
+        let line = self.ndi.log.observe(at, self.ndi.failing.as_deref());
+        log_ndi_line(
+            line.as_ref(),
+            self.ndi.failing.as_deref(),
+            job.stamp_100ns(),
+        );
+        line
+    }
+}
+
+/// The WARN / INFO of [`MaxWorker::finish_ndi`]'s line (the decision is
+/// `LogGate`'s, tested; logging only).
+#[cfg_attr(test, mutants::skip)]
+fn log_ndi_line(line: Option<&LogLine>, failing: Option<&str>, stamp_100ns: i64) {
+    match line {
+        Some(LogLine::Failing { held_back }) => warn!(
+            error = failing.unwrap_or_default(),
+            held_back = *held_back,
+            stamp_100ns,
+            "program max: the compositor does not compose for NDI (MAX off) - SP-program falls back to the CPU canvas"
+        ),
+        Some(LogLine::Recovered { held_back }) => info!(
+            held_back = *held_back,
+            stamp_100ns, "program max: the compositor composes for NDI again"
+        ),
+        None => {}
     }
 }
 

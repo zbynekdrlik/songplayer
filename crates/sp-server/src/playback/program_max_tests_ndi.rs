@@ -36,7 +36,7 @@ fn ndi_from_the_gpu_keeps_the_thread_taking_jobs_with_max_off() {
         "MAX off, NDI on the canvas: nothing wanted"
     );
     assert!(!max.offer_with(|| black(1)));
-    assert!((max.max_wanted(), max.ndi_wanted()) == (true, false));
+    assert_eq!((max.max_wanted(), max.ndi_wanted()), (true, false));
 
     assert!(max.set_ndi_source(NdiSource::Gpu), "cpu → gpu is a change");
     assert!(!max.set_ndi_source(NdiSource::Gpu), "the same value");

@@ -24,15 +24,15 @@
 //!   `ProgramBus::max()`; `GET /api/v1/program` serves [`NdiStatus`] as
 //!   `ndi`.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::sync::{Mutex, MutexGuard};
 
 use serde::Serialize;
 use sp_core::config::NdiSource;
 use sp_core::genlock::{GENLOCK_GRID_FPS, grid_index_100ns};
 
-use crate::playback::frame_buf::SharedFrame;
-use crate::playback::loop_stats::percentile_ceil;
+use crate::playback::frame_buf::{PerSize, SharedFrame};
+use crate::playback::program_max::Window;
 
 /// How many read-back pictures wait for the `program-output` thread; over
 /// it the oldest goes.
@@ -41,10 +41,6 @@ pub const NDI_FEED_DEPTH: usize = 3;
 /// How far (grid slots, 1 s) the feed's newest picture may lag a boundary
 /// for NDI to come from the GPU; further, the CPU canvas sends it.
 pub const NDI_FEED_STALE_SLOTS: i64 = 30;
-
-/// How many of the last readbacks and passes the `*_us_p99` figures cover
-/// (`MAX_STAT_WINDOW`: 30 s at 30 composes a second).
-pub const NDI_STAT_WINDOW: usize = 900;
 
 /// The constant UYVY black: one pixel pair `U Y0 V Y1` of BT.709
 /// limited-range black, what the GPU's pass makes of the cleared target.
@@ -63,20 +59,13 @@ pub fn black_uyvy(width: u32, height: u32) -> Vec<u8> {
 
 /// The UYVY black, built once for a size and handed out by `Arc` clone (a
 /// different size builds it again): every boundary that needs it sends the
-/// same allocation.
+/// same allocation (`frame_buf::PerSize`, the NV12 black's cache).
 #[derive(Debug, Default)]
-pub struct BlackUyvy(Option<(u32, u32, SharedFrame)>);
+pub struct BlackUyvy(PerSize);
 
 impl BlackUyvy {
     pub fn get(&mut self, width: u32, height: u32) -> SharedFrame {
-        if let Some((w, h, frame)) = &self.0
-            && (*w, *h) == (width, height)
-        {
-            return frame.clone();
-        }
-        let frame = SharedFrame::new(black_uyvy(width, height));
-        self.0 = Some((width, height, frame.clone()));
-        frame
+        self.0.get(width, height, black_uyvy)
     }
 }
 
@@ -97,7 +86,8 @@ pub struct FeedCore {
     pictures: BTreeMap<i64, SharedFrame>,
     /// The stamp the last take served.
     served: Option<i64>,
-    /// The stamp of the last picture pushed (pushes come in stamp order).
+    /// The stamp of the last picture KEPT (pushes come in stamp order; a
+    /// late one never entered the feed, so it proves no fresh readback).
     newest: Option<i64>,
     coalesced: u64,
     late: u64,
@@ -106,11 +96,11 @@ pub struct FeedCore {
 impl FeedCore {
     /// The `program-max` thread read boundary `stamp_100ns` back.
     pub fn push(&mut self, stamp_100ns: i64, picture: SharedFrame) -> Pushed {
-        self.newest = Some(stamp_100ns);
         if self.served.is_some_and(|served| stamp_100ns <= served) {
             self.late += 1;
             return Pushed::Late;
         }
+        self.newest = Some(stamp_100ns);
         self.pictures.insert(stamp_100ns, picture);
         if self.pictures.len() > NDI_FEED_DEPTH {
             self.pictures.pop_first();
@@ -130,7 +120,9 @@ impl FeedCore {
         picture
     }
 
-    /// The stamp of the newest picture pushed (served or not).
+    /// The stamp of the newest picture kept (served since or not): a
+    /// readback that only ever arrives late leaves it behind, so NDI falls
+    /// back to the canvas instead of repeating one picture for good.
     pub fn newest(&self) -> Option<i64> {
         self.newest
     }
@@ -252,37 +244,30 @@ pub struct NdiStatus {
     pub feed_coalesced: u64,
     /// Changes of the source, either way.
     pub switches: u64,
-    /// The p99 over the last [`NDI_STAT_WINDOW`] readbacks, µs: the map and
-    /// the row copy of the UYVY staging texture; and the UYVY pass's own
-    /// part of the compose's draw (`ComposeStats::uyvy_us`).
+    /// The p99 over the last `MAX_STAT_WINDOW` (900) readbacks, µs: the map
+    /// and the row copy of the UYVY staging texture; and the UYVY pass's
+    /// own part of those composes' draw (`ComposeStats::uyvy_us`). A Black
+    /// boundary's constant black is no readback: it adds to neither.
     pub readback_us_p99: u64,
     pub uyvy_us_p99: u64,
 }
 
-/// The feed and the NDI telemetry, under one lock.
-#[derive(Debug, Default)]
+/// The feed and the NDI telemetry, under one lock. The p99 windows are
+/// MAX's (`program_max::Window`, the last `MAX_STAT_WINDOW`).
+#[derive(Default)]
 struct FeedState {
     core: FeedCore,
     /// The source of the last boundary the `program-output` thread served.
     source: Option<NdiSource>,
     repeats: u64,
     switches: u64,
-    readback: VecDeque<u64>,
-    uyvy: VecDeque<u64>,
-}
-
-/// Append `us` to `window`, at most [`NDI_STAT_WINDOW`] long (the oldest
-/// goes first).
-fn push_window(window: &mut VecDeque<u64>, us: u64) {
-    if window.len() == NDI_STAT_WINDOW {
-        window.pop_front();
-    }
-    window.push_back(us);
+    readback: Window,
+    uyvy: Window,
 }
 
 /// The hand-off of NDI's read-back pictures and NDI's telemetry
 /// (`MaxOut::ndi`).
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct NdiFeed {
     state: Mutex<FeedState>,
 }
@@ -312,9 +297,9 @@ impl NdiFeed {
     /// pass's part of its compose, µs (`None`: not measured).
     pub fn record_readback(&self, readback_us: u64, uyvy_us: Option<u64>) {
         let mut state = self.lock();
-        push_window(&mut state.readback, readback_us);
+        state.readback.push(readback_us);
         if let Some(us) = uyvy_us {
-            push_window(&mut state.uyvy, us);
+            state.uyvy.push(us);
         }
     }
 
@@ -353,8 +338,8 @@ impl NdiFeed {
             readback_late,
             feed_coalesced,
             switches,
-            readback_us_p99: percentile_ceil(&windows.0, 99),
-            uyvy_us_p99: percentile_ceil(&windows.1, 99),
+            readback_us_p99: windows.0.p99(),
+            uyvy_us_p99: windows.1.p99(),
         }
     }
 }

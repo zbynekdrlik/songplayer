@@ -187,6 +187,8 @@ pub struct Lines {
     pub max: Option<LogLine>,
     /// #239: the FHD sender's (`None` too while it is not wanted).
     pub fhd: Option<LogLine>,
+    /// #279 P1b: the compositor's for NDI alone (`None` while MAX is wanted).
+    pub ndi: Option<LogLine>,
 }
 
 /// Who wants the compositor for a job (#279 P1b): MAX's output, the FHD
@@ -258,6 +260,9 @@ struct Composed {
 struct Went {
     max: Option<Result<Sent, Skip>>,
     fhd: Option<Result<FhdSent, Skip>>,
+    /// #279 P1b: the compose for NDI alone (MAX not wanted): built and
+    /// composed, or why not (`None`: nothing to say, `ndi_report`).
+    ndi: Option<Result<(), Skip>>,
 }
 
 impl<'a, G: MaxGpu> MaxWorker<'a, G> {
@@ -361,8 +366,9 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
             .max
             .and_then(|went| self.finish_max(went, lost, job, now));
         let fhd = went.fhd.and_then(|went| self.finish_fhd(went, job, now));
+        let ndi = went.ndi.and_then(|went| self.finish_ndi(went, job, now));
         self.list.boundary(now, self.out);
-        Lines { max, fhd }
+        Lines { max, fhd, ndi }
     }
 
     /// Report MAX's boundary and log what changed; returns the line it
@@ -472,12 +478,14 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
             return Went {
                 max: wants.max.then_some(Err(Skip::Unsupported)),
                 fhd: None,
+                ndi: None,
             };
         }
         if let Err(skip) = self.build_device(now) {
             let unsupported = matches!(skip, Skip::Unsupported);
             let fhd = (wants.fhd && !unsupported).then(|| Err(skip.clone()));
             return Went {
+                ndi: ndi::ndi_report(wants, Some(Err(skip.clone()))),
                 max: wants.max.then_some(Err(skip)),
                 fhd,
             };
@@ -526,7 +534,9 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
             None if wants.fhd => self.build_fhd_after(lost, now),
             None => None,
         };
-        Went { max, fhd }
+        let drawn = composed.map(|drawn| drawn.map(|_| ()));
+        let ndi = ndi::ndi_report(wants, drawn);
+        Went { max, fhd, ndi }
     }
 
     /// #239: MAX went first: build the FHD sender now, sending from the next

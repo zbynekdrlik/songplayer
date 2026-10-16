@@ -395,19 +395,20 @@ impl Queue {
     }
 }
 
-/// The last sent frames' costs, µs (at most [`MAX_STAT_WINDOW`]).
+/// The last sent frames' costs, µs (at most [`MAX_STAT_WINDOW`]; #279 P1b:
+/// NDI's readback figures too, `ndi_feed.rs`).
 #[derive(Clone, Default)]
-struct Window(VecDeque<u64>);
+pub(crate) struct Window(VecDeque<u64>);
 
 impl Window {
-    fn push(&mut self, us: u64) {
+    pub(crate) fn push(&mut self, us: u64) {
         self.0.push_back(us);
         if self.0.len() > MAX_STAT_WINDOW {
             self.0.pop_front();
         }
     }
 
-    fn p99(&self) -> u64 {
+    pub(crate) fn p99(&self) -> u64 {
         percentile_ceil(&self.0, 99)
     }
 
