@@ -161,7 +161,8 @@ test.describe("the LED wall shows every frame, in order, on its cadence (#272)",
     const failures: string[] = [];
     for (const clip of CLIPS) {
       const start = await request.post("/api/v1/test-item/start", { data: { clip: clip.name } });
-      expect(start.status(), `POST /api/v1/test-item/start ${clip.name}`).toBe(200);
+      // The route answers 204 No Content (`api/test_item.rs::post_start`).
+      expect(start.status(), `POST /api/v1/test-item/start ${clip.name}`).toBe(204);
       started = true;
       if ((await program(request)).source !== testPlaylist) {
         await cut(request, testPlaylist);
