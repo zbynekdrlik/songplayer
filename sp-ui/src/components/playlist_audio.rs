@@ -36,7 +36,10 @@ use serde::Deserialize;
 use sp_core::audio_fx::{
     BandKind, EqBand, GAIN_MAX_DB, GAIN_MIN_DB, MAX_BANDS, PlaylistFx, default_band, validate,
 };
-use sp_core::audio_fx_send::{ANSWER_TIMEOUT_MS, SendGate, SendStep};
+use sp_core::audio_fx_send::{
+    ANSWER_TIMEOUT_MS, LateAnswer, NO_ANSWER_SK, SAVED_SK, SAVING_SK, SendGate, SendStep,
+    answer_sk, late_answer,
+};
 use sp_core::audio_fx_view::{display_order, gain_label, snap_gain};
 use wasm_bindgen::JsCast;
 
@@ -44,10 +47,6 @@ use crate::api;
 use crate::components::player::now_ms;
 use crate::components::playlist_audio_band::band_card;
 use crate::components::playlist_audio_curve::eq_curve;
-
-/// The status line while a change waits or a request runs, and after.
-const SAVING: &str = "Ukladám…";
-const SAVED: &str = "Uložené";
 
 /// `GET …/audio`.
 #[derive(Debug, Clone, Deserialize)]
@@ -236,7 +235,7 @@ impl EqEdit {
             return;
         };
         if busy {
-            let _ = self.status.try_set(SAVING.to_string());
+            let _ = self.status.try_set(SAVING_SK.to_string());
         }
         match step {
             SendStep::Idle => {}
@@ -270,40 +269,39 @@ impl EqEdit {
                 Either::Left((answer, _)) => {
                     self.step(SendGate::landed);
                     let busy = self.gate.try_with_value(SendGate::busy).unwrap_or(false);
-                    match answer {
-                        Err(e) => format!("Uloženie zlyhalo: {e}"),
-                        Ok(()) if busy => SAVING.to_string(),
-                        Ok(()) => SAVED.to_string(),
-                    }
+                    answer_sk(&answer, busy)
                 }
                 Either::Right((_, put)) => {
                     self.step(SendGate::landed);
-                    leptos::task::spawn_local(self.late_answer(put, sent));
-                    "Uloženie zlyhalo: server neodpovedá".to_string()
+                    leptos::task::spawn_local(self.watch_late_answer(put, sent));
+                    NO_ANSWER_SK.to_string()
                 }
             };
             let _ = self.status.try_set(text);
         });
     }
 
-    /// A send given up that still lands: with the settings unchanged since,
-    /// it saved them after all; with newer ones, it may have landed over
-    /// their save, so they go out once more.
-    async fn late_answer(
+    /// A send given up that still lands: `sp_core`'s `late_answer` decides
+    /// (newer settings it may have landed over go out once more; unchanged
+    /// ones it saved after all).
+    async fn watch_late_answer(
         self,
         put: impl std::future::Future<Output = Result<(), String>>,
         sent: PlaylistFx,
     ) {
-        if put.await.is_err() {
-            return;
-        }
+        let landed_ok = put.await.is_ok();
         let Some(now) = self.fx.try_get_untracked() else {
             return;
         };
-        if now != sent {
-            self.step(SendGate::changed);
-        } else if self.gate.try_with_value(SendGate::busy) == Some(false) {
-            let _ = self.status.try_set(SAVED.to_string());
+        let Some(busy) = self.gate.try_with_value(SendGate::busy) else {
+            return;
+        };
+        match late_answer(landed_ok, now != sent, busy) {
+            LateAnswer::Resend => self.step(SendGate::changed),
+            LateAnswer::Saved => {
+                let _ = self.status.try_set(SAVED_SK.to_string());
+            }
+            LateAnswer::Nothing => {}
         }
     }
 }

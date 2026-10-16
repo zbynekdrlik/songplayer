@@ -5,7 +5,8 @@
 //! the summed curve (volume + every enabled band) with a soft fill to 0 dB;
 //! each enabled band's own curve in its type's colour; one handle per band
 //! at (frequency, gain). A handle is dragged with the pointer (captured, so
-//! the drag survives leaving the circle): a shelf or a peak on both axes, a
+//! the drag survives leaving the circle), by the pointer's travel from
+//! where it took hold (`grab_offset`): a shelf or a peak on both axes, a
 //! high-/low-pass on its frequency only (its handle sits on the 0 dB line).
 //! The wheel over a handle changes its Q. Every number comes from
 //! `sp_core::audio_fx` / `audio_fx_view` — the server's own formulas.
@@ -14,8 +15,8 @@ use leptos::prelude::*;
 use leptos::svg::Svg;
 use sp_core::audio_fx::{curve_path, db_y, freq_x};
 use sp_core::audio_fx_view::{
-    BOX_H, BOX_W, CURVE_POINTS, DB_GRID, FREQ_GRID, WheelTurn, band_path, dragged, fill_path,
-    handle_xy, to_box,
+    BOX_H, BOX_W, CURVE_POINTS, DB_GRID, FREQ_GRID, WheelTurn, band_path, dragged_from, fill_path,
+    grab_offset, handle_xy, to_box,
 };
 use wasm_bindgen::JsCast;
 
@@ -94,6 +95,8 @@ fn handle(
     // The wheel's turn over this handle, carried between events (a
     // touchpad's small events add up).
     let turn = StoredValue::new(WheelTurn::default());
+    // Where the drag took hold, off the handle's centre (box units).
+    let grab = StoredValue::new((0.0_f64, 0.0_f64));
     // The pointer in the box's units, measured on the SVG as drawn now.
     let pointer = move |ev: &web_sys::PointerEvent| -> Option<(f64, f64)> {
         let rect = svg.get_untracked()?.get_bounding_client_rect();
@@ -153,6 +156,9 @@ fn handle(
                     {
                         let _ = target.set_pointer_capture(ev.pointer_id());
                     }
+                    if let (Some((x, y)), Some(b)) = (pointer(&ev), band.get_untracked()) {
+                        grab.set_value(grab_offset(&b, x, y, BOX_W, BOX_H));
+                    }
                     dragging.set(Some(id));
                 }
                 on:pointermove=move |ev: web_sys::PointerEvent| {
@@ -160,7 +166,12 @@ fn handle(
                         return;
                     }
                     if let Some((x, y)) = pointer(&ev) {
-                        edit.edit_band(id, |b| *b = dragged(b, x, y, BOX_W, BOX_H), false);
+                        let held = grab.get_value();
+                        edit.edit_band(
+                            id,
+                            |b| *b = dragged_from(b, held, x, y, BOX_W, BOX_H),
+                            false,
+                        );
                     }
                 }
                 on:pointerup=move |_| end()
@@ -185,7 +196,8 @@ pub(crate) fn eq_curve(edit: EqEdit) -> impl IntoView {
     let svg = NodeRef::<Svg>::new();
     let dragging = RwSignal::new(None::<u64>);
     let summed = Memo::new(move |_| edit.fx.with(|f| curve_path(f, BOX_W, BOX_H, CURVE_POINTS)));
-    let fill = Memo::new(move |_| edit.fx.with(|f| fill_path(f, BOX_W, BOX_H, CURVE_POINTS)));
+    // The fill closes the summed curve: computed once per change.
+    let fill = Memo::new(move |_| summed.with(|curve| fill_path(curve, BOX_W, BOX_H)));
     view! {
         <svg
             class="playlist-audio-curve"

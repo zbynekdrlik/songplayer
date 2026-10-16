@@ -82,7 +82,8 @@ separate one-song playlist in mode Single).
     card's width, `aspect-ratio` kept, `preserveAspectRatio="none"`; the
     box stays −36…+18 dB (`CURVE_DB_MIN/MAX`). Grid `FREQ_GRID` (20 Hz …
     20 kHz) + `DB_GRID` (every 6 dB, the 0 dB line brighter); the summed
-    curve `curve_path` + its fill `fill_path` (closed to 0 dB); each
+    curve `curve_path` + its fill `fill_path` (that drawn curve closed to
+    0 dB, so a drag computes the curve once); each
     ENABLED band's own curve `band_path` (its filter alone, no volume; off
     = `d=""`) in its type's colour (`--eq-kind` on `.kind-<name>`); one
     handle per band at `handle_xy` (a high-/low-pass on the 0 dB line).
@@ -97,9 +98,13 @@ separate one-song playlist in mode Single).
     (`to_box` over the SVG's own `getBoundingClientRect`: the SVG has NO
     border or padding, its frame is an `outline` drawn inside, else the
     mapping is off by the border and a level drag reads −0,1 dB) and sets
-    the band
-    to `dragged(..)` (frequency always, gain only for a shelf / peak, both
-    snapped); `pointerup` / `pointercancel` / `lostpointercapture` end it
+    the band to `dragged_from(band, grab, ..)` = `dragged(..)` at the point
+    the handle's centre is carried to (frequency always, gain only for a
+    shelf / peak, both snapped): `grab` = `grab_offset` at `pointerdown`
+    (the pointer less the handle's centre), so a handle taken anywhere on
+    its grip moves BY the pointer's travel, never jumps to the pointer
+    (live audio: a tap off the centre would change the sound; review
+    round 4); `pointerup` / `pointercancel` / `lostpointercapture` end it
     once (`finish`). The wheel over a handle: `wheel_q` (×1,1 per notch of
     100, up narrows) through the handle's own `WheelTurn`, which adds up
     small events until they reach the next 0,01 (a touchpad's few pixels
@@ -146,10 +151,13 @@ separate one-song playlist in mode Single).
     ("Uloženie zlyhalo: server neodpovedá", nothing re-sent: a server
     that does not answer is not hammered), so it never holds the gate in
     flight and the next change goes out. The given-up request is still
-    watched (`EqEdit::late_answer`): when it lands with the settings
-    unchanged since, it was the save ("Uložené"); when newer settings
-    went out meanwhile it may have landed OVER them, so they are sent once
-    more. Residual: the server writes the row, then the register, per
+    watched (`EqEdit::watch_late_answer`, the pure `audio_fx_send::
+    late_answer`): when newer settings went out meanwhile it may have
+    landed OVER them — an error too, the server may have written the row
+    before it failed — so they are sent once more; landing ok over
+    unchanged settings with nothing going out, it was the save
+    ("Uložené"). The status texts and `answer_sk` live in
+    `audio_fx_send` too. Residual: the server writes the row, then the register, per
     request, so two PUTs that overlap there (only a given-up one and its
     successor) can leave the register a step behind the row until the
     re-send. `validate` runs before
@@ -182,8 +190,11 @@ separate one-song playlist in mode Single).
   server BEFORE the release, in fewer than 20 PUTs; it times the
   throttle where it runs, in the page (an `addInitScript` wrapper of
   `window.fetch` records `performance.now()` per PUT …/audio — gloo-net
-  calls the global `fetch` with a `Request`), ≥ 45 ms apart, never by
-  the mock's arrivals (a loaded runner delays them). The give-up test
+  calls the global `fetch` with a `Request`), ≥ 40 ms apart (a fetch is
+  stamped a little after the gate's decision), never by the mock's
+  arrivals (a loaded runner delays them). A handle taken off its centre
+  and moved 4 px moves by those 4 px of the log axis, its gain not at
+  all (the jump to the pointer was ~12 % and ~1,6 dB). The give-up test
   delays answers 13 / 16 s: given up at 10 s, the late answer counts,
   and a stale one landing over a newer save is followed by a re-send.
   The mock answers PUT 204 and 400 with the server's texts.

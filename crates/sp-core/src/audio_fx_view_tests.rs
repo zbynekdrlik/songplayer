@@ -4,9 +4,9 @@
 
 use super::{
     BOX_H, BOX_W, CURVE_POINTS, DB_GRID, FREQ_GRID, SLIDER_STEPS, WHEEL_Q_FACTOR, WheelTurn,
-    band_path, display_order, dragged, fill_path, freq_label, freq_slider, gain_label, handle_xy,
-    q_label, q_slider, slider_freq, slider_q, slider_shown, snap_freq, snap_gain, snap_q, to_box,
-    wheel_q, x_freq, y_db,
+    band_path, display_order, dragged, dragged_from, fill_path, freq_label, freq_slider,
+    gain_label, grab_offset, handle_xy, q_label, q_slider, slider_freq, slider_q, slider_shown,
+    snap_freq, snap_gain, snap_q, to_box, wheel_q, x_freq, y_db,
 };
 use crate::audio_fx::{
     BandKind, CURVE_DB_MAX, CURVE_DB_MIN, DEFAULT_Q, EqBand, PlaylistFx, curve_path, db_y,
@@ -371,6 +371,39 @@ fn a_dragged_handle_takes_the_frequency_and_gain_under_the_pointer() {
     assert_eq!(moved, band(BandKind::HighPass, 3560.0, 3.0, DEFAULT_Q));
 }
 
+/// A drag moves the band by the pointer's travel from where it took hold,
+/// never to the pointer: held 12 units right of and 5 above the dot's
+/// centre, the band stays put until the pointer moves, then follows as
+/// if the centre had been taken.
+#[test]
+fn a_drag_moves_the_band_by_the_pointers_travel_from_where_it_took_hold() {
+    let peak = band(BandKind::Peak, 1000.0, 3.0, 1.0);
+    let (hx, hy) = handle_xy(&peak, 800.0, 300.0);
+    let grab = grab_offset(&peak, hx + 12.0, hy - 5.0, 800.0, 300.0);
+    close(grab.0, 12.0, 1e-9);
+    close(grab.1, -5.0, 1e-9);
+    // Taken off the centre and not moved: the band as it was.
+    assert_eq!(
+        dragged_from(&peak, grab, hx + 12.0, hy - 5.0, 800.0, 300.0),
+        peak
+    );
+    // 30 right and 10 up: as the centre dragged there (1300 Hz, +4,8 dB).
+    let moved = dragged_from(&peak, grab, hx + 42.0, hy - 15.0, 800.0, 300.0);
+    assert_eq!(moved, band(BandKind::Peak, 1300.0, 4.8, 1.0));
+    assert_eq!(moved, dragged(&peak, hx + 30.0, hy - 10.0, 800.0, 300.0));
+    // A high-pass sits on the 0 dB line whatever its gain: its grab is
+    // measured from there, and it moves on its frequency only.
+    let hp = band(BandKind::HighPass, 80.0, 6.0, DEFAULT_Q);
+    let (hx, hy) = handle_xy(&hp, 800.0, 300.0);
+    let grab = grab_offset(&hp, hx - 7.0, hy + 9.0, 800.0, 300.0);
+    close(grab.0, -7.0, 1e-9);
+    close(grab.1, 9.0, 1e-9);
+    assert_eq!(
+        dragged_from(&hp, grab, hx - 7.0, hy + 40.0, 800.0, 300.0),
+        hp
+    );
+}
+
 /// A band's own curve is its filter alone (no volume), on; a band switched
 /// off draws none.
 #[test]
@@ -404,19 +437,18 @@ fn the_fill_closes_the_curve_to_the_zero_line() {
         eq: vec![],
     };
     assert_eq!(
-        fill_path(&quieter, 300.0, 108.0, 2),
+        fill_path(&curve_path(&quieter, 300.0, 108.0, 2), 300.0, 108.0),
         "M0.0 54.0 L300.0 54.0 L300.0 36.0 L0.0 36.0 Z"
     );
     let boosted = PlaylistFx {
         gain_db: 0.0,
         eq: vec![band(BandKind::Peak, 1000.0, 6.0, 1.0)],
     };
-    let fill = fill_path(&boosted, 800.0, 300.0, 7);
-    assert!(
-        fill.starts_with(&curve_path(&boosted, 800.0, 300.0, 7)),
-        "{fill}"
+    let curve = curve_path(&boosted, 800.0, 300.0, 7);
+    assert_eq!(
+        fill_path(&curve, 800.0, 300.0),
+        format!("{curve} L800.0 100.0 L0.0 100.0 Z")
     );
-    assert!(fill.ends_with(" L800.0 100.0 L0.0 100.0 Z"), "{fill}");
 }
 
 /// The cards go low to high by frequency; a tie by type (high-pass first,

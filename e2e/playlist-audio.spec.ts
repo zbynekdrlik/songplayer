@@ -319,15 +319,17 @@ test("dragging a peak's handle moves its frequency and gain live, throttled, bef
     gain_db: 0,
     eq: [held],
   });
-  // Throttled: 20 changes, fewer PUTs, the page starting each one ≥ 50 ms
-  // after the one before (45: performance.now() is coarsened in a page).
+  // Throttled: 20 changes, fewer PUTs, the gate deciding each ≥ 50 ms after
+  // the one before. The fetch is stamped a little after its decision (the
+  // send runs in a spawned task, behind whatever the page had queued), so
+  // 40: a broken throttle sends as fast as the moves come, far closer.
   const live = (await puts(request)).slice(sentBefore);
   expect(live.length).toBeGreaterThanOrEqual(1);
   expect(live.length, "20 moves, throttled").toBeLessThan(20);
   const sends = (await sendsNow()).slice(sendsBefore);
   expect(sends.length, "every PUT the mock saw was sent by the page").toBe(live.length);
   for (let i = 1; i < sends.length; i++) {
-    expect(sends[i] - sends[i - 1], `send ${i}`).toBeGreaterThanOrEqual(45);
+    expect(sends[i] - sends[i - 1], `send ${i}`).toBeGreaterThanOrEqual(40);
   }
   await page.mouse.up();
 
@@ -420,6 +422,44 @@ test("a high-pass handle moves on its frequency only (#278)", async ({ page, req
   expect(final.gain_db).toBe(0);
   await expect(handle.locator("circle.eq-handle-dot")).toHaveAttribute("cy", cyBefore ?? "");
   await expect.poll(() => lastPut(request), { timeout: 1000 }).toEqual({ gain_db: 0, eq: [final] });
+});
+
+test("a handle taken off its centre moves by the pointer's travel, never jumps to it (#278)", async ({
+  page,
+  request,
+}) => {
+  await openPanel(page);
+  await addBand(page, request, "peak");
+  const handle = page.getByTestId("playlist-audio-handle");
+  const card = page.getByTestId("playlist-audio-band");
+  const curve = page.getByTestId("playlist-audio-curve");
+  await curve.scrollIntoViewIfNeeded();
+  const drawn = await curve.boundingBox();
+  const grip = await handle.locator("circle.eq-handle-grip").boundingBox();
+  if (!drawn || !grip) throw new Error("the curve or the grip has no box");
+  // Inside the grip, well off the dot: 0.3 of its width right, 0.2 up.
+  const at = { x: grip.x + grip.width * 0.8, y: grip.y + grip.height * 0.3 };
+  const sentBefore = (await puts(request)).length;
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await page.mouse.move(at.x + 4, at.y);
+  // 4 px of travel: the frequency by 4 px's worth of the log axis (3
+  // decades over the curve's width), the gain not at all. A band that
+  // jumped to the pointer would land ~12 % higher and ~1,6 dB up.
+  await expect.poll(async () => (await cardBand(card)).freq_hz, { timeout: 2000 }).not.toBe(1000);
+  const nudged = await cardBand(card);
+  const travel = Math.exp((Math.log(1000) * 4) / drawn.width);
+  expect(Math.abs(nudged.gain_db), "the gain stays").toBeLessThanOrEqual(0.2);
+  expect(nudged.freq_hz / 1000, "moved by the travel").toBeGreaterThanOrEqual(1);
+  expect(nudged.freq_hz / 1000, "moved by the travel").toBeLessThanOrEqual(travel + 0.011);
+  // The rest of the drag carries it by the travel.
+  await page.mouse.move(at.x + 80, at.y - 40, { steps: 5 });
+  await page.mouse.up();
+  const final = await cardBand(card);
+  expect(final.freq_hz).toBeGreaterThan(1100);
+  expect(final.gain_db).toBeGreaterThan(1);
+  await expect.poll(() => lastPut(request), { timeout: 1000 }).toEqual({ gain_db: 0, eq: [final] });
+  expect((await puts(request)).length).toBeGreaterThan(sentBefore);
 });
 
 test("every slider moved with the mouse is sent within a second, no button (#278)", async ({

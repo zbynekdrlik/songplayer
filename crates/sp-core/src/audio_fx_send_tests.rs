@@ -4,7 +4,10 @@
 //! each listed mutant against these scripts.
 //! Wired via `#[cfg(test)] #[path = "audio_fx_send_tests.rs"] mod tests;`.
 
-use super::{ANSWER_TIMEOUT_MS, SendGate, SendStep, THROTTLE_MS};
+use super::{
+    ANSWER_TIMEOUT_MS, LateAnswer, NO_ANSWER_SK, SAVED_SK, SAVING_SK, SendGate, SendStep,
+    THROTTLE_MS, answer_sk, late_answer,
+};
 
 /// The clock starts away from 0 so a time that is wrongly multiplied or
 /// subtracted shows.
@@ -129,4 +132,48 @@ fn a_drag_end_flushes_its_last_value() {
     assert_eq!(gate.changed(T + 143.0), SendStep::Idle);
     assert_eq!(gate.tick(T + 165.0), SendStep::WaitMs(26.0));
     assert_eq!(gate.tick(T + 191.0), SendStep::Send);
+}
+
+/// The status line names an answer's error; an answered send reads
+/// "Ukladám…" while the gate is still busy, else "Uložené".
+#[test]
+fn the_status_line_follows_the_answer_and_the_gate() {
+    assert_eq!(SAVING_SK, "Ukladám…");
+    assert_eq!(SAVED_SK, "Uložené");
+    assert_eq!(NO_ANSWER_SK, "Uloženie zlyhalo: server neodpovedá");
+    assert_eq!(answer_sk(&Ok(()), false), "Uložené");
+    assert_eq!(answer_sk(&Ok(()), true), "Ukladám…");
+    let refused = Err("PUT /api/v1/playlists/1/audio → 500".to_string());
+    assert_eq!(
+        answer_sk(&refused, false),
+        "Uloženie zlyhalo: PUT /api/v1/playlists/1/audio → 500"
+    );
+    assert_eq!(
+        answer_sk(&refused, true),
+        "Uloženie zlyhalo: PUT /api/v1/playlists/1/audio → 500"
+    );
+}
+
+/// A given-up request that lands later: with the settings changed since,
+/// they go out once more, whether it landed ok or with an error (the row
+/// may hold its older value either way); over unchanged settings, an ok
+/// landing with nothing going out was the save; anything else asks nothing.
+#[test]
+fn a_late_answer_resends_changed_settings_and_confirms_unchanged_ones() {
+    for (landed_ok, changed_since, busy, want) in [
+        (true, true, false, LateAnswer::Resend),
+        (true, true, true, LateAnswer::Resend),
+        (false, true, false, LateAnswer::Resend),
+        (false, true, true, LateAnswer::Resend),
+        (true, false, false, LateAnswer::Saved),
+        (true, false, true, LateAnswer::Nothing),
+        (false, false, false, LateAnswer::Nothing),
+        (false, false, true, LateAnswer::Nothing),
+    ] {
+        assert_eq!(
+            late_answer(landed_ok, changed_since, busy),
+            want,
+            "landed_ok {landed_ok}, changed_since {changed_since}, busy {busy}"
+        );
+    }
 }

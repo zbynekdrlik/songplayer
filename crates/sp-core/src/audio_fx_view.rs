@@ -234,6 +234,30 @@ pub fn dragged(band: &EqBand, x: f64, y: f64, width: f64, height: f64) -> EqBand
     }
 }
 
+/// Where a drag of `band`'s handle took hold: the pointer's (`x`, `y`) less
+/// the handle's centre ([`handle_xy`]). The grip reaches well around the
+/// dot, so a drag moves the band BY the pointer's travel ([`dragged_from`]),
+/// never makes it jump to the pointer (live audio: a tap off the centre
+/// would change the sound).
+pub fn grab_offset(band: &EqBand, x: f64, y: f64, width: f64, height: f64) -> (f64, f64) {
+    let (hx, hy) = handle_xy(band, width, height);
+    (x - hx, y - hy)
+}
+
+/// `band` dragged with the pointer at (`x`, `y`), held at `grab`
+/// ([`grab_offset`]): [`dragged`] at the point the handle's centre is
+/// carried to.
+pub fn dragged_from(
+    band: &EqBand,
+    grab: (f64, f64),
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> EqBand {
+    dragged(band, x - grab.0, y - grab.1, width, height)
+}
+
 /// One band's own curve (its filter alone, no volume) as an SVG path in a
 /// `width` × `height` box; a band switched off draws none.
 pub fn band_path(band: &EqBand, width: f64, height: f64, points: usize) -> String {
@@ -247,11 +271,11 @@ pub fn band_path(band: &EqBand, width: f64, height: f64, points: usize) -> Strin
     curve_path(&alone, width, height, points)
 }
 
-/// The whole playlist's curve closed down to the 0 dB line: the soft fill
-/// under (or over) it.
-pub fn fill_path(fx: &PlaylistFx, width: f64, height: f64, points: usize) -> String {
+/// The whole playlist's `curve` (as [`curve_path`] drew it) closed down to
+/// the 0 dB line: the soft fill under (or over) it. It takes the drawn
+/// curve, so a drag computes the curve once.
+pub fn fill_path(curve: &str, width: f64, height: f64) -> String {
     let zero = db_y(0.0, height);
-    let curve = curve_path(fx, width, height, points);
     format!("{curve} L{width:.1} {zero:.1} L0.0 {zero:.1} Z")
 }
 
