@@ -418,7 +418,8 @@ struct Stats {
     draw: Window,
     send: Window,
     send_at: Window,
-    /// #279 P0: each sent boundary's upload volume (`upload::Uploads`).
+    /// #279 P0: each compose's upload volume, whatever its send
+    /// (`upload::Uploads`).
     uploads: upload::Uploads,
     late: u64,
     vblank_output: Option<String>,

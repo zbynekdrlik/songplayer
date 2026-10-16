@@ -116,6 +116,8 @@ fn two_warp_devices_answer_every_step() {
 fn the_listed_basic_render_driver_answers_every_step_the_way_probe_gpu_runs() {
     // windows-latest has no GPU, so `probe_gpu`'s device path (an explicit
     // DXGI adapter, D3D_DRIVER_TYPE_UNKNOWN) runs on the Basic Render Driver.
+    // Only the path is the same: A is BGRA here, where `probe_gpu` makes it
+    // with the video API (whether this driver makes that is not proven).
     let adapters = sp_gpu::adapters().expect("DXGI lists its adapters");
     let index = basic_render_driver(&adapters);
     let probe = sp_gpu::probe_on_listed_adapter(index).unwrap_or_else(|e| {
