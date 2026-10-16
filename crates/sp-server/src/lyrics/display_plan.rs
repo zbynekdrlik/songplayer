@@ -41,8 +41,11 @@
 //!    it leaves [`HOLD_TAIL_MS`] after its sung end instead.
 //!
 //! #280: every source line is first read without its parenthesised asides
-//! (`display_plan_asides.rs`), so the grouping, the char limit and the shown
-//! text all see the shorter line.
+//! (`display_plan_asides.rs`), then without its bare interjections
+//! (`display_plan_interjections.rs`): a line that is only `Oh.` / `Yeah.`
+//! leaves the plan, and the previous line holds through its time. So the
+//! grouping, the char limit and the shown text all see the shorter lines.
+//! A display line's `src_range` still counts in the track's own lines.
 //!
 //! The dashboard karaoke view (`LyricsState::update`) keeps the raw track and
 //! its word timing. Only the wall and the Presenter read this plan. The
@@ -56,6 +59,9 @@ use crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE;
 
 #[path = "display_plan_asides.rs"]
 mod asides;
+
+#[path = "display_plan_interjections.rs"]
+mod interjections;
 
 /// The most a `Song` line appears on the wall before it is sung, so the room
 /// can pre-read it. Only into a pause of [`SUSTAIN_MARGIN_MS`] after the
@@ -165,7 +171,9 @@ pub struct DisplayLine {
     /// after the last line.
     pub hide_ms: u64,
     /// The indices of the source lines (in `LyricsTrack::lines`) this line
-    /// shows.
+    /// shows, from its first shown line to its last. A line left out (#280,
+    /// only interjections) between them is in the range; one between two
+    /// display lines is in none.
     pub src_range: Range<usize>,
 }
 
@@ -207,11 +215,12 @@ impl DisplayPlan {
     }
 }
 
-/// Turn a track's sung lines into its display lines under `profile`: group
-/// them into sentences, then schedule (see the module docs).
+/// Turn a track's sung lines into its display lines under `profile`: take
+/// the lines the wall shows ([`shown_lines`]), group them into sentences,
+/// then schedule (see the module docs).
 pub fn build_plan(lines: &[LyricsLine], profile: DisplayProfile) -> Vec<DisplayLine> {
-    // #280: the wall and the Presenter leave out the parenthesised asides.
-    let shown: Vec<LyricsLine> = lines.iter().map(asides::without_asides).collect();
+    // The index in the track of each shown line, and the line as shown.
+    let (kept, shown): (Vec<usize>, Vec<LyricsLine>) = shown_lines(lines).into_iter().unzip();
     let lines = &shown[..];
     let groups = group_lines(lines);
     let spans = schedule(lines, &groups, profile);
@@ -229,9 +238,20 @@ pub fn build_plan(lines: &[LyricsLine], profile: DisplayProfile) -> Vec<DisplayL
                     .fold(None, |sk, line| join_sk(sk, line.sk.clone())),
                 show_ms,
                 hide_ms,
-                src_range: group,
+                src_range: kept[group.start]..kept[group.end - 1] + 1,
             }
         })
+        .collect()
+}
+
+/// The source lines the wall shows, each with its index in the track (#280):
+/// read without the parenthesised asides, then without the bare
+/// interjections; a line that is only interjections is left out.
+fn shown_lines(lines: &[LyricsLine]) -> Vec<(usize, LyricsLine)> {
+    lines
+        .iter()
+        .enumerate()
+        .map(|(i, line)| (i, asides::without_asides(line)))
         .collect()
 }
 
