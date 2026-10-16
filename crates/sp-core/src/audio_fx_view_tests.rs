@@ -3,9 +3,10 @@
 //! Wired via `#[cfg(test)] #[path = "audio_fx_view_tests.rs"] mod tests;`.
 
 use super::{
-    BOX_H, BOX_W, CURVE_POINTS, DB_GRID, FREQ_GRID, SLIDER_STEPS, WHEEL_Q_FACTOR, band_path,
-    display_order, dragged, fill_path, freq_label, freq_slider, gain_label, handle_xy, q_label,
-    q_slider, slider_freq, slider_q, snap_freq, snap_gain, snap_q, to_box, wheel_q, x_freq, y_db,
+    BOX_H, BOX_W, CURVE_POINTS, DB_GRID, FREQ_GRID, Q_STEP, SLIDER_STEPS, WHEEL_Q_FACTOR,
+    band_path, display_order, dragged, fill_path, freq_label, freq_slider, gain_label, handle_xy,
+    q_label, q_slider, slider_freq, slider_q, snap_freq, snap_gain, snap_q, to_box, wheel_q,
+    x_freq, y_db,
 };
 use crate::audio_fx::{
     BandKind, CURVE_DB_MAX, CURVE_DB_MIN, DEFAULT_Q, EqBand, PlaylistFx, curve_path, db_y,
@@ -241,6 +242,7 @@ fn the_q_slider_is_a_log_scale() {
 /// held to the Q limits.
 #[test]
 fn the_wheel_steps_q_by_a_tenth_per_notch() {
+    assert_eq!(Q_STEP, 0.01);
     for (q, delta_y, want) in [
         (1.0, -100.0, 1.1),
         (1.0, 100.0, 0.91),
@@ -249,6 +251,23 @@ fn the_wheel_steps_q_by_a_tenth_per_notch() {
         (1.0, 0.0, 1.0),
         (9.5, -100.0, 10.0),
         (0.11, 100.0, 0.1),
+    ] {
+        close(wheel_q(q, delta_y), want, 1e-12);
+    }
+}
+
+/// #278 review round 1: a turn too small to reach the next 0,01 (a
+/// touchpad's few pixels, a percent-based scroll) still moves one step its
+/// way — Q never sticks — and stays inside the limits.
+#[test]
+fn a_small_wheel_turn_still_moves_q_one_step() {
+    for (q, delta_y, want) in [
+        (1.0, -4.0, 1.01),
+        (1.0, 4.0, 0.99),
+        (0.2, -10.0, 0.21),
+        (DEFAULT_Q, -4.0, 0.72),
+        (10.0, -4.0, 10.0),
+        (0.1, 4.0, 0.1),
     ] {
         close(wheel_q(q, delta_y), want, 1e-12);
     }

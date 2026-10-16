@@ -12,6 +12,11 @@
 /// The least time between the starts of two sends, ms.
 pub const THROTTLE_MS: f64 = 50.0;
 
+/// How long the panel waits for a send's answer, ms. A send not answered
+/// by then is given up ([`SendGate::landed`], "server neodpovedá"), so a
+/// server that never answers can never hold the gate in flight for good.
+pub const ANSWER_TIMEOUT_MS: u32 = 10_000;
+
 /// What the panel does now.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SendStep {

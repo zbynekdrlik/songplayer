@@ -24,6 +24,8 @@ pub const SLIDER_STEPS: u32 = 1000;
 /// Q's factor per wheel notch over a band's handle (a notch is 100 of the
 /// wheel's `deltaY`; up narrows).
 pub const WHEEL_Q_FACTOR: f64 = 1.1;
+/// The step Q is shown and sent in.
+pub const Q_STEP: f64 = 0.01;
 
 /// The frequencies the grid marks, with their labels.
 pub const FREQ_GRID: [(f64, &str); 10] = [
@@ -163,9 +165,18 @@ pub fn slider_q(position: u32) -> f64 {
 
 /// Q after a wheel turn of `delta_y` over a band's handle:
 /// [`WHEEL_Q_FACTOR`] per notch, up (a negative `deltaY`) narrows, snapped.
+/// A turn too small to reach the next 0,01 (a touchpad, a browser's
+/// percent-based scrolling) still moves one 0,01 step its way, so Q never
+/// sticks; held to the Q limits.
 pub fn wheel_q(q: f64, delta_y: f64) -> f64 {
-    let notches = -delta_y / 100.0;
-    snap_q(q * WHEEL_Q_FACTOR.powf(notches))
+    let scaled = snap_q(q * WHEEL_Q_FACTOR.powf(-delta_y / 100.0));
+    if delta_y < 0.0 {
+        scaled.max(snap_q(q + Q_STEP))
+    } else if delta_y > 0.0 {
+        scaled.min(snap_q(q - Q_STEP))
+    } else {
+        scaled
+    }
 }
 
 /// Where a band's handle sits in a `width` × `height` box: its frequency

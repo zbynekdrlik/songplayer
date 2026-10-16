@@ -86,18 +86,24 @@ separate one-song playlist in mode Single).
     handle per band at `handle_xy` (a high-/low-pass on the 0 dB line).
   - **A handle's drag**: `pointerdown` captures the pointer on the circle
     (`set_pointer_capture`), `pointermove` maps the pointer into the box
-    (`to_box` over the SVG's own `getBoundingClientRect`) and sets the band
+    (`to_box` over the SVG's own `getBoundingClientRect`: the SVG has NO
+    border or padding, its frame is an `outline` drawn inside, else the
+    mapping is off by the border and a level drag reads −0,1 dB) and sets
+    the band
     to `dragged(..)` (frequency always, gain only for a shelf / peak, both
     snapped); `pointerup` / `pointercancel` / `lostpointercapture` end it
     once (`finish`). The wheel over a handle: `wheel_q` (×1,1 per notch of
-    100, up narrows; a direct, non-passive listener, so `preventDefault`
-    keeps the page still).
+    100, up narrows, and at least one 0,01 step per event so a touchpad's
+    few pixels never stick; a direct, non-passive listener, so
+    `preventDefault` keeps the page still).
   - **The cards** go by frequency, a tie by iemmixer's type rank
     (`display_order`), numbered like their handles. The order is taken at
     the load, an add, a remove and every gesture's end (`EqEdit::finish`),
     NEVER during a drag; cards and handles are `<For>`s keyed by the band
     id, so a new order MOVES a card (the same element, the spec pins it)
-    and an edit re-creates nothing. A card reads its band through a `Memo`.
+    and an edit re-creates nothing. A moved card's focused control loses
+    the focus (the browser re-inserts it), so `finish` gives it back in
+    the next animation frame. A card reads its band through a `Memo`.
     Every `<option>` carries a reactive `selected` (the #233 trap).
   - **Sliders**: frequency and Q are log sliders over 0…1000
     (`freq_slider`/`slider_freq`, `q_slider`/`slider_q`); gain and volume
@@ -106,7 +112,9 @@ separate one-song playlist in mode Single).
     `q_label` "Q 0,71"); what is shown is what is sent (`snap_freq`: three
     significant digits, `snap_gain` 0,1 dB, `snap_q` 0,01). A double-click
     on a row (`band-<field>-value`, `playlist-audio-gain-value`) resets
-    that value to the type's default (the volume to 0 dB).
+    that value to the type's default (the volume to 0 dB); the greyed gain
+    row of a high-/low-pass resets nothing (it keeps the gain it does not
+    use for a later shelf or peak).
   - **Live, no "Použiť"**: every change is `PUT …/audio` of the settings
     AS THEY ARE at the send. The rule is the pure
     `sp_core::audio_fx_send::SendGate` (`changed` / `flush` / `landed` /
@@ -115,7 +123,10 @@ separate one-song playlist in mode Single).
     flight, a gesture's end (`finish`: a release, a switch, a type, a reset,
     an add, a remove) sends at once. A slider commits on `pointerup` AND
     `change` (#200: never on `change` alone); a lost release costs nothing,
-    the armed timer still sends the last value. `validate` runs before
+    the armed timer still sends the last value. An answer is awaited
+    `ANSWER_TIMEOUT_MS` (10 s), then given up (`landed`, "Uloženie
+    zlyhalo: server neodpovedá"), so a server that never answers cannot
+    hold the gate in flight. `validate` runs before
     every send (`FxError::sk` on the status line). Status line: "Ukladám…"
     while busy, then "Uložené", or "Uloženie zlyhalo: …".
   - The playing song follows each PUT through the DSP's 50 ms crossfade;
@@ -136,15 +147,20 @@ separate one-song playlist in mode Single).
   asserts the visible labels, the cards' `data-*` numbers and the PUT
   bodies the mock received). Mock knobs `/__mock/playlist-audio{,-reset,-set,-delay,-put-delay}`:
   `/__mock/playlist-audio` returns `{puts: [{id, body, at, done}], last,
-  stored}` (arrival / answer on the mock's clock: the throttle is checked
-  as ≥ 40 ms between arrivals, all but the flushed last; with
+  stored}` (arrival / answer on the mock's clock: the drag test holds the
+  button down after 20 quick moves and needs the latest position on the
+  server BEFORE the release, in fewer than 20 PUTs ≥ 40 ms apart; with
   `-put-delay` every PUT starts after the one before was answered); the
   mock answers PUT 204 and 400 with the server's texts.
 - Post-deploy `e2e/post-deploy-playlist-audio.spec.ts` (SNV; not in PP's
-  subset): reads the first playlist's stored sound, checks the panel shows
-  it (the volume label, one card per band by its `data-index` with its
-  numbers, one handle per band), that opening it saved nothing, then PUTs
-  the settings UNCHANGED through the route (#278: the live panel has no
-  "save unchanged" action, and any edit there would be heard) and reads
-  the generation moved by one. Never write other values on a box from a
-  gate.
+  subset), the owner's own path (#278 review round 1): picks a playlist
+  that is not decoding (health `transport`) with room for a band, checks
+  the panel shows its stored sound (the volume label, one card per band by
+  its `data-index` with its numbers, one handle per band) and that opening
+  it saved nothing; then "+ Pásmo (zvon)" through the panel (a 1 kHz 0 dB
+  peak: a UNITY filter, the RBJ peak at 0 dB has b = a, so its TDF-II
+  stage passes every sample) must reach the row at once (generation +1),
+  and its "Odstrániť" must bring the row back exactly as stored
+  (generation +2); `finally` PUTs the stored sound back if the row
+  differs. That unity peak is the only other value a gate may ever write
+  on a box: never any audible one.

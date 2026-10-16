@@ -113,7 +113,19 @@ pub(crate) fn band_card(edit: EqEdit, id: u64) -> impl IntoView {
                 edit.edit_band(id, |b| b.gain_db = snap_gain(db), false);
             }
         },
-        move || edit.edit_band(id, |b| b.gain_db = default_band(b.kind).gain_db, true),
+        // A high-/low-pass keeps the gain it does not use (for a later shelf
+        // or peak): its greyed row resets nothing.
+        move || {
+            edit.edit_band(
+                id,
+                |b| {
+                    if b.kind.uses_gain() {
+                        b.gain_db = default_band(b.kind).gain_db;
+                    }
+                },
+                true,
+            )
+        },
         edit,
     );
     let q = param_row(

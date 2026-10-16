@@ -271,7 +271,7 @@ test("a new high-pass starts at 80 Hz and is sent at once, with no button (#278)
   ]);
 });
 
-test("dragging a peak's handle moves its frequency and gain live; the release is flushed (#278)", async ({
+test("dragging a peak's handle moves its frequency and gain live, throttled, before the release (#278)", async ({
   page,
   request,
 }) => {
@@ -285,13 +285,35 @@ test("dragging a peak's handle moves its frequency and gain live; the release is
   const cyBefore = Number(await handle.locator("circle").getAttribute("cy"));
   const sentBefore = (await puts(request)).length;
 
-  await dragHandle(page, handle, 150, -40, 12);
+  // 20 quick moves with the button still down.
+  const from = await dotCentre(page, handle);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x + 150, from.y - 40, { steps: 20 });
 
-  // The release flushed the last position: the last PUT IS the card.
+  // Live: with the button STILL down, the server already has the latest
+  // position (the throttle's timer sends it, no release needed).
+  const held = await cardBand(card);
+  expect(held.kind).toBe("peak");
+  expect(held.freq_hz).toBeGreaterThan(1000);
+  expect(held.gain_db).toBeGreaterThan(2);
+  await expect.poll(() => lastPut(request), { timeout: 1000 }).toEqual({
+    gain_db: 0,
+    eq: [held],
+  });
+  // Throttled: 20 changes, far fewer PUTs, each starting ≥ 50 ms after the
+  // one before (40 ms: the mock's clock reads arrivals).
+  const live = (await puts(request)).slice(sentBefore);
+  expect(live.length).toBeGreaterThanOrEqual(1);
+  expect(live.length, "20 moves, throttled").toBeLessThan(20);
+  for (let i = 1; i < live.length; i++) {
+    expect(live[i].at - live[i - 1].at, `PUT ${i}`).toBeGreaterThanOrEqual(40);
+  }
+  await page.mouse.up();
+
+  // The release: the last PUT is still the card's band.
   const final = await cardBand(card);
-  expect(final.kind).toBe("peak");
-  expect(final.freq_hz).toBeGreaterThan(1000);
-  expect(final.gain_db).toBeGreaterThan(2);
+  expect(final).toEqual(held);
   await expect.poll(() => lastPut(request), { timeout: 1000 }).toEqual({
     gain_db: 0,
     eq: [final],
@@ -302,14 +324,6 @@ test("dragging a peak's handle moves its frequency and gain live; the release is
   expect(Number(await handle.locator("circle").getAttribute("cx"))).toBeGreaterThan(cxBefore + 50);
   expect(Number(await handle.locator("circle").getAttribute("cy"))).toBeLessThan(cyBefore - 10);
   await expect(dPath).not.toHaveAttribute("d", flat ?? "");
-  // Live during the drag, throttled: more than the release's one PUT, and
-  // every PUT but the flushed last starts ≥ 50 ms after the one before it
-  // (40 ms: the mock's clock reads arrivals).
-  const sent = (await puts(request)).slice(sentBefore);
-  expect(sent.length).toBeGreaterThan(1);
-  for (let i = 1; i < sent.length - 1; i++) {
-    expect(sent[i].at - sent[i - 1].at, `PUT ${i}`).toBeGreaterThanOrEqual(40);
-  }
   await expect(page.getByTestId("playlist-audio-status")).toHaveText("Uložené");
 });
 
@@ -351,7 +365,7 @@ test("a high-pass handle moves on its frequency only (#278)", async ({ page, req
   await expect.poll(() => lastPut(request), { timeout: 1000 }).toEqual({ gain_db: 0, eq: [final] });
 });
 
-test("a gain slider moved with the mouse is sent within a second (#278)", async ({
+test("every slider moved with the mouse is sent within a second, no button (#278)", async ({
   page,
   request,
 }) => {
@@ -364,6 +378,17 @@ test("a gain slider moved with the mouse is sent within a second (#278)", async 
   expect(final.gain_db).toBeGreaterThan(3);
   await expect.poll(() => lastPut(request), { timeout: 1000 }).toEqual({ gain_db: 0, eq: [final] });
   await expect(card.getByTestId("band-gain-value")).toHaveText(gainLabel(final.gain_db));
+  // The log frequency slider: 1 kHz sits at 0.566 of it; up to ~85 %.
+  await dragSlider(page, card.getByTestId("band-freq"), 0.566, 0.85);
+  const higher = await cardBand(card);
+  expect(higher.freq_hz).toBeGreaterThan(3000);
+  await expect.poll(() => lastPut(request), { timeout: 1000 }).toEqual({ gain_db: 0, eq: [higher] });
+  await expect(card.getByTestId("band-freq-value")).toHaveText(freqLabel(higher.freq_hz));
+  // The log Q slider: Q 1 sits in its middle; down to ~20 % (a wide bell).
+  await dragSlider(page, card.getByTestId("band-q"), 0.5, 0.2);
+  const wider = await cardBand(card);
+  expect(wider.q).toBeLessThan(0.6);
+  await expect.poll(() => lastPut(request), { timeout: 1000 }).toEqual({ gain_db: 0, eq: [wider] });
   // The volume slider too.
   await dragSlider(page, page.getByTestId("playlist-audio-gain"), 30 / 42, 0.3);
   await expect
@@ -420,6 +445,18 @@ test("a type change takes the type's frequency and Q and keeps the gain (#278)",
   await expect.poll(() => lastPut(request), { timeout: 1000 }).toEqual({
     gain_db: 0,
     eq: [{ kind: "high_shelf", freq_hz: 8000, gain_db: moved.gain_db, q: Math.SQRT1_2, enabled: true }],
+  });
+  // A high-pass keeps the gain it does not use; a double-click on its
+  // greyed gain row resets nothing, so a later shelf gets it back.
+  await card.getByTestId("band-kind").selectOption("high_pass");
+  await expect(card.getByTestId("band-gain-value")).toHaveText("—");
+  await card.getByTestId("band-gain-value").dblclick();
+  await card.getByTestId("band-kind").selectOption("low_shelf");
+  await expect(card.getByTestId("band-freq-value")).toHaveText("120 Hz");
+  await expect(card.getByTestId("band-gain-value")).toHaveText(gainLabel(moved.gain_db));
+  await expect.poll(() => lastPut(request), { timeout: 1000 }).toEqual({
+    gain_db: 0,
+    eq: [{ kind: "low_shelf", freq_hz: 120, gain_db: moved.gain_db, q: Math.SQRT1_2, enabled: true }],
   });
 });
 

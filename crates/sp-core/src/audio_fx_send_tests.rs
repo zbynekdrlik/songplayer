@@ -4,15 +4,16 @@
 //! each listed mutant against these scripts.
 //! Wired via `#[cfg(test)] #[path = "audio_fx_send_tests.rs"] mod tests;`.
 
-use super::{SendGate, SendStep, THROTTLE_MS};
+use super::{ANSWER_TIMEOUT_MS, SendGate, SendStep, THROTTLE_MS};
 
 /// The clock starts away from 0 so a time that is wrongly multiplied or
 /// subtracted shows.
 const T: f64 = 1000.0;
 
 #[test]
-fn the_throttle_is_fifty_ms() {
+fn the_throttle_is_fifty_ms_and_an_answer_is_awaited_ten_seconds() {
     assert_eq!(THROTTLE_MS, 50.0);
+    assert_eq!(ANSWER_TIMEOUT_MS, 10_000);
 }
 
 /// Nothing changed: nothing is sent, whatever wakes the gate.

@@ -29,13 +29,16 @@
 
 use std::time::Duration;
 
+use futures::future::{Either, select};
+use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
 use serde::Deserialize;
 use sp_core::audio_fx::{
     BandKind, EqBand, GAIN_MAX_DB, GAIN_MIN_DB, MAX_BANDS, PlaylistFx, default_band, validate,
 };
-use sp_core::audio_fx_send::{SendGate, SendStep};
+use sp_core::audio_fx_send::{ANSWER_TIMEOUT_MS, SendGate, SendStep};
 use sp_core::audio_fx_view::{display_order, gain_label, snap_gain};
+use wasm_bindgen::JsCast;
 
 use crate::api;
 use crate::components::player::now_ms;
@@ -154,7 +157,21 @@ impl EqEdit {
     /// take their order.
     pub(crate) fn finish(self) {
         self.step(SendGate::flush);
-        self.resort();
+        // A card that moves is re-inserted, and the browser takes the focus
+        // from a control inside it (a slider or a type chosen with the
+        // keyboard): give it back once the cards have moved.
+        let focused = document()
+            .active_element()
+            .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok());
+        if self.resort()
+            && let Some(el) = focused
+        {
+            request_animation_frame(move || {
+                if el.is_connected() {
+                    let _ = el.focus();
+                }
+            });
+        }
     }
 
     /// Add a band of `kind` with its type's defaults (none past
@@ -191,17 +208,19 @@ impl EqEdit {
         self.finish();
     }
 
-    /// The cards' order from the bands as they are now.
-    fn resort(self) {
+    /// The cards' order from the bands as they are now; whether it changed.
+    fn resort(self) -> bool {
         let order = self.fx.with_untracked(|f| display_order(&f.eq));
         let ids = self.ids.get_untracked();
         let order: Vec<u64> = order
             .into_iter()
             .filter_map(|i| ids.get(i).copied())
             .collect();
-        if self.order.with_untracked(|current| *current != order) {
+        let changed = self.order.with_untracked(|current| *current != order);
+        if changed {
             self.order.set(order);
         }
+        changed
     }
 
     /// Run one decision of the send gate and carry out its step. `try_*`:
@@ -238,7 +257,13 @@ impl EqEdit {
         }
         let path = format!("/api/v1/playlists/{}/audio", self.playlist_id);
         leptos::task::spawn_local(async move {
-            let result = api::put_json_empty(&path, &fx).await;
+            // An answer that never comes must not hold the gate in flight.
+            let put = Box::pin(api::put_json_empty(&path, &fx));
+            let give_up = Box::pin(TimeoutFuture::new(ANSWER_TIMEOUT_MS));
+            let result = match select(put, give_up).await {
+                Either::Left((answer, _)) => answer,
+                Either::Right(_) => Err("server neodpovedá".to_string()),
+            };
             self.step(SendGate::landed);
             let busy = self.gate.try_with_value(SendGate::busy).unwrap_or(false);
             let text = match result {
@@ -378,7 +403,7 @@ pub fn PlaylistAudio(playlist_id: i64) -> impl IntoView {
                                 {volume_row(edit)}
                                 {eq_curve(edit)}
                                 <div class="curve-legend">
-                                    "Bod pásma ťahaj myšou: doľava a doprava frekvencia, hore a dole zisk; koliesko nad bodom mení Q. Dvojklik na hodnotu ju vráti na predvolenú. Každá zmena sa hneď uloží a počuť ju."
+                                    "Bod pásma ťahaj myšou: doľava a doprava frekvencia, hore a dole zisk; koliesko nad bodom mení Q. Dvojklik na hodnotu ju vráti na predvolenú. Každá zmena sa okamžite uloží a hneď ju počuť."
                                 </div>
                                 <div class="playlist-audio-bands">
                                     <For

@@ -382,14 +382,18 @@ body {
 .kind-peak { --eq-kind: #ff9f43; }
 .kind-high_shelf { --eq-kind: #ff6b6b; }
 .kind-low_pass { --eq-kind: #a06cd5; }
-/* #278: the curve takes the card's width and keeps the 800x300 box. */
+/* #278: the curve takes the card's width and keeps the 800x300 box. No
+   border or padding: a handle's drag maps the pointer over the SVG's own
+   box (getBoundingClientRect), which a border would widen; the frame is an
+   outline drawn inside it. */
 .playlist-audio-curve {
     display: block;
     width: 100%;
     height: auto;
     aspect-ratio: 800 / 300;
     background: var(--bg-input);
-    border: 1px solid var(--border);
+    outline: 1px solid var(--border);
+    outline-offset: -1px;
     border-radius: 4px;
     user-select: none;
     -webkit-user-select: none;
