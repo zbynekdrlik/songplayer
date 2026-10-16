@@ -5,7 +5,7 @@
 
 use sp_core::audio_fx::{BandKind, EqBand, PlaylistFx, response_db};
 
-use super::{FX_RAMP_FRAMES, FxProcessor, db_to_gain};
+use super::{FX_RAMP_FRAMES, FxProcessor, db_to_gain, warm_frames};
 
 const RATE: u32 = 48_000;
 
@@ -370,4 +370,12 @@ fn an_eq_change_warms_the_new_filters_on_exactly_the_last_300_ms() {
     for (i, (got, want)) in tail.iter().zip(want).enumerate().skip(2400 * 2) {
         assert_eq!(got, want, "sample {i} after the change");
     }
+}
+
+/// #278: the warm-up window is 300 ms of frames at the stream's rate.
+#[test]
+fn the_warm_up_holds_300_ms_of_frames() {
+    assert_eq!(warm_frames(48_000), 14_400);
+    assert_eq!(warm_frames(44_100), 13_230);
+    assert_eq!(warm_frames(96_000), 28_800);
 }
