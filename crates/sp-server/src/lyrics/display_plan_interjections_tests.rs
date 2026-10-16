@@ -1,8 +1,8 @@
 //! Tests for #280's interjection rule, through `build_plan` (what the wall
 //! and the Presenter get). The lines are the census's real ones (SNV,
 //! 16.10.2026, design 6223125533) and the #217 fixtures' (design
-//! 6223162067); the pins were derived with a scratch Python model of the
-//! plan.
+//! 6223162067), plus cases built around their shapes; the pins were derived
+//! with a scratch Python model of the plan.
 
 use std::ops::Range;
 
@@ -80,7 +80,8 @@ fn a_line_whose_words_outside_its_asides_are_only_interjections_shows_them_all()
 
 #[test]
 fn a_line_with_no_english_is_never_left_out() {
-    // A dub subtitle line groups by its Slovak; the English is the judge.
+    // A sung line with no English groups by its Slovak; the English is the
+    // judge, and an empty one judges nothing.
     assert_eq!(wall("", Some("Áno.")), shows("", Some("Áno.")));
 }
 
@@ -216,7 +217,7 @@ fn a_left_out_sentence_end_replaces_the_soft_end_before_it() {
 #[test]
 fn a_line_that_ends_a_sentence_keeps_its_own_end() {
     // Nothing goes back to a line that ends a sentence, nor to an empty
-    // English (a dub line), nor from a left-out line with no sentence end.
+    // English, nor from a left-out line with no sentence end.
     let lines = [
         sung(0, 1_000, "No one higher than you.", "Nikto vyšší ako ty."),
         sung(1_200, 1_500, "Oh!", "Och!"),

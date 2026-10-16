@@ -41,7 +41,8 @@
 //!    it leaves [`HOLD_TAIL_MS`] after its sung end instead.
 //!
 //! #280: every source line is first read without its parenthesised asides
-//! (`display_plan_asides.rs`), then without its bare interjections
+//! (`display_plan_asides.rs`), then, in sung lyrics (a dub line keeps its
+//! words), without its bare interjections
 //! (`display_plan_interjections.rs`): a line that is only `Oh.` / `Yeah.`
 //! leaves the plan, the previous line holds through its time and takes its
 //! sentence end. So the grouping, the char limit and the shown text all see
