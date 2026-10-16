@@ -65,6 +65,7 @@ pub async fn put_playlist_audio(
     if let Err(e) = validate(&fx) {
         return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
     }
+    let _held = WRITES.lock().await;
     match set_playlist_fx(&state.pool, id, &fx).await {
         Ok(true) => {
             info!(
@@ -75,7 +76,6 @@ pub async fn put_playlist_audio(
                 "playlist audio set"
             );
             crate::playback::playlist_fx::global().set(id, fx);
-            let _held = WRITES.lock().await;
             StatusCode::NO_CONTENT.into_response()
         }
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
