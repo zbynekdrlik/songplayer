@@ -119,12 +119,18 @@ asides; design 6224751018 + the edge rule 6223162067). The owner saw "One
 more time we say" + "Oh." as "Ešte raz hovoríme Och." (16.10.2026); on SNV
 1353 EN lines (4.1 %) of 349 songs were only interjections.
 
-- `build_plan` takes `shown_lines`: each line without its asides (or with
-  only its brackets gone, above), then through `interjections::shown`, each
-  kept line with its index in the track. It groups and schedules the kept lines, then maps each group
-  back: `src_range = kept[first]..kept[last] + 1`. A left-out line inside
-  a group is in its range; one between two display lines is in none. No
-  production code reads `src_range`.
+- `build_plan` takes `shown_lines(lines, profile)`: each line without its
+  asides (or with only its brackets gone, above), then through
+  `interjections::shown`, each kept line with its index in the track. It
+  groups and schedules the kept lines, then maps each group back:
+  `src_range = kept[first]..kept[last] + 1`. A left-out line inside a group
+  is in its range; one between two display lines is in none. No production
+  code reads `src_range`.
+- **Sung lyrics only (`Song`).** A dub line (`Speech`) is read only without
+  its asides (review round 2): its EN is the whole sentences matched to it
+  by time (#184 H5, `dabing.md`), not its translation, so a "Yeah." there
+  must not take the dub's own SK subtitle off the wall
+  (`a_dub_line_keeps_its_words_whatever_its_english`).
 - **The EN line is the judge.** The EN set: `oh ooh oooh oh-oh whoa woah woo
   yeah yea hey ah aah uh mm mmm hmm na la ay ayy eh`, compared lower-case
   with the marks around a word stripped. `yes` is NOT in it: a sung "yes" is
@@ -132,16 +138,20 @@ more time we say" + "Oh." as "Ešte raz hovoríme Och." (16.10.2026); on SNV
 - **A line whose EN words are ALL interjections leaves the plan**, both
   languages, with its time. The previous display line holds through it by
   the hold rules (until the next line shows; a gap now over 8 s blanks the
-  wall). A line with NO EN words (a dub line) is never left out.
+  wall). A line with NO EN words is never left out.
 - **Its sentence end goes back to the line before it**
   (`interjections::hand_back`, review round 1): the last line kept takes
   the left-out line's final `. ! ? …`, EN and SK each, unless it ends a
   sentence itself or is empty, by the same `ended` as an end run inside a
   line. Without it "One more time we say" + "Oh." + "I still believe it."
   became ONE wall line lit 5 s before its second sentence was sung (the
-  #217 failure). The wall and the Presenter strip a line's final mark, so
-  the carried `.` is never seen; it only closes the sentence. 221's line
-  8 `for you. Let's go for the` ends in the `.` of its left-out line 9.
+  #217 failure). A carried EN end closes the sentence, so it ends a
+  display line, and the wall and the Presenter strip that final mark; a SK
+  end carried while the EN group goes on (EN `Oh,` / SK `Ó.`) shows
+  mid-line, as the raw SK had it. 221's line 8 `for you. Let's go for the`
+  ends in the `.` of its left-out line 9. Only a sentence end goes back: a
+  soft `, ; :` would put commas on the kept words mid-line, and it only
+  moves where an over-long sentence splits (review round 2, declined).
 - **Edges go only where a mark (`, . ; : ! ? …`, the asides' `GLUED`)
   separates them.**
   - The LONGEST leading run of set words whose last word carries a mark:
@@ -163,18 +173,20 @@ more time we say" + "Oh." as "Ešte raz hovoríme Och." (16.10.2026); on SNV
     not (221's `like you. Oh,`).
 - **SK follows only an EN cut:** at most as many SK words at that edge, each
   from `och ó o oh jé jej hej áno jeah yeah ach ah uh mm hm wow ou`, by the
-  same separation and two-word rule. So `áno` / `o` never go on their own
-  (`Yes, Lord` / `Áno, Pane` stays), and a line with no SK changes only EN.
+  same separation rule, down to ONE word (`MIN_KEPT_SK`, review round 2:
+  the EN cut already showed that edge to be separate, and the wall shows
+  the SK, so `Ó, slobodní` under `Oh, we are free` → `Slobodní`). So `áno` /
+  `o` never go on their own (`Yes, Lord` / `Áno, Pane` stays), and a line
+  with no SK changes only EN.
 - A line that followed a left-out capitalised `Oh,` keeps its own lower-case
   start (What A God `what a God, what a God.`), as every wall line that
   starts mid-sentence does (`find nobody no.`). A capital handed forward
-  needs a sentence-start notion the plan does not have; not done.
+  (when the last kept line ends a sentence) is cosmetic and outside the
+  design; not done, the main session's call.
 - **Kept as they are (review round 1, noted):** a lone punctuation token
   is a word outside the set, so it stops a run (`Oh , yeah` → `Oh ,`,
   `Oh - yeah` stays whole); a line with unpaired parentheses keeps
-  them (`We sing (oh,`). The two-word minimum on the Slovak follow keeps
-  `Ó, slobodní` whole under `Oh, we are free` → `We are free`: the main
-  session's call if the wall should drop that `Ó,` too.
+  them (`We sing (oh,`).
 - Display-only: NO `LYRICS_PIPELINE_VERSION` bump; the karaoke view keeps
   the raw track.
 - Tests: `display_plan_interjections_tests.rs` (the census lines and the
