@@ -164,6 +164,9 @@ more time we say" + "Oh." as "Ešte raz hovoríme Och." (16.10.2026); on SNV
   - Not cut: `Say whoa oh.`, `Oh Lord, you're beautiful` (no mark), and an
     interjection in the middle (`clean, yeah, I'm free indeed`).
   - The first word left takes a capital when the line's first word had one.
+    A capital raises the first letter OR DIGIT of a word (past quotes and
+    marks): a word that starts with a digit is left as it is (`Oh, 3rd day`
+    → `3rd day`, never `3Rd`; review round 4).
   - **The last word keeps its own sentence end, else takes the line's
     final sentence end** (`free indeed, yeah.` → `free indeed.`, `like you.
     Oh,` → `like you.`, `Is he worthy? Yeah.` → `Is he worthy?`). The
@@ -181,7 +184,8 @@ more time we say" + "Oh." as "Ešte raz hovoríme Och." (16.10.2026); on SNV
 - **A left-out line that BEGAN a sentence hands its capital on**
   (follow-up 1, supervisor): `shown_lines` tracks whether the next line
   begins a sentence (the first line does; then each line by its own
-  sentence end, `ends_sentence`). A left-out line that begins one gives
+  sentence end, `ends_sentence`, a kept line read AFTER its edge cut:
+  `like you. Oh,` ends in `.`). A left-out line that begins one gives
   the next line kept its EN and SK capitals, each language by its own
   (`interjections::capitals` / `with_capitals`), unless it ends its
   sentence itself (`Oh.`). What A God's `what a God, what a God.` and
@@ -315,7 +319,10 @@ one only together with the design record on #217.
   each line in `.`. Examples: `renderer.rs` `wall_track` / `two_line_track`,
   `dispatch_lyrics_tests.rs` `make_track`, `tests_hold.rs` `track`. The wall
   strips the period (`strip_display_punctuation`), but the karaoke WS sends
-  the raw text (`"alpha."`).
+  the raw text (`"alpha."`). And since #280 part 2 a `Song` test line made
+  only of interjections (`Hey!`, `Oh.`, `Yeah.`) leaves the plan: a chant
+  test needs a content word (`a_chant_of_short_sentences_falls_at_most_400_ms_behind`
+  chants `Sing!`).
 - **Dub subtitle tracks go through the same plan, as `Speech`.**
   `gemini-live-translate` tracks (#182/#184) are stored as the same
   `{youtube_id}_lyrics.json` (`dabing/subtitles_store.rs`, `StoredDubTrack`
