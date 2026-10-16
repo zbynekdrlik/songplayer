@@ -111,11 +111,11 @@ impl ProbeError {
     /// A crate error met inside a step (a shared helper's): its call and
     /// HRESULT when it has them.
     pub fn from_gpu(error: &GpuError) -> Self {
-        match error {
+        match *error {
             GpuError::Api { call, hresult } | GpuError::DeviceLost { call, hresult } => {
-                Self::failed(*call, *hresult)
+                Self::failed(call, hresult)
             }
-            GpuError::NoObject { call } => Self::refused(*call, "gave no object"),
+            GpuError::NoObject { call } => Self::refused(call, "gave no object"),
             GpuError::Timeout(_) => Self::refused("the GPU wait", "not done within the bound"),
             _ => Self::refused("the probe", "failed outside a Direct3D call"),
         }
