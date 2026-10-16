@@ -6,14 +6,14 @@ paths:
   - "crates/sp-server/src/api/playlist_audio*.rs"
   - "crates/sp-server/src/db/models_playlist_fx*.rs"
   - "crates/sp-server/src/db/mod_tests_v33.rs"
-  - "sp-ui/src/components/playlist_audio.rs"
+  - "sp-ui/src/components/playlist_audio*.rs"
   - "sp-ui/src/components/playlist_card.rs"
   - "e2e/mock-api.mjs"
   - "e2e/playlist-audio.spec.ts"
   - "e2e/post-deploy-playlist-audio.spec.ts"
 ---
 
-# A playlist's own volume + EQ (#242)
+# A playlist's own volume + EQ (#242; the panel rebuilt live, #278)
 
 The owner's ruling (#242): every playlist has its OWN volume (dB) and its
 OWN parametric EQ, set per playlist and per node on the Dashboard. No
@@ -58,29 +58,93 @@ separate one-song playlist in mode Single).
   is 400 `audio body: …`, a limit 400 with `FxError`'s text) → 204 with no
   body (`put_json_empty` on the dashboard); 404 for an unknown playlist,
   nothing written on any refusal.
-- **Dashboard, `sp-ui/src/components/playlist_audio.rs`**: the collapsed
-  "Zvuk playlistu" panel on the playlist card, under the Player. It loads
-  on first open and shows its fields ONLY once the load landed
+- **Dashboard (#278 rebuilt it; design comment 6221171333, the owner's
+  ROZHODNUTÉ 6220698978: "the EQ processes correctly, the UI is the
+  problem")**: the collapsed "Zvuk playlistu" panel on the playlist card,
+  under the Player, modelled on iemmixer's `iem-ui/src/components/eq_modal.rs`.
+  It loads on first open and shows its fields ONLY once the load landed
   ("Načítavam…" before: an edit made earlier was overwritten by the load,
-  CI run 37975959175; `/__mock/playlist-audio-delay` reproduces it);
-  "Použiť" validates with `sp_core::audio_fx::validate`
-  (Slovak `sk()` on the status line) and saves nothing before the load
-  landed. The band rows are rebuilt only when the band COUNT changes
-  (`Memo` of `eq.len()`); every field reads its band by index, so an edit
-  never re-creates the input under the operator (the Tab-focus test pins
-  it). Every `<option>` carries a reactive `selected` (the #233 trap).
+  CI run 37975959175; `/__mock/playlist-audio-delay` reproduces it).
+  - `playlist_audio.rs`: the state (`EqEdit`, all `Copy` handles: `fx`, a
+    band id per `fx.eq` entry in `ids`, the cards' `order`, the send gate,
+    the status), the volume row, "Pridať pásmo" (one button per type,
+    `playlist-audio-add-<kind>`), the status line. `playlist_audio_curve.rs`:
+    the SVG. `playlist_audio_band.rs`: one card.
+  - **Per-type defaults, ONE table** `sp_core::audio_fx::default_band`:
+    high-pass 80 Hz, low shelf 120 Hz, peak 1 kHz Q 1, high shelf 8 kHz,
+    low-pass 16 kHz, the rest Q 0,707, 0 dB, on. A type change is
+    `with_kind`: the new type's frequency and Q, the gain and on / off kept.
+    (Before #278 every new band was a 1 kHz peak: a high-pass made from it
+    cut at 1 kHz, the owner's measurement.)
+  - **The curve**: `viewBox` 800×300 (`audio_fx_view::BOX_W/BOX_H`), the
+    card's width, `aspect-ratio` kept, `preserveAspectRatio="none"`; the
+    box stays −36…+18 dB (`CURVE_DB_MIN/MAX`). Grid `FREQ_GRID` (20 Hz …
+    20 kHz) + `DB_GRID` (every 6 dB, the 0 dB line brighter); the summed
+    curve `curve_path` + its fill `fill_path` (closed to 0 dB); each
+    ENABLED band's own curve `band_path` (its filter alone, no volume; off
+    = `d=""`) in its type's colour (`--eq-kind` on `.kind-<name>`); one
+    handle per band at `handle_xy` (a high-/low-pass on the 0 dB line).
+  - **A handle's drag**: `pointerdown` captures the pointer on the circle
+    (`set_pointer_capture`), `pointermove` maps the pointer into the box
+    (`to_box` over the SVG's own `getBoundingClientRect`) and sets the band
+    to `dragged(..)` (frequency always, gain only for a shelf / peak, both
+    snapped); `pointerup` / `pointercancel` / `lostpointercapture` end it
+    once (`finish`). The wheel over a handle: `wheel_q` (×1,1 per notch of
+    100, up narrows; a direct, non-passive listener, so `preventDefault`
+    keeps the page still).
+  - **The cards** go by frequency, a tie by iemmixer's type rank
+    (`display_order`), numbered like their handles. The order is taken at
+    the load, an add, a remove and every gesture's end (`EqEdit::finish`),
+    NEVER during a drag; cards and handles are `<For>`s keyed by the band
+    id, so a new order MOVES a card (the same element, the spec pins it)
+    and an edit re-creates nothing. A card reads its band through a `Memo`.
+    Every `<option>` carries a reactive `selected` (the #233 trap).
+  - **Sliders**: frequency and Q are log sliders over 0…1000
+    (`freq_slider`/`slider_freq`, `q_slider`/`slider_q`); gain and volume
+    are native ranges over −30…+12 dB, step 0,1. Values shown in Slovak
+    (`freq_label` "1,25 kHz", `gain_label` "+2,5 dB" / "0,0 dB" / "−3,5 dB",
+    `q_label` "Q 0,71"); what is shown is what is sent (`snap_freq`: three
+    significant digits, `snap_gain` 0,1 dB, `snap_q` 0,01). A double-click
+    on a row (`band-<field>-value`, `playlist-audio-gain-value`) resets
+    that value to the type's default (the volume to 0 dB).
+  - **Live, no "Použiť"**: every change is `PUT …/audio` of the settings
+    AS THEY ARE at the send. The rule is the pure
+    `sp_core::audio_fx_send::SendGate` (`changed` / `flush` / `landed` /
+    `tick` → `Idle` / `Send` / `WaitMs`): at most one send per 50 ms
+    (`THROTTLE_MS`, from the last send's start), never a second request in
+    flight, a gesture's end (`finish`: a release, a switch, a type, a reset,
+    an add, a remove) sends at once. A slider commits on `pointerup` AND
+    `change` (#200: never on `change` alone); a lost release costs nothing,
+    the armed timer still sends the last value. `validate` runs before
+    every send (`FxError::sk` on the status line). Status line: "Ukladám…"
+    while busy, then "Uložené", or "Uloženie zlyhalo: …".
+  - The playing song follows each PUT through the DSP's 50 ms crossfade;
+    back-to-back PUTs queue in its `pending` (the latest wins).
 
 ## Tests
 
-- `audio_fx_tests.rs`, `models_playlist_fx_tests.rs`, `mod_tests_v33.rs`,
+- `audio_fx_tests.rs` (+ #278: the wire names, labels, `default_band`,
+  `with_kind`), `audio_fx_view_tests.rs` and `audio_fx_send_tests.rs`
+  (#278: every pin from a scratch model of the same formulas / the gate,
+  each listed mutant mapped to a killing test), `models_playlist_fx_tests.rs`, `mod_tests_v33.rs`,
   `playlist_fx_dsp_tests.rs` (measured gain of each band type against
   `response_db`, ±0.05 dB; ramp; crossfade formula; bit identity),
   `playlist_fx_tests.rs` (a change while a song plays reaches its next
   chunk), `playlist_audio_tests.rs` (through the real router).
-- Mock E2E `e2e/playlist-audio.spec.ts` (mock knobs
-  `/__mock/playlist-audio{,-reset,-set}`; the mock answers PUT 204 and 400
-  with the same texts).
+- Mock E2E `e2e/playlist-audio.spec.ts` (#278, viewport 1600×1000, REAL
+  mouse drags of the handles and sliders, the wheel, double-clicks; it
+  asserts the visible labels, the cards' `data-*` numbers and the PUT
+  bodies the mock received). Mock knobs `/__mock/playlist-audio{,-reset,-set,-delay,-put-delay}`:
+  `/__mock/playlist-audio` returns `{puts: [{id, body, at, done}], last,
+  stored}` (arrival / answer on the mock's clock: the throttle is checked
+  as ≥ 40 ms between arrivals, all but the flushed last; with
+  `-put-delay` every PUT starts after the one before was answered); the
+  mock answers PUT 204 and 400 with the server's texts.
 - Post-deploy `e2e/post-deploy-playlist-audio.spec.ts` (SNV; not in PP's
   subset): reads the first playlist's stored sound, checks the panel shows
-  it, saves it UNCHANGED (no audible change) and reads the generation moved
-  by one. Never write other values on a box from a gate.
+  it (the volume label, one card per band by its `data-index` with its
+  numbers, one handle per band), that opening it saved nothing, then PUTs
+  the settings UNCHANGED through the route (#278: the live panel has no
+  "save unchanged" action, and any edit there would be heard) and reads
+  the generation moved by one. Never write other values on a box from a
+  gate.
