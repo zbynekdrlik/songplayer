@@ -312,6 +312,15 @@ longer commands — redirect to a log file and read that instead.
 - `ProcessThread.IdealProcessor` is WRITE-ONLY in PowerShell — reading it throws
   per thread and empties the row set; use `BasePriority`/`CurrentPriority`/
   `ThreadState`/`WaitReason` only.
+- **Windows PowerShell 5.1 hands a top-level JSON ARRAY from `Invoke-RestMethod`
+  down the pipeline as ONE object** (#251, 16.10.2026). So
+  `Invoke-RestMethod …/ndi/health | Where-Object { $_.transport -eq 'Playing' }`
+  passes the whole array, and EVERY playlist reads as "playing". That false
+  finding was posted to the owner and retracted (#251 comment 6215383194).
+  Enumerate first, `(Invoke-RestMethod $u) | ForEach-Object { $_ } | Where-Object …`,
+  or `$r = Invoke-RestMethod $u; $r.Where({ $_.transport -eq 'Playing' })`.
+  Cross-check any surprising state against the SongPlayer log's per-playlist
+  `ndi: heartbeat … state=` lines.
 - Per-process page faults, the box-wide demand-zero rate and interrupts are the
   first counters to read when "everything is slow but the CPU is idle":
   `Get-Counter '\Process(*)\Page Faults/sec','\Memory\Demand Zero Faults/sec','\Processor(_Total)\Interrupts/sec' -SampleInterval 2 -MaxSamples 2`.
