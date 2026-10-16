@@ -4,6 +4,8 @@
 //! 6223162067); the pins were derived with a scratch Python model of the
 //! plan.
 
+use std::ops::Range;
+
 use sp_core::lyrics::LyricsLine;
 
 use super::super::{DisplayProfile, build_plan};
@@ -57,6 +59,23 @@ fn a_line_of_only_interjections_leaves_the_plan() {
 fn a_line_that_is_only_an_aside_interjection_leaves_the_plan() {
     // The asides go first ("(Oh)" → "Oh"), then the interjection rule.
     assert_eq!(wall("(Oh)", Some("(Och)")), None);
+    assert_eq!(wall("Oh (yeah)", Some("Ó (áno)")), None);
+}
+
+#[test]
+fn a_line_whose_words_outside_its_asides_are_only_interjections_shows_them_all() {
+    // Review round 1: "Oh (Hallelujah)" lost its "Oh" with the asides rule
+    // and then the whole line with this one, while "(Hallelujah)" alone
+    // shows "Hallelujah": the wall never blanks a sung aside. Such a line is
+    // read with only its brackets gone, by the same rules.
+    assert_eq!(
+        wall("Oh (Hallelujah)", Some("Ó (Aleluja)")),
+        shows("Oh Hallelujah", Some("Ó Aleluja"))
+    );
+    assert_eq!(
+        wall("Yeah, (I'm free)", Some("Áno, (som slobodný)")),
+        shows("I'm free", Some("Som slobodný"))
+    );
 }
 
 #[test]
@@ -82,11 +101,144 @@ fn the_owners_line_shows_its_sentence_alone() {
         DisplayProfile::Song,
     );
     assert_eq!(plan.len(), 1, "{plan:?}");
-    assert_eq!(plan[0].en, "One more time we say");
-    assert_eq!(plan[0].sk.as_deref(), Some("Ešte raz hovoríme"));
+    // The left-out line's sentence end stays: it goes back to the line
+    // before (the wall and the Presenter strip a line's final mark).
+    assert_eq!(plan[0].en, "One more time we say.");
+    assert_eq!(plan[0].sk.as_deref(), Some("Ešte raz hovoríme."));
     assert_eq!(plan[0].src_range, 0..1);
     // Now the last line: it leaves 3 s after its own sung end.
     assert_eq!((plan[0].show_ms, plan[0].hide_ms), (129_200, 135_400));
+}
+
+/// A wall line as (source lines, show, hide, EN, SK).
+type WallLine = (Range<usize>, u64, u64, String, Option<String>);
+
+/// Every wall line of `lines` (the Song profile).
+fn wall_lines(lines: &[LyricsLine]) -> Vec<WallLine> {
+    build_plan(lines, DisplayProfile::Song)
+        .into_iter()
+        .map(|d| (d.src_range, d.show_ms, d.hide_ms, d.en, d.sk))
+        .collect()
+}
+
+/// An expected wall line.
+fn wall_line(range: Range<usize>, show: u64, hide: u64, en: &str, sk: &str) -> WallLine {
+    (range, show, hide, en.to_string(), Some(sk.to_string()))
+}
+
+#[test]
+fn the_sentence_after_a_left_out_sentence_end_is_its_own_wall_line() {
+    // Review round 1: with "Oh." left out, "One more time we say" ran into
+    // the next sentence and lit it 5 s before it was sung.
+    let lines = [
+        sung(
+            130_000,
+            132_400,
+            "One more time we say",
+            "Ešte raz hovoríme",
+        ),
+        sung(133_000, 133_600, "Oh.", "Och."),
+        sung(134_200, 136_500, "I still believe it.", "Stále tomu verím."),
+    ];
+    assert_eq!(
+        wall_lines(&lines),
+        [
+            wall_line(
+                0..1,
+                129_200,
+                133_900,
+                "One more time we say.",
+                "Ešte raz hovoríme."
+            ),
+            wall_line(
+                2..3,
+                133_900,
+                139_500,
+                "I still believe it.",
+                "Stále tomu verím."
+            ),
+        ]
+    );
+    // The same with a "Yeah." in the middle of a chorus.
+    let lines = [
+        sung(10_000, 12_000, "We lift your name", "Vyvyšujeme tvoje meno"),
+        sung(12_300, 12_800, "Yeah.", "Áno."),
+        sung(
+            13_000,
+            15_000,
+            "Holy is the Lord forever.",
+            "Svätý je Pán naveky.",
+        ),
+    ];
+    assert_eq!(
+        wall_lines(&lines),
+        [
+            wall_line(
+                0..1,
+                9_200,
+                13_000,
+                "We lift your name.",
+                "Vyvyšujeme tvoje meno."
+            ),
+            wall_line(
+                2..3,
+                13_000,
+                18_000,
+                "Holy is the Lord forever.",
+                "Svätý je Pán naveky."
+            ),
+        ]
+    );
+}
+
+#[test]
+fn a_left_out_sentence_end_replaces_the_soft_end_before_it() {
+    let lines = [
+        sung(0, 1_500, "Holy, holy, holy,", "Svätý, svätý, svätý,"),
+        sung(1_700, 2_000, "Oh!", "Och!"),
+        sung(2_400, 4_000, "Lord God Almighty.", "Pán Boh Všemohúci."),
+    ];
+    assert_eq!(
+        wall_lines(&lines),
+        [
+            wall_line(0..1, 0, 2_400, "Holy, holy, holy!", "Svätý, svätý, svätý!"),
+            wall_line(
+                2..3,
+                2_400,
+                7_000,
+                "Lord God Almighty.",
+                "Pán Boh Všemohúci."
+            ),
+        ]
+    );
+}
+
+#[test]
+fn a_line_that_ends_a_sentence_keeps_its_own_end() {
+    // Nothing goes back to a line that ends a sentence, nor to an empty
+    // English (a dub line), nor from a left-out line with no sentence end.
+    let lines = [
+        sung(0, 1_000, "No one higher than you.", "Nikto vyšší ako ty."),
+        sung(1_200, 1_500, "Oh!", "Och!"),
+        sung(4_000, 5_000, "", "Áno."),
+        sung(5_200, 5_500, "Yeah.", "Áno."),
+        sung(8_000, 9_000, "We sing", "Spievame"),
+        sung(9_200, 9_500, "Oh,", "Ó,"),
+    ];
+    let texts: Vec<_> = wall_lines(&lines)
+        .into_iter()
+        .map(|(range, _, _, en, sk)| (range, en, sk))
+        .collect();
+    let line =
+        |range: Range<usize>, en: &str, sk: &str| (range, en.to_string(), Some(sk.to_string()));
+    assert_eq!(
+        texts,
+        [
+            line(0..1, "No one higher than you.", "Nikto vyšší ako ty."),
+            line(2..3, "", "Áno."),
+            line(4..5, "We sing", "Spievame"),
+        ]
+    );
 }
 
 #[test]
@@ -258,6 +410,12 @@ fn a_cut_that_would_leave_one_word_leaves_the_line_whole() {
         wall("Oh, God.", Some("Ó, Bože.")),
         shows("Oh, God.", Some("Ó, Bože."))
     );
+    // A Slovak line of only interjections under an English end cut: its
+    // first word is never part of the end run, so it stays whole.
+    assert_eq!(
+        wall("We sing, oh, yeah.", Some("Áno, áno.")),
+        shows("We sing.", Some("Áno, áno."))
+    );
 }
 
 #[test]
@@ -299,6 +457,11 @@ fn slovak_follows_an_english_cut_only() {
     assert_eq!(
         wall("I'm free, yeah.", Some("Áno, som slobodný, áno.")),
         shows("I'm free.", Some("Áno, som slobodný."))
+    );
+    // At the end too, at most as many words as the English lost there.
+    assert_eq!(
+        wall("I'm free, yeah.", Some("Som slobodný, áno, áno.")),
+        shows("I'm free.", Some("Som slobodný, áno."))
     );
     // Under the same separation rule.
     assert_eq!(

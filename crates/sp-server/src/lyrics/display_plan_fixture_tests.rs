@@ -483,7 +483,7 @@ fn fixture_source_lines_tile_the_plan_in_order() {
 #[test]
 fn fixture_lines_of_only_interjections_are_in_no_wall_line() {
     // #280: What A God's "Oh," / "Yeah." / "Oh." / "Oh," and 221's
-    // "Yeah. Yeah." / "Hey." each sit between two wall lines.
+    // "Yeah. Yeah." / "Hey." (its last line) are in no wall line.
     let left_out_per_fixture: [&[usize]; 3] = [&[11, 61, 127, 187], &[], &[9, 74]];
     for ((name, track), dropped) in fixtures().into_iter().zip(left_out_per_fixture) {
         let shown = Shown::of(&track);
@@ -574,6 +574,13 @@ fn fixture_interjections_at_a_line_edge_go_where_a_mark_separates_them() {
         // One word would be left: whole.
         (0, 77..78, "Oh, God.", "Ó, Bože."),
         (1, 41..42, "Let's dance.", "Poďme tancovať."),
+        // Line 9 "Yeah. Yeah." is left out and hands its "." back to line 8.
+        (
+            2,
+            7..9,
+            "Now I'm on fire for you. Let's go for the.",
+            "Teraz horím pre teba. Poďme na to.",
+        ),
         (
             2,
             30..31,
@@ -589,6 +596,7 @@ fn fixture_interjections_at_a_line_edge_go_where_a_mark_separates_them() {
         ),
         // No mark between "Say" and "whoa oh.": whole.
         (2, 51..52, "Say whoa oh.", "Povedzte whoa oh."),
+        // "Oh, say whoa oh." / "Ó, povedzte whoa oh."
         (2, 55..56, "Say whoa oh.", "Povedzte whoa oh."),
         // "Say whoa oh. Yeah." / "Povedzte whoa oh. Áno."
         (2, 57..58, "Say whoa oh.", "Povedzte whoa oh."),
