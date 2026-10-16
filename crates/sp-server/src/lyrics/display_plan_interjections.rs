@@ -11,7 +11,9 @@
 //!
 //! - **The English line is the judge.** A line whose EN words are ALL
 //!   interjections ([`EN`]) leaves the plan in both languages; the previous
-//!   display line holds through its time by the plan's hold rules.
+//!   display line holds through its time by the plan's hold rules, and the
+//!   line before it takes its sentence end ([`hand_back`]): "One more time
+//!   we say" + "Oh." stays a sentence of its own.
 //! - **Edges.** A run of interjections at the start of a line goes when its
 //!   last word carries a mark (`Yeah, let's dance.` → `Let's dance.`), and
 //!   one at the end when the word before it does (`like you. Oh,` →
@@ -28,7 +30,7 @@
 use sp_core::lyrics::LyricsLine;
 
 use super::asides::GLUED;
-use super::{CLOSERS, SENTENCE_ENDS, final_mark};
+use super::{SENTENCE_ENDS, final_mark, final_mark_at};
 
 /// The English interjections, compared lower-case with the punctuation
 /// around the word stripped (census on SNV, design 6224751018). `yes` is not
@@ -52,18 +54,35 @@ const MIN_KEPT: usize = 2;
 /// `line` as the wall shows it: `None` when its English is only
 /// interjections, else with the edge runs its punctuation separates gone
 /// (see the module docs). Times and word timings are unchanged.
-pub(super) fn shown(line: LyricsLine) -> Option<LyricsLine> {
+pub(super) fn shown(line: &LyricsLine) -> Option<LyricsLine> {
     let words: Vec<&str> = line.en.split_whitespace().collect();
     if !words.is_empty() && words.iter().all(|word| is_in(&EN, word)) {
         return None;
     }
     let cut = edge_cut(&words, &EN, (words.len(), words.len()));
-    let en = trimmed(&line.en, &words, cut);
-    let sk = line.sk.as_deref().map(|sk| {
-        let words: Vec<&str> = sk.split_whitespace().collect();
-        trimmed(sk, &words, edge_cut(&words, &SK, cut))
-    });
-    Some(LyricsLine { en, sk, ..line })
+    Some(LyricsLine {
+        en: trimmed(&line.en, &words, cut),
+        sk: line.sk.as_deref().map(|sk| {
+            let words: Vec<&str> = sk.split_whitespace().collect();
+            trimmed(sk, &words, edge_cut(&words, &SK, cut))
+        }),
+        ..line.clone()
+    })
+}
+
+/// A line left out hands its sentence end back to `before`, the last line
+/// kept (review round 1): its English and its Slovak each end in the
+/// left-out text's final `. ! ? …`, like the last word an end run left
+/// ([`ended`]). Without it "One more time we say" + "Oh." ran into the next
+/// sentence and lit it seconds early.
+pub(super) fn hand_back(left: &LyricsLine, before: Option<&mut LyricsLine>) {
+    let Some(before) = before else {
+        return;
+    };
+    before.en = ended(&before.en, &left.en);
+    if let Some(left_sk) = &left.sk {
+        before.sk = before.sk.as_deref().map(|sk| ended(sk, left_sk));
+    }
 }
 
 /// Whether `word`, lower-case with the punctuation around it stripped, is
@@ -120,13 +139,27 @@ fn trimmed(text: &str, words: &[&str], (k, m): (usize, usize)) -> String {
     if is_capitalised(words[0]) {
         kept[0] = capitalised(&kept[0]);
     }
-    let line_end = words.last().and_then(|word| mark_in(word, &SENTENCE_ENDS));
-    if let (Some(end), Some(last)) = (line_end, kept.last_mut())
-        && mark_in(last, &SENTENCE_ENDS).is_none()
-    {
-        *last = with_mark(last, end);
+    if let (Some(last), Some(line_end)) = (kept.last_mut(), words.last()) {
+        *last = ended(last, line_end);
     }
     kept.join(" ")
+}
+
+/// `text` ending in the sentence end (`. ! ? …`) `from` ends in, unless
+/// `text` is empty or ends a sentence itself: a sentence end survives the
+/// words that carried it. Its final mark, when it has one of [`GLUED`], is
+/// replaced (`free indeed,` → `free indeed.`), else the end follows it.
+fn ended(text: &str, from: &str) -> String {
+    let kept = text.trim_end();
+    match mark_in(from.trim_end(), &SENTENCE_ENDS) {
+        Some(end) if !kept.is_empty() && mark_in(kept, &SENTENCE_ENDS).is_none() => {
+            match final_mark_at(kept) {
+                Some(found) if GLUED.contains(&found.1) => replaced(kept, found, end),
+                _ => format!("{kept}{end}"),
+            }
+        }
+        _ => text.to_string(),
+    }
 }
 
 /// Whether the first letter of `word` is a capital.
@@ -140,19 +173,6 @@ fn is_capitalised(word: &str) -> bool {
 fn capitalised(word: &str) -> String {
     match word.char_indices().find(|(_, c)| c.is_alphabetic()) {
         Some((at, c)) => replaced(word, (at, c), c.to_uppercase()),
-        None => word.to_string(),
-    }
-}
-
-/// `word` with its final mark (the last char before any closing quote or
-/// bracket) replaced by `mark`.
-fn with_mark(word: &str, mark: char) -> String {
-    match word
-        .char_indices()
-        .rev()
-        .find(|(_, c)| !CLOSERS.contains(c))
-    {
-        Some(found) => replaced(word, found, mark),
         None => word.to_string(),
     }
 }

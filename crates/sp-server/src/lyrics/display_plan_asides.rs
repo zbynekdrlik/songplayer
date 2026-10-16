@@ -41,9 +41,27 @@ fn drop_asides(text: &str) -> String {
         return text.to_string();
     };
     match join_words(&outside) {
-        joined if joined.is_empty() => join_words(&text.replace(['(', ')'], " ")),
+        joined if joined.is_empty() => without_brackets(text),
         joined => joined,
     }
+}
+
+/// `line` with only its brackets gone, every word kept (#280 part 2,
+/// review round 1): a line whose words outside its asides are only
+/// interjections is read so (`Oh (Hallelujah)` → `Oh Hallelujah`), as a
+/// line of only asides keeps its words: the wall never blanks a sung aside.
+pub(super) fn unbracketed(line: &LyricsLine) -> LyricsLine {
+    LyricsLine {
+        en: without_brackets(&line.en),
+        sk: line.sk.as_deref().map(without_brackets),
+        ..line.clone()
+    }
+}
+
+/// The words of `text` with its brackets gone, joined again
+/// ([`join_words`]).
+fn without_brackets(text: &str) -> String {
+    join_words(&text.replace(['(', ')'], " "))
 }
 
 /// The chars of `text` outside every parenthesis, a space where an aside

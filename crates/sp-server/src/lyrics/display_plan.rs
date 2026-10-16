@@ -43,8 +43,9 @@
 //! #280: every source line is first read without its parenthesised asides
 //! (`display_plan_asides.rs`), then without its bare interjections
 //! (`display_plan_interjections.rs`): a line that is only `Oh.` / `Yeah.`
-//! leaves the plan, and the previous line holds through its time. So the
-//! grouping, the char limit and the shown text all see the shorter lines.
+//! leaves the plan, the previous line holds through its time and takes its
+//! sentence end. So the grouping, the char limit and the shown text all see
+//! the shorter lines.
 //! A display line's `src_range` still counts in the track's own lines.
 //!
 //! The dashboard karaoke view (`LyricsState::update`) keeps the raw track and
@@ -246,13 +247,21 @@ pub fn build_plan(lines: &[LyricsLine], profile: DisplayProfile) -> Vec<DisplayL
 
 /// The source lines the wall shows, each with its index in the track (#280):
 /// read without the parenthesised asides, then without the bare
-/// interjections; a line that is only interjections is left out.
+/// interjections. A line that is only interjections is left out and hands
+/// its sentence end back to the line before it; one whose words outside its
+/// asides are only interjections is read with only its brackets gone.
 fn shown_lines(lines: &[LyricsLine]) -> Vec<(usize, LyricsLine)> {
-    lines
-        .iter()
-        .enumerate()
-        .filter_map(|(i, line)| interjections::shown(asides::without_asides(line)).map(|l| (i, l)))
-        .collect()
+    let mut kept: Vec<(usize, LyricsLine)> = Vec::with_capacity(lines.len());
+    for (i, line) in lines.iter().enumerate() {
+        let read = asides::without_asides(line);
+        match interjections::shown(&read)
+            .or_else(|| interjections::shown(&asides::unbracketed(line)))
+        {
+            Some(shown) => kept.push((i, shown)),
+            None => interjections::hand_back(&read, kept.last_mut().map(|(_, before)| before)),
+        }
+    }
+    kept
 }
 
 /// The source lines of each display line, in order (step 1 of the module
@@ -340,7 +349,14 @@ fn text(line: &LyricsLine) -> &str {
 
 /// The last char of `text` that is not a closing quote or bracket.
 fn final_mark(text: &str) -> Option<char> {
-    text.chars().rev().find(|c| !CLOSERS.contains(c))
+    final_mark_at(text).map(|(_, c)| c)
+}
+
+/// [`final_mark`] with its byte index in `text`.
+fn final_mark_at(text: &str) -> Option<(usize, char)> {
+    text.char_indices()
+        .rev()
+        .find(|(_, c)| !CLOSERS.contains(c))
 }
 
 /// Whether the line ends a sentence (`. ! ? …`).
