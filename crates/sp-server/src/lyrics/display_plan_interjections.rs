@@ -20,6 +20,11 @@
 //!   `like you.`). At least [`MIN_KEPT`] words must stay, else the line
 //!   stays whole (`Oh, God.`). So `Say whoa oh.` and `Oh Lord, you're
 //!   beautiful` stay whole: no mark separates their interjections.
+//! - **A capital goes on.** A left-out line that began a sentence with a
+//!   capital hands it to the next line kept ([`capitals`],
+//!   [`with_capitals`]): `Oh,` + `what a God.` shows `What a God.`.
+//! - **A lone mark is glued** to the word before it ([`join_words`]), so
+//!   `Oh , yeah, I'm free` reads as `Oh, yeah, I'm free`.
 //! - **Slovak follows an English cut, never alone:** at most as many words at
 //!   that edge, each from [`SK`], under the same rule, down to one word
 //!   ([`MIN_KEPT_SK`]). A Slovak `Áno` for an English "Yes" stays.
@@ -32,7 +37,7 @@
 
 use sp_core::lyrics::LyricsLine;
 
-use super::asides::GLUED;
+use super::asides::{GLUED, join_words};
 use super::{SENTENCE_ENDS, final_mark, final_mark_at};
 
 /// The English interjections, compared lower-case with the punctuation
@@ -64,7 +69,8 @@ const MIN_KEPT_SK: usize = 1;
 /// interjections, else with the edge runs its punctuation separates gone
 /// (see the module docs). Times and word timings are unchanged.
 pub(super) fn shown(line: &LyricsLine) -> Option<LyricsLine> {
-    let words: Vec<&str> = line.en.split_whitespace().collect();
+    let joined = join_words(&line.en);
+    let words: Vec<&str> = joined.split_whitespace().collect();
     if !words.is_empty() && words.iter().all(|word| is_in(&EN, word)) {
         return None;
     }
@@ -72,7 +78,8 @@ pub(super) fn shown(line: &LyricsLine) -> Option<LyricsLine> {
     Some(LyricsLine {
         en: trimmed(&line.en, &words, cut),
         sk: line.sk.as_deref().map(|sk| {
-            let words: Vec<&str> = sk.split_whitespace().collect();
+            let joined = join_words(sk);
+            let words: Vec<&str> = joined.split_whitespace().collect();
             trimmed(sk, &words, edge_cut(&words, &SK, cut, MIN_KEPT_SK))
         }),
         ..line.clone()
@@ -92,6 +99,29 @@ pub(super) fn hand_back(left: &LyricsLine, before: Option<&mut LyricsLine>) {
     if let Some(left_sk) = &left.sk {
         before.sk = before.sk.as_deref().map(|sk| ended(sk, left_sk));
     }
+}
+
+/// Whether `line`'s English and its Slovak begin with a capital: what a
+/// left-out line that began a sentence hands to the next line kept
+/// (follow-up 1: What A God's `Oh,` left `what a God, what a God.` in
+/// lower case).
+pub(super) fn capitals(line: &LyricsLine) -> (bool, bool) {
+    (
+        is_capitalised(&line.en),
+        line.sk.as_deref().is_some_and(is_capitalised),
+    )
+}
+
+/// `line` with the first letter of its English and of its Slovak a capital
+/// where `capitals` (EN, SK) says so.
+pub(super) fn with_capitals(mut line: LyricsLine, (en, sk): (bool, bool)) -> LyricsLine {
+    if en {
+        line.en = capitalised(&line.en);
+    }
+    if sk {
+        line.sk = line.sk.as_deref().map(capitalised);
+    }
+    line
 }
 
 /// Whether `word`, lower-case with the punctuation around it stripped, is
@@ -171,14 +201,14 @@ fn ended(text: &str, from: &str) -> String {
     }
 }
 
-/// Whether the first letter of `word` is a capital.
+/// Whether the first letter of `word` (or of a whole text) is a capital.
 fn is_capitalised(word: &str) -> bool {
     word.chars()
         .find(|c| c.is_alphabetic())
         .is_some_and(char::is_uppercase)
 }
 
-/// `word` with its first letter a capital.
+/// `word` (or a whole text) with its first letter a capital.
 fn capitalised(word: &str) -> String {
     match word.char_indices().find(|(_, c)| c.is_alphabetic()) {
         Some((at, c)) => replaced(word, (at, c), c.to_uppercase()),

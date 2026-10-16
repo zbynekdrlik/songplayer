@@ -88,8 +88,9 @@ fn outside_parentheses(text: &str) -> Option<String> {
 
 /// The words of `text` joined with one space, a word of [`GLUED`] chars
 /// alone glued to the word before it, and dropped when nothing comes
-/// before it.
-fn join_words(text: &str) -> String {
+/// before it. The interjection rule reads a line's words through it too, so
+/// a lone mark never stops an edge run (`Oh , yeah` reads as `Oh, yeah`).
+pub(super) fn join_words(text: &str) -> String {
     let mut joined = String::with_capacity(text.len());
     for word in text.split_whitespace() {
         let glued = word.chars().all(|c| GLUED.contains(&c));

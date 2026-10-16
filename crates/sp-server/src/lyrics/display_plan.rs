@@ -252,11 +252,16 @@ pub fn build_plan(lines: &[LyricsLine], profile: DisplayProfile) -> Vec<DisplayL
 /// bare interjections. A line that is only interjections is left out and
 /// hands its sentence end back to the line before it; one whose words
 /// outside its asides are only interjections is read with only its brackets
-/// gone. A dub line (`Speech`) keeps its words: its English is the whole
-/// sentences matched to it by time (#184 H5), not its translation, so it
-/// cannot judge the Slovak (review round 2).
+/// gone. A left-out line that began a sentence (the line before it ends
+/// one, or it is the first) hands its capital to the next line kept, unless
+/// it ends its sentence itself. A dub line (`Speech`) keeps its words: its
+/// English is the whole sentences matched to it by time (#184 H5), not its
+/// translation, so it cannot judge the Slovak (review round 2).
 fn shown_lines(lines: &[LyricsLine], profile: DisplayProfile) -> Vec<(usize, LyricsLine)> {
     let mut kept: Vec<(usize, LyricsLine)> = Vec::with_capacity(lines.len());
+    // Whether the next line begins a sentence, and the (EN, SK) capitals a
+    // left-out line that began one hands to the next line kept.
+    let (mut begins, mut capitals) = (true, (false, false));
     for (i, line) in lines.iter().enumerate() {
         let read = asides::without_asides(line);
         if profile == DisplayProfile::Speech {
@@ -266,8 +271,21 @@ fn shown_lines(lines: &[LyricsLine], profile: DisplayProfile) -> Vec<(usize, Lyr
         match interjections::shown(&read)
             .or_else(|| interjections::shown(&asides::unbracketed(line)))
         {
-            Some(shown) => kept.push((i, shown)),
-            None => interjections::hand_back(&read, kept.last_mut().map(|(_, before)| before)),
+            Some(shown) => {
+                let shown = interjections::with_capitals(shown, std::mem::take(&mut capitals));
+                begins = ends_sentence(&shown);
+                kept.push((i, shown));
+            }
+            None => {
+                if begins {
+                    capitals = interjections::capitals(&read);
+                }
+                interjections::hand_back(&read, kept.last_mut().map(|(_, before)| before));
+                begins = ends_sentence(&read);
+                if begins {
+                    capitals = (false, false);
+                }
+            }
         }
     }
     kept
