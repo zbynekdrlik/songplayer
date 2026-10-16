@@ -2554,6 +2554,32 @@ jobs:
             exit 1
           }
           Write-Host "OK: the A/V gate venv at $venv has numpy $version with numpy.fft"
+          # #272 lane 2: the wall frame gate (e2e/post-deploy-wall-frames.spec.ts)
+          # runs scripts/wall_frames.py from this venv; it captures the wall
+          # output with dxcam (the versions of the box's ops\probe-venv; dxcam
+          # 0.3+ never loads OpenCV with BGRA output). numpy stays pinned.
+          $dxcam = "0.3.0"
+          $comtypes = "1.4.17"
+          & $py -c "import sys, importlib.metadata as m; sys.exit(0 if (m.version('dxcam'), m.version('comtypes')) == ('$dxcam', '$comtypes') else 3)" 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Installing dxcam==$dxcam comtypes==$comtypes into the e2e venv"
+            & $py -m pip install --disable-pip-version-check --no-input "dxcam==$dxcam" "comtypes==$comtypes" "numpy==$numpy"
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "FAIL: pip install dxcam==$dxcam comtypes==$comtypes exited $LASTEXITCODE"
+              exit 1
+            }
+          }
+          & $py "$env:GITHUB_WORKSPACE\scripts\wall_frames.py" --help | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "FAIL: wall_frames.py does not start under $py (exit $LASTEXITCODE)"
+            exit 1
+          }
+          & $py -c "import dxcam, numpy; import sys; sys.exit(0 if numpy.__version__ == '$numpy' else 3)"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "FAIL: dxcam does not import under $py, or numpy moved off $numpy (exit $LASTEXITCODE)"
+            exit 1
+          }
+          Write-Host "OK: the e2e venv also has dxcam $dxcam for the wall frame gate"
 
       # #221 lane 3 (camera-box request, 6.10.2026): the post-deploy suite
       # switches cg OBS's program for the A/V gate's take (the probe scene)
@@ -2594,6 +2620,10 @@ jobs:
           # bundled ffmpeg (the box has no ffprobe; none is needed).
           SP_AVSYNC_PYTHON: C:\ProgramData\SongPlayer\e2e\avsync_venv\Scripts\python.exe
           SP_FFMPEG: C:\ProgramData\SongPlayer\cache\tools\ffmpeg.exe
+          # #272 lane 2 (e2e/post-deploy-wall-frames.spec.ts): the wall's
+          # dxcam output on SNV (Output[1] = 7680x1080; Output[0] is the
+          # primary). The reader runs on SP_AVSYNC_PYTHON's venv.
+          SP_WALL_DXCAM_OUTPUT: "1"
           # #233 lane 3: how many enabled ASIO outputs the box must run
           # (e2e/post-deploy-audio-asio.spec.ts). SNV runs one since
           # 8.10.2026: "DVS (Dante)", Dante Virtual Soundcard TX 1/2.

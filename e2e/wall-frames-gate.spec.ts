@@ -1,0 +1,154 @@
+/**
+ * Unit tests for the post-deploy wall frame gate's decision (#272 lane 2,
+ * `wall-frames-gate.ts`). Runs in the ubuntu mock suite
+ * (playwright.config.ts): no browser and no box; these `test()` blocks never
+ * touch the `page` fixture.
+ */
+
+import { test, expect } from "@playwright/test";
+import {
+  EXIT_CAPTURE_FAILED,
+  EXIT_CLEAN,
+  EXIT_DEFECTS,
+  EXIT_INCOMPLETE,
+  EXIT_NOTHING_DECODED,
+  EXIT_USAGE,
+  WallFramesReport,
+  wallFramesFailures,
+} from "./wall-frames-gate";
+
+/** A clean 40 s take of the 30 fps clip on a 60 Hz wall. */
+function clean(): WallFramesReport {
+  return {
+    verdict: "clean",
+    fps: 30,
+    samples: 2400,
+    decoded: 2398,
+    boundaries: 1200,
+    lost_frames: 0,
+    lost_boundaries: 0,
+    jumps_back: 0,
+    cadence_errors: 0,
+    frozen: false,
+    weights: { mismatches: 0 },
+    refreshes: { judged: 1196, uneven: 0, unresolved: 0 },
+    unverified: { steps: 0 },
+  };
+}
+
+test("a clean take passes", () => {
+  expect(wallFramesFailures("wall-30", EXIT_CLEAN, clean())).toEqual([]);
+});
+
+test("judder fails and names the uneven boundaries", () => {
+  const report = { ...clean(), verdict: "defects" as const };
+  report.refreshes = { judged: 1196, uneven: 536, unresolved: 0 };
+  expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toEqual([
+    "wall-30: JUDDER: 536 of 1196 judged boundaries were held the wrong number of refreshes",
+  ]);
+});
+
+test("every defect counter is named, in one failure each", () => {
+  const report: WallFramesReport = {
+    ...clean(),
+    verdict: "defects",
+    lost_frames: 3,
+    lost_boundaries: 4,
+    jumps_back: 5,
+    cadence_errors: 6,
+    frozen: true,
+    weights: { mismatches: 7 },
+    refreshes: { judged: 900, uneven: 8, unresolved: 0 },
+  };
+  expect(wallFramesFailures("wall-25", EXIT_DEFECTS, report)).toEqual([
+    "wall-25: JUDDER: 8 of 900 judged boundaries were held the wrong number of refreshes",
+    "wall-25: 5 jump(s) back: an older frame shown after a newer one",
+    "wall-25: 3 frame(s) of the clip never shown",
+    "wall-25: 4 boundary(ies) lost",
+    "wall-25: 6 cadence error(s): a step off the 30 fps grid",
+    "wall-25: 7 blend weight(s) off the pacer's rule",
+    "wall-25: the wall froze: fewer new pictures than half the grid's boundaries",
+  ]);
+});
+
+test("a defects verdict with no boundary read still fails", () => {
+  const report: WallFramesReport = {
+    ...clean(),
+    verdict: "defects",
+    boundaries: 0,
+    refreshes: null,
+  };
+  expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toEqual([
+    "wall-30: no boundary of the clip was read",
+  ]);
+});
+
+test("an exit 1 whose counters read zero still fails", () => {
+  const report = { ...clean(), verdict: "defects" as const };
+  expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toEqual([
+    "wall-30: the reader reported defects (exit 1) that no counter names",
+  ]);
+});
+
+test("an incomplete take fails as incomplete, never as judder or clean", () => {
+  const report: WallFramesReport = {
+    ...clean(),
+    verdict: "incomplete",
+    decoded: 2000,
+    unverified: { steps: 12 },
+    refreshes: { judged: 250, uneven: 0, unresolved: 3 },
+  };
+  expect(wallFramesFailures("wall-30", EXIT_INCOMPLETE, report)).toEqual([
+    "wall-30: the measurement is INCOMPLETE (not judder, not clean): 12 step(s) the capture did not see, 2000 of 2400 pictures decoded, 3 boundary(ies) unresolved, 250 boundaries judged",
+  ]);
+});
+
+test("an incomplete take with no refresh check says so", () => {
+  const report: WallFramesReport = {
+    ...clean(),
+    verdict: "incomplete",
+    samples: 0,
+    refreshes: null,
+  };
+  expect(wallFramesFailures("wall-30", EXIT_INCOMPLETE, report)).toEqual([
+    "wall-30: the measurement is INCOMPLETE (not judder, not clean): no refresh check",
+  ]);
+});
+
+test("nothing decoded = the wall does not show SongPlayer's program", () => {
+  const failures = wallFramesFailures("wall-30", EXIT_NOTHING_DECODED, null);
+  expect(failures).toHaveLength(1);
+  expect(failures[0]).toContain("does not show SongPlayer's program");
+});
+
+test("a failed capture fails with no verdict", () => {
+  const failures = wallFramesFailures("wall-30", EXIT_CAPTURE_FAILED, null);
+  expect(failures).toHaveLength(1);
+  expect(failures[0]).toContain("capture of the wall output failed");
+});
+
+test("a usage error fails", () => {
+  expect(wallFramesFailures("wall-30", EXIT_USAGE, null)).toEqual([
+    "wall-30: the reader refused its arguments (exit 2)",
+  ]);
+});
+
+test("no report fails, whatever the exit", () => {
+  expect(wallFramesFailures("wall-30", EXIT_CLEAN, null)).toEqual([
+    "wall-30: the reader exited 0 with no report",
+  ]);
+  expect(wallFramesFailures("wall-30", null, null)).toEqual([
+    "wall-30: the reader exited null with no report",
+  ]);
+});
+
+test("an exit 0 whose verdict is not clean fails", () => {
+  const report = { ...clean(), verdict: "incomplete" as const };
+  expect(wallFramesFailures("wall-30", EXIT_CLEAN, report)[0]).toContain("INCOMPLETE");
+});
+
+test("an unknown exit with a clean report fails", () => {
+  expect(wallFramesFailures("wall-30", 9, clean())).toEqual([
+    "wall-30: the reader exited 9 with the verdict clean",
+  ]);
+});

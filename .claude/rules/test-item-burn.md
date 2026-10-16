@@ -14,6 +14,8 @@ paths:
   - "scripts/tests/test_wall_clip.py"
   - "scripts/tests/test_wall_*.py"
   - "scripts/tests/wall_fakes.py"
+  - "e2e/wall-frames-gate*.ts"
+  - "e2e/post-deploy-wall-frames.spec.ts"
 ---
 
 # The SP-program burn 911014, the on-air item, the local test item (#228)
@@ -358,6 +360,46 @@ imports `wall_clip`, `wall_analysis` and `av_sync_check` (with its
   `unverified` (one boundary per picture), never clean. Whether a test
   item should write the wall title at all is open (a follow-up candidate
   on #272).
+
+## The post-deploy wall frame gate (#272 lane 2, `e2e/post-deploy-wall-frames.spec.ts`)
+
+The owner (16.10.2026, during an event with the wall juddering): no CI run
+may pass while the LED wall judders. Every other gate reads SongPlayer's
+own counters. The MAX gate checks the send and compose phases, and
+`post-deploy-wall.spec.ts` checks Arena's display setup. Nothing read the
+picture, so deploys went green over a juddering wall. Design: #272 comment
+6220915104.
+
+- **What it does (SNV only).** `post-deploy-pp.config.ts` lists its specs
+  by name and does not take this one.
+  - It reads `GET /api/v1/test-item`; the clips must be imported.
+  - For `wall-30`, then `wall-25`: `/start {"clip"}`, then a program cut
+    to the test playlist. It waits until `on_air_item.youtube_id` is
+    `wallclip-30` / `wallclip-25` with `position_ms` ≥ 3000 (≤ 25 s).
+  - Then 40 s of `scripts/wall_frames.py --fps <fps> --dxcam
+    $SP_WALL_DXCAM_OUTPUT --refresh-hz 60`.
+  - It runs on the e2e venv (`SP_AVSYNC_PYTHON`, which ci.yml also gives
+    `dxcam==0.3.0` + `comtypes==1.4.17` with numpy kept at its pin). The
+    runner runs in the desktop session 1, so desktop duplication works.
+  - `afterAll` cuts back to the source it found, then `/start` + `/stop`
+    with no body.
+- **The verdict** is `e2e/wall-frames-gate.ts::wallFramesFailures`, unit
+  tests in the mock suite (`wall-frames-gate.spec.ts`).
+  - Only exit 0 with verdict `clean` passes.
+  - `defects` names every counter: judder (`refreshes.uneven` of `judged`),
+    jumps back, lost frames and boundaries, cadence, weights, frozen.
+  - `incomplete` (exit 3) fails as INCOMPLETE, never as judder or clean.
+  - Exit 4 = the wall does not show SongPlayer's program (Arena's clip on
+    another source, MAX off with the clip on MAX, the clip not on air).
+  - Exit 5 = the capture failed.
+- **It is RED while the wall judders.** That is the point; never loosen it
+  to make a deploy green.
+- **What it does not see.** dxcam reads DWM's composition, stage 1, not the
+  physical wall after Surround and the LED processor. A clean take covers
+  only its 40 s, and the judder comes in waves.
+- dxcam's output on SNV: `Output[1]` 7680×1080 (`Output[0]` is the 4K
+  primary). Read it with `python -c "import dxcam;
+  print(dxcam.output_info())"`.
 
 ## Box procedure (main session, once per box)
 
