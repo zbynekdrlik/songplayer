@@ -23,10 +23,13 @@ use crate::playback::audio_out_block::ProgramBlock;
 use crate::playback::fleet_shift;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::ndi_feed::UYVY_BLACK_PAIR;
+use crate::playback::program_burn;
 use crate::playback::program_bus::{PROGRAM_NDI_NAME, ProgramJob};
+use crate::playback::program_item::ProgramItem;
 use crate::playback::program_max::MaxOut;
 use crate::playback::program_trace::ProgramTrace;
 use crate::playback::program_transition::{MixJob, crossfade_gains};
+use crate::playback::submit_handoff::SubmitJob;
 use crate::playback::vban_out::{VbanOut, VbanTake};
 
 /// The test canvas: 4×2 (UYVY 16 bytes, stride 8; NV12 12 bytes).
@@ -332,6 +335,52 @@ fn a_fade_from_the_gpu_crossfades_its_audio_and_sends_the_compositor_s_picture()
     rig.out.submit(ProgramJob::Standby { stamp_100ns: at(2) });
     assert_eq!(rig.out.mix_run, MixRun::default(), "the run ended with b1");
     assert_eq!(rig.backend.video_timecodes(), [at(0), at(1)]);
+}
+
+/// The burn of the item frame a held pair shows is painted on a COPY of
+/// its read-back UYVY picture (`burned_uyvy`), with that boundary's frame
+/// and wire stamp, when the pair goes out one boundary late. The
+/// production canvas (1920×1080): the burn needs its 270 rows.
+#[test]
+fn the_burn_on_the_readback_is_painted_into_a_copy_of_the_uyvy_picture() {
+    const PID: i64 = 5;
+    let backend = Arc::new(MockNdiBackend::new());
+    let sender =
+        NdiSender::new_with_clocking(backend, PROGRAM_NDI_NAME, false, false).expect("mock sender");
+    let max = Arc::new(MaxOut::new());
+    max.set_ndi_source(NdiSource::Gpu);
+    let item = Arc::new(ProgramItem::default());
+    item.mark(PID, 42, 0);
+    item.set_burn(true);
+    let mut out = ProgramOutput::fhd(sender)
+        .with_max(max.clone())
+        .with_item(item.clone());
+    // A 1920×1080 UYVY picture: luma 255, chroma 128.
+    let white = [128u8, 255, 128, 255].repeat(960 * 1080);
+    let picture = SharedFrame::new(white.clone());
+    max.ndi.push(at(1), picture.clone());
+    // Frame 1 of the item (33 ms after its mark), on boundary 1.
+    let job = SubmitJob {
+        media_pts_100ns: Some(330_000),
+        live: true,
+        ..pair(W, at(1), at(1), samples(0.25, 0.0))
+    };
+    out.serve(ProgramJob::Source(job), Some(PID), || 0);
+    assert_eq!(item.burned(), 0, "held: nothing went out");
+    out.serve(ProgramJob::Standby { stamp_100ns: at(2) }, Some(PID), || 0);
+    let sent = out.wire_frame().cloned().expect("boundary 1 went out");
+    assert!(!sent.ptr_eq(&picture), "painted into a copy");
+    assert!(
+        picture[..] == white[..],
+        "the read-back picture is untouched"
+    );
+    let gen_ts_ns = fleet_shift::wire_100ns(at(1)) * 100;
+    let want = program_burn::burned_uyvy(&white, 1920, 1080, 1, gen_ts_ns).expect("room");
+    assert!(
+        sent[..] == want[..],
+        "frame 1's burn, on boundary 1's wire stamp"
+    );
+    assert_eq!(item.burned(), 1);
 }
 
 #[test]

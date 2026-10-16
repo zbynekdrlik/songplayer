@@ -13,7 +13,9 @@ use std::time::{Duration, Instant};
 use sp_core::config::NdiSource;
 use sp_gpu::{GpuError, MAX_TARGET};
 
-use super::tests::{Drawn, FakeGpu, UYVY_US, device_lost, fake_uyvy, pic, picture, plain};
+use super::tests::{
+    Drawn, FakeGpu, UYVY_US, device_lost, fake_uyvy, not_registered, pic, picture, plain,
+};
 use super::{MAX_RETRY_BACKOFF, MaxWorker};
 use crate::playback::ndi_feed::{UYVY_BLACK_PAIR, uyvy_len};
 use crate::playback::program_max::{MaxJob, MaxOut};
@@ -144,6 +146,39 @@ fn max_off_with_ndi_on_composes_the_fhd_target_alone() {
     drop(log);
     assert_eq!(max.ndi.newest_stamp(), Some(3));
     assert!(worker.holds_gpu());
+}
+
+/// MAX switched off while its sender waits a backoff (NDI keeps the
+/// compositor): the backoff goes with MAX's output, so MAX on again builds
+/// at once.
+#[test]
+fn switching_max_off_with_ndi_on_forgets_max_s_backoff() {
+    let max = ndi_on(true);
+    let gpu = FakeGpu::default();
+    gpu.script().sender.push_back(not_registered());
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    let a = picture(4, 2);
+    let t0 = Instant::now();
+    worker.serve(&plain(1, &a), t0);
+    let log = gpu.log();
+    assert_eq!(
+        (log.senders_built, log.targets_removed, log.sent),
+        (1, 1, 0),
+        "refused: MAX's sender and target dropped, its backoff runs"
+    );
+    drop(log);
+    max.set_enabled(false);
+    worker.serve(&plain(2, &a), t0);
+    max.set_enabled(true);
+    worker.serve(&plain(3, &a), t0);
+    let log = gpu.log();
+    assert_eq!(
+        (log.senders_built, log.sent),
+        (2, 1),
+        "built at once: the backoff went with MAX's output"
+    );
+    drop(log);
+    assert_eq!(max.ndi.newest_stamp(), Some(3), "NDI read every boundary");
 }
 
 #[test]
