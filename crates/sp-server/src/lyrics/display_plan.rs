@@ -247,14 +247,21 @@ pub fn build_plan(lines: &[LyricsLine], profile: DisplayProfile) -> Vec<DisplayL
 }
 
 /// The source lines the wall shows, each with its index in the track (#280):
-/// read without the parenthesised asides, then without the bare
-/// interjections. A line that is only interjections is left out and hands
-/// its sentence end back to the line before it; one whose words outside its
-/// asides are only interjections is read with only its brackets gone.
-fn shown_lines(lines: &[LyricsLine], _profile: DisplayProfile) -> Vec<(usize, LyricsLine)> {
+/// read without the parenthesised asides, then, for sung lyrics, without the
+/// bare interjections. A line that is only interjections is left out and
+/// hands its sentence end back to the line before it; one whose words
+/// outside its asides are only interjections is read with only its brackets
+/// gone. A dub line (`Speech`) keeps its words: its English is the whole
+/// sentences matched to it by time (#184 H5), not its translation, so it
+/// cannot judge the Slovak (review round 2).
+fn shown_lines(lines: &[LyricsLine], profile: DisplayProfile) -> Vec<(usize, LyricsLine)> {
     let mut kept: Vec<(usize, LyricsLine)> = Vec::with_capacity(lines.len());
     for (i, line) in lines.iter().enumerate() {
         let read = asides::without_asides(line);
+        if profile == DisplayProfile::Speech {
+            kept.push((i, read));
+            continue;
+        }
         match interjections::shown(&read)
             .or_else(|| interjections::shown(&asides::unbracketed(line)))
         {

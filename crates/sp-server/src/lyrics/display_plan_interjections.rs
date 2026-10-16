@@ -21,8 +21,11 @@
 //!   stays whole (`Oh, God.`). So `Say whoa oh.` and `Oh Lord, you're
 //!   beautiful` stay whole: no mark separates their interjections.
 //! - **Slovak follows an English cut, never alone:** at most as many words at
-//!   that edge, each from [`SK`], under the same rule. A Slovak `Áno` for an
-//!   English "Yes" stays.
+//!   that edge, each from [`SK`], under the same rule, down to one word
+//!   ([`MIN_KEPT_SK`]). A Slovak `Áno` for an English "Yes" stays.
+//!
+//! Sung lyrics only: a dub line's English is not its translation (see
+//! `display_plan.rs::shown_lines`).
 //!
 //! Display-only: the stored JSON, the karaoke view and the pipeline are
 //! untouched.
@@ -51,6 +54,12 @@ const SK: [&str; 17] = [
 /// The fewest words an edge cut may leave: `Oh, God.` stays whole.
 const MIN_KEPT: usize = 2;
 
+/// The fewest words the Slovak follow may leave (review round 2): the
+/// English cut already showed that edge to be separate, and the wall shows
+/// the Slovak, so `Ó, slobodní` under `Oh, we are free` → `We are free`
+/// becomes `Slobodní`.
+const MIN_KEPT_SK: usize = 1;
+
 /// `line` as the wall shows it: `None` when its English is only
 /// interjections, else with the edge runs its punctuation separates gone
 /// (see the module docs). Times and word timings are unchanged.
@@ -59,12 +68,12 @@ pub(super) fn shown(line: &LyricsLine) -> Option<LyricsLine> {
     if !words.is_empty() && words.iter().all(|word| is_in(&EN, word)) {
         return None;
     }
-    let cut = edge_cut(&words, &EN, (words.len(), words.len()));
+    let cut = edge_cut(&words, &EN, (words.len(), words.len()), MIN_KEPT);
     Some(LyricsLine {
         en: trimmed(&line.en, &words, cut),
         sk: line.sk.as_deref().map(|sk| {
             let words: Vec<&str> = sk.split_whitespace().collect();
-            trimmed(sk, &words, edge_cut(&words, &SK, cut))
+            trimmed(sk, &words, edge_cut(&words, &SK, cut, MIN_KEPT_SK))
         }),
         ..line.clone()
     })
@@ -103,8 +112,8 @@ fn mark_in(word: &str, marks: &[char]) -> Option<char> {
 /// How many words go at the start and at the end of `words`: the longest
 /// run of `set` words at each edge, at most `most` words, whose last word
 /// carries a mark ([`GLUED`]) at the start, or whose preceding word does at
-/// the end. Nothing goes when fewer than [`MIN_KEPT`] words would stay.
-fn edge_cut(words: &[&str], set: &[&str], most: (usize, usize)) -> (usize, usize) {
+/// the end. Nothing goes when fewer than `fewest` words would stay.
+fn edge_cut(words: &[&str], set: &[&str], most: (usize, usize), fewest: usize) -> (usize, usize) {
     let in_set = |word: &&&str| is_in(set, word);
     let marked = |word: &str| mark_in(word, &GLUED).is_some();
     let start_run = words.iter().take_while(in_set).count().min(most.0);
@@ -115,7 +124,7 @@ fn edge_cut(words: &[&str], set: &[&str], most: (usize, usize)) -> (usize, usize
         .rev()
         .find(|&m| marked(words[words.len() - m - 1]));
     let (k, m) = (k.unwrap_or(0), m.unwrap_or(0));
-    if k + m + MIN_KEPT <= words.len() {
+    if k + m + fewest <= words.len() {
         (k, m)
     } else {
         (0, 0)
