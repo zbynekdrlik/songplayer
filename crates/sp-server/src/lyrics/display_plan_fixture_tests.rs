@@ -565,14 +565,15 @@ fn fixture_interjections_at_a_line_edge_go_where_a_mark_separates_them() {
     for (fixture, range, en, sk) in [
         // "Oh, what a God, what a God." / "Ó, aký Boh, aký Boh."
         (0, 10..11, "What a God, what a God.", "Aký Boh, aký Boh."),
-        // The line after a left-out "Oh," keeps its own words.
-        (0, 12..13, "what a God, what a God.", "aký Boh, aký Boh."),
-        // After the left-out line 187 "Oh,".
+        // The line after a left-out "Oh," that began a sentence takes its
+        // capital.
+        (0, 12..13, "What a God, what a God.", "Aký Boh, aký Boh."),
+        // After the left-out line 187 "Oh,", which began a sentence too.
         (
             0,
             188..190,
-            "more than the silver and gold to you.",
-            "viac než striebro a zlato, pre teba.",
+            "More than the silver and gold to you.",
+            "Viac než striebro a zlato, pre teba.",
         ),
         // One word would be left: whole.
         (0, 77..78, "Oh, God.", "Ó, Bože."),

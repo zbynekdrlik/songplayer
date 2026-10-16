@@ -383,6 +383,116 @@ fn a_dub_line_keeps_its_words_whatever_its_english() {
     );
 }
 
+/// A wall line's (source lines, EN, SK).
+type WallText = (Range<usize>, String, Option<String>);
+
+/// The (source lines, EN, SK) of every wall line of `lines` (the Song
+/// profile).
+fn wall_texts(lines: &[LyricsLine]) -> Vec<WallText> {
+    wall_lines(lines)
+        .into_iter()
+        .map(|(range, _, _, en, sk)| (range, en, sk))
+        .collect()
+}
+
+/// An expected (source lines, EN, SK).
+fn texts(range: Range<usize>, en: &str, sk: &str) -> WallText {
+    (range, en.to_string(), Some(sk.to_string()))
+}
+
+#[test]
+fn a_capital_left_out_at_a_sentence_start_goes_to_the_next_line() {
+    // Follow-up: What A God's "Oh," (after "…what a God.") left
+    // "what a God, what a God." starting lower-case on the wall.
+    let lines = [
+        sung(0, 2_000, "We sing to you.", "Spievame ti."),
+        sung(2_500, 3_000, "Oh,", "Ó,"),
+        sung(3_200, 5_000, "what a God, what a God.", "aký Boh, aký Boh."),
+    ];
+    assert_eq!(
+        wall_texts(&lines),
+        [
+            texts(0..1, "We sing to you.", "Spievame ti."),
+            texts(2..3, "What a God, what a God.", "Aký Boh, aký Boh."),
+        ]
+    );
+    // The first line of a track begins a sentence too.
+    let lines = [
+        sung(0, 500, "Oh,", "Ó,"),
+        sung(700, 2_000, "what a God.", "aký Boh."),
+    ];
+    assert_eq!(wall_texts(&lines), [texts(1..2, "What a God.", "Aký Boh.")]);
+    // Each language by its own capital.
+    let lines = [
+        sung(0, 500, "Oh,", "ó,"),
+        sung(700, 2_000, "what a God.", "aký Boh."),
+    ];
+    assert_eq!(wall_texts(&lines), [texts(1..2, "What a God.", "aký Boh.")]);
+    // Through a lower-case left-out line that goes on the same sentence.
+    let lines = [
+        sung(0, 1_000, "We sing.", "Spievame."),
+        sung(1_200, 1_500, "Oh,", "Ó,"),
+        sung(1_600, 1_900, "yeah,", "áno,"),
+        sung(2_000, 3_000, "what a God.", "aký Boh."),
+    ];
+    assert_eq!(
+        wall_texts(&lines),
+        [
+            texts(0..1, "We sing.", "Spievame."),
+            texts(3..4, "What a God.", "Aký Boh."),
+        ]
+    );
+}
+
+#[test]
+fn a_capital_left_out_inside_a_sentence_or_with_its_sentence_stays_there() {
+    // Inside a sentence ("We sing" ends in no mark): the line goes on in
+    // lower case, as `you were you're better.` does.
+    let lines = [
+        sung(0, 1_000, "We sing", "Spievame"),
+        sung(1_200, 1_500, "Oh,", "Ó,"),
+        sung(1_700, 3_000, "what a God.", "aký Boh."),
+    ];
+    assert_eq!(
+        wall_texts(&lines),
+        [texts(0..3, "We sing what a God.", "Spievame aký Boh.")]
+    );
+    // A left-out line that ends its own sentence takes its capital with it.
+    let lines = [
+        sung(0, 1_000, "We sing.", "Spievame."),
+        sung(1_200, 1_500, "Oh.", "Ó."),
+        sung(1_700, 3_000, "what a God.", "aký Boh."),
+    ];
+    assert_eq!(
+        wall_texts(&lines),
+        [
+            texts(0..1, "We sing.", "Spievame."),
+            texts(2..3, "what a God.", "aký Boh."),
+        ]
+    );
+}
+
+#[test]
+fn a_lone_mark_is_glued_to_the_word_before_it() {
+    // Follow-up: a token made only of `, . ; : ! ? …` stopped a run
+    // (`Oh , yeah` showed `Oh ,`); it belongs to the word before it, as
+    // the asides join reads it.
+    assert_eq!(
+        wall("Oh , yeah, I'm free", Some("Ó , áno, som slobodný")),
+        shows("I'm free", Some("Som slobodný"))
+    );
+    assert_eq!(
+        wall("We sing , oh.", Some("Spievame , ó.")),
+        shows("We sing.", Some("Spievame."))
+    );
+    assert_eq!(wall("Oh , oh", Some("Ó , ó")), None);
+    // Nothing to cut: the line as it is.
+    assert_eq!(
+        wall("Holy , holy Lord", Some("Svätý , svätý Pane")),
+        shows("Holy , holy Lord", Some("Svätý , svätý Pane"))
+    );
+}
+
 // ── interjections at a line's edge ─────────────────────────────────────────
 
 #[test]
