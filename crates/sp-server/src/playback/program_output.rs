@@ -467,7 +467,8 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// Serve one program boundary: its audio side ([`split`](Self::split),
     /// no video work) goes to the audio outputs (VBAN, #233) FIRST, then the
     /// boundary is offered to
-    /// `SP-program-MAX` (#223 S2, [`offer_max`](Self::offer_max)), then the
+    /// `SP-program-MAX` (#223 S2, [`offer_max`](Self::offer_max)), then (#251
+    /// step 4) it waits out the quiet window after the vblank, then the
     /// video side and the NDI pair ([`submit_video`](Self::submit_video)) —
     /// #210: FOH audio never waits for the video side of its own boundary
     /// (the NDI submit, a mixed picture). A forwarded source job keeps its
@@ -496,8 +497,8 @@ impl<B: NdiBackend> ProgramOutput<B> {
         self.offer_max(&pair, stamp_100ns);
         let ends_run = !matches!(pair, Pair::Mix { .. });
         let shown = self.observe_item(&pair, source, stamp_100ns); // #228
+        self.wait_video_quiet(); // #251 step 4: never in Arena's read window
         let submit_start_100ns = self.submit_video(pair, stamp_100ns, shown, &now);
-        self.wait_video_quiet();
         let submitted_100ns = now();
         if ends_run {
             self.end_mix_run();

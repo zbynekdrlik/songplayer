@@ -12,6 +12,7 @@ paths:
   - "crates/sp-server/src/playback/ndi_health_expect*.rs"
   - "crates/sp-server/src/playback/program_output*.rs"
   - "crates/sp-server/src/playback/program_trace*.rs"
+  - "crates/sp-server/src/playback/program_video_quiet*.rs"
   - "crates/sp-server/src/playback/handle_pipeline_event*.rs"
   - "crates/sp-server/src/playback/program_canvas*.rs"
   - "crates/sp-server/src/playback/band_pool*.rs"
@@ -136,6 +137,29 @@ output of its own and feeds this bus alone (`pipeline-testability.md`).
   VBAN hand-off after its block's first packet was due, over VBAN's send
   latency L, #210 part 2; `vban-out.md` "The program boundary's timing"). `ProgramOutput::submit` is only the tests' shorthand
   (`#[cfg(test)]`, no clock, returns the stamp).
+- #251 step 4: right before `submit_video`, `serve` waits while the
+  boundary lies in the quiet window after the PRIMARY display's vblank
+  (`program_video_quiet.rs`: `video_start`, `VideoQuiet`, `wait_out` on the
+  output's `SendClock`, `SpinClock` in production, `NoWait` by default).
+  Arena reads Spout ~8 ms after the vblank, and memory-bus load there makes
+  it show its older buffer (a +6 ms burst: 15-50x the wall's jumps back,
+  #251 comment 6206181014); the video side (the canvas fit / a 24/25 fps
+  blend, the NDI submit, the SDK encode and cg OBS's decode after it) is
+  such load. The window is `program_video_quiet_from_ms` / `_to_ms` (3 /
+  10.5 ms, applied with MAX's phases, `from >= to` or `to` past a refresh =
+  off); the grid is the one the `program-max` thread paced MAX on
+  (`MaxOut::video.publish_grid` in `pace`), none fresh (MAX off, a dark
+  output) = no wait. VBAN and MAX already have the boundary; an NDI pair's
+  audio waits with its video, its timestamps unchanged. At most 7.5 ms of
+  delay: cg OBS's SP receivers latch their shallow FIFO depth from the
+  ARRIVAL lag (camera-box, p90 + 15 ms budget; a swing over ~8-10 ms would
+  leave them a frame deeper). Telemetry `max.video_quiet {from_us, to_us,
+  grid, waits, wait_us_max}`. Box check over a 45 min drift cycle: the
+  wall's exact jumps back per offer band, and cg OBS's log `genlock-fifo
+  audit '<its SP-program input>'` (`shallow_depth=`, `shallow_latches=`,
+  `audio_slews=`, `late_holds=`, `underruns=`; a rise of `shallow_depth`
+  goes to camera-box, their issue 1302). Tests:
+  `program_video_quiet_tests.rs` (the order through a recording clock).
 - #223 S2: between `feed_outputs` and `submit_video`, `serve` offers the
   boundary to `SP-program-MAX` (`offer_max` → `program_max::MaxOut`, on
   `ProgramBus::max()`): the NATIVE picture of a forwarded pair, both native
