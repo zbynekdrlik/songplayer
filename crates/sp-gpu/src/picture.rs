@@ -70,6 +70,17 @@ pub struct Planes {
     pub pitch: u32,
 }
 
+impl Planes {
+    /// #279 P0: the bytes one upload of the picture writes into its two
+    /// textures: the luma plane (one byte a texel) and the chroma plane (two
+    /// bytes a U/V pair), the stride's padding past each row not counted.
+    pub fn upload_bytes(&self) -> u64 {
+        let luma = u64::from(self.luma.width) * u64::from(self.luma.height);
+        let chroma = u64::from(self.chroma.width) * u64::from(self.chroma.height);
+        luma + 2 * chroma
+    }
+}
+
 impl Nv12Picture<'_> {
     /// The planes of a whole picture, or why it is not one: no pixels, a
     /// side over [`MAX_PICTURE_SIDE`], a stride shorter than a chroma row

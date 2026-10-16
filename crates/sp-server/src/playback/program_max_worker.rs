@@ -398,6 +398,8 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     ) -> Option<LogLine> {
         match went {
             Ok((compose, send, timing, aligned)) => {
+                self.out
+                    .record_uploads(now, compose.upload_bytes, compose.uploads);
                 self.out.record_sent(compose, send);
                 self.out.record_send_timing(timing);
                 self.out.record_vblank(aligned);
@@ -935,3 +937,7 @@ mod tests_fhd_lost;
 #[cfg(test)]
 #[path = "program_max_worker_tests_log.rs"]
 mod tests_log;
+
+#[cfg(test)]
+#[path = "program_max_worker_tests_upload.rs"]
+mod tests_upload;

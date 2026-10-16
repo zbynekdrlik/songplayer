@@ -304,11 +304,7 @@ impl MaxCompositor for FakeCompositor {
         drop(log);
         match next_error(&self.shared, |s| s.compose.pop_front()) {
             Some(error) => Err(error),
-            None => Ok(ComposeStats {
-                upload_us: UPLOAD_US,
-                draw_us: DRAW_US,
-                uploads: 1,
-            }),
+            None => Ok(super::tests_upload::fake_stats(composition)),
         }
     }
 

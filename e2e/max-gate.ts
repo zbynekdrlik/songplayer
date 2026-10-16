@@ -36,6 +36,10 @@ export interface MaxStatus {
   upload_us_p99: number;
   draw_us_p99: number;
   send_us_p99: number;
+  /** #279 P0: plane bytes uploaded, MB/s, and pictures uploaded per second
+   *  (logged, not gated). */
+  upload_mb_s?: number;
+  uploads_per_s?: number;
   send_at_us_p50: number;
   send_at_us_p99: number;
   send_at_us_max: number;

@@ -301,6 +301,8 @@ fn a_picture_with_the_same_id_is_not_uploaded_again() {
     let first = Composition::Picture(picture(1, 1920, 1080, stride, &a));
     let stats = compositor.compose(&first).expect("compose a");
     assert_eq!(stats.uploads, 1, "a new picture is uploaded");
+    // #279 P0: 1920×1080 luma + 960×540 U/V pairs of two bytes.
+    assert_eq!(stats.upload_bytes, 1920 * 1080 + 2 * 960 * 540);
     assert!(stats.upload_us > 0, "a 3 MB upload takes time: {stats:?}");
     let frame_a = compositor.read_back().expect("read back a");
     assert_matches_reference(&frame_a, &first.layers(), "picture a");
@@ -309,6 +311,7 @@ fn a_picture_with_the_same_id_is_not_uploaded_again() {
     let same_id = Composition::Picture(picture(1, 1920, 1080, stride, &b));
     let stats = compositor.compose(&same_id).expect("compose b as id 1");
     assert_eq!(stats.uploads, 0, "the same id is not uploaded again");
+    assert_eq!(stats.upload_bytes, 0, "#279 P0: nothing crossed to the GPU");
     let again = compositor.read_back().expect("read back again");
     assert!(again == frame_a, "the resident picture is drawn again");
 
@@ -502,6 +505,11 @@ fn one_compose_fills_both_targets_within_the_reference() {
     };
     let stats = compositor.compose(&fade).expect("compose both targets");
     assert_eq!(stats.uploads, 2, "two pictures, each uploaded once");
+    assert_eq!(
+        stats.upload_bytes,
+        (2560 * 1440 + 2 * 1280 * 720) + (1440 * 1080 + 2 * 720 * 540),
+        "#279 P0: each picture's planes once, whatever the targets"
+    );
     let max_draw = compositor.draw_us(TargetId::PRIMARY).expect("MAX drawn");
     let fhd_draw = compositor.draw_us(fhd).expect("FHD drawn");
     assert!(

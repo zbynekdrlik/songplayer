@@ -37,6 +37,8 @@ async fn get_program_reports_the_max_block() {
             "upload_us_p99": 0,
             "draw_us_p99": 0,
             "send_us_p99": 0,
+            "upload_mb_s": 0.0,
+            "uploads_per_s": 0.0,
             "send_at_us_p50": 0,
             "send_at_us_p99": 0,
             "send_at_us_max": 0,
@@ -113,12 +115,17 @@ async fn get_program_reports_the_max_block() {
             upload_us: 700,
             draw_us: 300,
             uploads: 1,
+            upload_bytes: 3_110_400,
         },
         SpoutSendStats {
             send_us: 900,
             relisted: false,
         },
     );
+    // #279 P0: two boundaries 100 ms apart, an FHD picture each.
+    let t0 = std::time::Instant::now();
+    max.record_uploads(t0, 3_110_400, 1);
+    max.record_uploads(t0 + std::time::Duration::from_millis(100), 3_110_400, 1);
     max.record_device_reset();
     max.record_adapter("NVIDIA GeForce RTX 3070 Ti".into());
     let pid = add_playlist(&state.pool, "slow").await;
@@ -144,6 +151,11 @@ async fn get_program_reports_the_max_block() {
     );
     assert_eq!(m["device_resets"], 1);
     assert_eq!(m["adapter"], "NVIDIA GeForce RTX 3070 Ti");
+    assert_eq!(
+        (&m["upload_mb_s"], &m["uploads_per_s"]),
+        (&serde_json::json!(31.1), &serde_json::json!(10.0)),
+        "#279 P0: 3 110 400 bytes, one picture, in 100 ms"
+    );
 }
 
 /// #243 follow-up: `max.list_holder` names the program that kept Spout's

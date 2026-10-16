@@ -87,6 +87,9 @@ pub use quiesce::{MAX_STOP_WAIT, QUIESCE_EXPIRY, stop_and_wait};
 #[path = "program_max_phase.rs"]
 mod phase;
 pub use phase::{load_max_compose_phase_us, load_max_vblank_phase_us, load_video_quiet_us};
+#[path = "program_max_upload.rs"]
+mod upload;
+pub use upload::UPLOAD_RATE_SPAN;
 
 /// How many MAX jobs wait for the `program-max` thread: two, then the oldest
 /// is dropped (coalesced) — revision 2's D4 hand-off.
@@ -217,7 +220,7 @@ pub fn state_label(phase: &MaxPhase, enabled: bool) -> String {
 }
 
 /// `GET /api/v1/program` → `max` (#223 S2).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct MaxStatus {
     /// The setting `program_max_enabled`, as last applied.
     pub enabled: bool,
@@ -242,6 +245,12 @@ pub struct MaxStatus {
     pub upload_us_p99: u64,
     pub draw_us_p99: u64,
     pub send_us_p99: u64,
+    /// #279 P0: the plane bytes the composes moved from RAM to the GPU, MB/s
+    /// (10^6), and the pictures uploaded per second, over the sent
+    /// boundaries of the window (at most [`UPLOAD_RATE_SPAN`]); one upload
+    /// serves both targets, so `fhd` adds none (`program_max_upload.rs`).
+    pub upload_mb_s: f64,
+    pub uploads_per_s: f64,
     /// When the frames were in Spout's shared texture after the program
     /// offered them (the GPU's copy done), µs, over the last
     /// [`MAX_STAT_WINDOW`] sent frames. On the refresh grid the lead
@@ -408,6 +417,8 @@ struct Stats {
     draw: Window,
     send: Window,
     send_at: Window,
+    /// #279 P0: each sent boundary's upload volume (`upload::Uploads`).
+    uploads: upload::Uploads,
     late: u64,
     vblank_output: Option<String>,
     vblank_state: Option<VblankState>,
@@ -501,6 +512,7 @@ impl MaxOut {
                 draw: Window::default(),
                 send: Window::default(),
                 send_at: Window::default(),
+                uploads: upload::Uploads::default(),
                 late: 0,
                 vblank_output: None,
                 vblank_state: None,
@@ -788,6 +800,7 @@ impl MaxOut {
             )
         };
         let (send_phase, compose_phase) = windows;
+        let (upload_mb_s, uploads_per_s) = self.upload_rates();
         let ((phase, list_holder), [adapter, vblank_output]) = (phase, names);
         let (tracking, vblank_state) = tracking;
         let [
@@ -813,6 +826,8 @@ impl MaxOut {
             upload_us_p99: upload.p99(),
             draw_us_p99: draw.p99(),
             send_us_p99: send.p99(),
+            upload_mb_s,
+            uploads_per_s,
             send_at_us_p50: send_at.p50(),
             send_at_us_p99: send_at.p99(),
             send_at_us_max: send_at.max(),

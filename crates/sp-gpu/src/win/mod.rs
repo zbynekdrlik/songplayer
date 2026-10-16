@@ -316,7 +316,7 @@ impl Compositor {
         if swap_slots(resident, wanted) {
             self.slots.swap(0, 1);
         }
-        let mut uploads = 0;
+        let (mut uploads, mut upload_bytes) = (0, 0);
         for ((slot_of, picture), planes) in pictures.iter().zip(&planes) {
             let slot = &mut self.slots[slot_of.index()];
             let upload = upload_for(slot.as_ref().map(|t| t.resident), picture);
@@ -336,6 +336,7 @@ impl Compositor {
             let textures = slot.as_mut().ok_or(NO_TEXTURES)?;
             textures.write(&self.context, picture, planes);
             uploads += 1;
+            upload_bytes += planes.upload_bytes();
         }
         let upload_us = micros_since(upload_start);
 
@@ -373,6 +374,7 @@ impl Compositor {
             upload_us,
             draw_us,
             uploads,
+            upload_bytes,
         })
     }
 

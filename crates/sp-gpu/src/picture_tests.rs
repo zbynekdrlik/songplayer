@@ -126,3 +126,23 @@ fn a_picture_prints_its_size_never_its_bytes() {
         "Nv12Picture { id: 1, width: 4, height: 2, stride: 6, bytes: 18 }"
     );
 }
+
+/// #279 P0: one upload writes the luma plane (a byte a texel) and the
+/// chroma plane (two bytes a U/V pair), never the stride's padding.
+#[test]
+fn an_upload_writes_both_planes_without_the_padding() {
+    let bytes = |width, height, stride: u32| {
+        let data = vec![0u8; sp_core::nv12::nv12_len(stride, height)];
+        picture(width, height, stride, &data)
+            .planes()
+            .unwrap()
+            .upload_bytes()
+    };
+    assert_eq!(bytes(4, 2, 6), 8 + 2 * 2, "4×2: 2×1 pairs");
+    assert_eq!(bytes(5, 3, 8), 15 + 2 * 6, "5×3: 3×2 pairs, odd sides");
+    assert_eq!(
+        bytes(3840, 2160, 3840),
+        3840 * 2160 + 2 * 1920 * 1080,
+        "a 4K picture: 12.4 MB"
+    );
+}

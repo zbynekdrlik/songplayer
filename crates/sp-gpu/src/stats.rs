@@ -17,6 +17,10 @@ pub struct ComposeStats {
     pub draw_us: u64,
     /// How many pictures this call uploaded: 0 (all resident), 1 or 2.
     pub uploads: u32,
+    /// #279 P0: the plane bytes those uploads wrote (`Planes::upload_bytes`
+    /// of each, 0 when every picture was resident): what crossed from RAM
+    /// to the GPU, the number the GPU-resident path must take to 0.
+    pub upload_bytes: u64,
 }
 
 /// #251 step 2: each target's own part of one compose's draw, µs, in draw

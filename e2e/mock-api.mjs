@@ -1883,6 +1883,9 @@ function programBody() {
       upload_us_p99: 0,
       draw_us_p99: 0,
       send_us_p99: 0,
+      // #279 P0: what the composes upload (MB/s, pictures/s); no GPU here.
+      upload_mb_s: 0,
+      uploads_per_s: 0,
       send_at_us_p50: 0,
       send_at_us_p99: 0,
       send_at_us_max: 0,
