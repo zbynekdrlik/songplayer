@@ -131,3 +131,47 @@ async fn an_unknown_playlist_is_404_both_ways() {
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(global().slot(242_999).generation(), before, "nothing set");
 }
+
+/// #278: a PUT writes the row and the live register under ONE lock
+/// (`WRITES`), so two overlapping PUTs never leave the register a step
+/// behind the row. While another write holds the lock, a PUT writes
+/// neither; once it is released, both.
+#[tokio::test]
+async fn a_put_writes_the_row_and_the_register_under_one_lock() {
+    let id = 242_004;
+    let state = state_with(id).await;
+    let before = global().slot(id).generation();
+    let held = super::WRITES.lock().await;
+    let put = tokio::spawn({
+        let state = state.clone();
+        async move {
+            send(
+                &state,
+                "PUT",
+                &format!("/api/v1/playlists/{id}/audio"),
+                r#"{"gain_db":-7.5,"eq":[{"kind":"low_shelf","freq_hz":150,"gain_db":-18,"q":0.707}]}"#,
+            )
+            .await
+        }
+    });
+    // The safe direction: correct code cannot write while the lock is held.
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert_eq!(
+        global().slot(id).generation(),
+        before,
+        "the register moved while another write held the lock"
+    );
+    assert_ne!(
+        get_playlist_fx(&state.pool, id).await.unwrap(),
+        Some(shaped()),
+        "the row moved while another write held the lock"
+    );
+    drop(held);
+    let (status, _) = put.await.unwrap();
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        get_playlist_fx(&state.pool, id).await.unwrap(),
+        Some(shaped())
+    );
+    assert_eq!(global().slot(id).read(), (before + 1, shaped()));
+}

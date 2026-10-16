@@ -8,7 +8,7 @@
 //!   that does not read, or a value past a limit, is 400 with the reason and
 //!   nothing written; an unknown playlist is 404. The row is written FIRST,
 //!   then the live register, so a restart never loses a change the stream
-//!   already played.
+//!   already played. #278: both under ONE lock ([`WRITES`]).
 
 use axum::Json;
 use axum::body::Bytes;
@@ -21,6 +21,13 @@ use tracing::{error, info};
 
 use super::AppState;
 use crate::db::models_playlist_fx::{get_playlist_fx, set_playlist_fx};
+
+/// #278: every PUT writes the row and the live register under this one
+/// lock, so the register always holds what the row was last written with.
+/// The live panel gives a send up after 10 s and its successor may overlap
+/// it; unlocked, the earlier PUT could set the register after the later one
+/// wrote the row, a step behind until the panel sent again.
+pub(crate) static WRITES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// The answer of `GET …/audio`.
 #[derive(Debug, Serialize)]
@@ -68,6 +75,7 @@ pub async fn put_playlist_audio(
                 "playlist audio set"
             );
             crate::playback::playlist_fx::global().set(id, fx);
+            let _held = WRITES.lock().await;
             StatusCode::NO_CONTENT.into_response()
         }
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
