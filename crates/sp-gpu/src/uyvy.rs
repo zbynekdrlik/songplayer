@@ -24,12 +24,14 @@
 //!
 //! Each is one affine row over `(r, g, b, 1)`, already divided by 255: the
 //! UNORM value the render target stores. The rows reach the shader as f32
-//! in its constant buffer ([`matrix_f32`], [`constants_bytes`]), and the CPU
+//! in its constant buffer ([`rows_f32`], [`constants_bytes`]), and the CPU
 //! model uses the same f32 values.
 //!
 //! **Chroma** is the conversion of the two pixels' AVERAGE RGB, with no
 //! filter tap: the conversion is linear, so that equals the average of
-//! their Cb (and Cr), the 4:2:2 siting of a co-sited pair's mean.
+//! their Cb (and Cr). That is a chroma sample centred between the pair, not
+//! BT.709's co-sited one on its left pixel: the design's choice, two exact
+//! `Load`s and no filter tap.
 //!
 //! **How far a correct GPU may be from [`reference`]: [`UYVY_TOLERANCE`],
 //! one code.** The pass reads its two pixels with `Texture2D.Load` (no
@@ -73,7 +75,7 @@ pub const RGB_FULL_TO_BT709_LIMITED: [[f64; 4]; 3] = [
 
 /// [`RGB_FULL_TO_BT709_LIMITED`] as the shader gets it: each value rounded
 /// to f32, rows Y′, Cb, Cr.
-pub fn matrix_f32() -> [[f32; 4]; 3] {
+pub fn rows_f32() -> [[f32; 4]; 3] {
     RGB_FULL_TO_BT709_LIMITED.map(|row| row.map(|value| value as f32))
 }
 
@@ -81,11 +83,11 @@ pub fn matrix_f32() -> [[f32; 4]; 3] {
 /// `cbuffer Uyvy`: `to_y`, `to_u`, `to_v`).
 pub const UYVY_CONSTANTS_BYTES: usize = 48;
 
-/// The constant buffer's bytes: the rows of [`matrix_f32`] in order, each
+/// The constant buffer's bytes: the rows of [`rows_f32`] in order, each
 /// value a little-endian f32.
 pub fn constants_bytes() -> [u8; UYVY_CONSTANTS_BYTES] {
     let mut bytes = [0u8; UYVY_CONSTANTS_BYTES];
-    let values = matrix_f32().into_iter().flatten();
+    let values = rows_f32().into_iter().flatten();
     for (out, value) in bytes.chunks_exact_mut(4).zip(values) {
         out.copy_from_slice(&value.to_le_bytes());
     }
@@ -119,7 +121,7 @@ fn convert(row: [f32; 4], rgb: [f32; 3]) -> u8 {
 /// pair's average RGB; f32 maths, then the render target's rounding
 /// (`reference::unorm8`).
 pub fn pack_pair(left: [u8; 4], right: [u8; 4]) -> [u8; 4] {
-    let [to_y, to_u, to_v] = matrix_f32();
+    let [to_y, to_u, to_v] = rows_f32();
     let (left, right) = (rgb(left), rgb(right));
     let mean = [0, 1, 2].map(|c| (left[c] + right[c]) * 0.5);
     [

@@ -48,7 +48,7 @@ use crate::composition::{CANVAS_HEIGHT, CANVAS_WIDTH, Composition, Fit, MAX_FIT,
 use crate::error::GpuError;
 use crate::quad::QuadConstants;
 use crate::residency::{Resident, Upload, swap_slots, upload_for};
-use crate::stats::{ComposeStats, target_draws_us};
+use crate::stats::{ComposeStats, split_uyvy_part, target_draws_us};
 use crate::targets::{TargetId, Targets};
 use crate::uyvy::UYVY_STAGING;
 use device::DeviceUse;
@@ -435,12 +435,11 @@ impl Compositor {
         queries.extend(self.uyvy.as_ref().map(|pass| &pass.done));
         let done = pipeline::wait_until_each_done(&self.context, &queries)?;
         let draw_us = micros_since(draw_start);
-        // The targets' parts in draw order, then the UYVY pass's, if any.
         let parts = target_draws_us(draw_start, &done);
-        for ((_, drawn), &part) in self.targets.iter_mut().zip(&parts) {
+        let (parts, uyvy_us) = split_uyvy_part(parts, targets_drawn);
+        for ((_, drawn), part) in self.targets.iter_mut().zip(parts) {
             drawn.draw_us = Some(part);
         }
-        let uyvy_us = parts.get(targets_drawn).copied();
         unsafe { self.device.GetDeviceRemovedReason() }
             .map_err(|e| GpuError::removed(e.code().0 as u32))?;
         if let Some(pass) = &mut self.uyvy {

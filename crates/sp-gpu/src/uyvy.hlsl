@@ -5,7 +5,7 @@
 // (U, Y0, V, Y1), so its four bytes in memory are one UYVY pair.
 //
 // The constants are sp-gpu's uyvy::constants_bytes (uyvy.rs): three
-// float4 registers in this order, the rows of uyvy::matrix_f32. Change
+// float4 registers in this order, the rows of uyvy::rows_f32. Change
 // both together; uyvy.rs's pack_pair is the CPU model of ps_main.
 
 cbuffer Uyvy : register(b0)

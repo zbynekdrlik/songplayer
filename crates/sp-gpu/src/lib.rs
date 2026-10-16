@@ -126,7 +126,7 @@ pub use spout::{
     parse_sender_names,
 };
 pub use spout_lock::{LockHolder, SentinelEnd};
-pub use stats::{ComposeStats, SpoutSendStats, target_draws_us};
+pub use stats::{ComposeStats, SpoutSendStats, split_uyvy_part, target_draws_us};
 pub use targets::{TargetId, Targets};
 pub use vblank::{
     OutputInfo, Seen, VBLANK_BOOT_INTERVALS, VBLANK_IDLE_MAX, VBLANK_MAX_PERIOD, VBLANK_MIN_FIT,

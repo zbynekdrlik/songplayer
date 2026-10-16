@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use super::target_draws_us;
+use super::{split_uyvy_part, target_draws_us};
 
 const MS: Duration = Duration::from_millis(1);
 
@@ -38,4 +38,24 @@ fn an_instant_seen_before_the_one_before_reads_zero() {
 #[test]
 fn no_target_no_draw() {
     assert!(target_draws_us(Instant::now(), &[]).is_empty());
+}
+
+/// #279 P1a: the wait ends the targets' queries, then the UYVY pass's: the
+/// part after the targets' is the pass's own.
+#[test]
+fn the_part_after_the_targets_is_the_uyvy_pass_s() {
+    assert_eq!(
+        split_uyvy_part(vec![3_000, 2_250, 400], 2),
+        (vec![3_000, 2_250], Some(400))
+    );
+    assert_eq!(split_uyvy_part(vec![5, 6], 1), (vec![5], Some(6)));
+}
+
+#[test]
+fn with_no_uyvy_pass_every_part_is_a_target_s() {
+    assert_eq!(
+        split_uyvy_part(vec![3_000, 2_250], 2),
+        (vec![3_000, 2_250], None)
+    );
+    assert_eq!(split_uyvy_part(Vec::new(), 0), (Vec::new(), None));
 }

@@ -11,19 +11,18 @@ use std::ffi::c_void;
 use windows::Win32::Graphics::Direct3D::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_RENDER_TARGET, D3D11_BUFFER_DESC, D3D11_CPU_ACCESS_READ,
-    D3D11_MAP_FLAG_DO_NOT_WAIT, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_SUBRESOURCE_DATA,
-    D3D11_USAGE_DEFAULT, D3D11_USAGE_IMMUTABLE, D3D11_USAGE_STAGING, D3D11_VIEWPORT, ID3D11Buffer,
-    ID3D11Device, ID3D11DeviceContext, ID3D11PixelShader, ID3D11Query, ID3D11RasterizerState,
-    ID3D11RenderTargetView, ID3D11ShaderResourceView, ID3D11Texture2D, ID3D11VertexShader,
+    D3D11_MAP_FLAG_DO_NOT_WAIT, D3D11_SUBRESOURCE_DATA, D3D11_USAGE_DEFAULT, D3D11_USAGE_IMMUTABLE,
+    D3D11_USAGE_STAGING, D3D11_VIEWPORT, ID3D11Buffer, ID3D11Device, ID3D11DeviceContext,
+    ID3D11PixelShader, ID3D11Query, ID3D11RasterizerState, ID3D11RenderTargetView,
+    ID3D11ShaderResourceView, ID3D11Texture2D, ID3D11VertexShader,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R8G8B8A8_UNORM;
 use windows::core::s;
 
 use super::failed;
 use super::pipeline::{compile, created, query, raster};
-use super::textures::{desc, shader_view, texture};
+use super::textures::{desc, map_rows_into, shader_view, texture};
 use crate::error::GpuError;
-use crate::readback::{mapped_len, unpad_rows_into};
 use crate::targets::TargetId;
 use crate::uyvy::{
     StagingRing, UYVY_CONSTANTS_BYTES, UYVY_STAGING, constants_bytes, map_failed, uyvy_size,
@@ -36,11 +35,6 @@ const SHADER: &str = include_str!("../uyvy.hlsl");
 /// reported instead of a panic.
 const NO_SLOT: GpuError = GpuError::NoObject {
     call: "the UYVY staging slot",
-};
-
-/// A mapping that does not hold the rows it should.
-const NO_ROWS: GpuError = GpuError::NoObject {
-    call: "Map (the mapped UYVY rows)",
 };
 
 /// The UYVY pass of one target: everything it draws with, what it draws
@@ -186,29 +180,9 @@ impl UyvyPass {
             return Ok(false);
         };
         let staging = self.staging.get(slot).ok_or(NO_SLOT)?;
-        let row = self.width as usize * 4;
-        let rows = self.height as usize;
-        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+        let rows = (self.width as usize * 4, self.height as usize);
         let flags = D3D11_MAP_FLAG_DO_NOT_WAIT.0 as u32;
-        unsafe { context.Map(staging, 0, D3D11_MAP_READ, flags, Some(&mut mapped)) }
-            .map_err(|e| map_failed(e.code().0 as u32))?;
-        let pitch = mapped.RowPitch as usize;
-        let packed = match mapped_len(pitch, row, rows) {
-            Some(len) if !mapped.pData.is_null() => {
-                // SAFETY: the mapped staging texture is `rows` rows `pitch`
-                // bytes apart (`pitch` ≥ `row`, `mapped_len`), so its first
-                // `len` bytes end with the last row's texels, inside the
-                // mapping, which stays mapped until the Unmap below.
-                let bytes = unsafe {
-                    std::slice::from_raw_parts(mapped.pData.cast::<u8>().cast_const(), len)
-                };
-                out.clear();
-                unpad_rows_into(bytes, pitch, row, rows, out)
-            }
-            _ => None,
-        };
-        unsafe { context.Unmap(staging, 0) };
-        packed.ok_or(NO_ROWS)?;
+        map_rows_into(context, staging, flags, rows, out, map_failed)?;
         Ok(true)
     }
 }

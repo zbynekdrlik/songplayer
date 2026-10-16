@@ -14,7 +14,8 @@ pub struct ComposeStats {
     /// each picture once, whatever the targets (#251 step 2).
     pub upload_us: u64,
     /// From the first draw command until the GPU has finished the frame,
-    /// every target (the GPU side of the uploads included), µs.
+    /// every target (the GPU side of the uploads included), µs; #279 P1a:
+    /// with a UYVY pass enabled, the pass and its staging copy too.
     pub draw_us: u64,
     /// How many pictures this call uploaded: 0 (all resident), 1 or 2.
     pub uploads: u32,
@@ -44,6 +45,16 @@ pub fn target_draws_us(start: Instant, done: &[Instant]) -> Vec<u64> {
             u64::try_from(part.as_micros()).unwrap_or(u64::MAX)
         })
         .collect()
+}
+
+/// #279 P1a: one compose's parts ([`target_draws_us`] over the targets'
+/// event queries, then the UYVY pass's when one ran) split into the
+/// targets' own, in draw order, and the pass's: the part right after the
+/// `targets` targets' parts, `None` when there is none.
+pub fn split_uyvy_part(mut parts: Vec<u64>, targets: usize) -> (Vec<u64>, Option<u64>) {
+    let uyvy = parts.get(targets).copied();
+    parts.truncate(targets);
+    (parts, uyvy)
 }
 
 /// The cost of one `SpoutSender::send` (#223 S1b), measured on the calling

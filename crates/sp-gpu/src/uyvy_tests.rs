@@ -6,7 +6,7 @@
 
 use super::{
     MAP_CALL, RGB_FULL_TO_BT709_LIMITED, STILL_DRAWING_CALL, StagingRing, UYVY_CONSTANTS_BYTES,
-    UYVY_STAGING, UYVY_TOLERANCE, constants_bytes, map_failed, matrix_f32, pack_pair, reference,
+    UYVY_STAGING, UYVY_TOLERANCE, constants_bytes, map_failed, pack_pair, reference, rows_f32,
     uyvy_size,
 };
 use crate::color::{BT709_LIMITED_TO_FULL, KB, KR};
@@ -84,7 +84,7 @@ fn the_rows_invert_the_limited_to_full_matrix() {
 
 #[test]
 fn the_shader_rows_are_the_matrix_rounded_to_f32() {
-    let rows = matrix_f32();
+    let rows = rows_f32();
     assert_eq!(
         rows[0],
         [0.182_585_88, 0.614_230_6, 0.062_007_06, 0.062_745_1]
@@ -113,7 +113,7 @@ fn the_constant_buffer_is_the_three_rows_in_order() {
         .chunks_exact(4)
         .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
         .collect();
-    let want: Vec<f32> = matrix_f32().into_iter().flatten().collect();
+    let want: Vec<f32> = rows_f32().into_iter().flatten().collect();
     assert_eq!(floats, want);
     assert_eq!(floats[4], -0.100_643_73, "register 1 is Cb's row");
 }
