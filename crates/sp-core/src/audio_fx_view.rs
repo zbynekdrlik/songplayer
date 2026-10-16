@@ -24,8 +24,6 @@ pub const SLIDER_STEPS: u32 = 1000;
 /// Q's factor per wheel notch over a band's handle (a notch is 100 of the
 /// wheel's `deltaY`; up narrows).
 pub const WHEEL_Q_FACTOR: f64 = 1.1;
-/// The step Q is shown and sent in.
-pub const Q_STEP: f64 = 0.01;
 
 /// The frequencies the grid marks, with their labels.
 pub const FREQ_GRID: [(f64, &str); 10] = [
@@ -164,18 +162,39 @@ pub fn slider_q(position: u32) -> f64 {
 }
 
 /// Q after a wheel turn of `delta_y` over a band's handle:
-/// [`WHEEL_Q_FACTOR`] per notch, up (a negative `deltaY`) narrows, snapped.
-/// A turn too small to reach the next 0,01 (a touchpad, a browser's
-/// percent-based scrolling) still moves one 0,01 step its way, so Q never
-/// sticks; held to the Q limits.
+/// [`WHEEL_Q_FACTOR`] per notch, up (a negative `deltaY`) narrows, snapped
+/// and held to the Q limits. Many small events (a touchpad) go through
+/// [`WheelTurn`].
 pub fn wheel_q(q: f64, delta_y: f64) -> f64 {
-    let scaled = snap_q(q * WHEEL_Q_FACTOR.powf(-delta_y / 100.0));
-    if delta_y < 0.0 {
-        scaled.max(snap_q(q + Q_STEP))
-    } else if delta_y > 0.0 {
-        scaled.min(snap_q(q - Q_STEP))
-    } else {
-        scaled
+    let notches = -delta_y / 100.0;
+    snap_q(q * WHEEL_Q_FACTOR.powf(notches))
+}
+
+/// The wheel's turn over one band's handle, carried between events. A
+/// turn too small to reach the next 0,01 of Q (a touchpad's few pixels, a
+/// browser's percent-based scrolling) adds up until it does, so Q never
+/// sticks and a touchpad moves it no faster than a mouse wheel; a turn the
+/// other way starts afresh (so one past a Q limit is never owed).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct WheelTurn {
+    /// The turn not yet spent on Q, in `deltaY` units.
+    pending: f64,
+}
+
+impl WheelTurn {
+    /// Q after one wheel event of `delta_y` over a handle at `q`.
+    pub fn turn(&mut self, q: f64, delta_y: f64) -> f64 {
+        let same_way = self.pending * delta_y >= 0.0;
+        self.pending = if same_way {
+            self.pending + delta_y
+        } else {
+            delta_y
+        };
+        let next = wheel_q(q, self.pending);
+        if next != snap_q(q) {
+            self.pending = 0.0;
+        }
+        next
     }
 }
 

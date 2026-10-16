@@ -418,6 +418,12 @@ let playlistAudioDelayMs = 0;
 // (`/__mock/playlist-audio-put-delay {ms}`): a slow server, to prove the
 // panel never has two requests in flight.
 let playlistAudioPutDelayMs = 0;
+// #278: a status every PUT …/audio answers instead of the real one
+// (`/__mock/playlist-audio-put-status {status}`, 0 = off): a failing server.
+let playlistAudioPutStatus = 0;
+// Bumped by every reset: a delayed PUT that arrived before a reset (a test
+// that ended while its request waited) answers but stores nothing after it.
+let playlistAudioEpoch = 0;
 function playlistAudioOf(id) {
   return playlistAudio.get(id) ?? { gain_db: 0, eq: [], generation: 0 };
 }
@@ -462,10 +468,19 @@ app.put("/api/v1/playlists/:id/audio", async (req, res) => {
   const id = Number(req.params.id);
   const put = { id, body: req.body, at: Date.now(), done: null };
   playlistAudioPuts.push(put);
+  const epoch = playlistAudioEpoch;
   if (playlistAudioPutDelayMs > 0) {
     await new Promise((resolve) => setTimeout(resolve, playlistAudioPutDelayMs));
   }
+  if (epoch !== playlistAudioEpoch) {
+    res.status(204).end();
+    return;
+  }
   put.done = Date.now();
+  if (playlistAudioPutStatus > 0) {
+    res.status(playlistAudioPutStatus).type("text/plain").send("mock failure");
+    return;
+  }
   const refusal = playlistAudioRefusal(req.body);
   if (refusal) {
     res.status(400).type("text/plain").send(refusal);
@@ -498,6 +513,8 @@ app.post("/__mock/playlist-audio-reset", (_req, res) => {
   playlistAudioPuts = [];
   playlistAudioDelayMs = 0;
   playlistAudioPutDelayMs = 0;
+  playlistAudioPutStatus = 0;
+  playlistAudioEpoch += 1;
   res.status(204).end();
 });
 app.post("/__mock/playlist-audio-delay", (req, res) => {
@@ -506,6 +523,10 @@ app.post("/__mock/playlist-audio-delay", (req, res) => {
 });
 app.post("/__mock/playlist-audio-put-delay", (req, res) => {
   playlistAudioPutDelayMs = Number(req.body.ms) || 0;
+  res.status(204).end();
+});
+app.post("/__mock/playlist-audio-put-status", (req, res) => {
+  playlistAudioPutStatus = Number(req.body.status) || 0;
   res.status(204).end();
 });
 app.post("/__mock/playlist-audio-set", (req, res) => {

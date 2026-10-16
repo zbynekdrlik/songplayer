@@ -168,7 +168,10 @@ impl EqEdit {
         {
             request_animation_frame(move || {
                 if el.is_connected() {
-                    let _ = el.focus();
+                    // Never scroll the page for it.
+                    let options = web_sys::FocusOptions::new();
+                    options.set_prevent_scroll(true);
+                    let _ = el.focus_with_options(&options);
                 }
             });
         }
@@ -257,19 +260,24 @@ impl EqEdit {
         }
         let path = format!("/api/v1/playlists/{}/audio", self.playlist_id);
         leptos::task::spawn_local(async move {
-            // An answer that never comes must not hold the gate in flight.
+            // An answer that never comes must not hold the gate in flight:
+            // it is given up, and the settings as they are go out again.
             let put = Box::pin(api::put_json_empty(&path, &fx));
             let give_up = Box::pin(TimeoutFuture::new(ANSWER_TIMEOUT_MS));
-            let result = match select(put, give_up).await {
-                Either::Left((answer, _)) => answer,
-                Either::Right(_) => Err("server neodpovedá".to_string()),
-            };
-            self.step(SendGate::landed);
-            let busy = self.gate.try_with_value(SendGate::busy).unwrap_or(false);
-            let text = match result {
-                Err(e) => format!("Uloženie zlyhalo: {e}"),
-                Ok(()) if busy => SAVING.to_string(),
-                Ok(()) => SAVED.to_string(),
+            let text = match select(put, give_up).await {
+                Either::Left((answer, _)) => {
+                    self.step(SendGate::landed);
+                    let busy = self.gate.try_with_value(SendGate::busy).unwrap_or(false);
+                    match answer {
+                        Err(e) => format!("Uloženie zlyhalo: {e}"),
+                        Ok(()) if busy => SAVING.to_string(),
+                        Ok(()) => SAVED.to_string(),
+                    }
+                }
+                Either::Right(_) => {
+                    self.step(SendGate::gave_up);
+                    "Uloženie zlyhalo: server neodpovedá — skúšam znova".to_string()
+                }
             };
             let _ = self.status.try_set(text);
         });

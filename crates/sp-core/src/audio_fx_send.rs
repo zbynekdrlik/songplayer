@@ -13,7 +13,7 @@
 pub const THROTTLE_MS: f64 = 50.0;
 
 /// How long the panel waits for a send's answer, ms. A send not answered
-/// by then is given up ([`SendGate::landed`], "server neodpovedá"), so a
+/// by then is given up ([`SendGate::gave_up`], "server neodpovedá"), so a
 /// server that never answers can never hold the gate in flight for good.
 pub const ANSWER_TIMEOUT_MS: u32 = 10_000;
 
@@ -61,6 +61,16 @@ impl SendGate {
     /// The request in flight was answered (or given up).
     pub fn landed(&mut self, now_ms: f64) -> SendStep {
         self.in_flight = false;
+        self.next(now_ms)
+    }
+
+    /// The request in flight went unanswered for [`ANSWER_TIMEOUT_MS`] and
+    /// was given up. What the server holds is unknown (the request may
+    /// still land), so the settings as they are now go out again: the
+    /// latest value is the last one sent.
+    pub fn gave_up(&mut self, now_ms: f64) -> SendStep {
+        self.in_flight = false;
+        self.dirty = true;
         self.next(now_ms)
     }
 

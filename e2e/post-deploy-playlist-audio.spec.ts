@@ -13,9 +13,10 @@
  * it), and its "Odstrániť" takes it away again (generation +2, the row reads
  * exactly as stored). A 0 dB peak is a unity filter (the RBJ peak at 0 dB has
  * b = a, so its TDF-II stage passes every sample exactly); on a playlist
- * with bands the change is the DSP's usual 50 ms crossfade into the same
- * filters. The gate picks a playlist that is not decoding when there is one,
- * so nothing is heard. The stored settings are put back in `finally` if the
+ * with enabled bands the change is, as for any EQ edit, the DSP's 50 ms
+ * crossfade into a fresh cascade of the same filters (their state starting
+ * from zero). The gate picks a playlist that is not decoding when there is
+ * one, so nothing is heard. The stored settings are put back in `finally` if the
  * row differs from them. Never write any other value on the box from a gate.
  *
  * Zero console errors is the last assertion (the same benign filters as

@@ -58,6 +58,21 @@ fn one_request_in_flight_and_the_latest_change_follows_it() {
     assert!(!gate.busy());
 }
 
+/// #278 review round 2: a send unanswered for 10 s is given up, and the
+/// settings as they are now go out again (what the server holds is
+/// unknown); its answer then leaves the gate clean, and the throttle counts
+/// from the new send.
+#[test]
+fn an_unanswered_send_is_given_up_and_the_settings_go_out_again() {
+    let mut gate = SendGate::default();
+    assert_eq!(gate.changed(T), SendStep::Send);
+    assert_eq!(gate.gave_up(T + 10_000.0), SendStep::Send);
+    assert!(gate.busy(), "the new send is in flight");
+    assert_eq!(gate.landed(T + 10_005.0), SendStep::Idle);
+    assert!(!gate.busy());
+    assert_eq!(gate.changed(T + 10_020.0), SendStep::WaitMs(30.0));
+}
+
 /// A change within 50 ms of the last send's START waits for the rest of
 /// the window: one timer, and its tick sends; a tick at exactly the
 /// window's end sends.

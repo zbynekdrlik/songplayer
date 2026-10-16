@@ -352,6 +352,43 @@ test("after a drag the cards take the frequency order, moved and never re-create
   await expect(peakHandle.locator("text")).toHaveText("1");
 });
 
+test("a card moved by a keyboard edit keeps its focus (#278)", async ({ page, request }) => {
+  await request.post("/__mock/playlist-audio-set", {
+    data: {
+      id: PID,
+      fx: {
+        gain_db: 0,
+        eq: [
+          { kind: "peak", freq_hz: 50, gain_db: 3, q: 1, enabled: true },
+          { kind: "low_shelf", freq_hz: 120, gain_db: -2, q: Math.SQRT1_2, enabled: true },
+          { kind: "peak", freq_hz: 1000, gain_db: 0, q: 1, enabled: true },
+        ],
+      },
+    },
+  });
+  await openPanel(page);
+  const cards = page.getByTestId("playlist-audio-band");
+  await expect(cards.nth(2)).toHaveAttribute("data-index", "2");
+  const slider = cards.nth(2).getByTestId("band-freq");
+  await slider.focus();
+  // Home: the 1 kHz peak goes to 20 Hz, below the other two: its card
+  // moves to the top, and the slider keeps the focus.
+  await page.keyboard.press("Home");
+  await expect(cards.nth(0)).toHaveAttribute("data-index", "2");
+  await expect(cards.nth(0).getByTestId("band-freq-value")).toHaveText("20 Hz");
+  await expect(cards.nth(0).getByTestId("band-freq")).toBeFocused();
+  await expect
+    .poll(async () => (await lastPut(request))?.eq[2]?.freq_hz, { timeout: 1000 })
+    .toBe(20);
+  // The keyboard goes on working on the same slider.
+  await page.keyboard.press("PageUp");
+  await expect(cards.nth(0).getByTestId("band-freq-value")).toHaveText("40 Hz");
+  await expect(cards.nth(0).getByTestId("band-freq")).toBeFocused();
+  await expect
+    .poll(async () => (await lastPut(request))?.eq[2]?.freq_hz, { timeout: 1000 })
+    .toBe(40);
+});
+
 test("a high-pass handle moves on its frequency only (#278)", async ({ page, request }) => {
   await openPanel(page);
   await addBand(page, request, "high_pass");
@@ -464,6 +501,7 @@ test("the wheel over a handle changes its Q (#278)", async ({ page, request }) =
   await openPanel(page);
   await addBand(page, request, "peak");
   const centre = await dotCentre(page, page.getByTestId("playlist-audio-handle"));
+  const scrollBefore = await page.evaluate(() => window.scrollY);
   await page.mouse.move(centre.x, centre.y);
   await page.mouse.wheel(0, -100);
   await page.mouse.wheel(0, -100);
@@ -472,6 +510,15 @@ test("the wheel over a handle changes its Q (#278)", async ({ page, request }) =
   await expect
     .poll(async () => (await lastPut(request))?.eq[0]?.q, { timeout: 1000 })
     .toBe(1.21);
+  // A touchpad's small events add up instead of sticking: three of 4 px
+  // reach the next 0,01 once (sp_core::audio_fx_view::WheelTurn).
+  for (let i = 0; i < 3; i++) await page.mouse.wheel(0, -4);
+  await expect(card.getByTestId("band-q-value")).toHaveText("Q 1,22");
+  await expect
+    .poll(async () => (await lastPut(request))?.eq[0]?.q, { timeout: 1000 })
+    .toBe(1.22);
+  // The page itself did not scroll (the handle's listener takes the wheel).
+  expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
 });
 
 test("one request in flight: a slow server gets the PUTs one after another, the latest last (#278)", async ({
@@ -482,19 +529,97 @@ test("one request in flight: a slow server gets the PUTs one after another, the 
   await addBand(page, request, "peak");
   await request.post("/__mock/playlist-audio-put-delay", { data: { ms: 300 } });
   const sentBefore = (await puts(request)).length;
-  await dragHandle(page, page.getByTestId("playlist-audio-handle"), 200, -50, 40);
+  const handle = page.getByTestId("playlist-audio-handle");
+  const from = await dotCentre(page, handle);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x + 100, from.y - 25, { steps: 10 });
+  // A drag PUT has arrived (and waits 300 ms for its answer) with the
+  // button still down; the drag goes on, then ends.
+  await expect
+    .poll(async () => (await puts(request)).length - sentBefore, { timeout: 5000 })
+    .toBeGreaterThanOrEqual(1);
+  await page.mouse.move(from.x + 200, from.y - 50, { steps: 10 });
+  await page.mouse.up();
   const final = await cardBand(page.getByTestId("playlist-audio-band"));
   await expect.poll(() => lastPut(request), { timeout: 5000 }).toEqual({ gain_db: 0, eq: [final] });
   await expect
     .poll(async () => (await puts(request)).every((p) => p.done !== null), { timeout: 5000 })
     .toBe(true);
   const sent = (await puts(request)).slice(sentBefore);
+  // The moves after the first drag PUT reached the server in a later one.
   expect(sent.length).toBeGreaterThan(1);
   for (let i = 1; i < sent.length; i++) {
     expect(sent[i].at, `PUT ${i} started before PUT ${i - 1} was answered`).toBeGreaterThanOrEqual(
       sent[i - 1].done!,
     );
   }
+});
+
+test("a value past a limit is refused in Slovak and nothing is sent (#242, #278)", async ({
+  page,
+  request,
+}) => {
+  // A stored row the panel itself could never make (5 Hz).
+  await request.post("/__mock/playlist-audio-set", {
+    data: { id: PID, fx: { gain_db: 0, eq: [{ kind: "peak", freq_hz: 5, gain_db: 3, q: 1, enabled: true }] } },
+  });
+  await openPanel(page);
+  const card = page.getByTestId("playlist-audio-band");
+  await card.getByTestId("band-gain-value").dblclick();
+  await expect(page.getByTestId("playlist-audio-status")).toHaveText(
+    "Pásmo 1: frekvencia musí byť od 20 do 20 000 Hz",
+  );
+  expect(await puts(request)).toEqual([]);
+  // Back inside the limits, the next change goes out.
+  await card.getByTestId("band-freq-value").dblclick();
+  await expect.poll(() => lastPut(request), { timeout: 1000 }).toEqual({
+    gain_db: 0,
+    eq: [{ kind: "peak", freq_hz: 1000, gain_db: 0, q: 1, enabled: true }],
+  });
+  await expect(page.getByTestId("playlist-audio-status")).toHaveText("Uložené");
+});
+
+test("a save the server refuses says so, and the next change goes out (#278)", async ({
+  page,
+  request,
+}) => {
+  await openPanel(page);
+  await request.post("/__mock/playlist-audio-put-status", { data: { status: 500 } });
+  try {
+    await page.getByTestId("playlist-audio-add-peak").click();
+    await expect(page.getByTestId("playlist-audio-status")).toHaveText(
+      `Uloženie zlyhalo: PUT /api/v1/playlists/${PID}/audio → 500`,
+    );
+    await request.post("/__mock/playlist-audio-put-status", { data: { status: 0 } });
+    await page.getByTestId("playlist-audio-add-low_shelf").click();
+    await expect(page.getByTestId("playlist-audio-status")).toHaveText("Uložené");
+    await expect.poll(async () => (await lastPut(request))?.eq.length, { timeout: 1000 }).toBe(2);
+  } finally {
+    // The 500 is the point of the test, not a bug (sp-ui-frontend.md).
+    consoleMessages = consoleMessages.filter((m) => !/Failed to load resource.*500/.test(m));
+  }
+});
+
+test("an unanswered save is given up after 10 s and sent again (#278)", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(60_000);
+  await openPanel(page);
+  await request.post("/__mock/playlist-audio-put-delay", { data: { ms: 15_000 } });
+  await page.getByTestId("playlist-audio-add-peak").click();
+  await expect(page.getByTestId("playlist-audio-status")).toHaveText("Ukladám…");
+  // Given up at 10 s; the settings as they are go out again.
+  await expect(page.getByTestId("playlist-audio-status")).toHaveText(
+    "Uloženie zlyhalo: server neodpovedá — skúšam znova",
+    { timeout: 13_000 },
+  );
+  await expect.poll(async () => (await puts(request)).length, { timeout: 3000 }).toBe(2);
+  const sent = await puts(request);
+  expect(sent[1].body).toEqual(sent[0].body);
+  expect(sent[1].at - sent[0].at).toBeGreaterThanOrEqual(9_500);
+  expect(sent[0].done, "the first was still unanswered").toBeNull();
 });
 
 test("a band switched off or removed leaves the curve and is sent live (#242, #278)", async ({

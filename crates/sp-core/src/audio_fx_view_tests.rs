@@ -3,7 +3,7 @@
 //! Wired via `#[cfg(test)] #[path = "audio_fx_view_tests.rs"] mod tests;`.
 
 use super::{
-    BOX_H, BOX_W, CURVE_POINTS, DB_GRID, FREQ_GRID, Q_STEP, SLIDER_STEPS, WHEEL_Q_FACTOR,
+    BOX_H, BOX_W, CURVE_POINTS, DB_GRID, FREQ_GRID, SLIDER_STEPS, WHEEL_Q_FACTOR, WheelTurn,
     band_path, display_order, dragged, fill_path, freq_label, freq_slider, gain_label, handle_xy,
     q_label, q_slider, slider_freq, slider_q, snap_freq, snap_gain, snap_q, to_box, wheel_q,
     x_freq, y_db,
@@ -242,7 +242,6 @@ fn the_q_slider_is_a_log_scale() {
 /// held to the Q limits.
 #[test]
 fn the_wheel_steps_q_by_a_tenth_per_notch() {
-    assert_eq!(Q_STEP, 0.01);
     for (q, delta_y, want) in [
         (1.0, -100.0, 1.1),
         (1.0, 100.0, 0.91),
@@ -256,21 +255,46 @@ fn the_wheel_steps_q_by_a_tenth_per_notch() {
     }
 }
 
-/// #278 review round 1: a turn too small to reach the next 0,01 (a
-/// touchpad's few pixels, a percent-based scroll) still moves one step its
-/// way — Q never sticks — and stays inside the limits.
-#[test]
-fn a_small_wheel_turn_still_moves_q_one_step() {
-    for (q, delta_y, want) in [
-        (1.0, -4.0, 1.01),
-        (1.0, 4.0, 0.99),
-        (0.2, -10.0, 0.21),
-        (DEFAULT_Q, -4.0, 0.72),
-        (10.0, -4.0, 10.0),
-        (0.1, 4.0, 0.1),
-    ] {
-        close(wheel_q(q, delta_y), want, 1e-12);
+/// Q after each of `deltas`, one `WheelTurn` over a handle from `q`.
+fn turns(q: f64, deltas: &[f64]) -> Vec<f64> {
+    let mut turn = WheelTurn::default();
+    let mut q = q;
+    deltas
+        .iter()
+        .map(|delta_y| {
+            q = turn.turn(q, *delta_y);
+            q
+        })
+        .collect()
+}
+
+fn assert_turns(got: Vec<f64>, want: &[f64]) {
+    assert_eq!(got.len(), want.len(), "{got:?}");
+    for (g, w) in got.iter().zip(want) {
+        close(*g, *w, 1e-12);
     }
+}
+
+/// #278 review rounds 1-2: small wheel events (a touchpad's few pixels, a
+/// percent-based scroll) add up until they reach the next 0,01 of Q — Q
+/// never sticks and moves no faster than with a mouse wheel; a zero event
+/// keeps what is pending.
+#[test]
+fn small_wheel_turns_add_up_until_q_moves() {
+    assert_turns(
+        turns(1.0, &[-4.0, -4.0, -4.0, -4.0]),
+        &[1.0, 1.01, 1.01, 1.02],
+    );
+    assert_turns(turns(1.0, &[-4.0, 0.0, -4.0]), &[1.0, 1.0, 1.01]);
+    assert_turns(turns(1.0, &[-100.0, -100.0]), &[1.1, 1.21]);
+}
+
+/// A turn the other way starts afresh: neither what the old way left nor a
+/// turn past a Q limit is owed.
+#[test]
+fn a_wheel_turn_the_other_way_starts_afresh() {
+    assert_turns(turns(1.0, &[-4.0, 4.0, 4.0]), &[1.0, 1.0, 0.99]);
+    assert_turns(turns(10.0, &[-100.0, 100.0]), &[10.0, 9.09]);
 }
 
 /// A shelf's or a peak's handle sits at its frequency and gain; a

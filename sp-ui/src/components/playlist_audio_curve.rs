@@ -14,8 +14,8 @@ use leptos::prelude::*;
 use leptos::svg::Svg;
 use sp_core::audio_fx::{curve_path, db_y, freq_x};
 use sp_core::audio_fx_view::{
-    BOX_H, BOX_W, CURVE_POINTS, DB_GRID, FREQ_GRID, band_path, dragged, fill_path, handle_xy,
-    to_box, wheel_q,
+    BOX_H, BOX_W, CURVE_POINTS, DB_GRID, FREQ_GRID, WheelTurn, band_path, dragged, fill_path,
+    handle_xy, to_box,
 };
 use wasm_bindgen::JsCast;
 
@@ -88,6 +88,9 @@ fn handle(
 ) -> impl IntoView {
     let band = Memo::new(move |_| edit.band(id));
     let at = move || band.get().map(|b| handle_xy(&b, BOX_W, BOX_H));
+    // The wheel's turn over this handle, carried between events (a
+    // touchpad's small events add up).
+    let turn = StoredValue::new(WheelTurn::default());
     // The pointer in the box's units, measured on the SVG as drawn now.
     let pointer = move |ev: &web_sys::PointerEvent| -> Option<(f64, f64)> {
         let rect = svg.get_untracked()?.get_bounding_client_rect();
@@ -149,7 +152,11 @@ fn handle(
                 on:wheel=move |ev: web_sys::WheelEvent| {
                     ev.prevent_default();
                     let delta_y = ev.delta_y();
-                    edit.edit_band(id, |b| b.q = wheel_q(b.q, delta_y), false);
+                    edit.edit_band(
+                        id,
+                        |b| b.q = turn.try_update_value(|t| t.turn(b.q, delta_y)).unwrap_or(b.q),
+                        false,
+                    );
                 }
             />
             <text

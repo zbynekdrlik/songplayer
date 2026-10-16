@@ -93,9 +93,11 @@ separate one-song playlist in mode Single).
     to `dragged(..)` (frequency always, gain only for a shelf / peak, both
     snapped); `pointerup` / `pointercancel` / `lostpointercapture` end it
     once (`finish`). The wheel over a handle: `wheel_q` (×1,1 per notch of
-    100, up narrows, and at least one 0,01 step per event so a touchpad's
-    few pixels never stick; a direct, non-passive listener, so
-    `preventDefault` keeps the page still).
+    100, up narrows) through the handle's own `WheelTurn`, which adds up
+    small events until they reach the next 0,01 (a touchpad's few pixels
+    never stick, nor move Q faster than a mouse wheel; a turn the other
+    way starts afresh, so a turn past a limit is never owed); a direct,
+    non-passive listener, so `preventDefault` keeps the page still.
   - **The cards** go by frequency, a tie by iemmixer's type rank
     (`display_order`), numbered like their handles. The order is taken at
     the load, an add, a remove and every gesture's end (`EqEdit::finish`),
@@ -103,7 +105,9 @@ separate one-song playlist in mode Single).
     id, so a new order MOVES a card (the same element, the spec pins it)
     and an edit re-creates nothing. A moved card's focused control loses
     the focus (the browser re-inserts it), so `finish` gives it back in
-    the next animation frame. A card reads its band through a `Memo`.
+    the next animation frame, with `preventScroll` (web-sys
+    `FocusOptions`): the page never jumps. A card reads its band through a
+    `Memo`.
     Every `<option>` carries a reactive `selected` (the #233 trap).
   - **Sliders**: frequency and Q are log sliders over 0…1000
     (`freq_slider`/`slider_freq`, `q_slider`/`slider_q`); gain and volume
@@ -124,9 +128,12 @@ separate one-song playlist in mode Single).
     an add, a remove) sends at once. A slider commits on `pointerup` AND
     `change` (#200: never on `change` alone); a lost release costs nothing,
     the armed timer still sends the last value. An answer is awaited
-    `ANSWER_TIMEOUT_MS` (10 s), then given up (`landed`, "Uloženie
-    zlyhalo: server neodpovedá"), so a server that never answers cannot
-    hold the gate in flight. `validate` runs before
+    `ANSWER_TIMEOUT_MS` (10 s), then given up (`SendGate::gave_up`:
+    the settings as they are go out again, since what the server holds
+    is unknown; "Uloženie zlyhalo: server neodpovedá — skúšam znova"), so
+    a server that never answers cannot hold the gate in flight. A request
+    given up can still land later and briefly hold an older value, until
+    the re-send lands. `validate` runs before
     every send (`FxError::sk` on the status line). Status line: "Ukladám…"
     while busy, then "Uložené", or "Uloženie zlyhalo: …".
   - The playing song follows each PUT through the DSP's 50 ms crossfade;
@@ -145,7 +152,10 @@ separate one-song playlist in mode Single).
 - Mock E2E `e2e/playlist-audio.spec.ts` (#278, viewport 1600×1000, REAL
   mouse drags of the handles and sliders, the wheel, double-clicks; it
   asserts the visible labels, the cards' `data-*` numbers and the PUT
-  bodies the mock received). Mock knobs `/__mock/playlist-audio{,-reset,-set,-delay,-put-delay}`:
+  bodies the mock received; a keyboard edit that moves a card keeps its
+  focus; a refusal, a 500 and an answer that never comes each say so).
+  Mock knobs `/__mock/playlist-audio{,-reset,-set,-delay,-put-delay,-put-status}`
+  (a reset also makes a delayed PUT that arrived before it store nothing):
   `/__mock/playlist-audio` returns `{puts: [{id, body, at, done}], last,
   stored}` (arrival / answer on the mock's clock: the drag test holds the
   button down after 20 quick moves and needs the latest position on the
@@ -159,7 +169,9 @@ separate one-song playlist in mode Single).
   its `data-index` with its numbers, one handle per band) and that opening
   it saved nothing; then "+ Pásmo (zvon)" through the panel (a 1 kHz 0 dB
   peak: a UNITY filter, the RBJ peak at 0 dB has b = a, so its TDF-II
-  stage passes every sample) must reach the row at once (generation +1),
+  stage passes every sample; on a playlist with enabled bands it is, as
+  for any EQ edit, the 50 ms crossfade into a fresh cascade of the same
+  filters) must reach the row at once (generation +1),
   and its "Odstrániť" must bring the row back exactly as stored
   (generation +2); `finally` PUTs the stored sound back if the row
   differs. That unity peak is the only other value a gate may ever write
