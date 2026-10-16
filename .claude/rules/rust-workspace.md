@@ -336,6 +336,13 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   with no Linux caller is `dead_code` there, and a `pub(crate) use` of it is
   `unused_imports`. `pub use pipeline_types::{…, real_start_ms}` makes it
   crate API, so neither lint fires, and its Linux unit tests still gate it.
+- **`clippy::ptr_arg` on an off-Windows stub that mirrors a Windows
+  `&mut Vec` parameter** (#279 P1a, reasoned before CI). sp-gpu's
+  `Compositor::read_uyvy(&mut self, out: &mut Vec<u8>)` clears and refills
+  the caller's `Vec` on Windows, but the uninhabited stub (`match self.0
+  {}`) never touches its `_out`, so Linux clippy asks for `&mut [u8]` under
+  `-D warnings`. Put `#[allow(clippy::ptr_arg)]` on the STUB method with the
+  reason; never change the shared signature.
 
 ## Toolchain drift: CI's stable Rust moves under an unchanged tree (Rust 1.99, 3.10.2026)
 
@@ -894,6 +901,13 @@ the test that kills each one BEFORE CI's mutation gate runs.
   all 18 tests because none ever held two entries. For every such choice,
   write a test whose state makes the two siblings differ (two entries
   pending), and check it against the swapped variant in the scratch model.
+- **A ring of N slots is tested with N distinct values in turn** (#279 P1a
+  review round 1, the UYVY staging ring of 3). Two pictures alternated
+  over three slots leave the slot being written holding the SAME picture
+  as the newest one, so a read of the wrong slot passes. With N values in
+  turn every other slot holds another value; the same holds for any
+  rotation or double buffer whose index logic sits outside the mutation
+  gate (`win/`).
 - **A branch whose ONLY effect is a log line survives the gate** (#224
   part 2 review round 3: `if … && !slew.owe(..) { warn!(..) }` — the
   delete-`!` mutant only moves the WARN). Give such a branch an observable
