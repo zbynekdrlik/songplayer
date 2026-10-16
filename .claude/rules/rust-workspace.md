@@ -137,6 +137,18 @@ guess), and never claim the RED reproduces the old behaviour unless it does.
 The tests that encode the new contract against the OLD code belong in their own
 earlier `test(#N)` commit that uses only the existing API (#217 `e66514a`).
 
+**A new pure step inside an existing pipeline fn: test it THROUGH that fn, and
+ship the module as a shell in RED** (#280 part 2, `display_plan_interjections.rs`).
+Every case of the new rule was a one-line `build_plan` call (`wall(en, sk)` →
+the plan's EN/SK, `None` when the line left), so ALL its tests compile against
+the old code and sit in the RED commit; GREEN adds and edits no test. RED ships
+the structure (the `#[path]` module as its doc + `#[cfg(test)] mod tests`, the
+caller's new seam `shown_lines` and the index mapping) with the step not called
+— write the old spot as `.map(..)`, not a `filter_map` that always returns
+`Some` (`clippy::unnecessary_filter_map`). The module's private helpers are
+then killed by the plan-level tests; check that with a site-keyed Python
+harness before CI.
+
 **Deriving exact expected values on the no-compile box (#217).** Do not
 hand-compute dozens of pins. Write a scratch Python model that mirrors the pure
 Rust function step by step, and derive every exact value from it: fixture

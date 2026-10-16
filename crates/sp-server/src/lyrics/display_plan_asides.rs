@@ -13,8 +13,9 @@ use sp_core::lyrics::LyricsLine;
 
 /// A word made only of these is glued to the word before it when the
 /// words are joined again (`clean (Oh), yeah` → `clean, yeah`), and dropped
-/// at the start of a line (`(Oh), yeah` → `yeah`).
-const GLUED: [char; 7] = [',', '.', ';', ':', '!', '?', '…'];
+/// at the start of a line (`(Oh), yeah` → `yeah`). The interjection rule
+/// reads the same marks as the ones that separate an edge run.
+pub(super) const GLUED: [char; 7] = [',', '.', ';', ':', '!', '?', '…'];
 
 /// `line` as the display plan reads it: its English and its Slovak each
 /// through [`drop_asides`]; times and words unchanged.
@@ -40,9 +41,27 @@ fn drop_asides(text: &str) -> String {
         return text.to_string();
     };
     match join_words(&outside) {
-        joined if joined.is_empty() => join_words(&text.replace(['(', ')'], " ")),
+        joined if joined.is_empty() => without_brackets(text),
         joined => joined,
     }
+}
+
+/// `line` with only its brackets gone, every word kept (#280 part 2,
+/// review round 1): a line whose words outside its asides are only
+/// interjections is read so (`Oh (Hallelujah)` → `Oh Hallelujah`), as a
+/// line of only asides keeps its words: the wall never blanks a sung aside.
+pub(super) fn unbracketed(line: &LyricsLine) -> LyricsLine {
+    LyricsLine {
+        en: without_brackets(&line.en),
+        sk: line.sk.as_deref().map(without_brackets),
+        ..line.clone()
+    }
+}
+
+/// The words of `text` with its brackets gone, joined again
+/// ([`join_words`]).
+fn without_brackets(text: &str) -> String {
+    join_words(&text.replace(['(', ')'], " "))
 }
 
 /// The chars of `text` outside every parenthesis, a space where an aside
@@ -69,8 +88,9 @@ fn outside_parentheses(text: &str) -> Option<String> {
 
 /// The words of `text` joined with one space, a word of [`GLUED`] chars
 /// alone glued to the word before it, and dropped when nothing comes
-/// before it.
-fn join_words(text: &str) -> String {
+/// before it. The interjection rule reads a line's words through it too, so
+/// a lone mark never stops an edge run (`Oh , yeah` reads as `Oh, yeah`).
+pub(super) fn join_words(text: &str) -> String {
     let mut joined = String::with_capacity(text.len());
     for word in text.split_whitespace() {
         let glued = word.chars().all(|c| GLUED.contains(&c));
