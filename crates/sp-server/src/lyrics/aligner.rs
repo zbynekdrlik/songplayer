@@ -188,7 +188,7 @@ pub async fn preprocess_vocals(
     let mut child = cmd.spawn().context("failed to spawn preprocess-vocals")?;
     // #162: cap the child's memory via a Windows Job Object so an OOM kills the
     // child, not the host. Held (with the slot) until the child exits.
-    let _job = crate::lyrics::heavy_slot::assign_child_job(&child);
+    let _job = crate::lyrics::heavy_slot::assign_child_job(&child, plan.paced());
     // Drain stdout/stderr in the background so the pipes never fill and deadlock
     // the child. Both tasks end when the child closes its pipes (normal exit, or
     // SIGKILL on a stall / `kill_on_drop`).

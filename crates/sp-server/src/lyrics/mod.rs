@@ -19,6 +19,7 @@ pub mod heavy_alloc_env;
 pub mod heavy_containment;
 pub mod heavy_faults;
 pub mod heavy_plan;
+pub mod heavy_quiet;
 pub mod heavy_slot;
 pub mod host_commit;
 pub mod idle_gate;

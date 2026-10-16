@@ -381,3 +381,13 @@ async fn gpu_plan_leaves_cuda_and_threads_unset() {
         "gpu plan must not cap threads"
     );
 }
+
+/// #251 step 5: only a CPU heavy child (the wall in use) is paused while
+/// Arena reads Spout; a GPU child (the wall idle) never is.
+#[test]
+fn only_a_cpu_heavy_child_is_paced_off_arenas_read_window() {
+    assert!(HeavyStepPlan::cpu_idle().paced());
+    let low = ProcessingMode::LowPriority;
+    assert!(HeavyStepPlan::for_activity(low, playing()).paced());
+    assert!(!HeavyStepPlan::for_activity(low, idle()).paced());
+}

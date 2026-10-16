@@ -140,6 +140,13 @@ impl HeavyStepPlan {
         }
     }
 
+    /// #251 step 5: whether the child is paused while Arena reads Spout
+    /// (`heavy_quiet.rs`): a CPU child only — the wall is in use; a GPU child
+    /// (the wall idle) may hold a driver lock Arena needs, never suspended.
+    pub fn paced(&self) -> bool {
+        matches!(self.device, Device::Gpu)
+    }
+
     /// Short label for the per-step INFO log: `cpu-idle` | `gpu`.
     pub(crate) fn label(&self) -> &'static str {
         match self.device {
