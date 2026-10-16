@@ -201,16 +201,19 @@ fn ended(text: &str, from: &str) -> String {
     }
 }
 
-/// Whether the first letter of `word` (or of a whole text) is a capital.
+/// Whether `word` (or a whole text) begins with a capital: its first letter
+/// or digit, past any quote or mark, is an upper-case letter.
 fn is_capitalised(word: &str) -> bool {
     word.chars()
-        .find(|c| c.is_alphabetic())
+        .find(|c| c.is_alphanumeric())
         .is_some_and(char::is_uppercase)
 }
 
-/// `word` (or a whole text) with its first letter a capital.
+/// `word` (or a whole text) with its first letter or digit raised, past any
+/// quote or mark: a digit stays as it is, so `3rd` never becomes `3Rd`
+/// (review round 4).
 fn capitalised(word: &str) -> String {
-    match word.char_indices().find(|(_, c)| c.is_alphabetic()) {
+    match word.char_indices().find(|(_, c)| c.is_alphanumeric()) {
         Some((at, c)) => replaced(word, (at, c), c.to_uppercase()),
         None => word.to_string(),
     }
