@@ -594,8 +594,9 @@ pub(crate) fn assign_child_job(child: &tokio::process::Child, paced: bool) -> Ch
     // #168: start logging this child's page-fault rate (`heavy child faults/s`),
     // aborted by the guard's Drop when the child exits.
     let sampler = pid.map(crate::lyrics::heavy_faults::spawn_fault_sampler);
+    // #251 step 5: only a contained child (kill-on-close) is ever held.
     let pacer = pid
-        .filter(|_| paced)
+        .filter(|_| paced && handle.is_some())
         .and_then(crate::lyrics::heavy_quiet::QuietPacer::start);
     ChildJobGuard {
         handle,
