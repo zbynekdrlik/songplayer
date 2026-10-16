@@ -128,8 +128,10 @@ impl Compositor {
     }
 
     /// #279 P1a. Never runs (no value exists). `mutants::skip`: as
-    /// `compose`.
+    /// `compose`. `ptr_arg`: the signature is the Windows one, which
+    /// clears and refills the caller's `Vec`.
     #[cfg_attr(test, mutants::skip)]
+    #[allow(clippy::ptr_arg)]
     pub fn read_uyvy(&mut self, _out: &mut Vec<u8>) -> Result<bool, GpuError> {
         match self.0 {}
     }
