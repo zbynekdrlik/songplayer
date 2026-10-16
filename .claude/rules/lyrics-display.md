@@ -89,6 +89,25 @@ loaded track (in `LyricsState::with_lead_and_offset`; `new` delegates to it).
 - The `lyrics: loaded` log line carries `display_lines` and
   `display_profile`.
 
+**#280: parenthesised asides are left out** (`display_plan_asides.rs`, a
+child of `display_plan.rs`). Genius writes ad-libs, backing vocals and the
+leader's calls in parentheses. Song 361 "Redeemed" had wall lines of up to
+84 chars, and the owner disliked them (16.10.2026).
+
+- `build_plan` reads every source line through `without_asides` BEFORE
+  grouping, EN and SK alike. So `fits`, the sentence end
+  (`free? (Yeah)` ends in `?`) and the shown text all see the shorter line.
+- What `drop_asides` does:
+  - every balanced `( … )` goes, nested ones included;
+  - the words join again with one space, and a lone `, . ; : ! ? …` is
+    glued to the word before it (dropped when it would come first);
+  - a line that is ONLY asides keeps its words without the brackets, so the
+    wall never blanks a line the room sings;
+  - a line with no parenthesis, or with parentheses that do not pair up, is
+    returned untouched.
+- The fixtures hold no `(`, so every #217 pin stands.
+- The karaoke view keeps the raw text.
+
 **Never bump `LYRICS_PIPELINE_VERSION` for a display change.** The stored JSON
 and the pipeline are untouched. Regrouping lines in the pipeline instead
 (g35t grouping at sentence ends) is owner-gated. It forces a bump and a
