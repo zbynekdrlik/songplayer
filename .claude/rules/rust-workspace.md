@@ -399,7 +399,10 @@ failed on them (`36438006665`):
   argument is a generic tuple, so no coercion site exists. Write
   `done(&*guard)`. A plain `fn f(s: &ObsState)` would coerce, which is why
   it reads as fine. The same holds for `&PathBuf` → `&Path` through a
-  generic `R: Fn(&Path, &Path)` seam: write `.as_path()`. A small private
+  generic `R: Fn(&Path, &Path)` seam: write `.as_path()`, and for `&mut
+  Vec<u8>` / `&Vec<bool>` → `&mut [u8]` / `&[bool]` through `paint: impl
+  FnOnce(&mut [u8], &[bool])`: write `paint(&mut out[..], &modules[..])`
+  (#279 P1b review round 1, `program_burn::burned_with`). A small private
   trait seam (`downloader::cache::FileOps`, #136) avoids the trap
   entirely, because trait method calls DO coerce their arguments.
 - **`f(&mut x.lock().await)` does NOT deref-coerce a guard → E0308** (#250,

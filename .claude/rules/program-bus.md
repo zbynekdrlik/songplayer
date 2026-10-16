@@ -329,7 +329,8 @@ side does (`program_output_ndi.rs`, an impl split of `ProgramOutput`;
 
 - **The effective source, per boundary.** `submit_ndi` asks
   `ndi_source_for(setting, feed newest, b)`: the GPU while
-  `program_ndi_source` = `gpu` AND the readback's newest picture is at
+  `program_ndi_source` = `gpu` AND the readback's newest picture KEPT (a
+  late one never counts) is at
   most 30 grid slots (1 s) behind b, else the CPU canvas (`setting` /
   `no_readback` / `stale`). Without a `MaxOut` (the unit tests' outputs)
   it is always the canvas. A compositor that cannot run never freezes NDI.

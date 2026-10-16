@@ -1338,9 +1338,11 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   bytes all the same; a failed compose is not counted. `max.upload_mb_s`
   (10^6 bytes) and `max.uploads_per_s` = everything after the oldest of
   the last 900 composes, at most `UPLOAD_RATE_SPAN` (30 s) before the
-  newest, over the time since it, to a tenth. While MAX composes nothing
-  (off, quiesced, a backoff) they keep their last value: read them with
-  `max.state` `running`. One upload serves both targets: the FHD sender
+  newest, over the time since it, to a tenth. While the compositor
+  composes nothing (MAX off with NDI on the canvas, quiesced, a backoff)
+  they keep their last value: read them with `max.state` `running`. #279
+  P1b: with MAX off and NDI from the GPU the FHD composes still upload, so
+  they move while `max.state` reads `off`. One upload serves both targets: the FHD sender
   adds none (`max.fhd` has no upload figure). The GPU-resident path's
   number: `upload_mb_s` = 0 with a hardware-decodable song on program.
   Tests: the window on made-up instants (`program_max_upload_tests.rs`),
@@ -1569,14 +1571,24 @@ nothing on air (default `cpu`).
 - A readback that came proves the device like a sent boundary: it clears
   `lost_unsent` (with MAX off nothing else goes out), so a later loss
   rebuilds at once; a failed readback proves nothing.
+- With MAX off, NDI's compose is the compositor's only one: a failed build
+  or compose is logged like MAX's (`MaxWorker::finish_ndi`, a third
+  `LogGate`, `Lines::ndi`: one WARN `the compositor does not compose for
+  NDI (MAX off)`, one INFO when it composes again), never hidden behind
+  MAX's `off`. With MAX on, MAX's own line names it.
 
 ### The feed (`ndi_feed.rs`, pure, `MaxOut::ndi`)
 
 - `FeedCore`: a stamp-keyed map of at most `NDI_FEED_DEPTH` = 3 pictures,
   over it the OLDEST goes (`feed_coalesced`); `take(stamp)` returns that
   stamp's picture and drops every older one; a push at or before the last
-  stamp served is dropped (`readback_late`); `newest()` = the last push's
-  stamp, late or not (the readback's freshness).
+  stamp served is dropped (`readback_late`); `newest()` = the stamp of the
+  last picture KEPT (the readback's freshness). A late picture never
+  entered the feed, so a readback that only ever arrives late leaves it
+  behind and NDI falls back to the canvas after 30 slots (review round 1:
+  counting late pushes kept a frozen NDI "fresh" for good).
+- The p99s are MAX's `Window` (`program_max::Window`, the last 900); a
+  Black boundary's constant black is no readback and adds to neither.
 - `NdiFeed` = the core + NDI's telemetry under ONE short lock per call:
   neither thread waits on the other.
 
