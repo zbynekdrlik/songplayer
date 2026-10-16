@@ -53,6 +53,24 @@ pub fn upload_for(resident: Option<Resident>, picture: &Nv12Picture<'_>) -> Uplo
     }
 }
 
+/// #251: whether the compositor's two texture slots trade places before a
+/// compose: `resident` is the picture id each slot holds, `wanted` the id
+/// each slot is drawn from this compose (`None`: not drawn). True when
+/// fewer pictures must be uploaded after the trade. A blended song (#251's
+/// 24/25 fps on the 30 fps grid) is a chain of fades whose incoming picture
+/// is the next fade's outgoing one; without the trade every picture went
+/// up twice, once into each slot, and those uploads disturbed Arena.
+pub fn swap_slots(resident: [Option<u64>; 2], wanted: [Option<u64>; 2]) -> bool {
+    let uploads = |held: [Option<u64>; 2]| {
+        wanted
+            .iter()
+            .zip(held)
+            .filter(|&(want, held)| want.is_some() && *want != held)
+            .count()
+    };
+    uploads([resident[1], resident[0]]) < uploads(resident)
+}
+
 #[cfg(test)]
 #[path = "residency_tests.rs"]
 mod tests;
