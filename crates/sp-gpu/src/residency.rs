@@ -68,7 +68,7 @@ pub fn swap_slots(resident: [Option<u64>; 2], wanted: [Option<u64>; 2]) -> bool 
             .filter(|&(want, held)| want.is_some() && *want != held)
             .count()
     };
-    uploads([resident[1], resident[0]]) + 1 < uploads(resident)
+    uploads([resident[1], resident[0]]) < uploads(resident)
 }
 
 #[cfg(test)]
