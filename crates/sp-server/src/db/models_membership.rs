@@ -226,8 +226,8 @@ pub async fn recorded_elsewhere(
 }
 
 /// The peer exchange's records of a video (`youtube_id` keyed) that go with
-/// its last row.
-const PEER_TABLES: [&str; 3] = ["peer_waits", "peer_fetches", "peer_standins"];
+/// its last row (and #261's daily `peer::leftovers` pass).
+pub(crate) const PEER_TABLES: [&str; 3] = ["peer_waits", "peer_fetches", "peer_standins"];
 
 /// Delete `row` while it is still due at `cutoff_ms`, in one transaction
 /// with its own data: its play history (the foreign key's

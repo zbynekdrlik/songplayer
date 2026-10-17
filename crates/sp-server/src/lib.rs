@@ -7,7 +7,7 @@ pub mod audio_faults; // #257: every audio path's faults, persisted (the ledger)
 pub mod audio_host; // #233: every ASIO output runs in the sp-audio-host process (spawns nothing)
 pub mod background_hold; // #230: a sp-90s press holds the background jobs
 pub mod dabing;
-pub mod daily_pass; // the daily pass's timer (#260 retention, #256 usage-log prune)
+pub mod daily_pass; // the daily timer (#260 retention, #256 usage-log prune, #261 bounds)
 pub mod db;
 pub mod diag; // #223 S0: /api/v1/diag/* measurement benches
 pub mod downloader;
@@ -451,6 +451,12 @@ pub async fn start(
     ));
     // #256: the dashboard's usage log keeps 400 days, pruned daily.
     tokio::spawn(ui_usage::run(pool.clone(), shutdown_tx.subscribe()));
+    // #261: the play history and the exchange's leftover records, daily.
+    tokio::spawn(playlist::history_bound::run(
+        pool.clone(),
+        shutdown_tx.subscribe(),
+    ));
+    tokio::spawn(peer::leftovers::run(pool.clone(), shutdown_tx.subscribe()));
     tokio::spawn(async move {
         match tools_mgr.ensure_tools().await {
             Ok(paths) => {

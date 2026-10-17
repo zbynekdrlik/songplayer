@@ -88,6 +88,8 @@ fn every_job_has_its_stable_name() {
         (Job::VideoUpgrade, "video_upgrade"),
         (Job::Retention, "retention"),
         (Job::UiUsagePrune, "ui_usage_prune"),
+        (Job::PlayHistory, "play_history"),
+        (Job::PeerLeftovers, "peer_leftovers"),
     ];
     for (job, name) in names {
         assert_eq!(job.as_str(), name);

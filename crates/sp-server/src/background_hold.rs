@@ -18,8 +18,9 @@
 //!   (`lib.rs`'s sync consumer drops the request; the periodic sync
 //!   re-enqueues), the download, lyrics, stems and dub workers, the metadata
 //!   repair, the daily yt-dlp update, the #260 retention, the #256 prune of
-//!   the UI usage log, and the peer exchange (`Exchange::transfers_paused`:
-//!   no fetch, no serving, no hashing).
+//!   the UI usage log, the #261 bounds of the play history and of the
+//!   exchange's leftover records, and the peer exchange
+//!   (`Exchange::transfers_paused`: no fetch, no serving, no hashing).
 //!   Startup one-shots and the playback path never ask.
 //! - `GET /api/v1/background-hold` ([`status`]) feeds the health bar.
 
@@ -55,6 +56,11 @@ pub enum Job {
     Retention,
     /// #256: the UI usage log's rows older than 400 days go.
     UiUsagePrune,
+    /// #261: the play history's older plays of a song and its plays older
+    /// than 30 days outside a rotation go.
+    PlayHistory,
+    /// #261: the exchange's records of a video no row has any more go.
+    PeerLeftovers,
 }
 
 impl Job {
@@ -73,6 +79,8 @@ impl Job {
             Self::VideoUpgrade => "video_upgrade",
             Self::Retention => "retention",
             Self::UiUsagePrune => "ui_usage_prune",
+            Self::PlayHistory => "play_history",
+            Self::PeerLeftovers => "peer_leftovers",
         }
     }
 }
