@@ -272,6 +272,45 @@ async fn a_symlink_is_never_listed_or_followed() {
     assert_eq!(names(&cache).len(), 2);
 }
 
+/// A `peer` that is a symlink is never followed: a part behind it is never
+/// listed. Unix only (the Windows runner cannot make one without
+/// privilege).
+#[cfg(unix)]
+#[test]
+fn a_peer_dir_that_is_a_symlink_is_never_followed() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = dir.path().join("cache");
+    let outside = dir.path().join("outside");
+    write(&outside.join("x_audio_0123456789abcdef.part"), 10);
+    std::fs::create_dir_all(&cache).unwrap();
+    std::os::unix::fs::symlink(&outside, cache.join(PARTS_DIR)).unwrap();
+    assert_eq!(list(&cache), Vec::<Entry>::new());
+    assert_eq!(names(&outside), ["x_audio_0123456789abcdef.part"]);
+}
+
+/// A database with no row at all (fresh, or replaced) deletes no file of a
+/// video, however old: every song would read as a video no row has.
+#[tokio::test]
+async fn a_database_with_no_row_keeps_every_video_s_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = dir.path().join("cache");
+    let song_file = cache.join(song("gone0000001", "_audio.flac"));
+    write(&song_file, 10);
+    write(&cache.join("gone0000001_lyrics.json"), 10);
+    write(&cache.join("gone0000001_chunks.json"), 10);
+    let pool = pool(&cache).await;
+    sqlx::query("DELETE FROM videos")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let swept = pass(&pool, &cache, now_ms()).await.unwrap();
+    assert_eq!(swept.count(Why::NoRow), 0);
+    assert_eq!(swept.count(Why::Stale), 1, "a retired output still goes");
+    assert!(song_file.exists());
+    assert!(cache.join("gone0000001_lyrics.json").exists());
+    assert!(!cache.join("gone0000001_chunks.json").exists());
+}
+
 fn planned(place: Place, name: &str, is_dir: bool) -> Planned {
     Planned {
         place,
@@ -282,10 +321,23 @@ fn planned(place: Place, name: &str, is_dir: bool) -> Planned {
     }
 }
 
-/// A file already gone is no failure; one that cannot be deleted (a
-/// non-empty dir where a file was planned, on Linux and Windows alike) is
-/// counted and the pass goes on; a name that is not one plain component is
-/// never deleted; `left` is carried.
+/// `(files, dirs, bytes, failed, left)` of `execute` over `delete`.
+fn counts(cache: &Path, delete: Vec<Planned>, left: usize) -> (u64, u64, u64, u64, u64) {
+    let swept = execute(cache, &Plan { delete, left });
+    (
+        swept.files,
+        swept.dirs,
+        swept.bytes,
+        swept.failed,
+        swept.left,
+    )
+}
+
+/// Each case on its own (a sum would hide a swapped verdict): a file
+/// already gone is no failure; one that cannot be deleted (a non-empty dir
+/// where a file was planned, on Linux and Windows alike) is one failure; a
+/// name that is not one plain component is one failure and is never
+/// deleted; a deleted file counts with its bytes; `left` is carried.
 #[test]
 fn a_delete_that_cannot_happen_is_counted_and_nothing_leaves_the_dir() {
     let dir = tempfile::tempdir().unwrap();
@@ -293,28 +345,13 @@ fn a_delete_that_cannot_happen_is_counted_and_nothing_leaves_the_dir() {
     write(&cache.join("blocked/inside"), 1);
     write(&cache.join("ok_file"), 1);
     write(&dir.path().join("outside"), 1);
-    let plan = Plan {
-        delete: vec![
-            planned(Place::Cache, "missing", false),
-            planned(Place::Cache, "blocked", false),
-            planned(Place::Cache, "../outside", false),
-            planned(Place::Cache, "ok_file", false),
-        ],
-        left: 3,
-    };
-    let swept = execute(&cache, &plan);
-    assert_eq!(
-        (
-            swept.files,
-            swept.dirs,
-            swept.bytes,
-            swept.failed,
-            swept.left
-        ),
-        (1, 0, 5, 2, 3)
-    );
-    assert!(dir.path().join("outside").exists());
+    let one = |name: &str| vec![planned(Place::Cache, name, false)];
+    assert_eq!(counts(&cache, one("missing"), 0), (0, 0, 0, 0, 0));
+    assert_eq!(counts(&cache, one("blocked"), 0), (0, 0, 0, 1, 0));
     assert!(cache.join("blocked/inside").exists());
+    assert_eq!(counts(&cache, one("../outside"), 0), (0, 0, 0, 1, 0));
+    assert!(dir.path().join("outside").exists());
+    assert_eq!(counts(&cache, one("ok_file"), 3), (1, 0, 5, 0, 3));
     assert!(!cache.join("ok_file").exists());
 }
 

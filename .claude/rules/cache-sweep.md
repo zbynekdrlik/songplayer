@@ -25,10 +25,16 @@ comment 6230045110.
   pass an hour later), `Job::CacheSweep` ("cache_sweep" / "čistenie
   cache") behind the #230 background hold. Spawned in `lib.rs` with the
   config's cache dir and data dir.
-- **Under `cache::SONG_FILES`** from reading the rows to the last delete
-  (`pass`): a rename, a re-link, the retention and a download's record
-  never land between the read and a delete. The listing and the deletes
-  run on the blocking pool.
+- **The listing first, outside the lock; then `cache::SONG_FILES`** from
+  reading the rows to the last delete (`pass`): a rename, a re-link, the
+  retention, a sync's records and a download's never land between the
+  read and a delete, and a row added after the listing keeps its files
+  (the rows read under the lock decide; nothing writes a file of a video
+  no row has). The listing and the deletes run on the blocking pool.
+- **A database with no row at all deletes no file of a video**
+  (`RowFacts::is_empty`, one WARN `cache sweep: the database has no row`):
+  a fresh or replaced database would make every song a video no row has.
+  The rules that need no row (stale names, parts, …) still run.
 - **The rows:** every row's `youtube_id` and its five recording columns
   (`cache::RECORDING_COLUMNS`: `file_path`, `audio_file_path`,
   `vocals_file_path`, `instrumental_file_path`, `dub_file_path`; the same
@@ -38,7 +44,8 @@ comment 6230045110.
 - **The listing** (`list`): the cache dir's FILES, its jobs' work DIRS
   (`{id}_isolation`, `{id}_stemsep`, `{id}_dub`: their tree's bytes and
   newest write, `data_size::walk`; an unreadable part of the tree = no time
-  = never deleted), and `<cache>/peer/`'s files. No other dir is walked
+  = never deleted), and `<cache>/peer/`'s files (only when `peer` is a real
+  dir, never a symlink or junction). No other dir is walked
   (`tools/` with the lyrics venv, `peer/` itself, `.cli-proxy-api/` with
   CLIProxyAPI's OAuth tokens). A symlink (a junction on Windows) is never
   listed, so never followed or deleted (`DirEntry::metadata` does not
@@ -68,7 +75,9 @@ comment 6230045110.
     from git history) and the cleanup caches older than `_cleaned_v3`
     (`CLEANED_VERSION`; unversioned = older). A newer version is kept (a
     rollback must not eat a newer build's caches).
-  - `replaced` — a `<name>.replaced` / `<name>.N.replaced` 30 d, only while
+  - `replaced` — a `<name>.replaced` / `<name>.N.replaced` of a SONG file
+    (`<name>` matches `SONG_RE`: a set-aside only ever comes from a song's
+    unit move) 30 d, only while
     `<name>` holds a file: it is then the stale copy the unit move meant to
     delete (a stuck move-back, a failed delete, a crash after the rename).
     With `<name>` empty it may be the ONLY copy of a song file: it stays,
@@ -137,7 +146,13 @@ comment 6230045110.
 takes `removed_at` = its playlist's `deactivated_at` (NULL while active and
 for the test item's playlist), lane 1's own mark, so the reactivation
 clears it and #260's clock counts it; an existing row keeps its mark and
-takes the title. One statement. RED/GREEN: `routes_import_tests.rs`.
+takes the title. One statement. `routes_import_tests.rs` turns the
+playlist off and on through the real `PUT /api/v1/playlists/{id}`. The
+RED commit's helper (ea936b21) held the one-connection test pool while it
+queried it again (a 30 s pool timeout, red for the wrong reason); review
+round 1 moved it onto the real route. With that helper the old SQL fails
+exactly the two mark tests, the new one none (modelled on the real
+schema with Python sqlite3).
 
 ## Box checks (MAIN SESSION OPS)
 

@@ -213,7 +213,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "123456789A");
         write_crash_record_at(&path, "B", 10).expect("write 3");
         let rotated = crate::log_rotate::rotated_path(&path);
-        assert_eq!(std::fs::read_to_string(&rotated).unwrap(), "123456789A");
+        assert_eq!(std::fs::read_to_string(rotated).unwrap(), "123456789A");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "B");
     }
 
@@ -265,15 +265,14 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let crash_path = tmp.path().join("songplayer-panic.log");
         let full = vec![b'x'; crate::log_rotate::ROTATE_AT_BYTES as usize];
-        std::fs::write(&crash_path, &full).expect("a full crash file");
+        std::fs::write(&crash_path, full).expect("a full crash file");
         install_panic_hook(crash_path.clone());
         let rotated = crate::log_rotate::rotated_path(&crash_path);
         assert_eq!(
-            std::fs::metadata(&rotated).map(|m| m.len()).ok(),
+            std::fs::metadata(rotated).map(|m| m.len()).ok(),
             Some(crate::log_rotate::ROTATE_AT_BYTES),
             "rotated at the install"
         );
-        assert!(!crash_path.exists(), "no record yet");
         let joined = std::thread::Builder::new()
             .name("install-hook-thread".to_string())
             .spawn(|| panic!("install-hook-marker-2026"))
@@ -289,6 +288,13 @@ mod tests {
         assert!(
             content.contains("install-hook-thread"),
             "thread captured: {content}"
+        );
+        // A fresh file after the rotation (another test's panic may add a
+        // record of its own: the hook is process-wide).
+        assert!(
+            (content.len() as u64) < crate::log_rotate::ROTATE_AT_BYTES,
+            "a fresh crash file, {} bytes",
+            content.len()
         );
     }
 }

@@ -5,7 +5,9 @@
 //! An entry goes only when it is KNOWN and old enough:
 //!
 //! - [`Why::NoRow`]: named after a YouTube id no `videos` row has, recorded
-//!   by no row, unchanged for [`ORPHAN_AFTER_MS`] (7 d). Named after a
+//!   by no row, unchanged for [`ORPHAN_AFTER_MS`] (7 d), and only while the
+//!   database has a row at all (an empty or replaced one would make every
+//!   song a video no row has: [`RowFacts::is_empty`]). Named after a
 //!   video means a song file (`{song}_{artist}_{id}_normalized[_gf]…`, song
 //!   and artist carry no `_`, so the id is the 11 characters before
 //!   `_normalized`: [`SONG_RE`]), an id-first file of a known kind
@@ -18,7 +20,8 @@
 //!   `_cleaned_v`[`CLEANED_VERSION`] (or unversioned). A newer version is
 //!   kept (a rolled-back build must not eat a newer build's caches).
 //! - [`Why::Replaced`]: a set-aside `<name>.replaced` / `<name>.N.replaced`
-//!   (`cache::set_aside_name`) unchanged for [`REPLACED_AFTER_MS`] (30 d),
+//!   (`cache::set_aside_name`) of a song file (`<name>` matches [`SONG_RE`])
+//!   unchanged for [`REPLACED_AFTER_MS`] (30 d),
 //!   only while `<name>` holds a file: it is then the stale copy the unit
 //!   move meant to delete; with `<name>` empty it may be the only copy of a
 //!   song file, so it stays (the self-heal WARNs it at every start).
@@ -168,6 +171,13 @@ impl RowFacts {
         }
     }
 
+    /// Whether the database has no row at all: then no file is taken for a
+    /// video no row has (a fresh or replaced database must not empty the
+    /// cache).
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty()
+    }
+
     /// Whether a row has the video `id` or records a file of the song
     /// `base`.
     fn has(&self, id: &str, base: Option<&str>) -> bool {
@@ -259,7 +269,8 @@ pub fn why(
     if facts.records(name) {
         return None;
     }
-    if let Some((id, base)) = video_of(name, entry.is_dir)
+    if !facts.is_empty()
+        && let Some((id, base)) = video_of(name, entry.is_dir)
         && !facts.has(id, base)
         && older(entry.modified_ms, now_ms, ORPHAN_AFTER_MS)
     {
@@ -271,7 +282,8 @@ pub fn why(
     if is_stale_name(name) && older(entry.modified_ms, now_ms, STALE_AFTER_MS) {
         return Some(Why::Stale);
     }
-    if replaced_owner(name).is_some_and(|owner| files.contains_key(owner))
+    if replaced_owner(name)
+        .is_some_and(|owner| SONG_RE.is_match(owner) && files.contains_key(owner))
         && older(entry.modified_ms, now_ms, REPLACED_AFTER_MS)
     {
         return Some(Why::Replaced);

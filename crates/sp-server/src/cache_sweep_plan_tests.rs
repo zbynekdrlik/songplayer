@@ -399,6 +399,33 @@ fn a_replaced_file_goes_only_beside_its_name() {
     assert_eq!(why(&young, &files, &facts, NOW), None);
 }
 
+/// A `.replaced` of a name that is no song file is never the sweep's, even
+/// beside its name (a set-aside only ever comes from a song's unit move).
+#[test]
+fn a_set_aside_of_a_name_that_is_no_song_stays() {
+    let aside = file("notes.txt.replaced", 400 * DAY_MS);
+    let mut files = HashMap::new();
+    files.insert("notes.txt", Some(NOW - 400 * DAY_MS));
+    assert_eq!(why(&aside, &files, &facts(), NOW), None);
+}
+
+/// A database with no row at all takes no file for a video no row has (a
+/// fresh or replaced database must not empty the cache); the rules that
+/// need no row still hold.
+#[test]
+fn a_database_with_no_row_takes_no_file_of_a_video() {
+    let empty = RowFacts::default();
+    assert!(empty.is_empty());
+    assert!(!facts().is_empty());
+    let old = 400 * DAY_MS;
+    let at = |entry: &Entry| why(entry, &HashMap::new(), &empty, NOW);
+    assert_eq!(at(&file(&song("gone0000001", "_audio.flac"), old)), None);
+    assert_eq!(at(&file("gone0000001_lyrics.json", old)), None);
+    assert_eq!(at(&dir("gone0000001_isolation", old)), None);
+    assert_eq!(at(&file("gone0000001_chunks.json", old)), Some(Why::Stale));
+    assert_eq!(at(&part("a.part", old)), Some(Why::Part));
+}
+
 /// A dub's `.prev` goes 14 days after the later of its own and its dub's
 /// last write, only while its dub is there.
 #[test]
