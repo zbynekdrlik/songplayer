@@ -5,8 +5,9 @@
 use sp_core::fit::Placement;
 
 use super::{covers, layer_rgb, pixel, sample, taps, tolerance, unorm8, yuv_to_rgb};
-use crate::composition::{Composition, FHD_FIT, FHD_TARGET, Layer, MAX_TARGET, Slot};
+use crate::composition::{Composition, FHD_FIT, FHD_TARGET, Layer, MAX_TARGET, Side, Slot};
 use crate::picture::{Nv12Picture, Plane};
+use crate::ring::FakeRing;
 
 const PAD: u8 = 0xEE;
 
@@ -54,7 +55,7 @@ fn layer(
 ) -> Layer<'static> {
     Layer {
         slot: Slot::Outgoing,
-        picture,
+        side: Side::Cpu(picture),
         place: Placement { w, h, off_x, off_y },
         uv_rect: [0.0, 0.0, 1.0, 1.0],
         weight,
@@ -192,6 +193,26 @@ fn a_cropped_quad_samples_only_its_part_of_the_picture() {
     assert_eq!(layer_rgb(&middle, 10, 5), None, "right of the quad");
 }
 
+/// #279 P2: the model reads bytes, so a ring frame's layer adds nothing to
+/// it (the WARP pins take the reference of the CPU picture written into the
+/// slot); its coverage, and so the tolerance, is its place's as for any
+/// layer.
+#[test]
+fn a_ring_frame_s_layer_is_not_modelled() {
+    let ring = FakeRing::new(1);
+    let frame = ring
+        .frame(4, 2, std::time::Duration::ZERO)
+        .expect("a free slot");
+    let quad = Layer {
+        side: Side::Gpu(&frame),
+        ..layer(picture_a(), (8, 4, 2, 2), 1.0)
+    };
+    assert_eq!(layer_rgb(&quad, 5, 4), None);
+    assert_eq!(pixel(&[quad], 5, 4), [0, 0, 0, 255]);
+    assert!(covers(&quad, 5, 4));
+    assert_eq!(tolerance(&[quad], 5, 4), 1);
+}
+
 #[test]
 fn one_layer_is_its_rgb_stored_as_bgra() {
     let quad = layer(picture_a(), (8, 4, 2, 2), 1.0);
@@ -226,7 +247,7 @@ fn two_layers_add_at_their_weights_stored_in_8_bits_between() {
 #[test]
 fn a_composed_picture_is_letterboxed_in_the_4k_canvas() {
     // 4×2 (2:1) → 3840×1920 at row 120.
-    let layers = Composition::Picture(picture_a()).layers();
+    let layers = Composition::Picture(picture_a().into()).layers();
     assert_eq!(pixel(&layers, 0, 0), [0, 0, 0, 255]);
     assert_eq!(pixel(&layers, 0, 119), [0, 0, 0, 255], "the last bar row");
     assert_eq!(pixel(&layers, 0, 120), [0, 0, 39, 255], "texel (0, 0)");
@@ -244,7 +265,7 @@ fn a_composed_picture_is_letterboxed_in_the_4k_canvas() {
 /// bar (each within one code: one quad covers it).
 #[test]
 fn a_composed_narrow_picture_fills_the_4k_canvas() {
-    let layers = Composition::Picture(picture_b()).layers();
+    let layers = Composition::Picture(picture_b().into()).layers();
     assert_eq!(pixel(&layers, 0, 0), [134, 200, 255, 255], "the top left");
     assert_eq!(pixel(&layers, 0, 1079), [87, 153, 243, 255]);
     assert_eq!(pixel(&layers, 1920, 1080), [61, 127, 217, 255]);
@@ -260,8 +281,8 @@ fn a_composed_fade_adds_each_side_where_its_quad_reaches() {
     // whole canvas (#267: it fills MAX's width, rows 840..3000 of its 3840
     // scaled rows shown).
     let layers = Composition::Fade {
-        from: Some(picture_a()),
-        to: Some(picture_b()),
+        from: Some(picture_a().into()),
+        to: Some(picture_b().into()),
         weight_q8: 64,
     }
     .layers();
@@ -285,7 +306,7 @@ fn a_composed_fade_adds_each_side_where_its_quad_reaches() {
 #[test]
 fn a_composed_picture_is_letterboxed_in_the_fhd_target() {
     // 4×2 (2:1) → 1920×960 at row 60.
-    let layers = Composition::Picture(picture_a()).layers_in(1920, 1080, FHD_FIT);
+    let layers = Composition::Picture(picture_a().into()).layers_in(1920, 1080, FHD_FIT);
     assert_eq!(pixel(&layers, 0, 0), [0, 0, 0, 255]);
     assert_eq!(pixel(&layers, 0, 59), [0, 0, 0, 255], "the last bar row");
     assert_eq!(pixel(&layers, 0, 60), [0, 0, 39, 255], "texel (0, 0)");
@@ -307,8 +328,8 @@ fn a_composed_fade_in_the_fhd_target_samples_its_own_grid() {
     // A (4×2) at 1 − 64/256 over rows 60..1020; B (2×2) at 64/256 over
     // columns 420..1500.
     let layers = Composition::Fade {
-        from: Some(picture_a()),
-        to: Some(picture_b()),
+        from: Some(picture_a().into()),
+        to: Some(picture_b().into()),
         weight_q8: 64,
     }
     .layers_in(1920, 1080, FHD_FIT);
@@ -329,8 +350,8 @@ fn a_composed_fade_in_the_fhd_target_samples_its_own_grid() {
 fn the_tolerance_is_one_code_per_layer_covering_the_pixel() {
     // The same fade: A over rows 120..2040, B (#267) over the whole canvas.
     let layers = Composition::Fade {
-        from: Some(picture_a()),
-        to: Some(picture_b()),
+        from: Some(picture_a().into()),
+        to: Some(picture_b().into()),
         weight_q8: 64,
     }
     .layers();
@@ -344,8 +365,8 @@ fn the_tolerance_is_one_code_per_layer_covering_the_pixel() {
     // `SP-program`'s target keeps the bars: there B is pillarboxed
     // (columns 420..1500), and a pixel neither side reaches is exact.
     let fhd = Composition::Fade {
-        from: Some(picture_a()),
-        to: Some(picture_b()),
+        from: Some(picture_a().into()),
+        to: Some(picture_b().into()),
         weight_q8: 64,
     }
     .layers_in(1920, 1080, FHD_FIT);
@@ -361,8 +382,8 @@ fn the_tolerance_is_one_code_per_layer_covering_the_pixel() {
 #[test]
 fn one_composition_gives_each_target_its_own_reference() {
     let fade = Composition::Fade {
-        from: Some(picture_a()),
-        to: Some(picture_b()),
+        from: Some(picture_a().into()),
+        to: Some(picture_b().into()),
         weight_q8: 64,
     };
     let max = fade.layers_on(MAX_TARGET);

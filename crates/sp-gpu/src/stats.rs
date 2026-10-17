@@ -6,6 +6,8 @@
 
 use std::time::Instant;
 
+use crate::ring_state::Acquired;
+
 /// The cost of one `Compositor::compose` call, measured on the calling
 /// thread.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -28,6 +30,44 @@ pub struct ComposeStats {
     /// finished them, as [`target_draws_us`] counts a target's); `None`
     /// when no UYVY pass is enabled (`Compositor::enable_uyvy`).
     pub uyvy_us: Option<u64>,
+    /// #279 P2: the ring slots this compose drew from in place
+    /// (`Composition::frames`: each slot once), their keyed mutex held.
+    pub gpu_sides: u32,
+    /// #279 P2: the ring slots this compose opened on its device (a slot is
+    /// opened once, then kept: `ring_state::OpenedKeys`).
+    pub gpu_opens: u32,
+    /// #279 P2: the ring slots whose keyed mutex another side still held
+    /// (`WAIT_TIMEOUT` on the 0 ms acquire): drawn black this boundary.
+    pub km_acquire_timeouts: u32,
+    /// #279 P2: the ring slots whose producer device was lost
+    /// (`WAIT_ABANDONED`), whose acquire failed or that did not open: drawn
+    /// black, and their ring is dead.
+    pub abandoned: u32,
+}
+
+impl ComposeStats {
+    /// #279 P2: count one ring slot of a compose whose keyed mutex answered
+    /// `acquired`, and say whether it is drawn: held, yes
+    /// ([`gpu_sides`](Self::gpu_sides)); busy, no
+    /// ([`km_acquire_timeouts`](Self::km_acquire_timeouts)); abandoned or
+    /// failed, no ([`abandoned`](Self::abandoned): its ring dies,
+    /// `Acquired::kills_ring`).
+    pub fn count_gpu_side(&mut self, acquired: Acquired) -> bool {
+        match acquired {
+            Acquired::Held => {
+                self.gpu_sides += 1;
+                true
+            }
+            Acquired::Busy => {
+                self.km_acquire_timeouts += 1;
+                false
+            }
+            Acquired::Abandoned | Acquired::Failed(_) => {
+                self.abandoned += 1;
+                false
+            }
+        }
+    }
 }
 
 /// #251 step 2: each target's own part of one compose's draw, µs, in draw

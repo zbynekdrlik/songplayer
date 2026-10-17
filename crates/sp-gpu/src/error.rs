@@ -108,6 +108,32 @@ pub enum GpuError {
     /// even width (`uyvy::uyvy_size`); nothing was made.
     #[error("the UYVY pass needs a target of even width, this one is {width} pixels wide")]
     UyvyOddWidth { width: u32 },
+    /// #279 P2: no slot of the picture ring came free within the bound
+    /// (`ring_state::RING_WAIT`): the pacer, the bus and MAX still hold a
+    /// frame of every slot. A decode error: the reader's fallback takes it.
+    #[error("the picture ring had no free slot within {waited_ms} ms")]
+    RingFull { waited_ms: u64 },
+    /// #279 P2: the picture ring is dead: a device that used one of its
+    /// slots was lost (a keyed mutex abandoned) or an acquire failed. Its
+    /// pictures are drawn black; the reader goes on in software.
+    #[error("the picture ring is dead (a device using its slots was lost)")]
+    RingDead,
+    /// #279 P2: a picture the ring cannot take: empty, over 16384 on a
+    /// side, or (its sides rounded up to even) not inside the surface it is
+    /// copied out of (`ring_state::copy_box`).
+    #[error(
+        "a {width}x{height} picture cannot be copied out of a {surface_width}x{surface_height} surface"
+    )]
+    RingPicture {
+        width: u32,
+        height: u32,
+        surface_width: u32,
+        surface_height: u32,
+    },
+    /// #279 P2: a source texture of a format the ring does not take (P2:
+    /// NV12 only; `format` is its `DXGI_FORMAT`).
+    #[error("the picture ring copies NV12 textures, this one is DXGI format {format}")]
+    RingSourceFormat { format: u32 },
 }
 
 /// #243: " (held by <holder>)" for a refusal whose lock a program kept,

@@ -2,7 +2,7 @@
 //! compositor (moved out of `program_max_worker.rs`, #251 step 2, which sits
 //! at the 1000-line cap). Pure: tested in `program_max_worker_tests.rs`.
 
-use sp_gpu::{Composition, Nv12Picture};
+use sp_gpu::{Composition, Side};
 
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_max::{MaxJob, MaxPicture};
@@ -57,7 +57,7 @@ impl PictureIds {
         &mut self,
         labelled: &mut Vec<(SharedFrame, u64)>,
         picture: &'a MaxPicture,
-    ) -> Nv12Picture<'a> {
+    ) -> Side<'a> {
         let known = self
             .held
             .iter()
@@ -72,6 +72,6 @@ impl PictureIds {
             }
         };
         labelled.push((picture.video.clone(), id));
-        picture.nv12(id)
+        Side::Cpu(picture.nv12(id))
     }
 }

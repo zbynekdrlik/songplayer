@@ -15,12 +15,12 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_RASTERIZER_DESC, D3D11_RENDER_TARGET_BLEND_DESC, D3D11_SAMPLER_DESC,
     D3D11_TEXTURE_ADDRESS_CLAMP, D3D11_USAGE_DEFAULT, D3D11_VIEWPORT, ID3D11BlendState,
     ID3D11Buffer, ID3D11Device, ID3D11DeviceContext, ID3D11PixelShader, ID3D11Query,
-    ID3D11RasterizerState, ID3D11SamplerState, ID3D11VertexShader,
+    ID3D11RasterizerState, ID3D11SamplerState, ID3D11ShaderResourceView, ID3D11VertexShader,
 };
 use windows::core::{PCSTR, s};
 
 use super::failed;
-use super::textures::{PlaneTextures, RenderTarget};
+use super::textures::RenderTarget;
 use crate::error::GpuError;
 use crate::quad::{QUAD_CONSTANTS_BYTES, QuadConstants};
 
@@ -45,10 +45,12 @@ pub(super) struct Pipeline {
     constants: ID3D11Buffer,
 }
 
-/// One quad to draw: its constants and the plane textures it samples.
+/// One quad to draw: its constants and the plane views it samples (an
+/// uploaded slot's textures, or #279 P2 an opened ring slot's NV12 planes).
 pub(super) struct Quad<'t> {
     pub constants: QuadConstants,
-    pub textures: &'t PlaneTextures,
+    pub luma: &'t ID3D11ShaderResourceView,
+    pub chroma: &'t ID3D11ShaderResourceView,
 }
 
 /// The bytes of a compiled shader.
@@ -176,10 +178,7 @@ impl Pipeline {
                 );
                 context.PSSetShaderResources(
                     0,
-                    Some(&[
-                        Some(quad.textures.luma_view.clone()),
-                        Some(quad.textures.chroma_view.clone()),
-                    ]),
+                    Some(&[Some(quad.luma.clone()), Some(quad.chroma.clone())]),
                 );
                 context.Draw(4, 0);
             }

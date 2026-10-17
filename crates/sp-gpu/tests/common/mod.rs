@@ -10,7 +10,7 @@ pub mod locks;
 
 use sp_gpu::{
     CANVAS_HEIGHT, CANVAS_WIDTH, Compositor, FHD_FIT, FHD_HEIGHT, FHD_WIDTH, Layer, Nv12Picture,
-    reference,
+    Side, reference,
 };
 
 pub const W: u32 = CANVAS_WIDTH;
@@ -65,14 +65,16 @@ pub fn pattern(width: u32, height: u32, seed: u32) -> (u32, Vec<u8>) {
     (stride, data)
 }
 
-pub fn picture(id: u64, width: u32, height: u32, stride: u32, data: &[u8]) -> Nv12Picture<'_> {
-    Nv12Picture {
+/// An uploaded picture's side (#279 P2: a composition's sides are
+/// `Side`s; `Side::Gpu` is a ring frame's, `tests/ring.rs`).
+pub fn picture(id: u64, width: u32, height: u32, stride: u32, data: &[u8]) -> Side<'_> {
+    Side::Cpu(Nv12Picture {
         id,
         width,
         height,
         stride,
         data,
-    }
+    })
 }
 
 pub fn at(frame: &[u8], x: u32, y: u32) -> [u8; 4] {

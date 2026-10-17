@@ -235,8 +235,7 @@ fn compose(upload_us: u64, draw_us: u64) -> ComposeStats {
         upload_us,
         draw_us,
         uploads: 1,
-        upload_bytes: 0,
-        uyvy_us: None,
+        ..ComposeStats::default()
     }
 }
 

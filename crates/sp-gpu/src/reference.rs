@@ -76,13 +76,16 @@ pub fn pixel(layers: &[Layer<'_>], x: u32, y: u32) -> [u8; 4] {
 /// The saturated RGB `layer`'s quad draws at canvas pixel (`x`, `y`) before
 /// its weight, or `None` when the quad does not cover the pixel (or the
 /// picture is not whole NV12: the compositor refuses one before drawing).
+/// #279 P2: the model reads the picture's bytes, so a layer of a ring frame
+/// (`Side::Gpu`) reads `None` too: take the reference of the composition
+/// of the CPU picture written into the slot.
 pub fn layer_rgb(layer: &Layer<'_>, x: u32, y: u32) -> Option<[f64; 3]> {
     let (dx, dy) = offset_in(layer, x, y)?;
     let place = layer.place;
     let [left, top, right, bottom] = layer.uv_rect;
     let u = between(left, right, (f64::from(dx) + 0.5) / f64::from(place.w));
     let v = between(top, bottom, (f64::from(dy) + 0.5) / f64::from(place.h));
-    let picture = &layer.picture;
+    let picture = layer.side.cpu()?;
     let planes = picture.planes().ok()?;
     let (data, pitch) = (picture.data, planes.pitch);
     let luma = sample(data, planes.luma, pitch, 1, 0, u, v);

@@ -186,7 +186,7 @@ fn shared_nv12(a: &Device, b: &Device) -> Result<SharedNv12, ProbeError> {
 /// A keyed mutex's `AcquireSync`, its RAW HRESULT: the `windows` crate's
 /// `Result` would turn `WAIT_TIMEOUT` and `WAIT_ABANDONED` (success codes)
 /// into `Ok` (`probe::acquire_step` reads it).
-fn acquire(mutex: &IDXGIKeyedMutex, key: u64, milliseconds: u32) -> u32 {
+pub(super) fn acquire(mutex: &IDXGIKeyedMutex, key: u64, milliseconds: u32) -> u32 {
     // SAFETY: the interface's own vtable entry, called on its own pointer.
     let hresult = unsafe {
         (Interface::vtable(mutex).AcquireSync)(Interface::as_raw(mutex), key, milliseconds)
