@@ -12,6 +12,8 @@ paths:
   - "sp-ui/src/components/ui_usage_line.rs"
   - "e2e/ui-usage*.ts"
   - "e2e/post-deploy-ui-usage.spec.ts"
+  - "src-tauri/tauri.conf.json"
+  - "src-tauri/src/tray.rs"
 ---
 
 # The dashboard's usage log (#256)
@@ -62,9 +64,12 @@ layout: every control gets a class by how often it is used). Design record:
     true`, wry calls `controller.MoveFocus(…PROGRAMMATIC)` when it creates
     the webview, inside the hidden window, so the page could read focused.
     The tray's "Open", a click on the tray icon and a second launch call
-    `show()` + `set_focus()`, whose `focus` brings the owed view in. Not
-    yet observed on a box: a restart must leave the `/` page row as it was.
-    Clicks need no gate (only a person clicks);
+    `show()` + `set_focus()`; wry passes the window's focus into the
+    webview, whose `window` `focus` should bring the owed view in (read
+    from the sources). Neither half is observed on a box yet: (a) a
+    restart leaves the `/` page row as it was; (b) opening the window from
+    the tray adds one `/` view within 10 s. Keep `"focus": false` on that
+    window. Clicks need no gate (only a person clicks);
   - the buffer goes out every 10 s when not empty (`gloo_net` POST, JSON),
     at once when it holds 200, and by `navigator.sendBeacon` (a string,
     so `text/plain`) on `visibilitychange` → hidden;
@@ -176,6 +181,7 @@ layout: every control gets a class by how often it is used). Design record:
   would make must grow by less than 4 (`recordedSession`), so an
   operator's own use of the box meanwhile never fails a deploy. It never
   drives a person's session on a box (that would write made-up uses into
-  the node's statistics): "a real session is counted" and "SongPlayer's
-  own hidden window adds no `/` view at a restart" are the post-deploy
-  checks made by hand.
+  the node's statistics): "a real session is counted", "SongPlayer's own
+  hidden window adds no `/` view at a restart" and "opening that window
+  from the tray adds one `/` view" are the post-deploy checks made by
+  hand.

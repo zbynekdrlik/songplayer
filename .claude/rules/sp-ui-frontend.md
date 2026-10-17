@@ -1155,9 +1155,10 @@ hold for any draggable control the dashboard grows:
 
 `src-tauri/tauri.conf.json` opens a window on `http://127.0.0.1:8920` at
 every start, hidden (`visible: false`) and unfocused (`focus: false`) until
-the tray shows it. Anything the dashboard does on load therefore runs once
-per SongPlayer start (each deploy) with nobody looking: a poll, a preview
-(the #178 click-to-start rule exists for it), a usage record. WebView2 may
+the tray shows it. Anything the dashboard does on load therefore starts at
+every SongPlayer start (each deploy) and runs with nobody looking for as
+long as SongPlayer runs: a poll, a preview (the #178 click-to-start rule
+exists for it), a usage record. WebView2 may
 still report that page `visible` (wry keeps its controller visible), so
 gate "somebody is looking" on `document.hasFocus()` too, and catch the
 moment it is shown with `window`'s `focus` event (`usage.rs`,

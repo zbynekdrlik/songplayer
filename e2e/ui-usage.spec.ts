@@ -188,40 +188,45 @@ test("an automated session and a browser with sp_no_usage send nothing", async (
   // context of its own (pages of one context share their localStorage);
   // `person` is the control: the same session, recorded.
   watchConsole(page);
+  // A context the `context` fixture did not make is never closed by
+  // Playwright: close it on every path, or its page keeps polling the mock.
   const markedContext = await browser.newContext({ baseURL: test.info().project.use.baseURL });
-  const marked = await markedContext.newPage();
-  watchConsole(marked);
-  await asAPerson(marked);
-  await marked.addInitScript(() => {
-    localStorage.setItem("sp_no_usage", "1");
-  });
-  const person = await context.newPage();
-  watchConsole(person);
-  await asAPerson(person);
+  try {
+    const marked = await markedContext.newPage();
+    watchConsole(marked);
+    await asAPerson(marked);
+    await marked.addInitScript(() => {
+      localStorage.setItem("sp_no_usage", "1");
+    });
+    const person = await context.newPage();
+    watchConsole(person);
+    await asAPerson(person);
 
-  for (const p of [page, marked, person]) {
-    await p.goto("/");
-    await expect(p.getByTestId("health-bar")).toBeVisible({ timeout: 10000 });
-    await p.getByTestId("nav-settings").click();
-    await expect(p.getByTestId("nav-settings")).toHaveClass(/active/);
-    await p.getByTestId("nav-dashboard").click();
-    await expect(p.getByTestId("nav-dashboard")).toHaveClass(/active/);
+    for (const p of [page, marked, person]) {
+      await p.goto("/");
+      await expect(p.getByTestId("health-bar")).toBeVisible({ timeout: 10000 });
+      await p.getByTestId("nav-settings").click();
+      await expect(p.getByTestId("nav-settings")).toHaveClass(/active/);
+      await p.getByTestId("nav-dashboard").click();
+      await expect(p.getByTestId("nav-dashboard")).toHaveClass(/active/);
+    }
+    // Hiding a page sends what its log holds at once (sendBeacon): the
+    // person's session arrives; the other two, had they a log, would too.
+    for (const p of [page, marked, person]) await hide(p);
+    const once = [
+      { page: "/", control: "", kind: "page" },
+      { page: "/", control: "nav-settings", kind: "click" },
+      { page: "/settings", control: "", kind: "page" },
+      { page: "/settings", control: "nav-dashboard", kind: "click" },
+      { page: "/", control: "", kind: "page" },
+    ];
+    await expect.poll(() => recorded(request), { timeout: 5000 }).toEqual(once);
+    await page.waitForTimeout(1000);
+    expect(await recorded(request), "only the person's session").toEqual(once);
+    await person.close();
+  } finally {
+    await markedContext.close();
   }
-  // Hiding a page sends what its log holds at once (sendBeacon): the
-  // person's session arrives; the other two, had they a log, would too.
-  for (const p of [page, marked, person]) await hide(p);
-  const once = [
-    { page: "/", control: "", kind: "page" },
-    { page: "/", control: "nav-settings", kind: "click" },
-    { page: "/settings", control: "", kind: "page" },
-    { page: "/settings", control: "nav-dashboard", kind: "click" },
-    { page: "/", control: "", kind: "page" },
-  ];
-  await expect.poll(() => recorded(request), { timeout: 5000 }).toEqual(once);
-  await page.waitForTimeout(1000);
-  expect(await recorded(request), "only the person's session").toEqual(once);
-  await markedContext.close();
-  await person.close();
 });
 
 test("a page the operator cannot see records its view only once it can be seen", async ({
