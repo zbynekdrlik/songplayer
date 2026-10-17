@@ -480,6 +480,8 @@ impl BenchReport {
             adapter: decode.adapter.filter(|_| hardware),
             hw_fallback: decode.fallback,
             path_changes: decode.path_changes,
+            max_height: decode.max_height,
+            scaled_from: decode.scaled_from,
             ..self
         }
     }
