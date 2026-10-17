@@ -9,7 +9,7 @@ use super::{
     Acquired, KEY_CONSUMER, KEY_PRODUCER, MAX_SIZE_CLASSES, OPENED_IDLE_COMPOSES, OPENED_MAX,
     OpenedKeys, RING_CAPACITY, RING_WAIT, Release, RingFormat, RingState, SizeClass, SlotDraw,
     SlotKey, SlotOpen, SlotState, Take, Touch, WRITER_ACQUIRE_MS, copy_box, hresult_text,
-    make_texture, producer_key, slot_draw, stale_texture, subresource_count, why_killed,
+    make_texture, missing_subresource, producer_key, slot_draw, stale_texture, why_killed,
     writer_step,
 };
 
@@ -96,11 +96,23 @@ fn an_empty_or_oversized_picture_has_no_copy_box() {
 }
 
 #[test]
-fn a_source_has_its_slices_times_its_mips_subresources() {
-    assert_eq!(subresource_count(4, 1), 4, "a decoder's texture array");
-    assert_eq!(subresource_count(1, 1), 1);
-    assert_eq!(subresource_count(3, 2), 6);
-    assert_eq!(subresource_count(u32::MAX, 2), u32::MAX, "saturated");
+fn a_subresource_past_the_source_s_slices_times_its_mips_is_missing() {
+    assert_eq!(
+        missing_subresource(3, 4, 1),
+        None,
+        "a decoder array's last slice"
+    );
+    assert_eq!(missing_subresource(4, 4, 1), Some(4), "one past it");
+    assert_eq!(missing_subresource(9, 4, 1), Some(4), "well past it");
+    assert_eq!(missing_subresource(0, 1, 1), None);
+    assert_eq!(missing_subresource(1, 1, 1), Some(1));
+    assert_eq!(missing_subresource(5, 3, 2), None, "3 slices of 2 mips");
+    assert_eq!(missing_subresource(6, 3, 2), Some(6));
+    assert_eq!(
+        missing_subresource(u32::MAX, u32::MAX, 2),
+        Some(u32::MAX),
+        "saturated"
+    );
 }
 
 #[test]

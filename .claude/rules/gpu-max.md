@@ -1942,15 +1942,16 @@ behaviour change).
   ring, its handle `FAKE_HANDLE_BASE` (`isize::MIN`) `+ 4·(slot + 1)`, a
   value no Windows handle has: sp-server's tests use it.
 - **`win/ring.rs` `PictureRing` (glue, out of the gate):**
-  `copy_from(source, subresource, visible)` refuses a source that is not
-  NV12 (`RingSourceFormat`) or has no copy box (`RingPicture`), takes a
+  `copy_from(source, subresource, visible)` refuses, before any slot is
+  taken, a source that is not NV12 (`RingSourceFormat`), a subresource
+  the source does not have (`missing_subresource` → `RingSubresource`:
+  Direct3D would drop the copy silently) or a picture with no copy box
+  (`RingPicture`); then it takes a
   slot, makes its texture when told (`BIND_SHADER_RESOURCE`,
   `MISC_SHARED_NTHANDLE | MISC_SHARED_KEYEDMUTEX`, `CreateSharedHandle`),
   acquires the slot's key (the raw HRESULT through the vtable,
-  `writer_step`), `CopySubresourceRegion`s the even box out of a
-  subresource the source has (`subresource_count`, else
-  `RingSubresource`: Direct3D would drop the copy silently; a
-  texture-array slice is the WARP test
+  `writer_step`), `CopySubresourceRegion`s the even box (a texture-array
+  slice: the WARP test
   `a_slot_is_copied_out_of_a_slice_of_a_decoder_like_texture_array`),
   `Flush`es, `ReleaseSync(1)`, hands over. A key not held,
   or a failed release, kills the ring; a failed write gives the slot

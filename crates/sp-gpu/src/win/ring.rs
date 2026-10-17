@@ -31,7 +31,7 @@ use crate::error::GpuError;
 use crate::ring::{GpuFrame, RingCore, RingStats, Taken, Written, hand_over};
 use crate::ring_state::{
     Acquired, KEY_CONSUMER, RING_WAIT, RingFormat, SizeClass, WRITER_ACQUIRE_MS, copy_box,
-    make_texture, stale_texture, subresource_count, writer_step,
+    make_texture, missing_subresource, stale_texture, writer_step,
 };
 
 /// A slot taken for a write holds no texture after the write made one: a
@@ -124,8 +124,7 @@ impl PictureRing {
                 format: desc.Format.0 as u32,
             });
         }
-        let count = subresource_count(desc.ArraySize, desc.MipLevels);
-        if subresource >= count {
+        if let Some(count) = missing_subresource(subresource, desc.ArraySize, desc.MipLevels) {
             return Err(GpuError::RingSubresource { subresource, count });
         }
         let copy = copy_box(visible, (desc.Width, desc.Height)).ok_or(GpuError::RingPicture {

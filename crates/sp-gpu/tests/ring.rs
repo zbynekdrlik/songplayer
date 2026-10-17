@@ -414,18 +414,13 @@ fn a_source_the_ring_does_not_take_is_refused() {
             surface_height: 64,
         })
     );
-    let (stride, data) = pattern(64, 64, 3);
-    let slices: Vec<Vec<u8>> = (0..4)
-        .map(|_| surface((64, 64), (64, 64), (stride, &data[..])))
-        .collect();
-    let array = texture(ring.device(), DXGI_FORMAT_NV12, (64, 64), &slices);
     assert_eq!(
-        ring.copy_from(&array, 4, (64, 64)).map(|f| f.id()),
+        ring.copy_from(&nv12, 1, (64, 64)).map(|f| f.id()),
         Err(GpuError::RingSubresource {
-            subresource: 4,
-            count: 4
+            subresource: 1,
+            count: 1
         }),
-        "a 4-slice array has no slice 4"
+        "a single texture has no subresource 1"
     );
     assert_eq!(ring.stats().slots, 0, "nothing taken");
 }
