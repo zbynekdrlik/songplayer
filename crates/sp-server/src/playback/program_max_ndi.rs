@@ -67,11 +67,9 @@ impl NdiPass {
 impl<G: MaxGpu> MaxWorker<'_, G> {
     /// The UYVY pass on the compositor's primary (FHD) target while NDI is
     /// `wanted`, off otherwise (a backoff forgotten). Nothing without a
-    /// compositor.
-    pub(super) fn ndi_pass(&mut self, wanted: bool, now: Instant) {
-        let Some(compositor) = self.device.compositor.as_mut() else {
-            return;
-        };
+    /// compositor. Returns the line the enable's log wrote.
+    pub(super) fn ndi_pass(&mut self, wanted: bool, now: Instant) -> Option<LogLine> {
+        let compositor = self.device.compositor.as_mut()?;
         if !wanted {
             if self.ndi.on {
                 compositor.disable_uyvy();
@@ -80,24 +78,25 @@ impl<G: MaxGpu> MaxWorker<'_, G> {
             self.ndi.forget();
             // Nothing takes them any more: no 4 MB buffer stays pinned.
             self.out.ndi.clear();
-            return;
+            return None;
         }
         if self.ndi.on || self.ndi.retry_at.is_some_and(|at| now < at) {
-            return;
+            return None;
         }
         let at = elapsed_100ns(self.started, now);
         match compositor.enable_uyvy(TargetId::PRIMARY) {
             Ok(()) => {
                 self.ndi.on = true;
                 self.ndi.retry_at = None;
-                self.ndi.enable_log.observe(at, None);
                 info!("program max: NDI's UYVY readback is on (SP-program from the GPU)");
+                self.ndi.enable_log.observe(at, None)
             }
             Err(error) => {
                 self.ndi.retry_at = Some(now + MAX_RETRY_BACKOFF);
                 let why = error.to_string();
                 let line = self.ndi.enable_log.observe(at, Some(&why));
                 log_enable_failed(line.as_ref(), &why);
+                line
             }
         }
     }

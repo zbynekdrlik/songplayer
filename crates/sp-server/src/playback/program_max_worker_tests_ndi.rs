@@ -279,6 +279,45 @@ fn with_max_off_a_failing_compositor_is_logged_for_ndi() {
     assert_eq!(lines.ndi, None, "MAX's line names it");
 }
 
+/// The enable's log follows every boundary while NDI is wanted (review
+/// round 3): the retry after the backoff lands inside the log's window, so
+/// that recovery is said after the window, and a later failing spell with
+/// the same error is WARNed again (never stuck on the old failure).
+#[test]
+fn a_quick_recovery_of_the_enable_is_said_after_the_window_and_a_new_failure_warned() {
+    let max = ndi_on(true);
+    let gpu = FakeGpu::default();
+    gpu.script().enable_uyvy.push_back(gpu_refusal());
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    let a = picture(4, 2);
+    let t0 = Instant::now();
+    let lines = worker.serve_lines(&plain(1, &a), t0, t0);
+    assert_eq!(lines.ndi_enable, Some(LogLine::Failing { held_back: 0 }));
+    let retry = t0 + MAX_RETRY_BACKOFF;
+    let lines = worker.serve_lines(&plain(2, &a), retry, retry);
+    assert_eq!(lines.ndi_enable, None, "on again inside the window: held");
+    let window = Duration::from_nanos(MAX_LOG_EVERY_100NS as u64 * 100);
+    let after = t0 + window;
+    let lines = worker.serve_lines(&plain(3, &a), after, after);
+    assert_eq!(
+        lines.ndi_enable,
+        Some(LogLine::Recovered { held_back: 1 }),
+        "said by the first boundary after the window"
+    );
+    // The device lost and rebuilt, and the enable refused again.
+    let later = after + window;
+    gpu.script().compose.push_back(device_lost());
+    worker.serve_lines(&plain(4, &a), later, later);
+    gpu.script().enable_uyvy.push_back(gpu_refusal());
+    let lines = worker.serve_lines(&plain(5, &a), later, later);
+    assert_eq!(gpu.log().compositors_built, 2, "rebuilt at once");
+    assert_eq!(
+        lines.ndi_enable,
+        Some(LogLine::Failing { held_back: 0 }),
+        "the new failing spell is WARNed"
+    );
+}
+
 /// MAX off and the pass refused: nothing wants a compose (no output can go
 /// out, NDI reads nothing back), so nothing is drawn.
 #[test]

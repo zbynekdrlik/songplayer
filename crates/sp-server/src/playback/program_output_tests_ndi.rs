@@ -3,21 +3,24 @@
 //! MAX's hand-off, the readback feed filled by the test (no `program-max`
 //! thread: nothing takes MAX's offers). Boundary b's audio goes to VBAN at
 //! b and to NDI at b + 1 with b's stamps and b's read-back picture; a
-//! missing picture repeats the last one (the black before any); the
-//! switches hold one boundary or skip one; a fade's audio is crossfaded
+//! missing picture repeats the last one (the black before any); a switch
+//! to the GPU holds one boundary, a switch back sends the held pair first
+//! (no audio block lost); after an automatic fallback the GPU comes back
+//! only after 30 on-time readbacks in a row; a fade's audio is crossfaded
 //! and its picture is the compositor's; the burn is painted on the UYVY
 //! copy; the trace names the stamp that went out. (VBAN before any NDI
 //! call in gpu mode: `program_output_tests_order.rs`.)
 //! Wired via `#[cfg(test)] #[path = "program_output_tests_ndi.rs"] mod tests_ndi;`.
 
-use std::sync::Arc;
+use std::cell::Cell;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sp_core::config::NdiSource;
 use sp_ndi::test_util::MockNdiBackend;
 use sp_ndi::{FourCCVideoType, NdiSender};
 
-use super::tests_order::{at, interleaved, pair, samples};
+use super::tests_order::{HookedNdi, at, interleaved, pair, samples};
 use super::{MixRun, ProgramOutput};
 use crate::playback::audio_out_block::ProgramBlock;
 use crate::playback::fleet_shift;
@@ -281,8 +284,7 @@ fn a_switch_to_the_gpu_holds_one_boundary_and_back_sends_the_held_pair_first() {
 #[test]
 fn a_readback_that_is_always_late_falls_back_and_stays_on_the_canvas() {
     let mut rig = rig(NdiSource::Gpu);
-    let p0 = uyvy(1);
-    rig.max.ndi.push(at(0), p0.clone());
+    rig.max.ndi.push(at(0), uyvy(1));
     rig.out.submit(source(0, 0.25));
     rig.out.submit(source(1, 0.25));
     for k in 2..=30 {
@@ -466,6 +468,90 @@ fn the_first_switch_to_the_gpu_needs_no_run_of_on_time_readbacks() {
     assert_eq!(sends(&rig).len(), 2, "b1 held: on the GPU at once");
     let status = rig.max.ndi_status();
     assert_eq!((status.source, status.switches), ("gpu", 1), "{status:?}");
+}
+
+/// The first switch to the GPU takes the boundary before's readback as the
+/// last picture (review round 3): a picture missing right after the switch
+/// repeats that boundary, never a black frame.
+#[test]
+fn the_first_switch_to_the_gpu_repeats_the_boundary_before_never_the_black() {
+    let mut rig = rig(NdiSource::Gpu);
+    rig.out.submit(source(0, 0.25));
+    let p0 = uyvy(1);
+    rig.max.ndi.push(at(0), p0.clone());
+    rig.out.submit(source(1, 0.25));
+    rig.out.submit(source(2, 0.25));
+    assert!(
+        wire(&rig).ptr_eq(&p0),
+        "b1's readback never came: b0's picture, not the black"
+    );
+    let status = rig.max.ndi_status();
+    assert_eq!((status.switches, status.repeats), (1, 1), "{status:?}");
+}
+
+/// At the setting's switch to the canvas the held pair goes out with the
+/// last read-back picture (a repeat) BEFORE the switch forgets it: read
+/// inside b2's own submit, b1's picture on the wire is b0's, never the
+/// black.
+#[test]
+fn the_setting_s_switch_sends_the_held_pair_before_it_forgets_the_last_picture() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let log = seen.clone();
+    let backend = Arc::new(HookedNdi {
+        inner: MockNdiBackend::new(),
+        on_audio: Box::new(move |mock: &MockNdiBackend| {
+            log.lock().unwrap().push(mock.last_async_video_slice());
+        }),
+    });
+    let sender = NdiSender::new_with_clocking(backend.clone(), PROGRAM_NDI_NAME, false, false)
+        .expect("mock sender");
+    let max = Arc::new(MaxOut::new());
+    max.set_ndi_source(NdiSource::Gpu);
+    let mut out = ProgramOutput::new(sender, W, H).with_max(max.clone());
+    let p0 = uyvy(1);
+    max.ndi.push(at(0), p0.clone());
+    out.submit(source(0, 0.25));
+    out.submit(source(1, 0.25));
+    max.set_ndi_source(NdiSource::Cpu);
+    out.submit(source(2, 0.25));
+    let p0_slice = Some((p0.as_ptr() as usize, p0.len()));
+    let seen = seen.lock().unwrap().clone();
+    assert_eq!(
+        seen,
+        [None, p0_slice, p0_slice],
+        "the pictures on the wire at b0's, b1's and b2's audio"
+    );
+    assert_eq!(
+        backend.inner.last_async_video_fourcc(),
+        Some(FourCCVideoType::NV12),
+        "b2 on the canvas"
+    );
+}
+
+/// At a switch to the canvas the video side starts before the held pair's
+/// submit, so `health.timing.submit_us` covers both submits.
+#[test]
+fn a_switch_to_the_canvas_times_both_submits() {
+    let mut rig = rig(NdiSource::Gpu);
+    rig.max.ndi.push(at(0), uyvy(1));
+    rig.out.submit(source(0, 0.25));
+    rig.max.set_ndi_source(NdiSource::Cpu);
+    let reads = Cell::new(0_i64);
+    let now = || {
+        reads.set(reads.get() + 1);
+        reads.get()
+    };
+    let marks = rig.out.serve(source(1, 0.25), None, now);
+    assert_eq!(
+        (
+            marks.taken_100ns,
+            marks.fed_100ns,
+            marks.submit_start_100ns,
+            marks.submitted_100ns
+        ),
+        (1, 2, 3, 5),
+        "the start read before b0's submit (3), not the canvas picture's own (4)"
+    );
 }
 
 /// The setting's switch to the canvas ends a fallback's count: a later

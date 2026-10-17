@@ -37,10 +37,11 @@ const T0: i64 = 17_900_000_000_000_000;
 
 /// An NDI backend that records like [`MockNdiBackend`] and runs `on_audio`
 /// inside every `send_audio` — the first call of a pair's NDI submit —
-/// before it records the send.
-struct HookedNdi {
-    inner: MockNdiBackend,
-    on_audio: Box<dyn Fn() + Send + Sync>,
+/// before it records the send. The hook sees the mock as it is then (#279
+/// P1b: the picture the pair before put on the wire).
+pub(super) struct HookedNdi {
+    pub(super) inner: MockNdiBackend,
+    pub(super) on_audio: Box<dyn Fn(&MockNdiBackend) + Send + Sync>,
 }
 
 impl NdiBackend for HookedNdi {
@@ -125,7 +126,7 @@ impl NdiBackend for HookedNdi {
         interleaved: &[f32],
         timecode_100ns: Option<i64>,
     ) {
-        (self.on_audio)();
+        (self.on_audio)(&self.inner);
         self.inner.send_audio(
             handle,
             sample_rate,
@@ -203,7 +204,7 @@ fn submit_with_ndi_held(job: ProgramJob) -> Seen {
     let held = gate.clone();
     let backend = Arc::new(HookedNdi {
         inner: MockNdiBackend::new(),
-        on_audio: Box::new(move || {
+        on_audio: Box::new(move |_: &MockNdiBackend| {
             let _ = entered_tx.send(());
             held.wait();
         }),
@@ -386,7 +387,7 @@ fn from_the_gpu_vban_has_each_block_before_any_ndi_call() {
     let held = gate.clone();
     let backend = Arc::new(HookedNdi {
         inner: MockNdiBackend::new(),
-        on_audio: Box::new(move || {
+        on_audio: Box::new(move |_: &MockNdiBackend| {
             let _ = entered_tx.send(());
             held.wait();
         }),
@@ -446,7 +447,7 @@ fn every_output_has_the_block_before_the_ndi_submit() {
     let held = gate.clone();
     let backend = Arc::new(HookedNdi {
         inner: MockNdiBackend::new(),
-        on_audio: Box::new(move || {
+        on_audio: Box::new(move |_: &MockNdiBackend| {
             let _ = entered_tx.send(());
             held.wait();
         }),
@@ -490,7 +491,7 @@ fn slow_output(clock: &SettableClock, cost_100ns: i64) -> ProgramOutput<HookedNd
     let slow = clock.clone();
     let backend = Arc::new(HookedNdi {
         inner: MockNdiBackend::new(),
-        on_audio: Box::new(move || slow.advance(cost_100ns)),
+        on_audio: Box::new(move |_: &MockNdiBackend| slow.advance(cost_100ns)),
     });
     let sender =
         NdiSender::new_with_clocking(backend, PROGRAM_NDI_NAME, false, false).expect("mock sender");
