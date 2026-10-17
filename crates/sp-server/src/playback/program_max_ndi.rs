@@ -7,7 +7,12 @@
 //!   program ([`MaxWorker::ndi_pass`]); otherwise it is disabled, so the
 //!   CPU mode pays no readback. A failed enable is tried again only after
 //!   [`MAX_RETRY_BACKOFF`] (it makes textures and compiles a shader); a lost
-//!   device is left to the compose's own check.
+//!   device is left to the compose's own check. The enable's log (a
+//!   `LogGate`) follows every boundary while NDI is wanted: one WARN per
+//!   failing spell, one INFO when it is on again, a change inside the
+//!   log's window said after it (review round 3: observed only at an
+//!   attempt, a retry inside the window left it on the old failure for
+//!   good).
 //! - After each compose, at the compose instant and BEFORE the Spout sends
 //!   (a 67 ms Spout lock wait never delays NDI), [`read_back`] maps the
 //!   staging copy (`read_uyvy`, never a wait) into a `frame_pool` buffer
@@ -51,8 +56,11 @@ pub(super) struct NdiPass {
     /// log: they outlive a compositor, like MAX's.
     failing: Option<String>,
     log: LogGate,
-    /// The enable's own log: a pass that keeps failing to enable is said
-    /// once (not at every retry), its recovery once.
+    /// Why the pass could not be enabled (`None`: it was, or nothing
+    /// tried), and the enable's own log: a pass that keeps failing to
+    /// enable is said once (not at every retry), its recovery once. They
+    /// outlive a compositor.
+    enable_failing: Option<String>,
     enable_log: LogGate,
 }
 
@@ -67,7 +75,8 @@ impl NdiPass {
 impl<G: MaxGpu> MaxWorker<'_, G> {
     /// The UYVY pass on the compositor's primary (FHD) target while NDI is
     /// `wanted`, off otherwise (a backoff forgotten). Nothing without a
-    /// compositor. Returns the line the enable's log wrote.
+    /// compositor. Returns the line the enable's log wrote: it is observed
+    /// at every boundary while NDI is wanted.
     pub(super) fn ndi_pass(&mut self, wanted: bool, now: Instant) -> Option<LogLine> {
         let compositor = self.device.compositor.as_mut()?;
         if !wanted {
@@ -80,25 +89,25 @@ impl<G: MaxGpu> MaxWorker<'_, G> {
             self.out.ndi.clear();
             return None;
         }
-        if self.ndi.on || self.ndi.retry_at.is_some_and(|at| now < at) {
-            return None;
+        if !self.ndi.on && self.ndi.retry_at.is_none_or(|retry| now >= retry) {
+            match compositor.enable_uyvy(TargetId::PRIMARY) {
+                Ok(()) => {
+                    self.ndi.on = true;
+                    self.ndi.retry_at = None;
+                    self.ndi.enable_failing = None;
+                    info!("program max: NDI's UYVY readback is on (SP-program from the GPU)");
+                }
+                Err(error) => {
+                    self.ndi.retry_at = Some(now + MAX_RETRY_BACKOFF);
+                    self.ndi.enable_failing = Some(error.to_string());
+                }
+            }
         }
         let at = elapsed_100ns(self.started, now);
-        match compositor.enable_uyvy(TargetId::PRIMARY) {
-            Ok(()) => {
-                self.ndi.on = true;
-                self.ndi.retry_at = None;
-                info!("program max: NDI's UYVY readback is on (SP-program from the GPU)");
-                self.ndi.enable_log.observe(at, None)
-            }
-            Err(error) => {
-                self.ndi.retry_at = Some(now + MAX_RETRY_BACKOFF);
-                let why = error.to_string();
-                let line = self.ndi.enable_log.observe(at, Some(&why));
-                log_enable_failed(line.as_ref(), &why);
-                line
-            }
-        }
+        let failing = self.ndi.enable_failing.as_deref();
+        let line = self.ndi.enable_log.observe(at, failing);
+        log_enable_line(line.as_ref(), failing);
+        line
     }
 }
 
@@ -141,15 +150,21 @@ impl<G: MaxGpu> MaxWorker<'_, G> {
 }
 
 /// The WARN of a UYVY pass that could not be enabled, once per failing
-/// spell (`LogGate`'s decision, tested; logging only).
+/// spell, and the INFO when it is on again (`LogGate`'s decision, tested;
+/// logging only).
 #[cfg_attr(test, mutants::skip)]
-fn log_enable_failed(line: Option<&LogLine>, why: &str) {
-    if let Some(LogLine::Failing { held_back }) = line {
-        warn!(
-            error = why,
+fn log_enable_line(line: Option<&LogLine>, failing: Option<&str>) {
+    match line {
+        Some(LogLine::Failing { held_back }) => warn!(
+            error = failing.unwrap_or_default(),
             held_back = *held_back,
             "program max: NDI's UYVY pass could not be enabled - tried again after each backoff"
-        );
+        ),
+        Some(LogLine::Recovered { held_back }) => info!(
+            held_back = *held_back,
+            "program max: NDI's UYVY pass is enabled again"
+        ),
+        None => {}
     }
 }
 

@@ -35,9 +35,13 @@
 //!   switch to the CPU never drops an audio block (#279 ROZHODNUTÉ
 //!   6232669201 item 1): the held pair goes out FIRST (its readback, else
 //!   the last picture, else the black: a repeat), then b on the canvas —
-//!   two submits back to back, contiguous stamps. The setting's switch
-//!   then forgets the last read-back picture; an automatic fallback keeps
-//!   it.
+//!   two submits back to back, contiguous stamps.
+//! - The last picture: every boundary on the canvas forgets it (no 4 MB
+//!   stays pinned while NDI is on the canvas). A switch to the GPU takes
+//!   the boundary before's readback as the last picture (the gate's
+//!   on-time take, or `take_on_time` at the switch), so a picture missing
+//!   right after it repeats that boundary, the black only when none was
+//!   read back (review round 3: a first entry used to send the black).
 //!
 //! So picture and audio move together, the stamps are b − 1's exactly as
 //! the canvas would have stamped them, and the delay is a constant slot
@@ -108,9 +112,8 @@ pub(super) struct NdiLine {
     source: NdiSource,
     /// The pair held for the next boundary (from the GPU).
     held: Option<Held>,
-    /// The last read-back picture sent (or, after a fallback, taken on
-    /// time by the gate): what a missing one repeats. An automatic
-    /// fallback to the canvas keeps it; the setting's switch forgets it.
+    /// The last read-back picture sent, or taken at a switch to the GPU:
+    /// what a missing one repeats. Every canvas boundary forgets it.
     last: Option<SharedFrame>,
     /// The constant UYVY black, sent before any picture came.
     black: BlackUyvy,
@@ -152,12 +155,17 @@ impl<B: NdiBackend> ProgramOutput<B> {
             .admit(ndi_source_for(setting, newest, stamp_100ns));
         let previous = self.ndi.source;
         let switched = previous != pick.source();
+        if switched && pick == NdiPick::Gpu {
+            // The boundary before's readback is the last picture (the gate
+            // already took it when it counted this boundary).
+            self.take_on_time();
+        }
         log_switch(self.ndi.switch_log.observe(stamp_100ns, pick));
         self.ndi.rejoin.after(previous, pick);
         self.ndi.source = pick.source();
         self.ndi.prev = Some(stamp_100ns);
         let (start, sent, repeated) = match pick {
-            NdiPick::Cpu(why) => {
+            NdiPick::Cpu(_) => {
                 // ROZHODNUTÉ 6232669201 item 1: the held pair goes out
                 // first (no audio block is ever lost), then b on the canvas.
                 let flushed = self
@@ -165,9 +173,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
                     .held
                     .take()
                     .map(|held| (now(), self.send_held(held)));
-                if why == CpuWhy::Setting {
-                    self.ndi.last = None;
-                }
+                self.ndi.last = None;
                 let canvas_start = self.submit_video(pair, stamp_100ns, shown, now);
                 match flushed {
                     Some((start, repeated)) => (start, stamp_100ns, repeated),
@@ -189,10 +195,10 @@ impl<B: NdiBackend> ProgramOutput<B> {
         (start, sent)
     }
 
-    /// After an automatic fallback, on the canvas: the boundary before's
-    /// read-back picture, taken from the feed as the GPU would have taken
-    /// it; whether it came on time. It is kept as the last picture: the
-    /// first one missing after the return repeats it.
+    /// The boundary before's read-back picture, taken from the feed as the
+    /// GPU would have taken it (after an automatic fallback, on the canvas;
+    /// and at a switch to the GPU); whether it came on time. It is kept as
+    /// the last picture: the first one missing after a switch repeats it.
     fn take_on_time(&mut self) -> bool {
         match self.ndi.prev.and_then(|prev| self.take_whole(prev)) {
             Some(picture) => {
