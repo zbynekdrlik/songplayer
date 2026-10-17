@@ -57,7 +57,7 @@
 //! `aspect_fit` ([`FHD_FIT`], #267). #251 step 2: that target is a SECOND
 //! target of MAX's compositor ([`FHD_TARGET`], `Compositor::add_target`,
 //! ids and draw order in the pure [`Targets`]): one device, one upload of
-//! each picture ([`Composition::pictures`]), every target drawn from it,
+//! each picture ([`Composition::uploads`]), every target drawn from it,
 //! one wait; `SpoutSender::for_target` sends any one of them, and each
 //! target's own share of the draw is [`target_draws_us`].
 //!

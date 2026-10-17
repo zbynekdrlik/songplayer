@@ -365,7 +365,7 @@ impl Compositor {
     /// (each target keeps the last frame). #251: the two slots first trade
     /// places when that saves uploads ([`swap_slots`]: a fade's incoming
     /// picture is the next fade's outgoing one). #251 step 2: each picture
-    /// ([`Composition::pictures`]) is uploaded ONCE into its slot, then
+    /// ([`Composition::uploads`]) is uploaded ONCE into its slot, then
     /// every target is drawn from those textures in draw order (the primary
     /// first), each placed by its own rule ([`Composition::layers_on`]); one
     /// flush and one wait for all of them, each target's own part kept for

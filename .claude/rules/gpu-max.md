@@ -109,7 +109,8 @@ below).
     targets in.
   - `layers()` is `layers_on(MAX_TARGET)`; `layers_on(target)` =
     `layers_in(w, h, fit)`, which places into any target.
-  - `pictures()` = the (slot, side) pairs one compose draws, in draw
+  - `pictures()` (test-only since #279 P2) = the (slot, side) pairs one
+    compose draws, in draw
     order, whatever the targets; every target's layers sample exactly
     those (`composition_tests.rs::every_target_draws_the_pictures_one_compose_uploads`).
     #279 P2: of those, `uploads()` (the CPU sides) is what one compose

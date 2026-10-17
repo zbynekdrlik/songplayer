@@ -17,8 +17,9 @@
 //!
 //! #251 step 2: both targets are drawn by ONE compositor from ONE upload of
 //! each picture. A compositor holds several render targets ([`Target`]:
-//! [`MAX_TARGET`], [`FHD_TARGET`]); [`Composition::pictures`] are what one
-//! compose uploads, and each target draws [`Composition::layers_on`] it:
+//! [`MAX_TARGET`], [`FHD_TARGET`]); [`Composition::uploads`] are what one
+//! compose uploads (#279 P2: and [`Composition::frames`] the ring slots it
+//! holds), and each target draws [`Composition::layers_on`] it:
 //! the same pictures in the same slots at the same weights, placed by that
 //! target's rule.
 //!
@@ -276,8 +277,8 @@ impl<'a> Composition<'a> {
     /// order: the outgoing side, then the incoming one, each placed into
     /// that target by `fit`. A side of weight 0 is not drawn (and not
     /// uploaded): the black has no layer, a plain picture one at weight 1.
-    /// Whatever the target, the layers carry [`pictures`](Self::pictures):
-    /// the same slots and sides.
+    /// Whatever the target, the layers carry the same slots and sides
+    /// (`pictures`, the tests' view).
     pub fn layers_in(&self, width: u32, height: u32, fit: Fit) -> Vec<Layer<'a>> {
         self.sides()
             .map(|(slot, side, q8)| {
@@ -298,8 +299,10 @@ impl<'a> Composition<'a> {
     /// whatever targets it draws (each target's
     /// [`layers_on`](Self::layers_on) samples exactly these). #279 P2: one
     /// compose uploads their CPU pictures ([`uploads`](Self::uploads)) and
-    /// opens their ring frames ([`frames`](Self::frames)).
-    pub fn pictures(&self) -> Vec<(Slot, Side<'a>)> {
+    /// opens their ring frames ([`frames`](Self::frames)); this list is the
+    /// tests' view of both.
+    #[cfg(test)]
+    pub(crate) fn pictures(&self) -> Vec<(Slot, Side<'a>)> {
         self.sides().map(|(slot, side, _)| (slot, side)).collect()
     }
 
