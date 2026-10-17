@@ -100,3 +100,41 @@ async fn the_wall_route_carries_songplayer_s_clip_stamped_with_the_server_s_cloc
         "the answer's own clock: {now_ms} < {before}"
     );
 }
+
+/// `GET /api/v1/status` as JSON, through the real router.
+async fn status_json(state: crate::AppState) -> serde_json::Value {
+    let req = Request::builder()
+        .uri("/api/v1/status")
+        .body(Body::empty())
+        .unwrap();
+    let resp = crate::api::router(state, None).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+/// #261: `GET /api/v1/status` carries the data dir's size at its top level,
+/// null until the first measure, then the last measure (`crate::data_size`;
+/// the only test that sets that process-wide store).
+#[tokio::test]
+async fn the_status_carries_the_data_dir_size_null_until_measured() {
+    use sp_core::data_size::DataSize;
+
+    let state = test_state().await;
+    let json = status_json(state.clone()).await;
+    for key in ["data_dir_bytes", "cache_bytes", "data_dir_measured_ms"] {
+        assert_eq!(json[key], serde_json::Value::Null, "{key} before a measure");
+    }
+    crate::data_size::set(DataSize {
+        data_dir_bytes: Some(5_000_000_000),
+        cache_bytes: Some(4_000_000_000),
+        data_dir_measured_ms: Some(1_760_000_000_000),
+    });
+    let json = status_json(state).await;
+    crate::data_size::set(DataSize::default());
+    assert_eq!(json["data_dir_bytes"], 5_000_000_000_u64);
+    assert_eq!(json["cache_bytes"], 4_000_000_000_u64);
+    assert_eq!(json["data_dir_measured_ms"], 1_760_000_000_000_i64);
+}

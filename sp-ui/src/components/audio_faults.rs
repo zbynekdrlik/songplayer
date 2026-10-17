@@ -66,8 +66,9 @@ extern "C" {
     fn get_timezone_offset(this: &Date) -> f64;
 }
 
-/// An instant (UTC ms) in the browser's local time.
-fn local(utc_ms: i64) -> LocalTime {
+/// An instant (UTC ms) in the browser's local time (#261: Nastavenia's
+/// data-dir line names its measure's time with it too).
+pub(crate) fn local(utc_ms: i64) -> LocalTime {
     let d = Date::new(utc_ms as f64);
     LocalTime {
         day: d.get_date() as u32,

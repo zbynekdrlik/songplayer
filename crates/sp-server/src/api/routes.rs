@@ -110,6 +110,10 @@ pub struct StatusResponse {
     /// Defender's real-time protection, the firewall). Missing key → not checked.
     #[serde(default)]
     pub environment: sp_core::prod_env::EnvironmentStatus,
+    /// #261: the data dir's size (`data_dir_bytes`, `cache_bytes`,
+    /// `data_dir_measured_ms` at the top level; null until the first measure).
+    #[serde(flatten)]
+    pub data_size: sp_core::data_size::DataSize,
 }
 
 // #136 / #223 S3b: moved to `routes_status` for the 1000-line cap.
@@ -748,6 +752,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
         paid_ai_enabled: paid_ai.enabled,
         paid_ai_held: paid_ai.held,
         environment,
+        data_size: crate::data_size::current(),
     })
 }
 

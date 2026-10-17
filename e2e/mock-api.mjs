@@ -1601,6 +1601,30 @@ app.post("/__mock/wall-reset", (_req, res) => {
   res.json(wall);
 });
 
+// #261: the data dir's size on `/api/v1/status` (null until the server's
+// first measure). The default: 123,4 GB, the cache 120,0 GB, measured two
+// hours before the mock started. `/__mock/data-size {…}` replaces the three
+// fields (nulls included); `/__mock/data-size-reset` restores the default.
+const GIB = 1_073_741_824;
+const DATA_SIZE_DEFAULT = {
+  data_dir_bytes: 123 * GIB + Math.floor((4 * GIB) / 10),
+  cache_bytes: 120 * GIB,
+  data_dir_measured_ms: Date.now() - 2 * 3_600_000,
+};
+let dataSize = { ...DATA_SIZE_DEFAULT };
+app.post("/__mock/data-size", (req, res) => {
+  dataSize = {
+    data_dir_bytes: req.body.data_dir_bytes ?? null,
+    cache_bytes: req.body.cache_bytes ?? null,
+    data_dir_measured_ms: req.body.data_dir_measured_ms ?? null,
+  };
+  res.json(dataSize);
+});
+app.post("/__mock/data-size-reset", (_req, res) => {
+  dataSize = { ...DATA_SIZE_DEFAULT };
+  res.json(dataSize);
+});
+
 // Status
 app.get("/api/v1/status", (_req, res) => {
   res.json({
@@ -1622,6 +1646,8 @@ app.get("/api/v1/status", (_req, res) => {
     paid_ai_held: paidAiEnabled(settings.paid_ai_enabled) ? [] : ["lyrics", "metadata"],
     // #233: the production environment, as `/api/v1/environment`.
     environment,
+    // #261: the data dir's size, at the status's top level as the server's.
+    ...dataSize,
   });
 });
 

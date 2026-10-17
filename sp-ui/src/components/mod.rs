@@ -1,6 +1,7 @@
 pub mod audio_faults; // #257 the audio fault history (HealthBar segment + panel)
 pub mod audio_outputs; // #233 Nastavenia "Zvukové výstupy" (the output list)
 pub mod dabing_list;
+pub mod data_size_line; // #261 Nastavenia's line about the data dir's size
 pub mod health_bar;
 pub mod import_box;
 pub mod song_row;
