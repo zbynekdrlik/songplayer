@@ -66,11 +66,13 @@ impl MediaFoundationVideoReader {
                  D3D11: a stream of whole 16-pixel blocks, which NVDEC does not pad)"
             );
         }
+        let current = mf_scaled::current_type_facts(&opened.reader);
         let facts = ScaledOpenFacts {
             chain: chain.stages,
             native_aperture: shape.native_aperture,
             native_colour: shape.colour,
-            out_colour: mf_scaled::current_colour(&opened.reader),
+            out_colour: current.map(|(colour, _)| colour),
+            out_pixel_aspect: current.and_then(|(_, ratio)| ratio),
             decoder: chain.decoder,
             decoder_at_first_picture: None,
             first_picture_padding_in_reach: None,
@@ -80,6 +82,7 @@ impl MediaFoundationVideoReader {
             from = %format!("{}x{}", shape.from.0, shape.from.1),
             to = %format!("{}x{}", shape.size.0, shape.size.1),
             pixel_aspect = ?shape.pixel_aspect,
+            pixel_aspect_out = ?facts.out_pixel_aspect,
             decoder = ?facts.decoder,
             chain = ?facts.chain,
             native_aperture = ?facts.native_aperture,

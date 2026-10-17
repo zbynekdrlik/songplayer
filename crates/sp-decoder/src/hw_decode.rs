@@ -625,8 +625,9 @@ pub fn video_area(blob: &[u8]) -> Option<VideoArea> {
 /// #282 (review round 2): whether a scaled open would scale the decoder's
 /// padding into the picture. NVDEC pads its output type to 16 rows (a
 /// 3840×1606 stream decodes as 3840×1616, #223's green strip); the video
-/// processor behind it crops the padding only by the decoder type's
-/// display aperture. So a `decoded` type larger than the `native` picture
+/// processor behind it is taken to crop the padding only by the decoder
+/// type's display aperture (reasoned in review round 2, not measured). So
+/// a `decoded` type larger than the `native` picture
 /// is safe only with an aperture of exactly the native picture at the
 /// origin; otherwise the scaled open is refused (the file plays at its own
 /// size, the readback cutting the padding as before).
@@ -710,11 +711,12 @@ fn gcd(mut a: u128, mut b: u128) -> u128 {
 /// of [`scaled_size`] leaves the scaled size a fraction of a pixel off the
 /// native aspect (3840×1606 → 1920×804: 804:803); this ratio states the
 /// picture's true pixel aspect at that size (the stretch, 0.1 %, is
-/// invisible). It is not what fills the frame: Windows' source reader
-/// ignores an output type's pixel aspect under advanced video processing
-/// (Wine's Windows-run `test_source_reader_aspect_ratio`, `.not_present` on Windows),
-/// the explicit `MF_MT_FRAME_SIZE` governs, and the CI test's 66×50 edge
-/// bands prove the picture fills it. `None` when a size is 0 or a reduced
+/// invisible). Whether the source reader keeps it is unproven for an NV12
+/// output: Wine's Windows-run `test_source_reader_aspect_ratio` shows an
+/// ARGB32 output's ratio absent from the current type. The CI test's
+/// software 66×50 edge bands prove the picture fills the frame, not which
+/// attribute fills it (the ratio and the frame size agree there); the CI
+/// log prints the negotiated ratio. `None` when a size is 0 or a reduced
 /// term does not fit a `u32` (the type then carries no ratio).
 pub fn scaled_pixel_aspect(
     native: (u32, u32),

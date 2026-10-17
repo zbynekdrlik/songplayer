@@ -6,10 +6,9 @@
 //! processor's scale is proven on the box only. What runs here is the same
 //! open — a first source reader read for the stream's own size, then a
 //! second one with `MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING` and
-//! the NV12 output type's `MF_MT_FRAME_SIZE` (+ the picture's pixel aspect,
-//! which Windows' reader ignores, and the native colour description; no
-//! frame rate) —
-//! with Media Foundation's video processor scaling on the CPU.
+//! the NV12 output type's `MF_MT_FRAME_SIZE` (+ the picture's pixel aspect
+//! and the native colour description; no frame rate) — with Media
+//! Foundation's video processor scaling on the CPU.
 //!
 //! The picture checks compare the scaled picture with the unscaled one by
 //! regions, with tolerances measured on this fixture (ffmpeg's bilinear,
@@ -34,21 +33,22 @@
 //! #282 follow-up: each scaled open writes what it read of Media
 //! Foundation to stderr (past libtest's capture, so every CI log shows the
 //! runner's facts): the transform chain, the decoder's output at the open
-//! and at the first picture, the native geometric aperture and the colour
-//! descriptions. It then asserts the chain is the decoder followed by
-//! another transform (the video processor), the decoder's output was read
-//! and the negotiated scaled type states no colour value OTHER than the
-//! native type's (a stated, unequal value would be a conversion). Whether
-//! `GetCurrentMediaType` keeps the matrix and range that were set is not
-//! proven: Wine's Windows-run `test_source_reader_aspect_ratio` shows the reader drops an output
-//! type's pixel aspect, so an unstated value passes. The fixture has no
-//! colour description (no VUI signal type, no `colr` box), so on it this is
-//! most likely vacuous until a CI log shows a stated `native_colour`. The
-//! tests that
-//! decode from the first picture also assert the decoder's output was read
-//! again there. Two runner premises, proven only once their first CI run
-//! passes, sit in their own tests, so a runner that disagrees fails there
-//! alone:
+//! and at the first picture, the native geometric aperture, the colour
+//! descriptions and the negotiated pixel aspect. It then asserts the chain
+//! is the decoder followed by another transform (the video processor), the
+//! decoder's output was read and, where the native type states a colour
+//! value, the negotiated scaled type states no other (a stated, unequal
+//! value would suggest a conversion). Whether `GetCurrentMediaType` keeps
+//! the matrix and range that were set is not proven (Wine's Windows-run
+//! `test_source_reader_aspect_ratio` shows the reader dropping an ARGB32
+//! output's pixel aspect), so an unstated value passes. The fixture has no
+//! colour description (no VUI signal type, no `colr` box), so on it this
+//! is most likely vacuous until a CI log shows a stated `native_colour`.
+//!
+//! The tests that decode from the first picture also assert the decoder's
+//! output was read again there. Two runner premises, each proven only once
+//! its first CI run passes, sit in their own tests, so a runner that
+//! disagrees fails there alone:
 //! `a_scaled_open_lists_the_video_processor_in_its_chain` (the processor's
 //! category) and `the_first_picture_shows_no_decoder_padding_in_reach`
 //! (the decoder's crop shown as `MF_MT_MINIMUM_DISPLAY_APERTURE`).
@@ -186,8 +186,8 @@ fn unscaled() -> (MediaFoundationVideoReader, Vec<DecodedVideoFrame>) {
 /// what the scaled open read (`ScaledOpenFacts`) straight to stderr (past
 /// libtest's capture), so every CI log shows it, then asserts the chain is
 /// the decoder and a transform after it, the decoder's output was read,
-/// and the negotiated type states no colour value other than the native
-/// type's.
+/// and, where the native type states a colour value, the negotiated type
+/// states no other.
 fn open_scaled(
     cap: u32,
     size: (u32, u32),
@@ -411,10 +411,10 @@ fn a_cap_smaller_than_the_picture_hands_every_picture_over_scaled() {
 
 /// A cap of 50 rows: the box is 88×50, the picture is decoded at 66×50, a
 /// fraction of a pixel off the native aspect (pixel aspect 100:99): the
-/// picture must still fill the frame (no letterboxed edge). This is what
-/// proves the fill: Windows' reader ignores the output type's pixel aspect
-/// (Wine's Windows-run `test_source_reader_aspect_ratio`), so the explicit frame size
-/// governs.
+/// picture must still fill the frame (no letterboxed edge). This proves
+/// the fill on the software path, not which attribute fills it (the ratio
+/// and the frame size agree here); the stderr line names the negotiated
+/// ratio (`out_pixel_aspect`).
 #[test]
 fn an_inexact_ratio_fills_the_whole_frame() {
     let _alone = counters_alone();

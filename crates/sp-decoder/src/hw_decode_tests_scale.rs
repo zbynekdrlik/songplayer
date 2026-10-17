@@ -215,8 +215,8 @@ type ParCase = (
 );
 
 /// Review round 1: the scaled size is a fraction of a pixel off the native
-/// aspect; the output ratio states the display aspect exactly (Windows'
-/// reader ignores it, the frame size governs: `scaled_pixel_aspect`'s doc).
+/// aspect; the output ratio states the display aspect exactly (whether
+/// the reader keeps it: `scaled_pixel_aspect`'s doc).
 #[test]
 fn a_scaled_output_keeps_the_native_display_aspect() {
     let cases: [ParCase; 13] = [

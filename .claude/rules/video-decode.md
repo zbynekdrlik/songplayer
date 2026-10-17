@@ -92,10 +92,10 @@ jumps back follow the bytes SongPlayer moves (#251 comment 6232632646).
 The owner then made it a permanent switch per site (ROZHODNUTÉ on #282,
 17.10.2026: "musi byt sposob to zmenit"), so `max_resolution` caps
 download AND decode for good. SNV runs it at 1440 since 17.10.2026 15:09Z
-(the box A/B on #282: 10-15× fewer jumps back under NVENC, from two
-ABA rounds of 40 s takes on one AV1 song, a regression check and not a
-proof of a frame-exact path). The
-follow-up lane's design is #282 comment 6241829405.
+(the box A/B on #282: 10-15× fewer jumps back under NVENC, from two ABA
+rounds of 40 s takes on one AV1 song: a regression check, not a proof of a
+frame-exact path). The follow-up lane's design is #282 comment
+6241829405.
 
 **Automatic.** Setting `max_resolution` back to automatic restores
 3840×2160 with no code change, WITH hardware decode on (SNV, PP). The rule
@@ -133,8 +133,9 @@ rounds 1–2):
   `source_reader(.., advanced)`) with
   `MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING` = 1
   (`MF_READWRITE_DISABLE_CONVERTERS` must stay unset). Microsoft: the
-  source reader then inserts a video processor that matches the output
-  type's frame rate, frame size, interlace mode, pixel aspect and subtype.
+  source reader then inserts a video processor and "attempts to match" the
+  output type's frame rate, frame size, interlace mode, pixel aspect and
+  subtype (for the pixel aspect, see the next bullet).
   On the D3D path it is D3D11-aware and scales on the GPU before the
   readback, so the readback, the frame pool, MAX's upload and the canvas
   all carry the smaller picture. In software it scales on the CPU.
@@ -142,17 +143,21 @@ rounds 1–2):
   - `MF_MT_FRAME_SIZE` = the scaled size;
   - `MF_MT_PIXEL_ASPECT_RATIO` = `hw_decode::scaled_pixel_aspect`, the
     native display aspect kept exactly (3840×1606 → 1920×804 is 804:803).
-    Windows' source reader IGNORES an output type's pixel aspect under
-    advanced video processing (Wine's Windows-run `test_source_reader_aspect_ratio` in
-    `dlls/mfreadwrite/tests/mfplat.c`: "Aspect ratio in output type is
-    ignored", `.not_present` in the current type; with no frame size the
-    reader rescales by the INPUT's aspect, with one the frame size wins).
-    So the explicit `MF_MT_FRAME_SIZE` is what fills the frame, as the CI
-    test's 66×50 edge bands prove; the ratio is harmless and kept;
+    Whether the reader keeps it is unproven for our NV12 output. Wine's
+    Windows-run `test_source_reader_aspect_ratio`
+    (`dlls/mfreadwrite/tests/mfplat.c`, "Aspect ratio in output type is
+    ignored") shows an ARGB32 output's ratio absent from the current type
+    (with no frame size the reader rescales by the INPUT's aspect; with
+    one, the frame size wins). CI's software 66×50 edge bands prove the
+    picture fills the frame, not which attribute fills it (with 100:99 the
+    ratio and the frame both give the native 4:3). The CI log prints the
+    negotiated ratio (`out_pixel_aspect`), which settles it;
   - the native type's `MF_MT_YUV_MATRIX` and `MF_MT_VIDEO_NOMINAL_RANGE`
-    when it has them. The processor then converts no colour; a size-based
-    default, e.g. BT.601 for an SD output, would shift the hues the
-    compositor reads as BT.709.
+    when it has them, so that the processor need not convert colour. That
+    is the intent, unproven: Microsoft's matched attributes do not list
+    colour, and the box's hue check is the proof. A size-based default,
+    e.g. BT.601 for an SD output, would shift the hues the compositor
+    reads as BT.709.
 
   It carries NO frame rate (review round 2). A rate of ours could start
   the processor's frame-rate conversion when the decoder reports another
@@ -210,16 +215,19 @@ rounds 1–2):
   - `colour_native` / `colour_out` / `colour_decoder`: the matrix and the
     nominal range (`MF_MT_YUV_MATRIX`: 1 = BT.709, 2 = BT.601;
     `MF_MT_VIDEO_NOMINAL_RANGE`: 1 = full, 2 = 16..235) of the native type
-    (put on the scaled type), the negotiated scaled type and the
-    decoder's output. Whether `colour_out` keeps each value the native
-    type states (ours, `ScaledType::apply`) is NOT proven: the reader drops
-    an output pixel aspect (above), so it may drop these too. The CI test
-    fails only on a stated, unequal value, and the CI fixture most likely
-    states none. Only two
-    STATED, unequal values of `colour_out` and `colour_decoder` suggest a
+    (put on the scaled type), the negotiated scaled type and the decoder's
+    output. Whether `colour_out` keeps each value the native type states
+    (ours, `ScaledType::apply`) is NOT proven: the reader may drop it as it
+    drops an ARGB32 output's pixel aspect (above). The CI test fails only
+    where the native type states a value and the scaled type states
+    another; the CI fixture most likely states none. Only two STATED,
+    unequal values of `colour_out` and `colour_decoder` suggest a
     conversion; an unstated (`None`) side says nothing (the processor then
     takes some default of its own: reasoned, not measured). The proof
-    stays the hue check against the uncapped song.
+    stays the hue check against the uncapped song;
+  - `pixel_aspect_out`: the negotiated type's pixel aspect
+    (`out_pixel_aspect`; `None` = not stated).
+
 - **The first scaled picture** (#282 follow-up): the decoder MFT found at
   the open is kept and its output type read again ONCE there, then let go,
   with no `GetTransformForStream` call mid-stream (Microsoft: drain the
@@ -317,29 +325,35 @@ rounds 1–2):
   Each scaled open writes to stderr (the CI log) what MF negotiated and
   its whole `ScaledOpenFacts`, and after the first picture the decoder's
   output at the open and at the first picture. Every scaled open made
-  through the `open_scaled` helper asserts the chain is the decoder at
-  index 0 and a transform (not an `Error`) after it, the decoder's output
-  read (`scaled_decoder_output()` Some), and no colour value on the
-  negotiated type OTHER than the native type's (the CI fixture most
-  likely states none: no VUI signal type, no `colr` box, so this is most
-  likely vacuous there). The tests that decode from the first
-  picture (cap 60, cap 50, the seek, the reopen's second open) also
-  assert the re-read (`Some(Ok)`) and that the padding check ran.
-  `the_first_picture_shows_no_decoder_padding_in_reach` alone pins
-  `first_picture_padding_in_reach` `Some(false)`. The fixture fills its
-  frame, so this pins that the check reads the stream's own size. Its
-  premise (the decoder shows its crop as `MF_MT_MINIMUM_DISPLAY_APERTURE`
-  or no padding at all; Wine's H.264 decoder tests) is proven only once
-  its first CI run passes. Evidence for the chain's shape: Microsoft
-  (a decoder at index 0) and Wine's conformance tests, which run against
-  Windows (`dlls/mfreadwrite/tests/mfplat.c`: "the video processor can be
-  accessed at index 1 with MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING",
-  index 2 = `MF_E_INVALIDINDEX`; with no conversion needed the decoder
-  alone). Neither proves the processor's CATEGORY on Windows (Wine's own
-  reader reports `MFT_CATEGORY_VIDEO_PROCESSOR`), so that is pinned in its
-  own test, `a_scaled_open_lists_the_video_processor_in_its_chain`, whose
-  first CI run (#282 follow-up) is the proof; if it fails, the stderr
-  line before it names the chain.
+  through the `open_scaled` helper asserts:
+  - the chain is the decoder at index 0 and a transform (not an `Error`)
+    after it;
+  - the decoder's output was read (`scaled_decoder_output()` Some);
+  - where the native type states a colour value, the negotiated type
+    states no other (the CI fixture most likely states none: no VUI
+    signal type, no `colr` box, so this is most likely vacuous there).
+
+  The tests that decode from the first picture (cap 60, cap 50, the
+  seek, the reopen's second open) also assert the re-read (`Some(Ok)`)
+  and that the padding check ran. Two runner premises sit in their own
+  tests, each proven only once its first CI run passes, so a runner that
+  disagrees fails there alone:
+  - `the_first_picture_shows_no_decoder_padding_in_reach` pins
+    `first_picture_padding_in_reach` `Some(false)`. The fixture fills its
+    frame, so this pins that the check reads the stream's own size. Its
+    premise: the decoder shows its crop as
+    `MF_MT_MINIMUM_DISPLAY_APERTURE`, or no padding at all (Wine's H.264
+    decoder tests);
+  - `a_scaled_open_lists_the_video_processor_in_its_chain` pins the
+    processor's CATEGORY. Evidence for the chain's shape: Microsoft (a
+    decoder at index 0) and Wine's conformance tests, which run against
+    Windows (`dlls/mfreadwrite/tests/mfplat.c`: "the video processor can
+    be accessed at index 1 with
+    MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING", index 2 =
+    `MF_E_INVALIDINDEX`; with no conversion needed, the decoder alone).
+    Neither proves the category on Windows (Wine's own reader reports
+    `MFT_CATEGORY_VIDEO_PROCESSOR`); if the test fails, the stderr line
+    before it names the chain.
 - **Box checks (CI cannot run the D3D path):**
   - PATCH `max_resolution` to 1080 and wait 5 s. Then run the decode
     bench with `"hw": true` on a 4K sample, for EACH 4K codec (VP9, AV1,

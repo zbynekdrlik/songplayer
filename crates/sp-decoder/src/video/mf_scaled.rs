@@ -8,11 +8,12 @@
 //! `mf_reader_scaled.rs`.
 //!
 //! The output type (`apply`) carries the scaled size, the picture's pixel
-//! aspect (`hw_decode::scaled_pixel_aspect`; Windows' reader ignores an
-//! output type's pixel aspect, the frame size governs), and
-//! the native type's YUV matrix and nominal range when it has them (so the
-//! video processor converts no colour: a size-based default, e.g. BT.601
-//! for an SD output, would shift the hues the compositor reads as BT.709).
+//! aspect (`hw_decode::scaled_pixel_aspect`; whether the reader keeps it is
+//! unproven for NV12), and the native type's YUV matrix and nominal range
+//! when it has them, so that the video processor need not convert colour
+//! (the intent, unproven: a size-based default, e.g. BT.601 for an SD
+//! output, would shift the hues the compositor reads as BT.709; the box's
+//! hue check is the proof).
 //! It carries NO frame rate (review round 2): a rate of ours could start
 //! the processor's frame-rate conversion when the decoder reports another;
 //! the native rate is only what the reader reports when the processor's
@@ -85,7 +86,8 @@ pub(super) struct ScaledType {
     /// `hw_decode::scaled_size`.
     pub(super) size: (u32, u32),
     /// `hw_decode::scaled_pixel_aspect`: the native display aspect, kept
-    /// exactly (stated on the type; Windows' reader ignores it).
+    /// exactly (stated on the type; whether the reader keeps it is
+    /// unproven).
     pub(super) pixel_aspect: Option<(u32, u32)>,
     /// The native type's colour description, put on the output type.
     pub(super) colour: Colour,
@@ -180,6 +182,9 @@ pub struct ScaledOpenFacts {
     /// The negotiated scaled type's colour description (`None`: Media
     /// Foundation did not answer).
     pub out_colour: Option<Colour>,
+    /// The negotiated scaled type's `MF_MT_PIXEL_ASPECT_RATIO` (`None`:
+    /// not stated, or Media Foundation did not answer).
+    pub out_pixel_aspect: Option<(u32, u32)>,
     /// The decoder's output at the open; `Err`: why it could not be read.
     pub decoder: Result<DecoderOutput, String>,
     /// The decoder's output read again at the first picture (`None` before
@@ -310,11 +315,11 @@ pub(super) fn frame_rate_of(media_type: &IMFMediaType) -> Option<u64> {
     unsafe { media_type.GetUINT64(&MF_MT_FRAME_RATE) }.ok()
 }
 
-/// The colour description of `reader`'s negotiated output type, `None`
-/// when Media Foundation does not answer.
-pub(super) fn current_colour(reader: &IMFSourceReader) -> Option<Colour> {
+/// The colour description and the pixel aspect of `reader`'s negotiated
+/// output type, `None` when Media Foundation does not answer.
+pub(super) fn current_type_facts(reader: &IMFSourceReader) -> Option<(Colour, Option<(u32, u32)>)> {
     let current = unsafe { reader.GetCurrentMediaType(VIDEO_STREAM) }.ok()?;
-    Some(colour_of(&current))
+    Some((colour_of(&current), pixel_aspect_of(&current)))
 }
 
 /// A media type's colour description.
