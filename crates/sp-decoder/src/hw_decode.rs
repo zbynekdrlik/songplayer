@@ -564,8 +564,7 @@ pub fn visible_reference(
 /// `scale_refusals`. (A padded TEXTURE with an exact type is fine: the
 /// readback takes the UV plane's offset from the texture's height.)
 pub fn scale_took(requested: (u32, u32), negotiated: (u32, u32)) -> bool {
-    let side = |asked: u32, got: u32| got.checked_sub(asked).is_some_and(|over| over < 16);
-    side(requested.0, negotiated.0) && side(requested.1, negotiated.1)
+    requested == negotiated
 }
 
 /// #282: whether a picture's surface tells the DECODER's path: only on
@@ -575,8 +574,8 @@ pub fn scale_took(requested: (u32, u32), negotiated: (u32, u32)) -> bool {
 /// [`HwCounters`] (the scaled open is counted in `scaled_opens`); the
 /// decoder's own path behind the processor shows only in the bench's
 /// timings.
-pub fn decoder_path_visible(on_d3d: bool, _scaled: bool) -> bool {
-    on_d3d
+pub fn decoder_path_visible(on_d3d: bool, scaled: bool) -> bool {
+    on_d3d && !scaled
 }
 
 /// `a` and `b`'s greatest common divisor (`a` when `b` is 0).
@@ -610,7 +609,7 @@ pub fn scaled_pixel_aspect(
         _ => (1, 1),
     };
     let num = par_w * u128::from(native.0) * u128::from(scaled.1);
-    let den = par_h * u128::from(native.1) * u128::from(scaled.1);
+    let den = par_h * u128::from(native.1) * u128::from(scaled.0);
     if num == 0 || den == 0 {
         return None;
     }
