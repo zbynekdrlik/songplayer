@@ -649,7 +649,7 @@ fn aperture_is(aperture: Option<VideoArea>, native: (u32, u32)) -> bool {
 
 /// NVDEC pads its surfaces and output types to whole 16-pixel blocks
 /// (1080 → 1088, 858 → 864, 1350 → 1360 on SNV; 1440 / 1280 / 720 never).
-const DECODER_BLOCK: u32 = 2;
+const DECODER_BLOCK: u32 = 16;
 
 /// #282 (review round 3): whether a scaled open may go on, judged at its
 /// open from what the decoder hands the video processor (`decoder`: its
