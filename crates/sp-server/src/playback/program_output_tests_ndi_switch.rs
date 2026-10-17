@@ -91,8 +91,8 @@ fn switch_with_the_thread_first(max_on: bool) -> (Arc<MockNdiBackend>, Arc<MaxOu
 
 /// MAX on: the thread switched its pass off before the sender's boundary 2,
 /// and boundary 1's held pair still went out with its own readback (the
-/// thread's second compose): no repeat, contiguous stamps, and the feed
-/// let go after the flush.
+/// thread's second compose): no repeat, contiguous stamps. (The clear
+/// after the flush is pinned in `program_output_tests_ndi.rs`.)
 #[test]
 fn the_held_pair_keeps_its_picture_when_the_thread_sees_the_switch_first() {
     let (backend, max, gpu) = switch_with_the_thread_first(true);
@@ -103,7 +103,6 @@ fn the_held_pair_keeps_its_picture_when_the_thread_sees_the_switch_first() {
     assert_eq!(backend.video_timecodes(), [at(0), at(1), at(2)]);
     let status = max.ndi_status();
     assert_eq!((status.switches, status.repeats), (2, 0), "{status:?}");
-    assert!(max.ndi.take(at(1)).is_none(), "let go after the flush");
 }
 
 /// MAX off: the thread released the compositor before the sender's
@@ -121,7 +120,6 @@ fn the_held_pair_keeps_its_picture_when_the_thread_releases_first() {
         Some(6),
         "boundary 2 on the NV12 canvas, after the flush"
     );
-    assert!(max.ndi.take(at(1)).is_none(), "let go after the flush");
 }
 
 /// ROZHODNUTÉ 6233825414: NDI's automatic fallback to the canvas is a WARN

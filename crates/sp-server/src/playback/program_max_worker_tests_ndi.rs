@@ -555,6 +555,8 @@ fn with_max_off_a_device_lost_at_the_pass_s_enable_is_rebuilt_after_the_backoff(
     assert_eq!(log.composes, 0);
     drop(log);
     assert_eq!(lines.ndi, Some(LogLine::Failing { held_back: 0 }));
+    let lost = PassLine::Failing(Arc::from(device_lost().to_string()));
+    assert_eq!(lines.ndi_pass, Some((lost, 0)), "the pass's own line");
     assert_eq!(max.status().device_resets, 1);
     let early = t0 + MAX_RETRY_BACKOFF - Duration::from_millis(1);
     worker.serve(&plain(2, &a), early);
@@ -568,6 +570,46 @@ fn with_max_off_a_device_lost_at_the_pass_s_enable_is_rebuilt_after_the_backoff(
     );
     drop(log);
     assert_eq!(taken(&max, 3), Some(fake_uyvy(1)), "read back");
+}
+
+/// Review round 6: a device lost at the enable of a compositor that was
+/// already up (NDI flipped to the GPU while MAX runs) is lost like one a
+/// compose finds. The boundary fails (MAX's too: one event, no refused
+/// sender, so no MAX backoff), and since a boundary went out after the
+/// last loss the next job rebuilds at once, the pass with it. Only a
+/// compositor built for the boundary (the test above) waits the backoff.
+#[test]
+fn a_device_lost_at_the_enable_of_a_running_compositor_is_rebuilt_at_once() {
+    let max = MaxOut::new();
+    max.set_enabled(true);
+    let gpu = FakeGpu::default();
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    let a = picture(4, 2);
+    let t0 = Instant::now();
+    worker.serve(&plain(1, &a), t0);
+    assert_eq!(gpu.log().sent, 1, "MAX went out: the device works");
+    max.set_ndi_source(NdiSource::Gpu);
+    gpu.script().enable_uyvy.push_back(device_lost());
+    let lines = worker.serve_lines(&plain(2, &a), t0, t0);
+    let lost = PassLine::Failing(Arc::from(device_lost().to_string()));
+    assert_eq!(lines.ndi_pass, Some((lost, 0)));
+    assert_eq!(lines.max, Some(LogLine::Failing { held_back: 0 }));
+    assert_eq!(gpu.log().drops, ["sender", "compositor"]);
+    let status = max.status();
+    assert_eq!(
+        (status.device_resets, status.failed, status.sender_backoffs),
+        (1, 1, 0),
+        "one device event, no MAX backoff"
+    );
+    worker.serve(&plain(3, &a), t0);
+    let log = gpu.log();
+    assert_eq!(
+        (log.compositors_built, log.uyvy_enabled, log.sent),
+        (2, 1, 2),
+        "rebuilt at the next job, the pass on, MAX out again"
+    );
+    drop(log);
+    assert_eq!(taken(&max, 3), Some(fake_uyvy(2)), "read back");
 }
 
 /// A job the hand-off coalesced never reaches the thread: its boundary is
