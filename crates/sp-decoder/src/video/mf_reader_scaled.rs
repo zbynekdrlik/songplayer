@@ -73,6 +73,7 @@ impl MediaFoundationVideoReader {
             out_colour: mf_scaled::current_colour(&opened.reader),
             decoder: chain.decoder,
             decoder_at_first_picture: None,
+            first_picture_padding_in_reach: None,
         };
         info!(
             file = %path.display(),
@@ -98,8 +99,9 @@ impl MediaFoundationVideoReader {
     /// On the D3D11 path NVDEC may learn its padded size only at the first
     /// frame, after the open's check, so one INFO line names what the
     /// decoder hands the processor now and whether that padding reaches the
-    /// processor (`hw_decode::padding_reaches_processor`: the green strip at
-    /// the picture's bottom). Kept in the facts for the tests.
+    /// processor (`hw_decode::padding_reaches_processor` against the
+    /// stream's own size: where the green strip at the picture's bottom is
+    /// expected). Both are kept in the facts for the tests.
     pub(super) fn reread_decoder_output(&mut self) {
         let (Some(decoder), Some(native)) = (self.decoder_mft.take(), self.scaled_from) else {
             return;
@@ -117,6 +119,7 @@ impl MediaFoundationVideoReader {
         );
         if let Some(facts) = self.scaled_facts.as_mut() {
             facts.decoder_at_first_picture = Some(again);
+            facts.first_picture_padding_in_reach = Some(in_reach);
         }
     }
 

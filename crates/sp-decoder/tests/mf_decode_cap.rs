@@ -34,14 +34,17 @@
 //! Foundation to stderr (past libtest's capture, so every CI log shows the
 //! runner's facts): the transform chain, the decoder's output at the open
 //! and at the first picture, the native geometric aperture and the colour
-//! descriptions. It then asserts the chain holds a video processor and the
-//! decoder's output was read.
+//! descriptions. It then asserts the chain is the decoder followed by
+//! another transform (the video processor) and the decoder's output was
+//! read; `a_scaled_open_lists_the_video_processor_in_its_chain` pins the
+//! processor's category on its own.
 
 #![cfg(windows)]
 
 use std::io::Write;
 use std::sync::{Mutex, MutexGuard};
 
+use sp_decoder::video::ChainStage;
 use sp_decoder::{
     DecodeMode, DecodedVideoFrame, MediaFoundationVideoReader, MediaStream, VideoStream,
     hw_counters,
@@ -167,8 +170,8 @@ fn unscaled() -> (MediaFoundationVideoReader, Vec<DecodedVideoFrame>) {
 /// A capped reader's open, its facts against the unscaled reader's, and
 /// the counters' change; it writes what Media Foundation negotiated and
 /// what the scaled open read (`ScaledOpenFacts`) straight to stderr (past
-/// libtest's capture), so every CI log shows it, then asserts the chain
-/// holds a video processor and the decoder's output was read.
+/// libtest's capture), so every CI log shows it, then asserts the chain is
+/// the decoder and a transform after it and the decoder's output was read.
 fn open_scaled(
     cap: u32,
     size: (u32, u32),
@@ -221,9 +224,12 @@ fn open_scaled(
     );
     assert!(reader.frame_rate_known(), "cap {cap}: not the 29.97 guess");
     let facts = facts.unwrap_or_else(|| panic!("cap {cap}: a scaled open keeps its facts"));
+    // The decoder at index 0 (Microsoft) and a transform after it: the
+    // processor the reader inserts (Wine's conformance tests, run against
+    // Windows, read it at index 1). Its category is pinned in its own test.
     assert!(
-        facts.has_video_processor(),
-        "cap {cap}: the source reader's chain holds a video processor: {:?}",
+        facts.chain.first() == Some(&ChainStage::Decoder) && facts.chain.len() >= 2,
+        "cap {cap}: the decoder, then the video processor: {:?}",
         facts.chain
     );
     assert!(
@@ -255,6 +261,14 @@ fn assert_reread_at_first_picture(reader: &MediaFoundationVideoReader, what: &st
         matches!(facts.decoder_at_first_picture, Some(Ok(_))),
         "{what}: the decoder's output was read again at the first picture: {:?}",
         facts.decoder_at_first_picture
+    );
+    // The fixture's pictures fill the frame (the edge bands), so no padding
+    // reaches the processor; this pins that the check reads the stream's
+    // own size (160x120), not the scaled one.
+    assert_eq!(
+        facts.first_picture_padding_in_reach,
+        Some(false),
+        "{what}: no decoder padding in reach of the processor at the first picture"
     );
 }
 
@@ -463,6 +477,24 @@ fn a_refused_scaled_open_plays_the_file_at_its_own_size() {
             "picture {i}: the same bytes as an uncapped reader"
         );
     }
+}
+
+/// #282 follow-up: the transform the source reader inserts after the
+/// decoder for a scaled open is listed in `MFT_CATEGORY_VIDEO_PROCESSOR`
+/// (Microsoft: the reader looks for its processor in that category; Wine's
+/// reader reports that category for it). Its own test, so a runner that
+/// reports another category fails here alone; the chain is in the CI log.
+#[test]
+fn a_scaled_open_lists_the_video_processor_in_its_chain() {
+    let _alone = counters_alone();
+    let (plain_reader, _) = unscaled();
+    let reader = open_scaled(60, (80, 60), &plain_reader);
+    let facts = reader.scaled_open_facts().expect("scaled facts");
+    assert!(
+        facts.has_video_processor(),
+        "a video processor in the chain: {:?}",
+        facts.chain
+    );
 }
 
 /// #282 follow-up: the refusal hook is disarmed when its guard drops, so a

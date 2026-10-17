@@ -26,6 +26,17 @@ established split patterns:
   `pub(crate)` field. A method the parent calls is `pub(super)` there; a
   `pub fn` stays public API.
 
+## A function that starts returning a GUARD: move its callers in the same commit (#282 follow-up)
+
+`refuse_next_scaled_open_for_test()` went from `()` to a drop guard
+(`ScaledOpenRefusal`, `#[must_use]`) in the feat commit, while its test
+caller still called it as a statement until the test commit. In between,
+the guard dropped at once and disarmed the hook, so that commit's own
+test failed (and warned `unused_must_use`): a `git bisect` stop that is
+red on correct code. When a return type gains Drop semantics, rewrite
+every caller (`let guard = …; … drop(guard);`) in the SAME commit. Grep
+the callers across `crates/` (tests included) with the Grep tool first.
+
 ## A wider `let` binding in a file AT the 1000-line cap can push it over via rustfmt (#198 item 8)
 
 Changing a call site in a file already at exactly 1000 lines is only safe if it

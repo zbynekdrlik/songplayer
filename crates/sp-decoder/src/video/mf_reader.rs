@@ -758,6 +758,8 @@ impl MediaFoundationVideoReader {
             fallback = %fallback.describe(),
             "mf_reader: a decode error on the D3D11 path; this file goes on in software"
         );
+        // The D3D11 open's decoder MFT is let go before its session is.
+        self.decoder_mft = None;
         let opened = Self::create(&self.path, None, self.max_height)?;
         hw_counters().fell_back(&fallback);
         self.fallback = Some(fallback);

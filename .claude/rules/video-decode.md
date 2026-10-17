@@ -195,22 +195,30 @@ rounds 1–2):
   - `decoder`: what the decoder hands the processor, `Ok(DecoderOutput
     {size, aperture, colour})` or why the chain could not be read;
   - `chain`: the source reader's transforms in order (`Decoder`,
-    `VideoProcessor`, or another category's GUID);
+    `VideoProcessor`, `Other(<category GUID>)`, or the `Error` that ended
+    the walk);
   - `native_aperture`: the native type's `MF_MT_GEOMETRIC_APERTURE`;
-  - `colour_native` / `colour_out` / `colour_decoder`: `MF_MT_YUV_MATRIX`
-    + `MF_MT_VIDEO_NOMINAL_RANGE` (matrix 1 = BT.709, 2 = BT.601; range
-    1 = full, 2 = 16..235) of the native type (put on the scaled type),
-    the negotiated scaled type, and the decoder's output. A `colour_out`
-    that differs from `colour_decoder` means the processor converts
-    colour.
+  - `colour_native` / `colour_out` / `colour_decoder`: the matrix and the
+    nominal range (`MF_MT_YUV_MATRIX`: 1 = BT.709, 2 = BT.601;
+    `MF_MT_VIDEO_NOMINAL_RANGE`: 1 = full, 2 = 16..235) of the native type
+    (put on the scaled type), the negotiated scaled type and the
+    decoder's output. `colour_out` mostly echoes the native type (ours).
+    Only two STATED, unequal values of `colour_out` and `colour_decoder`
+    suggest a conversion; an unstated (`None`) side says nothing, as the
+    processor then takes its own default. The proof stays the hue check
+    against the uncapped song.
 - **The first scaled picture** (#282 follow-up): the decoder MFT found at
   the open is kept and its output type read again ONCE there, then let go,
   with no `GetTransformForStream` call mid-stream (Microsoft: drain the
   reader before calling it). One INFO `mf_reader: the decoder's output at
   the first scaled picture (#282)` with `at_open`, `at_first_picture` and
   `padding_in_reach` (`hw_decode::padding_reaches_processor` on the new
-  type). On the box, `padding_in_reach=true` IS the green strip: NVDEC
-  padded after the open's check. Look at that file's bottom rows on MAX.
+  type against the stream's own size; also in the facts,
+  `first_picture_padding_in_reach`). On the box, `padding_in_reach=true`
+  is where the green strip is expected (NVDEC padded after the open's
+  check; that the processor crops only by `MF_MT_MINIMUM_DISPLAY_APERTURE`
+  was reasoned in review, not measured): look at that file's bottom rows
+  on MAX.
 - The reader's `scaled_from()` is the stream's own size;
   `scaled_decoder_output()` and `scaled_open_facts()` (doc-hidden,
   `ScaledOpenFacts`, `video/mod.rs` re-exports it) are what the open read.
@@ -219,7 +227,7 @@ rounds 1–2):
   module `video/mf_reader_scaled.rs` (`#[path = "mf_reader_scaled.rs"]
   mod scaled;` inside `mf_reader.rs`, resolved next to it). As a child it
   reaches the reader's private fields and `source_reader` / `configure`,
-  so `mf_reader.rs` (896 lines) stayed under the cap with no field made
+  so `mf_reader.rs` (898 lines) stayed under the cap with no field made
   `pub(super)`. The chain walk and the Media Foundation reads are
   `mf_scaled.rs` (`read_chain`: every transform up to
   `MF_E_INVALIDINDEX`, the first decoder's output; Microsoft: a decoder
@@ -295,12 +303,21 @@ rounds 1–2):
 
   Each scaled open writes to stderr (the CI log) what MF negotiated and
   its whole `ScaledOpenFacts`, and after the first picture the decoder's
-  output at the open and at the first picture. It asserts the chain holds
-  a video processor (`has_video_processor`) and the decoder's output was
-  read (`scaled_decoder_output()` Some) and re-read (`Some(Ok)`). That
-  `GetTransformForStream` lists the video processor at all is NOT in any
-  Microsoft page: the first CI run of this check (#282 follow-up) is its
-  proof. If it ever fails, the line before it names the chain.
+  output at the open and at the first picture. Every scaled open asserts
+  the chain is the decoder at index 0 and a transform after it, the
+  decoder's output read (`scaled_decoder_output()` Some) and, after the
+  first picture, re-read (`Some(Ok)`) with `first_picture_padding_in_reach`
+  `Some(false)` (the fixture fills its frame, so this pins that the check
+  reads the stream's own size). Evidence for the chain's shape: Microsoft
+  (a decoder at index 0) and Wine's conformance tests, which run against
+  Windows (`dlls/mfreadwrite/tests/mfplat.c`: "the video processor can be
+  accessed at index 1 with MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING",
+  index 2 = `MF_E_INVALIDINDEX`; with no conversion needed the decoder
+  alone). Neither proves the processor's CATEGORY on Windows (Wine's own
+  reader reports `MFT_CATEGORY_VIDEO_PROCESSOR`), so that is pinned in its
+  own test, `a_scaled_open_lists_the_video_processor_in_its_chain`, whose
+  first CI run (#282 follow-up) is the proof; if it fails, the stderr
+  line before it names the chain.
 - **Box checks (CI cannot run the D3D path):**
   - PATCH `max_resolution` to 1080 and wait 5 s. Then run the decode
     bench with `"hw": true` on a 4K sample, for EACH 4K codec (VP9, AV1,
@@ -313,9 +330,10 @@ rounds 1–2):
     - a mean well under the uncapped run's;
     - the log's `opened scaled to the decode cap` line says `path=D3D11`
       and names the `decoder` output, the `chain` (a `VideoProcessor`
-      after the `Decoder`) and the colours (`colour_out` equal to
-      `colour_decoder`: no conversion); the `at the first scaled picture`
-      line says `padding_in_reach=false`.
+      after the `Decoder`) and the colours (two stated, unequal values of
+      `colour_out` and `colour_decoder` suggest a conversion: check the
+      hues); the `at the first scaled picture` line says
+      `padding_in_reach=false`.
   - Play a 4K song: `status.video_decode.scaled_opens` +1 and
     `scale_refusals` +0. A refusal's WARN names the negotiated size or the
     decoder's padding. `GET /api/v1/program` `max.upload_mb_s` should drop
@@ -327,7 +345,7 @@ rounds 1–2):
     always look at MAX's / the wall's bottom rows for a green line (the
     check runs at open, the decoder's type can change at the first
     frame; the `at the first scaled picture` INFO's
-    `padding_in_reach=true` names exactly that case).
+    `padding_in_reach=true` is that case, by the model).
 
     The exact fix if such songs must scale too (review round 1): ONE
     reader with `IMFSourceReaderEx::AddTransformForStream`, inserting a

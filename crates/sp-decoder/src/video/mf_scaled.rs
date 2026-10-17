@@ -159,8 +159,10 @@ pub enum ChainStage {
     Decoder,
     /// `MFT_CATEGORY_VIDEO_PROCESSOR`: the processor that scales.
     VideoProcessor,
-    /// Another category (its GUID), or the error that ended the walk.
+    /// Another category: its GUID.
     Other(String),
+    /// The error (other than the chain's end) that ended the walk.
+    Error(String),
 }
 
 /// What a scaled open read of Media Foundation (#282 follow-up), logged at
@@ -180,8 +182,13 @@ pub struct ScaledOpenFacts {
     /// The decoder's output at the open; `Err`: why it could not be read.
     pub decoder: Result<DecoderOutput, String>,
     /// The decoder's output read again at the first picture (`None` before
-    /// it, or when the open could not read the decoder).
+    /// it, or when the open found no decoder MFT to keep).
     pub decoder_at_first_picture: Option<Result<DecoderOutput, String>>,
+    /// Whether the decoder's padding reached the video processor at the
+    /// first picture (`hw_decode::padding_reaches_processor` on the re-read
+    /// type against the stream's own size; `false` when the re-read
+    /// failed). `None` until the re-read.
+    pub first_picture_padding_in_reach: Option<bool>,
 }
 
 impl ScaledOpenFacts {
@@ -204,14 +211,13 @@ pub(super) struct Chain {
 
 /// `reader`'s transform chain: every transform up to the end of the chain
 /// (`MF_E_INVALIDINDEX`) or [`MAX_TRANSFORMS`], and the first decoder's
-/// output type. Any other error ends the walk; before the decoder was
-/// found it is the decoder's error, as the chain could not be read.
+/// output type (Microsoft: a decoder sits at index 0). Any other error ends
+/// the walk; before the decoder was found it is the decoder's error, as the
+/// chain could not be read.
 pub(super) fn read_chain(reader: &IMFSourceReader) -> Chain {
     let mut chain = Chain {
         stages: Vec::new(),
-        decoder: Err(format!(
-            "no decoder in the chain's first {MAX_TRANSFORMS} transforms"
-        )),
+        decoder: Err(String::new()),
         decoder_mft: None,
     };
     let ex: IMFSourceReaderEx = match reader.cast() {
@@ -222,6 +228,7 @@ pub(super) fn read_chain(reader: &IMFSourceReader) -> Chain {
         }
     };
     let mut found = false;
+    let mut walk_error = None;
     for index in 0..MAX_TRANSFORMS {
         let mut category = GUID::from_u128(0);
         let mut transform: Option<IMFTransform> = None;
@@ -236,10 +243,8 @@ pub(super) fn read_chain(reader: &IMFSourceReader) -> Chain {
         if let Err(e) = got {
             if e.code() != MF_E_INVALIDINDEX {
                 let why = format!("GetTransformForStream {index}: {e}");
-                chain.stages.push(ChainStage::Other(why.clone()));
-                if !found {
-                    chain.decoder = Err(why);
-                }
+                chain.stages.push(ChainStage::Error(why.clone()));
+                walk_error = Some(why);
             }
             break;
         }
@@ -263,6 +268,14 @@ pub(super) fn read_chain(reader: &IMFSourceReader) -> Chain {
                 .stages
                 .push(ChainStage::Other(format!("{category:?}")));
         }
+    }
+    if !found {
+        chain.decoder = Err(walk_error.unwrap_or_else(|| {
+            format!(
+                "no decoder among the chain's {} transform(s) read (at most {MAX_TRANSFORMS})",
+                chain.stages.len()
+            )
+        }));
     }
     chain
 }
