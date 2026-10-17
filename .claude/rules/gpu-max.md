@@ -1187,7 +1187,7 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   (`program_canvas.rs`, CPU) would then have to follow, to stay one
   program.
 - The `program-max` thread (`program_max_worker.rs`): while
-  `MaxOut::fhd_wanted` (the setting AND MAX on), the FHD OUTPUT (its
+  `Wants::fhd` (the setting AND MAX on), the FHD OUTPUT (its
   sender of the compositor's primary, `Output`, built on the thread:
   `MaxGpu::fhd_sender(&c, TargetId::PRIMARY)`) is drawn by the same compose
   as MAX, from the same labelled
@@ -1213,7 +1213,7 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   target off (`drop_max`), so nothing is drawn for MAX during its backoff.
   A refused or failed FHD sender drops that sender only (`drop_fhd`); a
   refused or failed MAX sender never stops the FHD output, and the other
-  way round. Switched off (`fhd_wanted` false), the FHD sender goes at the
+  way round. Switched off (`Wants::fhd` false), the FHD sender goes at the
   next boundary and its backoff is forgotten (`release_fhd`); MAX off with
   NDI on the canvas releases everything (MAX's sender, the FHD sender, then
   the compositor), MAX off with NDI from the GPU only MAX's sender and
@@ -1531,19 +1531,18 @@ nothing on air (default `cpu`).
   SPOUT_SENDER_NAME)`, and taken off with it (`drop_max`: the sender
   first, then `remove_target`). The FHD Spout sender is `new_fhd(&c,
   TargetId::PRIMARY)`.
-- The thread takes jobs while ANYTHING wants the compositor
-  (`Queue::wanted` = `program_max_enabled` OR `program_ndi_source` =
-  `gpu`). `set_enabled(false)` / `set_ndi_source(cpu)` drop the queue only
-  when nothing wants it, and wake the thread; with nothing wanted it
-  releases everything as before.
-- Who wants the compositor is ONE rule, `program_max::Wants` from one
-  read of the queue (`Queue::wants`, `MaxOut::wants`): MAX's own output by
-  its setting alone, the FHD Spout sender by its setting AND MAX on
-  (`fhd_off_reason`), NDI's readback by NDI on the GPU; `Wants::any` is
-  what the queue's acceptance, its release, the setting changes and the
-  worker read (`fhd_wanted` / `ndi_wanted` read the same snapshot; review
-  round 3: the worker used to restate it from three reads under three
-  locks). The worker reads it per job (`serve_lines`). A job served
+- The thread takes jobs while ANYTHING wants the compositor. Who wants
+  it is ONE rule, `program_max::Wants` from one read of the queue
+  (`Queue::wants`, `MaxOut::wants`): MAX's own output by its setting
+  alone, the FHD Spout sender by its setting AND MAX on
+  (`fhd_off_reason`), NDI's readback by `program_ndi_source` = `gpu`.
+  `Wants::any` is what the queue's acceptance, its release and the setting
+  changes read (`set_enabled(false)` / `set_ndi_source(cpu)` drop the
+  queue only when nothing wants it, and wake the thread; with nothing
+  wanted it releases everything as before), and the worker reads the same
+  snapshot per job (`serve_lines`). Review rounds 3-4: the worker used to
+  restate it from three reads under three locks, and `fhd_wanted` /
+  `ndi_wanted` (test-only wrappers then) are gone. A job served
   while NOTHING wants the compositor (MAX off and NDI on the canvas: the
   setting changed after the thread took the job) builds and composes
   nothing, and the next step releases. The lane's first cut inferred MAX
@@ -1565,14 +1564,20 @@ nothing on air (default `cpu`).
 - `MaxWorker::ndi_pass(wanted)`: P1a's UYVY pass is enabled on the PRIMARY
   while NDI is wanted, disabled otherwise (the canvas mode pays no
   readback). A failed enable is tried again only after
-  `MAX_RETRY_BACKOFF` (it makes textures and compiles a shader). Its own
-  `LogGate` is observed on EVERY boundary while NDI is wanted
-  (`NdiPass::enable_failing` keeps why the last enable failed; the line
-  reaches `Lines::ndi_enable`): one WARN per failing spell, one INFO when
-  it is enabled again. Review round 3: observed only at an attempt, the
-  retry 3 s later landed inside the 5 s window, the recovery was never
-  said, and the gate stayed on the old failure, so a later spell with the
-  same error was never WARNed.
+  `MAX_RETRY_BACKOFF` (it makes textures and compiles a shader).
+- The pass has ONE log: a `StateLog<PassLine>` of its state (`pass_line`:
+  `Off` while NDI is not wanted, `On` while the pass is enabled, else
+  `Failing(why)` with the last enable error, an `Arc<str>` so a failing
+  boundary compares and stores it with no allocation), observed at every
+  boundary the thread holds a compositor; the line reaches
+  `Lines::ndi_pass`. An INFO when it goes on or off, a WARN per failing
+  spell, a change inside the 5 s window said after it as the state is
+  then, and no line outside it. Review rounds 3-4: an enable gate
+  observed only at an attempt never said a recovery inside its window
+  and stayed on the old failure, so a later spell with the same error was
+  never WARNed; and INFO lines written at every enable and disable,
+  outside the gate, could leave the log's last line contradicting the
+  pass ("on" while it failed) and flooded it under device churn.
   The pass goes with the compositor (`NdiPass::forget` in `drop_gpu`): a
   rebuilt compositor enables it again. The pass switched off, and every
   release (nothing wants the compositor, a quiesce, the thread's end),
@@ -1632,8 +1637,9 @@ nothing on air (default `cpu`).
   `ndi_feed::ReturnGate`, `NDI_RETURN_ON_TIME` = 30). A fallback from the
   GPU for any reason but the setting arms it. While armed, every boundary
   on the canvas takes the boundary before's readback from the feed exactly
-  as the GPU path would (`take_on_time`: whole UYVY for the canvas, kept
-  as the last picture), and counts the on-time ones in a row; a late or a
+  as the GPU path would (`take_on_time`: whole UYVY for the canvas; the
+  take at the returning boundary is the last picture there), and counts
+  the on-time ones in a row; a late or a
   missing one starts the count again. A GPU pick before 30 in a row stays
   on the canvas (`CpuWhy::Settling`). So a fallback never flaps boundary
   by boundary: before the gate, the readback's first kept push after a
@@ -1642,9 +1648,12 @@ nothing on air (default `cpu`).
   fell back again 30 slots later, round after round. The return to the
   GPU and the setting's canvas disarm it; the setting's flip to `gpu` is a
   first entry, not a return: it goes to the GPU as soon as the newest
-  picture read back is fresh, as designed (a quick gpu → cpu → gpu flip
-  within 1 s enters at once on the pictures from before). On the canvas
-  after a fallback `readback_late`
+  picture read back is fresh, as designed. A quick gpu → cpu → gpu flip
+  within 1 s enters at once on the freshness of the pictures from before
+  (the feed let them go at the switch to the canvas, `newest` stays), so
+  its switch's take finds nothing and a missing picture is the black
+  until the readback comes back (or the stale fallback after 30 slots).
+  On the canvas after a fallback `readback_late`
   keeps counting the late pictures and `feed_coalesced` no longer climbs
   (the canvas takes them).
 - cpu: `submit_video` as before (the NV12 canvas), stamped b.
@@ -1667,14 +1676,18 @@ nothing on air (default `cpu`).
   the canvas: two submits back to back, contiguous stamps. The lane's
   first cut dropped the held pair, which lost b − 1's limited 33 ms block
   on `SP-program` (cg OBS, the stream) at every setting flip and every
-  automatic fallback; VBAN / FOH never lost it.
+  automatic fallback; VBAN / FOH never lost it. At the setting's switch
+  the feed's pictures go right after that flush (`NdiFeed::clear`):
+  nothing takes them, and the thread lets them go only while it holds a
+  compositor (review round 4).
 - The last picture (what a missing one repeats): every boundary on the
   canvas forgets it (after the held pair's flush; no 4 MB picture stays
   pinned while NDI is on the canvas). A switch to the GPU takes the
   boundary before's readback as the last picture (`take_on_time`; after a
   fallback the gate already took it at that boundary), so a picture
   missing right after any switch to the GPU repeats the boundary before,
-  the black only when none was read back. Review round 3: a first entry
+  the black only when the boundary before was not read back (an older
+  picture the take dropped is not kept). Review round 3: a first entry
   sent the black there, and round 2's "an automatic fallback keeps it"
   had no effect left once the gate's takes set it before every return.
 - The lines (a `stat_window::StateLog<NdiSource>`, pure, the same
@@ -1729,16 +1742,19 @@ fills: b's audio to VBAN at b and to NDI at b + 1 with b's stamps, the
 repeat and the black, a short picture never sent, both switches with the
 held pair sent first and contiguous audio stamps, stale, a readback that
 stays late never flapping back, the 30-in-a-row return and its restart,
-the first entry at once, a fade, the trace's stamp),
+the first entry at once, a fade, the trace's stamp,
+the first switch repeating the boundary before, the held pair sent
+before the setting's switch forgets the last picture — read inside a
+later submit through `HookedNdi`, whose hook sees the mock —, the switch's
+`submit_start`, the feed let go at the setting's switch, the last picture
+back in the frame pool after a fallback),
 `program_output_tests_order.rs` (VBAN before any NDI call from the GPU;
-its `HookedNdi` hook sees the mock, so a test reads the picture on the
-wire inside a later submit: the held pair sent before the setting's
-switch forgets the last picture), `program_max_tests_ndi.rs` (the queue's
-rules, the setting), `program_max_worker_tests_ndi.rs` (the fake's
-`order`: the readback after the compose and before MAX's send, Black, MAX
-off, the pass off, the enable's backoff and its log after a quick
-recovery, a failed readback, a lost device, `lost_unsent`, a coalesce's
-gap, a job with nothing wanted, the release's feed),
+`HookedNdi`), `program_max_tests_ndi.rs` (the queue's rules, the
+setting), `program_max_worker_tests_ndi.rs` (the fake's `order`: the
+readback after the compose and before MAX's send, Black, MAX off, the
+pass off, the enable's backoff, the pass log's on / off / failing lines
+and a quick recovery, a failed readback, a lost device, `lost_unsent`, a
+coalesce's gap, a job with nothing wanted, the release's feed),
 `stat_window_tests.rs` (`StateLog`),
 `api/program_tests_ndi.rs`,
 `program_burn_tests_uyvy.rs`, sp-ndi's FourCC tests, and the WARP proof

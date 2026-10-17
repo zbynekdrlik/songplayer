@@ -340,8 +340,10 @@ side does (`program_output_ndi.rs`, an impl split of `ProgramOutput`;
   NDI back (`CpuWhy::Settling` until then) — never a boundary-by-boundary
   flap. The setting's flip to `gpu` is a first entry: at once. Any switch
   to the GPU takes the boundary before's readback as the last picture,
-  so a picture missing right after it repeats that boundary (never the
-  black while one was read back); every canvas boundary forgets it.
+  so a picture missing right after it repeats that boundary (the black
+  only when the boundary before was not read back); every canvas boundary
+  forgets it, and the setting's switch to the canvas lets the feed's
+  pictures go after the held pair's flush.
 - **From the canvas**: `submit_video`, stamped b, exactly as before.
 - **From the GPU**: the pair HELD at b − 1 goes out with `feed.take(b −
   1)` (its limited audio moved in, the standby silence for a standby

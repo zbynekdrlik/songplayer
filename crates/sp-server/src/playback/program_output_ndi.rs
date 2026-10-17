@@ -40,8 +40,10 @@
 //!   stays pinned while NDI is on the canvas). A switch to the GPU takes
 //!   the boundary before's readback as the last picture (the gate's
 //!   on-time take, or `take_on_time` at the switch), so a picture missing
-//!   right after it repeats that boundary, the black only when none was
-//!   read back (review round 3: a first entry used to send the black).
+//!   right after it repeats that boundary, the black only when the
+//!   boundary before was not read back (review round 3: a first entry used
+//!   to send the black). The setting's switch to the canvas lets the
+//!   feed's pictures go after the held pair's flush (review round 4).
 //!
 //! So picture and audio move together, the stamps are b − 1's exactly as
 //! the canvas would have stamped them, and the delay is a constant slot
