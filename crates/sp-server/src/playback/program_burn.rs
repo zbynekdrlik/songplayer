@@ -28,6 +28,11 @@
 //! [`burned`] paints into a COPY: the canvas picture can be the source's own
 //! allocation, which `SP-program-MAX` and the Spout FHD sender also hold —
 //! they never carry the burn.
+//!
+//! #279 P1b: from the GPU readback `SP-program` is UYVY (`U Y0 V Y1` per
+//! pixel pair, rows of `width · 2` bytes): [`burned_uyvy`] paints the same
+//! square at the same place into a copy of it ([`paint_uyvy`]: the luma
+//! bytes by module, the chroma of every pair under the square neutral).
 
 use qrcode::{Color, EcLevel, QrCode, Version};
 
@@ -197,19 +202,95 @@ pub fn paint(nv12: &mut [u8], layout: Layout, modules: &[bool]) {
     }
 }
 
+/// #279 P1b: paint the [`BURN_MODULES`]² grid `modules` into the UYVY
+/// picture `uyvy` (`width`×`height`, rows of `width · 2` bytes, `U Y0 V Y1`
+/// per pixel pair), at [`geometry`]: each luma byte of the square is
+/// [`LUMA_DARK`] or [`LUMA_LIGHT`] by its module, the U and V of every pair
+/// the square covers are neutral, nothing else is touched. Paints nothing
+/// when the picture has no room for the square, the grid is not that size,
+/// or the picture is not whole UYVY for its size.
+pub fn paint_uyvy(uyvy: &mut [u8], width: u32, height: u32, modules: &[bool]) {
+    let Some(geom) = geometry(width, height) else {
+        return;
+    };
+    let n = BURN_MODULES as usize;
+    let stride = width as usize * 2;
+    if modules.len() != n * n || uyvy.len() < stride * height as usize {
+        return;
+    }
+    let (module, side) = (geom.module as usize, geom.side as usize);
+    let (x0, y0) = (geom.x as usize, geom.y as usize);
+    // The pairs under the square: pixels x0/2·2 .. ⌈(x0 + side)/2⌉·2, each
+    // pixel's chroma byte (U for an even pixel, V for an odd one) at 2·x.
+    let (first, last) = (x0 / 2 * 2, (x0 + side).div_ceil(2) * 2);
+    for row in 0..side {
+        let marks = &modules[row / module * n..][..n];
+        let line = &mut uyvy[(y0 + row) * stride..][..stride];
+        for px in first..last {
+            line[2 * px] = CHROMA_NEUTRAL;
+        }
+        let lumas = line[2 * x0 + 1..].iter_mut().step_by(2).take(side);
+        for (column, px) in lumas.enumerate() {
+            *px = if marks[column / module] {
+                LUMA_DARK
+            } else {
+                LUMA_LIGHT
+            };
+        }
+    }
+}
+
+/// `video` with the burn of `frame` at `gen_ts_ns` painted (`paint`, the
+/// format's painter) into a COPY taken from the frame pool: `video` itself
+/// is never written. `None` when a `width`×`height` picture has no room for
+/// the burn or the payload does not fit the QR.
+fn burned_with(
+    video: &[u8],
+    (width, height): (u32, u32),
+    frame: u32,
+    gen_ts_ns: i64,
+    paint: impl FnOnce(&mut [u8], &[bool]),
+) -> Option<SharedFrame> {
+    geometry(width, height)?;
+    let modules = qr_modules(&payload(SONGPLAYER_RUN_ID, frame, gen_ts_ns))?;
+    let mut out = sp_decoder::frame_pool::take(video.len());
+    out.extend_from_slice(video);
+    // Slices: a closure parameter is no coercion site (`&mut Vec` would not
+    // become `&mut [u8]` through `impl FnOnce`).
+    paint(&mut out[..], &modules[..]);
+    Some(SharedFrame::new(out))
+}
+
 /// The canvas picture `video` (of `canvas`) with the burn of `frame` at
 /// `gen_ts_ns` painted into a COPY taken from the frame pool: `video`
 /// itself is never written. `None` when the canvas has no room for the burn
 /// or the payload does not fit the QR.
 pub fn burned(video: &[u8], canvas: Layout, frame: u32, gen_ts_ns: i64) -> Option<SharedFrame> {
-    geometry(canvas.width, canvas.height)?;
-    let modules = qr_modules(&payload(SONGPLAYER_RUN_ID, frame, gen_ts_ns))?;
-    let mut out = sp_decoder::frame_pool::take(video.len());
-    out.extend_from_slice(video);
-    paint(&mut out, canvas, &modules);
-    Some(SharedFrame::new(out))
+    let size = (canvas.width, canvas.height);
+    burned_with(video, size, frame, gen_ts_ns, |out, modules| {
+        paint(out, canvas, modules);
+    })
+}
+
+/// #279 P1b: the UYVY picture `video` (`width`×`height`) with the burn of
+/// `frame` at `gen_ts_ns` painted into a COPY ([`paint_uyvy`]), as
+/// [`burned`] does for the canvas.
+pub fn burned_uyvy(
+    video: &[u8],
+    width: u32,
+    height: u32,
+    frame: u32,
+    gen_ts_ns: i64,
+) -> Option<SharedFrame> {
+    burned_with(video, (width, height), frame, gen_ts_ns, |out, modules| {
+        paint_uyvy(out, width, height, modules);
+    })
 }
 
 #[cfg(test)]
 #[path = "program_burn_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "program_burn_tests_uyvy.rs"]
+mod tests_uyvy;

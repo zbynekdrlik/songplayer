@@ -1,6 +1,8 @@
 //! #210 part 2: the shared window helpers, exact pins.
 //! Wired via `#[cfg(test)] #[path = "stat_window_tests.rs"] mod tests;`.
 
+use std::cell::Cell;
+
 use super::*;
 
 #[test]
@@ -42,4 +44,30 @@ fn the_limiter_admits_one_per_period_and_counts_the_ones_it_held_back() {
         Some(1),
         "the count restarted at the last WARN"
     );
+}
+
+/// #279 P1b review round 3: a state's changes for the log, one line per
+/// change, at most one per period; a change held back is said after the
+/// window as the state is then; the state is built only for a line.
+#[test]
+fn a_state_log_says_each_change_once_and_builds_the_state_only_for_a_line() {
+    let built = Cell::new(0);
+    let build = |s: &str| {
+        built.set(built.get() + 1);
+        Some(s.to_owned())
+    };
+    let mut log = StateLog::<Option<String>>::default();
+    assert_eq!(log.change(0, 10, false, || build("x")), None, "no change");
+    assert_eq!(built.get(), 0, "nothing built");
+    assert_eq!(log.change(1, 10, true, || build("a")), Some(0));
+    assert_eq!(log.logged().as_deref(), Some("a"));
+    assert_eq!(
+        log.change(5, 10, true, || build("b")),
+        None,
+        "in the window"
+    );
+    assert_eq!(built.get(), 1, "a change held back builds nothing");
+    assert_eq!(log.change(11, 10, true, || build("b")), Some(1));
+    assert_eq!(log.logged().as_deref(), Some("b"));
+    assert_eq!(built.get(), 2);
 }

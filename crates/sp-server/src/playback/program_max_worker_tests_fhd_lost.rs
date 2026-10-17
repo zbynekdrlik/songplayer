@@ -11,12 +11,14 @@
 
 use std::time::Instant;
 
+use sp_gpu::MAX_TARGET;
+
 use super::tests::{FakeGpu, device_lost};
 use super::tests_fhd::{black, fhd_on, name_taken};
 use super::{LogLine, MAX_RETRY_BACKOFF, MaxWorker};
 
 /// A lost device while MAX's sender is built is the device's: the FHD
-/// output fails with that very error, adds no target, and both wait.
+/// output fails with that very error, builds no sender, and both wait.
 #[test]
 fn a_lost_device_while_building_max_s_sender_fails_the_fhd_output_too() {
     let max = fhd_on();
@@ -26,10 +28,8 @@ fn a_lost_device_while_building_max_s_sender_fails_the_fhd_output_too() {
     worker.serve(&black(1), Instant::now());
     let log = gpu.log();
     assert_eq!(log.drops, ["compositor"]);
-    assert!(
-        log.targets_added.is_empty(),
-        "no FHD target on a lost device"
-    );
+    assert_eq!(log.targets_added, [MAX_TARGET], "MAX's, before its sender");
+    assert_eq!(log.fhd_senders_built, 0, "no FHD sender on a lost device");
     drop(log);
     let status = max.status();
     let why = format!("error: {}", device_lost());
@@ -48,13 +48,16 @@ fn a_lost_device_while_building_the_fhd_output_first_fails_max_too() {
     let max = fhd_on();
     let gpu = FakeGpu::default();
     gpu.script().sender.push_back(name_taken());
-    gpu.script().add_target.push_back(device_lost());
+    gpu.script().fhd_sender.push_back(device_lost());
     let mut worker = MaxWorker::new(&max, gpu.clone());
     let t0 = Instant::now();
     worker.serve(&black(1), t0);
     let log = gpu.log();
     assert_eq!(log.drops, ["compositor"]);
-    assert!(log.drawn.is_empty(), "nothing drawn on a lost device");
+    assert!(
+        log.drawn.is_empty() && log.fhd_drawn.is_empty(),
+        "nothing drawn on a lost device"
+    );
     drop(log);
     let status = max.status();
     let why = format!("error: {}", device_lost());
@@ -155,7 +158,7 @@ fn a_lost_device_drops_both_senders_and_the_compositor_and_rebuilds_both() {
             log.fhd_senders_built
         ),
         (2, 2, 2, 2),
-        "both rebuilt at once"
+        "both rebuilt at once (MAX's target with its sender)"
     );
     drop(log);
     worker.serve(&black(4), t0);

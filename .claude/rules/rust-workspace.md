@@ -416,7 +416,10 @@ failed on them (`36438006665`):
   argument is a generic tuple, so no coercion site exists. Write
   `done(&*guard)`. A plain `fn f(s: &ObsState)` would coerce, which is why
   it reads as fine. The same holds for `&PathBuf` → `&Path` through a
-  generic `R: Fn(&Path, &Path)` seam: write `.as_path()`. A small private
+  generic `R: Fn(&Path, &Path)` seam: write `.as_path()`, and for `&mut
+  Vec<u8>` / `&Vec<bool>` → `&mut [u8]` / `&[bool]` through `paint: impl
+  FnOnce(&mut [u8], &[bool])`: write `paint(&mut out[..], &modules[..])`
+  (#279 P1b review round 1, `program_burn::burned_with`). A small private
   trait seam (`downloader::cache::FileOps`, #136) avoids the trap
   entirely, because trait method calls DO coerce their arguments.
 - **`f(&mut x.lock().await)` does NOT deref-coerce a guard → E0308** (#250,
@@ -477,6 +480,13 @@ failed on them (`36438006665`):
   the opaque one is not. Use the helper as a temporary
   (`pool.run(&recorder(&log))`), bind it in a block, or take the data out
   without moving (`std::mem::take(&mut *log.lock().unwrap())`).
+  The same holds for a named struct WITH DROP GLUE that borrows a local
+  (#279 P1b review round 5): a test helper building
+  `MaxWorker::new(&max, gpu)` (it owns a fake compositor that implements
+  `Drop`) cannot return `max` in its tail expression while the worker
+  is still in scope (it is dropped after the tail is evaluated). Write
+  `drop(worker);` before the tail
+  (`program_output_tests_ndi_switch.rs::switch_with_the_thread_first`).
 - **A closure that returns an async method's future borrowing the
   closure's own argument is E0515** (#229 follow-up lane, caught by
   reading): `let wait = |why: PeerError| self.after_failed_fetch(.., &why);`

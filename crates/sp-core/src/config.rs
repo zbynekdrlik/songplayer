@@ -125,6 +125,45 @@ pub fn program_spout_fhd_to_send(loaded: Option<&str>, checked: bool) -> Option<
     (program_spout_fhd_enabled(loaded) != checked).then(|| checked.to_string())
 }
 
+/// #279 P1b: where NDI `SP-program`'s picture is made ([`program_ndi_source`]):
+/// `gpu` = the `program-max` compositor's UYVY readback of its FHD target,
+/// sent one boundary late with that boundary's audio; `cpu` = the CPU canvas
+/// (`program_canvas.rs`). Temporary, for P1b's wall A/B (deleted in P5);
+/// read with MAX's settings every 5 s, no restart.
+pub const SETTING_PROGRAM_NDI_SOURCE: &str = "program_ndi_source";
+
+/// #279 P1b: the two sources of NDI `SP-program`'s picture (the default:
+/// the CPU canvas).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NdiSource {
+    /// The CPU canvas: the fit / the fade on the band pool, NV12.
+    #[default]
+    Cpu,
+    /// The GPU readback of the compositor's FHD target, UYVY.
+    Gpu,
+}
+
+impl NdiSource {
+    /// The setting's and the telemetry's word: `cpu` or `gpu`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            NdiSource::Cpu => "cpu",
+            NdiSource::Gpu => "gpu",
+        }
+    }
+}
+
+/// #279 P1b: a stored `program_ndi_source`: exactly `gpu` (trimmed) is the
+/// GPU readback; anything else, absent included, is the CPU canvas — the
+/// default, so a deploy changes nothing on air.
+pub fn program_ndi_source(raw: Option<&str>) -> NdiSource {
+    if raw.is_some_and(|v| v.trim() == "gpu") {
+        NdiSource::Gpu
+    } else {
+        NdiSource::Cpu
+    }
+}
+
 /// #223 follow-up: where after each vblank of the wall's display a
 /// `SP-program-MAX` send starts, in ms (decimals allowed): Resolume Arena
 /// takes the Spout texture at its own instant in each refresh, so a send
@@ -564,6 +603,26 @@ mod tests {
             "only an explicit false"
         );
         assert!(!program_spout_fhd_enabled(Some("\tfalse ")), "trimmed");
+    }
+
+    /// #279 P1b: NDI `SP-program` comes from the GPU readback only for an
+    /// explicit `gpu`; the default (and anything else) is the CPU canvas.
+    #[test]
+    fn the_ndi_source_is_the_cpu_canvas_unless_the_setting_says_gpu() {
+        assert_eq!(SETTING_PROGRAM_NDI_SOURCE, "program_ndi_source");
+        assert_eq!(program_ndi_source(None), NdiSource::Cpu, "no setting");
+        assert_eq!(program_ndi_source(Some("gpu")), NdiSource::Gpu);
+        assert_eq!(
+            program_ndi_source(Some(" gpu\n")),
+            NdiSource::Gpu,
+            "trimmed"
+        );
+        for other in ["cpu", "", "GPU", "gpu2", "true"] {
+            assert_eq!(program_ndi_source(Some(other)), NdiSource::Cpu, "{other:?}");
+        }
+        assert_eq!(NdiSource::Cpu.as_str(), "cpu");
+        assert_eq!(NdiSource::Gpu.as_str(), "gpu");
+        assert_eq!(NdiSource::default(), NdiSource::Cpu, "nothing applied yet");
     }
 
     /// #239: a save sends each Spout switch only when the checkbox changed

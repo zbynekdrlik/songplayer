@@ -61,6 +61,7 @@ fn the_fake_uploads_each_picture_of_its_composition() {
 #[test]
 fn each_compose_s_upload_is_counted_at_the_instant_it_was_served() {
     let max = MaxOut::new();
+    max.set_enabled(true);
     let mut worker = MaxWorker::new(&max, FakeGpu::default());
     let t0 = Instant::now();
     for i in 0..=10u32 {
@@ -80,6 +81,7 @@ fn each_compose_s_upload_is_counted_at_the_instant_it_was_served() {
 #[test]
 fn a_black_boundary_uploads_nothing() {
     let max = MaxOut::new();
+    max.set_enabled(true);
     let mut worker = MaxWorker::new(&max, FakeGpu::default());
     let t0 = Instant::now();
     let (a, b) = (picture(1920, 1080), picture(1920, 1080));
@@ -99,6 +101,7 @@ fn a_black_boundary_uploads_nothing() {
 #[test]
 fn every_compose_that_ran_is_counted_whatever_its_send() {
     let max = MaxOut::new();
+    max.set_enabled(true);
     let gpu = FakeGpu::default();
     let mut worker = MaxWorker::new(&max, gpu.clone());
     let t0 = Instant::now();

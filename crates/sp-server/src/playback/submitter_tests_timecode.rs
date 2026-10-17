@@ -123,7 +123,7 @@ fn holdover_keeps_the_submitted_frame_alive_across_the_async_call() {
     let mut sub = FrameSubmitter::new(sender, 30, 1);
 
     let data = SharedFrame::new(vec![3u8; 4 * 2 * 3 / 2]);
-    sub.submit_frame_at_boundary_owned(4, 2, 4, data, &[], 333_333, 333_333);
+    sub.submit_frame_at_boundary_owned(4, 2, 4, data, &[], 333_333, 333_333, PixelFormat::Nv12);
 
     let (recv_ptr, recv_len) = backend
         .last_async_video_slice()
@@ -141,7 +141,7 @@ fn holdover_keeps_the_submitted_frame_alive_across_the_async_call() {
 
     // A second submit releases the first allocation and holds the second.
     let data2 = SharedFrame::new(vec![9u8; 4 * 2 * 3 / 2]);
-    sub.submit_frame_at_boundary_owned(4, 2, 4, data2, &[], 666_666, 666_666);
+    sub.submit_frame_at_boundary_owned(4, 2, 4, data2, &[], 666_666, 666_666, PixelFormat::Nv12);
     let (recv_ptr2, _) = backend.last_async_video_slice().unwrap();
     let held2 = sub.prev_frame.as_ref().unwrap();
     assert_eq!(

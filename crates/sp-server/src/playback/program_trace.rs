@@ -135,6 +135,8 @@ pub struct TraceRecord {
     /// Its wire stamp, what a receiver sees (100 ns, under the fleet shift
     /// K_F read when the record is written, just after the submit: only a
     /// date step registered in between makes it differ from the sent one).
+    /// #279 P1b: the wire stamp of the stamp NDI got: from the GPU readback
+    /// the boundary before's.
     pub wire_100ns: i64,
     /// UTC of the submit return (ms): the fleet label of that reading.
     pub utc_ms: i64,
@@ -417,6 +419,21 @@ impl TraceWriter {
     /// [`TraceKind::Cut`]; a live record of the marked song's source takes
     /// the song mark.
     pub fn record(&mut self, marks: &BoundaryMarks, source: Option<i64>, shape: JobShape, k: i64) {
+        self.record_sent(marks, source, shape, k, marks.stamp_100ns);
+    }
+
+    /// [`record`](Self::record) a boundary whose NDI submit carried the
+    /// stamp `sent_100ns` (#279 P1b: from the GPU readback the boundary
+    /// before goes out; a switch to it sends nothing, and the boundary's
+    /// own stamp is written): the record's `wire_100ns` is that stamp's.
+    pub fn record_sent(
+        &mut self,
+        marks: &BoundaryMarks,
+        source: Option<i64>,
+        shape: JobShape,
+        k: i64,
+        sent_100ns: i64,
+    ) {
         let index = self.trace.written();
         let kind = match shape.kind {
             TraceKind::Source if source != self.last_source => TraceKind::Cut,
@@ -427,7 +444,7 @@ impl TraceWriter {
         let record = TraceRecord {
             index,
             stamp_100ns: stamp,
-            wire_100ns: wire_stamp_100ns(stamp, k),
+            wire_100ns: wire_stamp_100ns(sent_100ns, k),
             utc_ms: (marks.submitted_100ns + shift_100ns(k)).div_euclid(10_000),
             taken_us: us_from(stamp, marks.taken_100ns),
             fed_us: us_from(stamp, marks.fed_100ns),
