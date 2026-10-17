@@ -220,7 +220,8 @@ pub async fn record_play(
     Ok(())
 }
 
-/// Return youtube_ids of videos in the playlist that have never been played.
+/// Return youtube_ids of videos in the playlist never played ON IT (#261: a
+/// play on a custom set list is no play of the song's home playlist).
 pub async fn get_unplayed_video_ids(
     pool: &SqlitePool,
     playlist_id: i64,
@@ -228,7 +229,7 @@ pub async fn get_unplayed_video_ids(
     let rows = sqlx::query(
         "SELECT v.youtube_id
          FROM videos v
-         LEFT JOIN play_history ph ON ph.video_id = v.id
+         LEFT JOIN play_history ph ON ph.video_id = v.id AND ph.playlist_id = v.playlist_id
          WHERE v.playlist_id = ? AND v.removed_at IS NULL AND ph.id IS NULL
          ORDER BY v.id",
     )
@@ -255,7 +256,8 @@ pub async fn get_normalized_video_ids(
     Ok(rows.iter().map(|r| r.get("id")).collect())
 }
 
-/// Return IDs (from videos table) of normalized videos that have not been played.
+/// Return IDs (from videos table) of normalized videos not played ON this
+/// playlist since its rotation began (#261: the rotation counts its own plays).
 pub async fn get_unplayed_normalized_video_ids(
     pool: &SqlitePool,
     playlist_id: i64,
@@ -263,7 +265,7 @@ pub async fn get_unplayed_normalized_video_ids(
     let rows = sqlx::query(
         "SELECT v.id
          FROM videos v
-         LEFT JOIN play_history ph ON ph.video_id = v.id
+         LEFT JOIN play_history ph ON ph.video_id = v.id AND ph.playlist_id = v.playlist_id
          WHERE v.playlist_id = ? AND v.normalized = 1 AND v.removed_at IS NULL AND ph.id IS NULL
          ORDER BY v.id",
     )
