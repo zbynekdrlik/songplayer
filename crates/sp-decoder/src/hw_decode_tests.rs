@@ -562,6 +562,12 @@ fn the_counters_count_each_outcome_on_its_own() {
     counters.path_changed();
     counters.path_changed();
     counters.path_changed();
+    // #282: a counter each, never the other's.
+    for _ in 0..5 {
+        counters.scaled_open();
+    }
+    counters.scale_refused();
+    counters.scale_refused();
     assert_eq!(
         counters.snapshot(),
         HwDecodeStats {
@@ -572,6 +578,8 @@ fn the_counters_count_each_outcome_on_its_own() {
             mid_stream_fallbacks: 2,
             path_changes: 3,
             last_fallback: Some("mid-stream: device hung".into()),
+            scaled_opens: 5,
+            scale_refusals: 2,
         }
     );
 }

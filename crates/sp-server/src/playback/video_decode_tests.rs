@@ -141,6 +141,7 @@ fn the_status_carries_the_setting_and_the_counters() {
         mid_stream_fallbacks: 2,
         path_changes: 5,
         last_fallback: Some("mid-stream: device removed".into()),
+        ..HwDecodeStats::default()
     };
     assert_eq!(
         status_of(&setting, stats),
