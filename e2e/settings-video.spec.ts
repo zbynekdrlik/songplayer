@@ -80,6 +80,13 @@ test("the defaults show automatic, both switches off, and the upgrade's status (
 }) => {
   await openSettings(page);
   const select = page.locator('[data-testid="settings-max-resolution"]');
+  // #282: the cap is the operator's switch for playback too.
+  await expect(page.locator('[data-testid="settings-video"] label').first()).toContainText(
+    "Najvyššie rozlíšenie (sťahovanie aj prehrávanie)",
+  );
+  await expect(page.locator('[data-testid="settings-max-resolution-hint"]')).toHaveText(
+    "Vyššie video sa pri prehrávaní zmenší na túto výšku (grafikou). Platí od ďalšej piesne, bez reštartu. Automaticky = 2160 s GPU dekódovaním.",
+  );
   await expect(select).toHaveValue("");
   await expect(select.locator("option:checked")).toHaveText(
     "Automaticky (4K s dekódovaním na GPU, inak 1440)",
