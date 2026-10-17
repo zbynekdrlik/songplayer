@@ -27,7 +27,7 @@
 //! its life; MAX's 3840×2160 target is ADDED with MAX's sender while MAX is
 //! on (`MaxOut::enabled`) and taken off with it. While the FHD Spout
 //! sender is wanted (`program_spout_fhd_enabled` and MAX on,
-//! `MaxOut::fhd_wanted`) the sender `SP-program` sends the primary, the
+//! `Wants::fhd`) the sender `SP-program` sends the primary, the
 //! picture the NDI `SP-program` carries. One compose at the compose instant
 //! uploads each picture ONCE and draws every target; at the due instant
 //! MAX's send runs, then the FHD one's: plain copies, the GPU work all done
@@ -37,7 +37,7 @@
 //! drawn at all (then it is built first and goes out alone, at the due
 //! instant). A device the FHD side loses after MAX's boundary went out is
 //! MAX's too: the boundary stays sent, MAX's state and log name the loss.
-//! #279 P1b: while NDI `SP-program` comes from the GPU (`MaxOut::ndi_wanted`)
+//! #279 P1b: while NDI `SP-program` comes from the GPU (`Wants::ndi`)
 //! the primary is read back as UYVY after each compose, before the sends
 //! (`program_max_ndi.rs`); with MAX off the compositor keeps composing for
 //! NDI alone.

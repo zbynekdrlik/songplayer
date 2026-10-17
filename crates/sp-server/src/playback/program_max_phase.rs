@@ -111,11 +111,6 @@ impl MaxOut {
         self.lock_queue().wants()
     }
 
-    /// #279 P1b: whether the thread reads NDI's picture back.
-    pub fn ndi_wanted(&self) -> bool {
-        self.wants().ndi
-    }
-
     /// #279 P1b: the `ndi` block of `GET /api/v1/program`.
     pub fn ndi_status(&self) -> NdiStatus {
         self.ndi.status(self.ndi_source())

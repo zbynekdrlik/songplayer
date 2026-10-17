@@ -37,7 +37,7 @@ fn ndi_from_the_gpu_keeps_the_thread_taking_jobs_with_max_off() {
     );
     assert!(!max.offer_with(|| black(1)));
     assert_eq!(
-        (max.enabled(), max.ndi_wanted()),
+        (max.enabled(), max.wants().ndi),
         (false, false),
         "MAX's own output is wanted only by its setting"
     );
@@ -48,7 +48,7 @@ fn ndi_from_the_gpu_keeps_the_thread_taking_jobs_with_max_off() {
     assert!(max.offer_with(|| black(2)));
     assert_eq!(job_stamp(max.try_next(true)), 2);
     assert_eq!(
-        (max.enabled(), max.ndi_wanted()),
+        (max.enabled(), max.wants().ndi),
         (false, true),
         "MAX's own output is not wanted while it is off"
     );
@@ -57,7 +57,7 @@ fn ndi_from_the_gpu_keeps_the_thread_taking_jobs_with_max_off() {
 
     // MAX on, then off again: NDI keeps the queued job.
     assert!(max.set_enabled(true));
-    assert_eq!((max.enabled(), max.ndi_wanted()), (true, true));
+    assert_eq!((max.enabled(), max.wants().ndi), (true, true));
     assert!(max.offer_with(|| black(3)));
     assert!(max.set_enabled(false));
     assert_eq!(max.queued(), 1, "NDI still wants it");
