@@ -126,6 +126,7 @@ fn every_job_has_its_slovak_name() {
         ("ytdlp_update", "aktualizácia yt-dlp"),
         ("video_upgrade", "vylepšenie videí na 4K"),
         ("retention", "mazanie odobratých skladieb"),
+        ("ui_usage_prune", "mazanie starého záznamu používania"),
     ];
     for (job, sk) in names {
         assert_eq!(job_sk(job), sk);

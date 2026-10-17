@@ -95,7 +95,9 @@ once, kept a year, then deleted with its files.
 - `run` (spawned in lib.rs next to the wall): the first pass 5 min after
   the start, then every 24 h; held by the #230 background hold as
   `Job::Retention` ("retention" / "mazanie odobratých skladieb"), a held
-  pass retried 1 h later (`next_wait`). A failed pass is one WARN.
+  pass retried 1 h later: the shared daily timer `crate::daily_pass`
+  (`daily_pass::next_wait`), the #256 usage-log prune's too. A failed pass
+  is one WARN.
 - Per row, under `cache::SONG_FILES` (the sync writes under it too, so a
   song brought back at that moment is never deleted):
   1. `due_row` reads it again (gone or brought back → nothing);

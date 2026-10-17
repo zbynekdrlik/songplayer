@@ -17,8 +17,9 @@
 //! - The jobs that ask, each before it starts one: the playlist sync
 //!   (`lib.rs`'s sync consumer drops the request; the periodic sync
 //!   re-enqueues), the download, lyrics, stems and dub workers, the metadata
-//!   repair, the daily yt-dlp update, the #260 retention, and the peer exchange
-//!   (`Exchange::transfers_paused`: no fetch, no serving, no hashing).
+//!   repair, the daily yt-dlp update, the #260 retention, the #256 prune of
+//!   the UI usage log, and the peer exchange (`Exchange::transfers_paused`:
+//!   no fetch, no serving, no hashing).
 //!   Startup one-shots and the playback path never ask.
 //! - `GET /api/v1/background-hold` ([`status`]) feeds the health bar.
 
@@ -52,6 +53,8 @@ pub enum Job {
     VideoUpgrade,
     /// #260: a year after a song left its YouTube playlist, its row and files go.
     Retention,
+    /// #256: the UI usage log's rows older than 400 days go.
+    UiUsagePrune,
 }
 
 impl Job {
@@ -69,6 +72,7 @@ impl Job {
             Self::YtdlpUpdate => "ytdlp_update",
             Self::VideoUpgrade => "video_upgrade",
             Self::Retention => "retention",
+            Self::UiUsagePrune => "ui_usage_prune",
         }
     }
 }

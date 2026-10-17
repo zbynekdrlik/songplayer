@@ -7,6 +7,7 @@ mod app;
 mod components;
 mod pages;
 mod store;
+mod usage; // #256: the dashboard records how it is used
 mod ws;
 
 /// WASM entry point.

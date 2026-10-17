@@ -18,7 +18,9 @@ import { defineConfig } from "@playwright/test";
  * fails only when SongPlayer cannot read, never on PP's own setup) +
  * `post-deploy-pp-preview.spec.ts` (#266: the on-program card's live preview
  * decodes video and audio at PP; it needs real H.264/AAC, so it runs in the
- * `edge` project below, on the Edge deploy-pp.yml makes sure of).
+ * `edge` project below, on the Edge deploy-pp.yml makes sure of) +
+ * `post-deploy-ui-usage.spec.ts` (#256: PP's own usage log answers its
+ * summary, and the gate's automated session adds nothing to it).
  * The SNV suite is post-deploy.config.ts; it ignores post-deploy-pp*.
  */
 export default defineConfig({
@@ -32,6 +34,7 @@ export default defineConfig({
     "**/post-deploy-audio-faults-ui.spec.ts",
     "**/post-deploy-wall.spec.ts",
     "**/post-deploy-pp-preview.spec.ts",
+    "**/post-deploy-ui-usage.spec.ts",
   ],
   timeout: 90_000,
   retries: 0,

@@ -147,6 +147,7 @@ fn job_sk(job: &str) -> &str {
         "ytdlp_update" => "aktualizácia yt-dlp",
         "video_upgrade" => "vylepšenie videí na 4K",
         "retention" => "mazanie odobratých skladieb",
+        "ui_usage_prune" => "mazanie starého záznamu používania",
         other => other,
     }
 }

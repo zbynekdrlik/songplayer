@@ -9,6 +9,7 @@ pub mod models_playlists; // #225 every playlist id, for the WS on-connect repla
 pub mod models_register; // #250 a lyrics track's register check (V36 columns)
 pub mod models_stems; // #14 karaoke stem-separation queries (own module, 1000-line cap)
 pub mod models_stems_priority; // #195 tiered in-use-first stems selector (own module, 1000-line cap)
+pub mod models_ui_usage; // #256 the dashboard's usage log (V42)
 pub mod startup_open; // #229 the startup open waits out a briefly locked database
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
@@ -76,6 +77,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (39, MIGRATION_V39),
     (40, MIGRATION_V40),
     (41, MIGRATION_V41),
+    (42, MIGRATION_V42),
 ];
 
 const MIGRATION_V1: &str = "
@@ -652,6 +654,24 @@ UPDATE videos SET lyrics_source = NULL, lyrics_attempts = 0, lyrics_next_attempt
 WHERE lyrics_source = 'no_source' AND COALESCE(has_lyrics, 0) = 0
 ";
 
+/// #256: the dashboard's usage log (`db::models_ui_usage`): one row per
+/// recorded use — `ts_ms` by the browser's clock, the dashboard `page`, the
+/// `control` (its `data-testid`, else `<tag>`; empty for a page view), the
+/// `kind` (`click` / `change` / `submit` / `page`) and `on_air_source`, the
+/// program's source when the batch arrived (a playlist id, -1 the NDI input,
+/// -2 Blank, NULL before the first selection). Kept 400 days, read and
+/// pruned by time.
+const MIGRATION_V42: &str = "
+CREATE TABLE IF NOT EXISTS ui_usage (
+    ts_ms INTEGER NOT NULL,
+    page TEXT NOT NULL,
+    control TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    on_air_source INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_ui_usage_ts ON ui_usage (ts_ms);
+";
+
 /// Connection-pool tuning for the FILE-backed pool (#184 round A).
 ///
 /// WAL + NORMAL synchronous remove reader/writer blocking for this
@@ -848,6 +868,9 @@ mod tests_v40;
 #[path = "mod_tests_v41.rs"]
 #[cfg(test)]
 mod tests_v41;
+#[path = "mod_tests_v42.rs"]
+#[cfg(test)]
+mod tests_v42;
 
 #[path = "mod_tests_pool.rs"]
 #[cfg(test)]

@@ -7,6 +7,7 @@ pub mod audio_faults; // #257: every audio path's faults, persisted (the ledger)
 pub mod audio_host; // #233: every ASIO output runs in the sp-audio-host process (spawns nothing)
 pub mod background_hold; // #230: a sp-90s press holds the background jobs
 pub mod dabing;
+pub mod daily_pass; // the daily pass's timer (#260 retention, #256 usage-log prune)
 pub mod db;
 pub mod diag; // #223 S0: /api/v1/diag/* measurement benches
 pub mod downloader;
@@ -41,6 +42,7 @@ pub mod test_item; // #228: camera-box's measurement clip as a one-item test pla
 #[cfg(test)]
 mod test_log; // a scoped log capture shared by the tests
 mod tools_ready; // #144: publish the ready tools, then the slow follow-ups
+pub mod ui_usage; // #256: the dashboard's usage log - its 400-day prune
 pub mod video_upgrade; // #223 S11: a cached song's video upgraded in place
 pub mod wall; // #259: the LED wall report (Arena's own output setup vs the box; acts on nothing)
 
@@ -447,6 +449,8 @@ pub async fn start(
         pool.clone(),
         shutdown_tx.subscribe(),
     ));
+    // #256: the dashboard's usage log keeps 400 days, pruned daily.
+    tokio::spawn(ui_usage::run(pool.clone(), shutdown_tx.subscribe()));
     tokio::spawn(async move {
         match tools_mgr.ensure_tools().await {
             Ok(paths) => {
