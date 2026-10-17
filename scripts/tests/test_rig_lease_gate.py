@@ -8,9 +8,11 @@ is skipped, none answering = unreachable).
 from __future__ import annotations
 
 import json
+import re
 import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 import rig_lease_gate as gate_mod
@@ -428,3 +430,29 @@ def test_only_an_http_url_with_a_host_and_a_valid_port_is_one():
     assert not gate_mod.is_http_url("http://dev1:0/rig-lease.json")
     assert not gate_mod.is_http_url("http://dev1:65536/rig-lease.json")
     assert gate_mod.is_http_url("http://dev1:65535/rig-lease.json")
+
+
+def test_a_box_scoped_lease_url_is_accepted():
+    """camera-box issue 1450: the lease server answers a box-scoped view
+    (`?resources=resolume-snv`), so a holder of only the cameras never
+    blocks SongPlayer's deploy."""
+    assert gate_mod.is_http_url(
+        "http://10.77.9.200:8890/rig-lease.json?resources=resolume-snv"
+    )
+    assert gate_mod.is_http_url(
+        "http://dev1:8890/rig-lease.json?resources=resolume-snv"
+    )
+
+
+def test_every_ci_lease_wait_asks_the_resolume_snv_view():
+    ci = (
+        Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
+    ).read_text(encoding="utf-8")
+    calls = [line for line in ci.splitlines() if "rig_lease_gate.py --own-repo" in line]
+    assert len(calls) == 3, calls
+    for line in calls:
+        urls = re.findall(r'--url "([^"]+)"', line)
+        assert urls, line
+        assert all(
+            u.endswith("/rig-lease.json?resources=resolume-snv") for u in urls
+        ), urls

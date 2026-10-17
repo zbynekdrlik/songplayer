@@ -1108,7 +1108,7 @@ jobs:
             Write-Error "FAIL: $py not found - the rig-lease gate needs the box's Python 3.12"
             exit 1
           }
-          & $py scripts\rig_lease_gate.py --own-repo "${{ github.repository }}" --url "http://10.77.9.200:8890/rig-lease.json" --url "http://dev1:8890/rig-lease.json" --poll-seconds 30 --max-wait-seconds 3600
+          & $py scripts\rig_lease_gate.py --own-repo "${{ github.repository }}" --url "http://10.77.9.200:8890/rig-lease.json?resources=resolume-snv" --url "http://dev1:8890/rig-lease.json?resources=resolume-snv" --poll-seconds 30 --max-wait-seconds 3600
           $code = $LASTEXITCODE
           if ($code -eq 3) {
             Write-Error "FAIL: another repo still holds the rig lease after 60 min - not deploying over it"
@@ -1422,7 +1422,7 @@ jobs:
             Write-Error "FAIL: $py not found - the rig-lease gate needs the box's Python 3.12"
             exit 1
           }
-          & $py scripts\rig_lease_gate.py --own-repo "${{ github.repository }}" --url "http://10.77.9.200:8890/rig-lease.json" --url "http://dev1:8890/rig-lease.json" --poll-seconds 30 --max-wait-seconds 3600
+          & $py scripts\rig_lease_gate.py --own-repo "${{ github.repository }}" --url "http://10.77.9.200:8890/rig-lease.json?resources=resolume-snv" --url "http://dev1:8890/rig-lease.json?resources=resolume-snv" --poll-seconds 30 --max-wait-seconds 3600
           $code = $LASTEXITCODE
           if ($code -eq 3) {
             Write-Error "FAIL: another repo still holds the rig lease after 60 min - not acting on the box over it"
@@ -2595,7 +2595,7 @@ jobs:
             Write-Error "FAIL: $py not found - the rig-lease gate needs the box's Python 3.12"
             exit 1
           }
-          & $py scripts\rig_lease_gate.py --own-repo "${{ github.repository }}" --url "http://10.77.9.200:8890/rig-lease.json" --url "http://dev1:8890/rig-lease.json" --poll-seconds 30 --max-wait-seconds 3600
+          & $py scripts\rig_lease_gate.py --own-repo "${{ github.repository }}" --url "http://10.77.9.200:8890/rig-lease.json?resources=resolume-snv" --url "http://dev1:8890/rig-lease.json?resources=resolume-snv" --poll-seconds 30 --max-wait-seconds 3600
           $code = $LASTEXITCODE
           if ($code -eq 3) {
             Write-Error "FAIL: another repo still holds the rig lease after 60 min - not running the post-deploy suite over it"

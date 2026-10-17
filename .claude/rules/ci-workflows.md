@@ -425,7 +425,7 @@ lease on dev1 while they drive the shared rig. "Deploy to win-resolume" runs
 "Wait for the rig lease" right after checkout, before "Deploy SongPlayer"
 stops SongPlayer:
 
-- `GET /rig-lease.json` (camera-box `scripts/rig-lease-server.py`, :8890;
+- `GET /rig-lease.json?resources=resolume-snv` (camera-box issue 1450: the box-scoped view, so a holder of only SNV's cameras / strih / stream never blocks SongPlayer's deploy; today's server ignores the query and answers the whole-rig view, schema 1 unchanged; pinned by `test_every_ci_lease_wait_asks_the_resolume_snv_view`) (camera-box `scripts/rig-lease-server.py`, :8890;
   `held`, `stale`, `holder.repo`, `expected_release_at`, `ttl_s`), trying
   `http://10.77.9.200:8890` (dev1's LAN address, 5-15 ms from win-resolume,
   29.9.2026) and then `http://dev1:8890` (the mDNS name `dev1.local`: it
