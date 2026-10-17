@@ -25,12 +25,14 @@ comment 6230045110.
   pass an hour later), `Job::CacheSweep` ("cache_sweep" / "čistenie
   cache") behind the #230 background hold. Spawned in `lib.rs` with the
   config's cache dir and data dir.
-- **The listing first, outside the lock; then `cache::SONG_FILES`** from
-  reading the rows to the last delete (`pass`): a rename, a re-link, the
-  retention, a sync's records and a download's never land between the
-  read and a delete, and a row added after the listing keeps its files
-  (the rows read under the lock decide; nothing writes a file of a video
-  no row has). The listing and the deletes run on the blocking pool.
+- **Under `cache::SONG_FILES` from reading the rows, through the listing,
+  to the last delete** (`pass`): a unit move, a re-link, the retention, a
+  sync's records and a download's never land between what the pass reads
+  and what it deletes. Review round 2 put the listing back under the lock:
+  listed outside it, a unit move caught half-way (its `<name>` and
+  `<name>.replaced` both there, then a failed give-back) let the pass
+  delete the only copy as `replaced`. The listing and the deletes run on
+  the blocking pool; the lock is held seconds a day.
 - **A database with no row at all deletes no file of a video**
   (`RowFacts::is_empty`, one WARN `cache sweep: the database has no row`):
   a fresh or replaced database would make every song a video no row has.
@@ -42,14 +44,19 @@ comment 6230045110.
   `RowFacts`: ids, recorded file NAMES and the song bases they name, all
   lowercased: NTFS ignores case, and a match only KEEPS more).
 - **The listing** (`list`): the cache dir's FILES, its jobs' work DIRS
-  (`{id}_isolation`, `{id}_stemsep`, `{id}_dub`: their tree's bytes and
-  newest write, `data_size::walk`; an unreadable part of the tree = no time
-  = never deleted), and `<cache>/peer/`'s files (only when `peer` is a real
-  dir, never a symlink or junction). No other dir is walked
+  (`{id}_isolation`, `{id}_stemsep`, `{id}_dub`: walked for their tree's
+  bytes and newest write, `data_size::walk`, only when the plan could take
+  them (`RowFacts::may_take`: a video no row has); a row's video's work dir
+  is listed with no time, never walked; an unreadable part of a tree = no
+  time = never deleted), and `<cache>/peer/`'s files (only when `peer` is
+  a real dir, never a symlink or junction; its name is the exchange's
+  `peer::fetch::PARTS_DIR`). No other dir is walked
   (`tools/` with the lyrics venv, `peer/` itself, `.cli-proxy-api/` with
-  CLIProxyAPI's OAuth tokens). A symlink (a junction on Windows) is never
-  listed, so never followed or deleted (`DirEntry::metadata` does not
-  follow one).
+  CLIProxyAPI's OAuth tokens). Each entry's time is its own record
+  (`std::fs::symlink_metadata`: never a symlink's target, and never the
+  directory index, which NTFS updates lazily for an open file such as a
+  part a fetch is writing). A symlink (a junction on Windows) is never
+  listed, so never followed or deleted.
 - **The decision** (`plan`, pure): an entry goes only when it is KNOWN and
   old enough, by its last write (mtime; a rename keeps it):
   - `no_row` — named after a video no row has, recorded by no row, 7 d:
@@ -125,7 +132,8 @@ comment 6230045110.
   line, read once: `Dáta na disku: 123,4 GB (cache 120,0 GB), merané
   17.10. 14:05` (`size_sk`: whole MiB under a GiB, else tenths of a GiB,
   Windows' units; the time in the browser's zone) or `… ešte nezmerané
-  (prvé meranie 5 min po štarte)`. Not on the HealthBar (read rarely).
+  (meria sa pri dennom čistení cache)` (5 min after a start, later while
+  the #230 hold holds the pass). Not on the HealthBar (read rarely).
 
 ## Logs SongPlayer writes on its own (`log_rotate.rs`)
 

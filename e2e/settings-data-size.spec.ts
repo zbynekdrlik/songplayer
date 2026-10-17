@@ -100,7 +100,7 @@ test("before the first measure the line says it is not measured yet", async ({
   expect(status.data_dir_measured_ms).toBeNull();
   await page.goto("/settings");
   await expect(page.getByTestId("data-size-line")).toHaveText(
-    "Dáta na disku: ešte nezmerané (prvé meranie 5 min po štarte)",
+    "Dáta na disku: ešte nezmerané (meria sa pri dennom čistení cache)",
     { timeout: 10000 },
   );
   expect(realConsoleErrors()).toEqual([]);

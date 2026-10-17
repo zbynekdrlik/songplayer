@@ -22,6 +22,10 @@ use super::kind::{ArtifactKind, Job};
 use super::wire::{Artifact, is_sha256_hex};
 use crate::downloader::cache::is_valid_video_id;
 
+/// The parts dir's name under the cache (#261: the daily cache sweep lists
+/// it by this name too).
+pub const PARTS_DIR: &str = "peer";
+
 /// `<yt>_<kind>_<first 16 sha digits>.part`, or `None` for an artifact this
 /// node cannot name safely.
 pub fn part_name(a: &Artifact) -> Option<String> {
@@ -207,7 +211,7 @@ impl Exchange {
 
     /// Where fetched artifacts wait as parts.
     pub(crate) fn parts_dir(&self) -> PathBuf {
-        self.cache_dir.join("peer")
+        self.cache_dir.join(PARTS_DIR)
     }
 
     /// Artifact `a` of `peer`, a verified part; refused while transfers are

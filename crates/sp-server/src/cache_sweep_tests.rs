@@ -7,7 +7,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use sqlx::SqlitePool;
 
 use super::{PARTS_DIR, Swept, execute, is_plain_name, list, pass, row_facts};
-use crate::cache_sweep_plan::{DAY_MS, Entry, Place, Plan, Planned, Why};
+use crate::cache_sweep_plan::{DAY_MS, Entry, Place, Plan, Planned, RowFacts, Why};
 use crate::downloader::cache::{RECORDING_COLUMNS, recorded_by_a_row};
 
 /// The pass's "now": 40 days after the real clock, so every file written
@@ -184,14 +184,17 @@ async fn a_pass_deletes_what_no_row_needs_and_keeps_the_rest() {
     assert!(again.is_empty(), "nothing left to do: {again:?}");
 }
 
-/// The pass reads the rows and deletes under `cache::SONG_FILES`: while
-/// another holder has it, nothing is deleted.
+/// The pass reads the rows, lists and deletes under `cache::SONG_FILES`:
+/// while another holder has it, nothing is deleted, and a row recorded
+/// meanwhile (a sync adding the video back) keeps its video's files.
 #[tokio::test]
 async fn a_pass_waits_for_the_song_file_lock() {
     let dir = tempfile::tempdir().unwrap();
     let cache = dir.path().join("cache");
     let gone = cache.join("gone0000001_lyrics.json");
+    let back = cache.join("back0000001_lyrics.json");
     write(&gone, 1);
+    write(&back, 1);
     let pool = pool(&cache).await;
     let held = crate::downloader::cache::SONG_FILES.lock().await;
     let task = {
@@ -201,6 +204,10 @@ async fn a_pass_waits_for_the_song_file_lock() {
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert!(!task.is_finished(), "the pass waits for the lock");
     assert!(gone.exists());
+    sqlx::query("INSERT INTO videos (playlist_id, youtube_id) VALUES (1, 'back0000001')")
+        .execute(&pool)
+        .await
+        .unwrap();
     drop(held);
     let swept = tokio::time::timeout(Duration::from_secs(60), task)
         .await
@@ -208,10 +215,20 @@ async fn a_pass_waits_for_the_song_file_lock() {
         .unwrap();
     assert_eq!(swept.count(Why::NoRow), 1);
     assert!(!gone.exists());
+    assert!(back.exists(), "its row was read under the lock");
 }
 
-/// The listing: the cache dir's files, its jobs' work dirs (their tree's
-/// bytes and newest write), `peer/`'s files; never another dir.
+/// Rows of `rowvideo001`: the database has a row, so a video no row has
+/// can go.
+fn some_rows() -> RowFacts {
+    let mut facts = RowFacts::default();
+    facts.add_row("rowvideo001", &[None]);
+    facts
+}
+
+/// The listing: the cache dir's files, its jobs' work dirs (a video no row
+/// has: its tree's bytes and newest write; a row's video's: not walked, no
+/// time), `peer/`'s files; never another dir.
 #[test]
 fn the_listing_reads_files_work_dirs_and_parts_only() {
     let dir = tempfile::tempdir().unwrap();
@@ -221,11 +238,12 @@ fn the_listing_reads_files_work_dirs_and_parts_only() {
     write(&cache.join("abcdefghijk_dub/z.json"), 6);
     set_modified(&cache.join("abcdefghijk_dub/x/y.raw"), 4_102_444_800_000);
     write(&cache.join("abcdefghijk_stemsep"), 1); // a FILE of a work dir's name
+    write(&cache.join("rowvideo001_isolation/seg/0001.wav"), 7);
     write(&cache.join("tools/big.exe"), 99);
     write(&cache.join(".cli-proxy-api/token.json"), 9);
     write(&cache.join("peer/p.part"), 4);
     write(&cache.join("peer/sub/q.part"), 4);
-    let mut listed = list(cache);
+    let mut listed = list(cache, &some_rows());
     listed.sort_by(|a, b| (a.place, &a.name).cmp(&(b.place, &b.name)));
     let shape: Vec<(Place, &str, bool, u64)> = listed
         .iter()
@@ -237,11 +255,17 @@ fn the_listing_reads_files_work_dirs_and_parts_only() {
             (Place::Cache, "a_lyrics.json", false, 3),
             (Place::Cache, "abcdefghijk_dub", true, 11),
             (Place::Cache, "abcdefghijk_stemsep", false, 1),
+            (Place::Cache, "rowvideo001_isolation", true, 0),
             (Place::Parts, "p.part", false, 4),
         ]
     );
     let work_dir = listed.iter().find(|e| e.is_dir).unwrap();
     assert_eq!(work_dir.modified_ms, Some(4_102_444_800_000));
+    let rows_dir = listed
+        .iter()
+        .find(|e| e.name == "rowvideo001_isolation")
+        .unwrap();
+    assert_eq!(rows_dir.modified_ms, None, "not walked: never the plan's");
     let file = listed.iter().find(|e| e.name == "a_lyrics.json").unwrap();
     let meta = std::fs::metadata(cache.join("a_lyrics.json")).unwrap();
     assert_eq!(file.modified_ms, crate::data_size::modified_ms(&meta));
@@ -265,7 +289,7 @@ async fn a_symlink_is_never_listed_or_followed() {
         cache.join("gone0000001_lyrics.json"),
     )
     .unwrap();
-    assert_eq!(list(&cache), Vec::<Entry>::new());
+    assert_eq!(list(&cache, &some_rows()), Vec::<Entry>::new());
     let swept = pass(&pool(&cache).await, &cache, now_ms()).await.unwrap();
     assert!(swept.is_empty());
     assert_eq!(names(&outside), ["gone0000001_lyrics.json", "keep.wav"]);
@@ -284,7 +308,7 @@ fn a_peer_dir_that_is_a_symlink_is_never_followed() {
     write(&outside.join("x_audio_0123456789abcdef.part"), 10);
     std::fs::create_dir_all(&cache).unwrap();
     std::os::unix::fs::symlink(&outside, cache.join(PARTS_DIR)).unwrap();
-    assert_eq!(list(&cache), Vec::<Entry>::new());
+    assert_eq!(list(&cache, &some_rows()), Vec::<Entry>::new());
     assert_eq!(names(&outside), ["x_audio_0123456789abcdef.part"]);
 }
 

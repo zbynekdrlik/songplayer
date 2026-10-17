@@ -185,6 +185,13 @@ impl RowFacts {
             || base.is_some_and(|b| self.bases.contains(&b.to_lowercase()))
     }
 
+    /// Whether a file of the video `id` (of the song `base`) may go as a
+    /// video no row has: the database has rows, and none of them has the
+    /// video or records a file of the song.
+    pub fn may_take(&self, id: &str, base: Option<&str>) -> bool {
+        !self.is_empty() && !self.has(id, base)
+    }
+
     /// Whether a row records a file of this name.
     fn records(&self, name: &str) -> bool {
         self.recorded.contains(&name.to_lowercase())
@@ -269,9 +276,8 @@ pub fn why(
     if facts.records(name) {
         return None;
     }
-    if !facts.is_empty()
-        && let Some((id, base)) = video_of(name, entry.is_dir)
-        && !facts.has(id, base)
+    if let Some((id, base)) = video_of(name, entry.is_dir)
+        && facts.may_take(id, base)
         && older(entry.modified_ms, now_ms, ORPHAN_AFTER_MS)
     {
         return Some(Why::NoRow);

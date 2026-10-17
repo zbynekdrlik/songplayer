@@ -30,8 +30,10 @@ pub const LINE_LOADING: &str = "Dáta na disku: načítavam…";
 /// The status could not be read.
 pub const LINE_UNAVAILABLE: &str = "Dáta na disku: nedostupné";
 
-/// Measured nothing yet (the first measure comes 5 min after a start).
-pub const LINE_NOT_MEASURED: &str = "Dáta na disku: ešte nezmerané (prvé meranie 5 min po štarte)";
+/// Measured nothing yet (the measure comes with the daily cache sweep: 5 min
+/// after a start, later while the #230 background hold holds it).
+pub const LINE_NOT_MEASURED: &str =
+    "Dáta na disku: ešte nezmerané (meria sa pri dennom čistení cache)";
 
 /// 1 MiB: Windows' "MB".
 const MIB: u64 = 1_048_576;

@@ -8,20 +8,23 @@
 //! here: the listing, the rows' facts and the deletes.
 //!
 //! - The listing (`list`): the cache dir's files, the work dirs of its jobs
-//!   (`{id}_isolation` / `_stemsep` / `_dub`, each with its tree's bytes and
-//!   newest write), and `<cache>/peer/`'s files (only when `peer` is a real
-//!   dir). Any other dir (`tools`, `.cli-proxy-api`) is never walked, and a
+//!   (`{id}_isolation` / `_stemsep` / `_dub`; walked for their tree's bytes
+//!   and newest write only when the plan could take them, a video no row
+//!   has), and `<cache>/peer/`'s files (only when `peer` is a real dir).
+//!   Any other dir (`tools`, `.cli-proxy-api`) is never walked, and a
 //!   symlink (a junction on Windows) is never listed, followed or deleted.
+//!   Each entry's time is its own record (`symlink_metadata`), never the
+//!   directory index's, which NTFS updates lazily for an open file.
 //! - The rows: every row's `youtube_id` and its five path columns
 //!   (`cache::RECORDING_COLUMNS`, the ones `cache::recorded_by_a_row`
 //!   reads), read once.
-//! - The listing runs first, outside the lock (it walks the work dirs);
-//!   then the pass holds `cache::SONG_FILES` from reading the rows to its
-//!   last delete (a rename, a re-link, the retention, a sync's records and
-//!   a download's all take it), so nothing is recorded under a name
-//!   between the read and a delete, and a row added after the listing
-//!   keeps its files (the rows, read under the lock, decide). The listing
-//!   and the deletes run on the blocking pool.
+//! - The pass holds `cache::SONG_FILES` from reading the rows, through the
+//!   listing, to its last delete (a unit move, a re-link, the retention, a
+//!   sync's records and a download's all take it): nothing moves or is
+//!   recorded between what the pass reads and what it deletes, so a
+//!   `.replaced` or a dub's `.prev` is never judged by a sibling a move
+//!   took away meanwhile (review round 2). The listing and the deletes
+//!   run on the blocking pool.
 //! - A database with no row at all deletes no file of a video (one WARN;
 //!   `RowFacts::is_empty`).
 //! - A delete touches only a name the listing read in the cache dir or in
@@ -39,13 +42,13 @@ use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
 
 use crate::background_hold::Job;
-use crate::cache_sweep_plan::{Entry, Place, Plan, RowFacts, WORK_DIR_RE, Why, plan};
+use crate::cache_sweep_plan::{Entry, Place, Plan, RowFacts, Why, plan, video_of};
 use crate::daily_pass;
 use crate::data_size;
 use crate::downloader::cache::{self, RECORDING_COLUMNS};
 
 /// The peer exchange's parts dir under the cache (`Exchange::parts_dir`).
-pub const PARTS_DIR: &str = "peer";
+pub use crate::peer::fetch::PARTS_DIR;
 
 /// What a pass deleted.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -98,37 +101,47 @@ pub async fn row_facts(pool: &SqlitePool) -> Result<RowFacts, sqlx::Error> {
     Ok(facts)
 }
 
-/// The cache dir's listing (module doc).
-pub fn list(cache_dir: &Path) -> Vec<Entry> {
+/// The cache dir's listing (module doc); `facts` only spares the walk of
+/// a work dir the plan can never take.
+pub fn list(cache_dir: &Path, facts: &RowFacts) -> Vec<Entry> {
     let mut entries = Vec::new();
-    list_into(cache_dir, Place::Cache, &mut entries);
+    list_into(cache_dir, Place::Cache, facts, &mut entries);
     let parts = cache_dir.join(PARTS_DIR);
     // A `peer` that is a symlink (a junction) is never followed.
     if std::fs::symlink_metadata(&parts).is_ok_and(|meta| meta.file_type().is_dir()) {
-        list_into(&parts, Place::Parts, &mut entries);
+        list_into(&parts, Place::Parts, facts, &mut entries);
     }
     entries
 }
 
 /// The entries of `dir` the sweep looks at: files, and in the cache dir
 /// the work dirs (a missing or unreadable dir lists nothing).
-fn list_into(dir: &Path, place: Place, entries: &mut Vec<Entry>) {
+fn list_into(dir: &Path, place: Place, facts: &RowFacts, entries: &mut Vec<Entry>) {
     let Ok(read) = std::fs::read_dir(dir) else {
         return;
     };
     for entry in read.flatten() {
-        // `DirEntry::metadata` never follows a symlink (or a junction).
-        let (Ok(meta), Some(name)) = (
-            entry.metadata(),
-            entry.file_name().to_str().map(str::to_owned),
-        ) else {
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        let path = entry.path();
+        // The entry's own record, never a symlink's target (or a junction's).
+        let Ok(meta) = std::fs::symlink_metadata(&path) else {
             continue;
         };
         let kind = meta.file_type();
-        let work_dir = place == Place::Cache && kind.is_dir() && WORK_DIR_RE.is_match(&name);
-        let (bytes, modified_ms) = if work_dir {
-            let tree = data_size::walk(&entry.path(), None);
-            (tree.bytes, tree.newest_ms.filter(|_| tree.complete))
+        let work_dir = if place == Place::Cache && kind.is_dir() {
+            video_of(&name, true).map(|(id, _)| id.to_string())
+        } else {
+            None
+        };
+        let (bytes, modified_ms) = if let Some(id) = &work_dir {
+            if facts.may_take(id, None) {
+                let tree = data_size::walk(&path, None);
+                (tree.bytes, tree.newest_ms.filter(|_| tree.complete))
+            } else {
+                (0, None) // a row has its video: never the plan's, not walked
+            }
         } else if kind.is_file() {
             (meta.len(), data_size::modified_ms(&meta))
         } else {
@@ -137,7 +150,7 @@ fn list_into(dir: &Path, place: Place, entries: &mut Vec<Entry>) {
         entries.push(Entry {
             place,
             name,
-            is_dir: work_dir,
+            is_dir: work_dir.is_some(),
             bytes,
             modified_ms,
         });
@@ -207,17 +220,13 @@ pub fn execute(cache_dir: &Path, plan: &Plan) -> Swept {
 
 /// One pass at `now_ms` (module doc).
 pub async fn pass(pool: &SqlitePool, cache_dir: &Path, now_ms: i64) -> anyhow::Result<Swept> {
-    let dir = cache_dir.to_path_buf();
-    let entries = tokio::task::spawn_blocking(move || list(&dir))
-        .await
-        .context("the listing's thread")?;
     let _files = cache::SONG_FILES.lock().await;
     let facts = row_facts(pool).await.context("reading the rows")?;
     if facts.is_empty() {
         warn!("cache sweep: the database has no row - no file of a video is deleted");
     }
     let dir = cache_dir.to_path_buf();
-    tokio::task::spawn_blocking(move || execute(&dir, &plan(&entries, &facts, now_ms)))
+    tokio::task::spawn_blocking(move || execute(&dir, &plan(&list(&dir, &facts), &facts, now_ms)))
         .await
         .context("the sweep's thread")
 }
