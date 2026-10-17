@@ -338,7 +338,10 @@ side does (`program_output_ndi.rs`, an impl split of `ProgramOutput`;
   ROZHODNUTÉ 6232669201 item 3): each canvas boundary takes the boundary
   before's readback as the GPU would, and only 30 on time in a row bring
   NDI back (`CpuWhy::Settling` until then) — never a boundary-by-boundary
-  flap. The setting's flip to `gpu` is a first entry: at once.
+  flap. The setting's flip to `gpu` is a first entry: at once. Any switch
+  to the GPU takes the boundary before's readback as the last picture,
+  so a picture missing right after it repeats that boundary (never the
+  black while one was read back); every canvas boundary forgets it.
 - **From the canvas**: `submit_video`, stamped b, exactly as before.
 - **From the GPU**: the pair HELD at b − 1 goes out with `feed.take(b −
   1)` (its limited audio moved in, the standby silence for a standby
@@ -352,13 +355,14 @@ side does (`program_output_ndi.rs`, an impl split of `ProgramOutput`;
   frame). Back to the canvas NO audio block is lost (ROZHODNUTÉ 6232669201
   item 1): the held pair goes out first (its readback, else the last
   picture, else the black: a repeat), then b on the canvas — two submits,
-  contiguous stamps. Logged once, rate-limited (`SwitchLog`: a change held
-  back is said after the window, as the source is then), counted
-  (`ndi.switches`).
+  contiguous stamps. Logged once, rate-limited (a
+  `stat_window::StateLog` of the source: a change held back is said after
+  the window, as the source is then), counted (`ndi.switches`).
 - `health.timing.submit_us` is the NDI submit alone from the GPU (both
   submits at a switch to the canvas); the trace's `wire_100ns` names the
-  stamp NDI got (b − 1's; b's own at a switch to the canvas;
-  `TraceWriter::record_sent`).
+  stamp NDI got (b − 1's; b's own at a switch to the GPU, where nothing
+  went out, and at a switch to the canvas, where b − 1 went out just
+  before b; `TraceWriter::record_sent`).
 - `GET /api/v1/program` → `ndi {setting, source, delay_slots, fourcc,
   repeats, readback_late, feed_coalesced, switches, readback_us_p99,
   uyvy_us_p99}` (`api/program_tests_ndi.rs`); the mock serves the shape

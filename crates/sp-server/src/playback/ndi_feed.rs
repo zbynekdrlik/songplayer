@@ -224,8 +224,8 @@ pub fn ndi_source_for(setting: NdiSource, newest: Option<i64>, b_100ns: i64) -> 
 /// or a missing one starts the count again. A GPU pick before
 /// [`NDI_RETURN_ON_TIME`] in a row stays on the canvas (`Settling`). The
 /// return to the GPU, or the setting's canvas, disarms it: the setting's
-/// flip to `gpu` (a first entry) goes to the GPU at the first fresh
-/// picture, as designed.
+/// flip to `gpu` (a first entry) goes to the GPU as soon as the newest
+/// picture read back is fresh, as designed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ReturnGate {
     /// `Some(on-time readbacks in a row)` since an automatic fallback.
