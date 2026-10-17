@@ -409,6 +409,17 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
   again after any change to Arena's wall mapping: one `camera.grab()` of
   the output while a wall clip plays, then `wall_frames.strip_rows` on
   `cell_profile(sample_columns(picture, (0, 1)))`.
+- **A manual measurement on the box checks the rig lease FIRST, and
+  before each round** (17.10.2026: an overnight layer A/B cut SP-program
+  and bypassed Arena layers for 6 min inside camera-box's 8 h av-soak,
+  whose lease the deploy honoured). It does not apply to a read-only
+  capture. Any script that cuts the program, switches an Arena source or
+  bypasses a layer runs `diag\wall-bridge\lease_free.ps1` first. That is
+  `scripts/rig_lease_gate.py` with `--max-wait-seconds 0`: exit 0 = free,
+  3 = another repo holds it. The script does not start while the lease
+  is held, and stops and restores when another repo takes it mid-run
+  (`layer_ab.ps1`, `test0_rot.ps1`). Tell the holder's session (ListAgents
+  → SendMessage) what overlapped, if anything did.
 - **The first manual take (16.10.2026 19:00Z, `wall-30` through MAX on
   L4 / L5):** verdict `defects`: 521 jumps back and 1040 of 1708 boundaries
   held the wrong number of refreshes in 40 s. So the gate was red on the
