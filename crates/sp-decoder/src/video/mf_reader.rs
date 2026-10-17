@@ -492,7 +492,7 @@ impl MediaFoundationVideoReader {
             frame_rate_den,
             frame_rate_known,
             reference,
-            scaled_from: None,
+            scaled_from: requested.and(native),
             decoder_out: None,
         })
     }
