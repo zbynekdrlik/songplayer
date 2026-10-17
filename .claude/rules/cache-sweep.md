@@ -47,7 +47,9 @@ comment 6230045110.
 - **The listing** (`list`): the cache dir's FILES, its jobs' work DIRS
   (`{id}_isolation`, `{id}_stemsep`, `{id}_dub`: walked for their tree's
   bytes and newest write, `data_size::walk_exact` (each entry's own
-  record), only when the plan could take
+  record: a file a job still holds open reads as it is now, where NTFS's
+  listing may lag, `an_exact_walk_reads_a_file_still_open_for_writing`
+  logs both readings on the Windows job), only when the plan could take
   them (`RowFacts::may_take`: a video no row has); a row's video's work dir
   is listed with no time, never walked; an unreadable part of a tree = no
   time = never deleted), and `<cache>/peer/`'s files (only when `peer` is
@@ -151,8 +153,13 @@ comment 6230045110.
   open and before every write that finds it full, so during a run too.
 - A rotation that fails never loses a line (the same file goes on); a
   `RotatingFile` tries again once the file grew by another sixteenth of
-  the limit (`retry_at`), never on every line. `log_rotate.rs` is on the
-  host's no-spawn scan.
+  the limit (`retry_at`), never on every line; every (re)open starts that
+  spacing afresh, so a fresh file after a failed reopen rotates at its own
+  limit. `log_rotate.rs` is on the host's no-spawn scan.
+- The `WRITING` test (`a_crash_record_waits_for_the_one_being_written`)
+  runs nothing that can panic while it holds the lock (the writer thread is
+  spawned first and waits for a go): a panic there would wait for the lock
+  in an installed hook, a hung test binary instead of a failed test.
 - The daily `songplayer.<date>.log` keep their own 14-file bound.
 
 ## The import into an inactive playlist (`api/routes_import.rs`)

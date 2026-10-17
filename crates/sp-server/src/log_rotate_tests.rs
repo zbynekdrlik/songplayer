@@ -136,8 +136,9 @@ fn a_log_deleted_during_a_run_is_created_again() {
 }
 
 /// A reopen that fails (the log's dir gone) is an error for that write, and
-/// the next write opens the log again once it can. Unix only: Windows will
-/// not move a directory that holds an open file.
+/// the next write opens the log again once it can; that fresh file rotates
+/// at its own limit (the failed try's spacing went with the old file). Unix
+/// only: Windows will not move a directory that holds an open file.
 #[cfg(unix)]
 #[test]
 fn a_log_that_cannot_be_reopened_errors_then_recovers() {
@@ -145,13 +146,17 @@ fn a_log_that_cannot_be_reopened_errors_then_recovers() {
     let logs = dir.path().join("logs");
     std::fs::create_dir(&logs).unwrap();
     let log = logs.join("host.log");
-    let mut file = RotatingFile::open(&log, 4).unwrap();
-    file.write_all(b"abcd").unwrap();
+    let mut file = RotatingFile::open(&log, 32).unwrap();
+    file.write_all(&[b'a'; 32]).unwrap();
     std::fs::rename(&logs, dir.path().join("moved")).unwrap();
     assert!(file.write_all(b"e").is_err(), "nowhere to write");
     std::fs::create_dir(&logs).unwrap();
     file.write_all(b"f").unwrap();
     assert_eq!(read(&log), "f");
+    file.write_all("g".repeat(31).as_bytes()).unwrap(); // 32 of 32
+    file.write_all(b"h").unwrap();
+    assert_eq!(read(&rotated_path(&log)), format!("f{}", "g".repeat(31)));
+    assert_eq!(read(&log), "h");
 }
 
 /// A stat the system cannot answer (a path "inside" a regular file:

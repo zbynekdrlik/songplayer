@@ -57,7 +57,8 @@ pub struct RotatingFile {
     /// Bytes in the current file.
     written: u64,
     /// After a rotation that failed, the next try waits until the file
-    /// holds this much (another sixteenth of the limit), never every line.
+    /// holds this much (another sixteenth of the limit), never every line;
+    /// every (re)open starts it afresh with the file's own count.
     retry_at: u64,
 }
 
@@ -84,6 +85,7 @@ impl RotatingFile {
             .append(true)
             .open(&self.path)?;
         self.written = file.metadata()?.len();
+        self.retry_at = 0;
         self.file = Some(file);
         Ok(())
     }

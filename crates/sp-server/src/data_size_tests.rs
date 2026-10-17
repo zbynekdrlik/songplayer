@@ -112,3 +112,33 @@ fn an_exact_walk_reads_the_same_tree() {
     assert!(exact.complete);
     assert!(!exact.skipped);
 }
+
+/// The exact walk reads a file a job still holds open (the sweep's work
+/// dirs) from the file's own record: its size and time as they are now,
+/// where NTFS's listing may still show those of the open (the Windows job
+/// writes both readings to its log).
+#[test]
+fn an_exact_walk_reads_a_file_still_open_for_writing() {
+    use std::io::Write;
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("root");
+    std::fs::create_dir(&root).unwrap();
+    let mut open = std::fs::File::create(root.join("growing")).unwrap();
+    open.write_all(&[b'x'; 4096]).unwrap();
+    open.set_modified(UNIX_EPOCH + Duration::from_millis(4_102_444_800_789))
+        .unwrap();
+    let listed = walk(&root, None);
+    let exact = super::walk_exact(&root);
+    let _ = writeln!(
+        std::io::stderr(),
+        "a file still open: listing {} bytes {:?}, exact {} bytes {:?}",
+        listed.bytes,
+        listed.newest_ms,
+        exact.bytes,
+        exact.newest_ms
+    );
+    assert_eq!(exact.bytes, 4096);
+    assert_eq!(exact.newest_ms, Some(4_102_444_800_789));
+    drop(open);
+}

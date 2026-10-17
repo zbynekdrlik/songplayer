@@ -232,17 +232,21 @@ mod tests {
     fn a_crash_record_waits_for_the_one_being_written() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let path = tmp.path().join("songplayer-panic.log");
-        let held = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+        let (go_tx, go_rx) = std::sync::mpsc::channel();
         let (done_tx, done_rx) = std::sync::mpsc::channel();
         let writer = {
             let path = path.clone();
             std::thread::spawn(move || {
+                go_rx.recv().expect("go");
                 write_crash_record_at(&path, "waited", 10).expect("write");
                 done_tx.send(()).expect("send");
             })
         };
-        // Read while held, assert once released: a failing assert while
-        // holding the lock would hang an installed hook's own record.
+        // Nothing that can panic runs while the lock is held (a panic here
+        // would wait for it in an installed hook's own record): the writer
+        // is spawned before it, and the asserts run once it is released.
+        let held = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = go_tx.send(());
         let early = done_rx
             .recv_timeout(std::time::Duration::from_millis(200))
             .is_ok();
