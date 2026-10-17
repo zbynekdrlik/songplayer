@@ -108,9 +108,9 @@ pub struct MediaFoundationVideoReader {
     /// afresh (`hw_decode::scaled_open_safe` reads the new decoder), so the
     /// picture size can change mid-song, either way: a D3D11 open that
     /// scaled, then a reopen that is refused, goes on at the stream's own
-    /// size; a D3D11 open that was refused (a stream that is not whole
-    /// 16-pixel blocks), then a software reopen that scales, goes on at the
-    /// scaled size. The canvas fits any size.
+    /// size; a D3D11 open that was refused (not whole 16-pixel blocks, no
+    /// native aperture shown), then a software reopen that scales, goes on
+    /// at the scaled size. The canvas fits any size.
     max_height: Option<u32>,
     /// What the caller asked for.
     mode: DecodeMode,

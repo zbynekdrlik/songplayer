@@ -627,10 +627,10 @@ pub fn video_area(blob: &[u8]) -> Option<VideoArea> {
 /// 3840×1606 stream decodes as 3840×1616, #223's green strip); the video
 /// processor behind it is taken to crop the padding only by the decoder
 /// type's display aperture (reasoned in review round 2, not measured). So
-/// a `decoded` type larger than the `native` picture
-/// is safe only with an aperture of exactly the native picture at the
-/// origin; otherwise the scaled open is refused (the file plays at its own
-/// size, the readback cutting the padding as before).
+/// a `decoded` type larger than the `native` picture is safe only with an
+/// aperture of exactly the native picture at the origin; otherwise the
+/// scaled open is refused (the file plays at its own size, the readback
+/// cutting the padding as before).
 pub fn padding_reaches_processor(
     decoded: (u32, u32),
     aperture: Option<VideoArea>,

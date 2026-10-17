@@ -149,9 +149,11 @@ rounds 1–2):
     ignored") shows an ARGB32 output's ratio absent from the current type
     (with no frame size the reader rescales by the INPUT's aspect; with
     one, the frame size wins). CI's software 66×50 edge bands prove the
-    picture fills the frame, not which attribute fills it (with 100:99 the
-    ratio and the frame both give the native 4:3). The CI log prints the
-    negotiated ratio (`out_pixel_aspect`), which settles it;
+    picture fills the frame, not which attribute fills it: 66×50 at 100:99
+    is the native 4:3, so either way the same picture comes out. The
+    negotiated ratio is printed by the CI log (`out_pixel_aspect`, the
+    software path) and by the box's open INFO (`pixel_aspect_out`, the
+    D3D11 path);
   - the native type's `MF_MT_YUV_MATRIX` and `MF_MT_VIDEO_NOMINAL_RANGE`
     when it has them, so that the processor need not convert colour. That
     is the intent, unproven: Microsoft's matched attributes do not list
@@ -189,12 +191,12 @@ rounds 1–2):
     - in software only the padding seen at open refuses, and an unreadable
       chain is let through with a WARN naming the file (the same WARN
       lets a D3D11 stream of whole blocks through; it names `path`). What
-      is PROVEN of the software decoders: CI run 39040435639 printed
-      the runner's H.264 software decoder (the line names no MFT)
-      showing `160×120`, no aperture, AT OPEN for
-      the fixture coded 160×128. The VP9 / AV1 software decoders and any
-      decoder's type after its first frame are not proven; the CI log's
-      `at the first picture` line (below) shows H.264's;
+      is PROVEN of the software decoders: CI run 39040435639 printed the
+      runner's H.264 software decoder (the line names no MFT) showing
+      `160×120`, no aperture, AT OPEN for the fixture coded 160×128. The
+      VP9 / AV1 software decoders and any decoder's type after its first
+      frame are not proven; the CI log's `at the first picture` line
+      (below) shows H.264's;
   - Media Foundation refuses the attribute or the type.
 
   A refusal logs WARN `mf_reader: the scaled open was refused; this file
@@ -226,7 +228,8 @@ rounds 1–2):
     takes some default of its own: reasoned, not measured). The proof
     stays the hue check against the uncapped song;
   - `pixel_aspect_out`: the negotiated type's pixel aspect
-    (`out_pixel_aspect`; `None` = not stated).
+    (`out_pixel_aspect`; `None` = not stated, or Media Foundation did
+    not answer).
 
 - **The first scaled picture** (#282 follow-up): the decoder MFT found at
   the open is kept and its output type read again ONCE there, then let go,
@@ -366,9 +369,11 @@ rounds 1–2):
     - a mean well under the uncapped run's;
     - the log's `opened scaled to the decode cap` line says `path=D3D11`
       and names the `decoder` output, the `chain` (a `VideoProcessor`
-      after the `Decoder`) and the colours (two stated, unequal values of
+      after the `Decoder`), the colours (two stated, unequal values of
       `colour_out` and `colour_decoder` suggest a conversion: check the
-      hues); the `at the first scaled picture` line says
+      hues) and `pixel_aspect_out` (the D3D11 path's answer to whether the
+      reader keeps the output ratio); the `at the first scaled picture`
+      line says
       `at_first_picture=Ok(…)` and `padding_in_reach=false` (a failed
       re-read also prints `false`).
   - Play a 4K song: `status.video_decode.scaled_opens` +1 and

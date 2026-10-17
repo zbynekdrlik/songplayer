@@ -21,8 +21,9 @@
 //!
 //! #282 follow-up: a scaled open's facts ([`ScaledOpenFacts`]: each
 //! transform of the chain, the native geometric aperture, the colour
-//! descriptions, the decoder's output at the open and at the first picture)
-//! are logged and kept for the tests, which print them to the CI log.
+//! descriptions, the negotiated pixel aspect, the decoder's output at the
+//! open and at the first picture) are logged and kept for the tests, which
+//! print them to the CI log.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
