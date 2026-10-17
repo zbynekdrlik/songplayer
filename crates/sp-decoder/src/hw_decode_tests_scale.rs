@@ -1,12 +1,14 @@
 //! #282: the decode cap's decisions (`hw_decode.rs`), on Linux: the box, the
 //! scaled size, the readback's reference size, whether Media Foundation took
-//! the scaled open, and the path of a scaled picture. Wired via
+//! the scaled open, the output type's pixel aspect, and the path of a scaled
+//! picture. Wired via
 //! `#[cfg(test)] #[path = "hw_decode_tests_scale.rs"] mod tests_scale;`.
 //! Every pin was derived from a scratch model of the same arithmetic, which
 //! also checked that each listed mutant fails one of these tests.
 
 use super::{
-    D3D11_BIND_DECODER, DecodePath, decode_box, scale_took, scaled_size, visible_reference,
+    D3D11_BIND_DECODER, DecodePath, decode_box, decoder_path_visible, scale_took,
+    scaled_pixel_aspect, scaled_size, visible_reference,
 };
 
 /// One cap's box: (cap, (width, height)).
@@ -162,35 +164,86 @@ fn a_scaled_open_cuts_its_surface_to_the_requested_size() {
     assert_eq!(super::visible_size((1920, 816), reference), (1920, 804));
 }
 
-/// One scaled open's negotiated type: (requested, negotiated, on the D3D11
-/// path, taken).
-type TookCase = ((u32, u32), (u32, u32), bool, bool);
+/// One scaled open's negotiated type: (requested, negotiated, taken).
+type TookCase = ((u32, u32), (u32, u32), bool);
 
+/// Review round 1: behind the video processor the output type is ours, so
+/// only the exact size counts; a padded type would be picture the readback
+/// cuts off (a silent crop), on the D3D11 path as in software.
 #[test]
-fn a_scaled_open_counts_only_when_media_foundation_negotiated_the_size() {
-    let cases: [TookCase; 12] = [
-        ((1920, 1080), (1920, 1080), true, true),
-        ((1920, 1080), (1920, 1080), false, true),
-        // Padding the D3D11 readback cuts: up to 15 over on each side.
-        ((1920, 804), (1920, 816), true, true),
-        ((1920, 804), (1935, 819), true, true),
-        ((1920, 804), (1936, 804), true, false),
-        ((1920, 804), (1920, 820), true, false),
-        // In software the picture is handed over uncut: exactly.
-        ((1920, 804), (1920, 805), false, false),
-        ((1920, 804), (1921, 804), false, false),
+fn a_scaled_open_counts_only_when_media_foundation_negotiated_the_exact_size() {
+    let cases: [TookCase; 8] = [
+        ((1920, 1080), (1920, 1080), true),
+        ((1920, 804), (1920, 804), true),
+        // A padded type: refused, never cut.
+        ((1920, 804), (1920, 816), false),
+        ((1920, 804), (1935, 819), false),
+        ((1920, 804), (1920, 805), false),
+        ((1920, 804), (1921, 804), false),
         // A reader that kept the native size.
-        ((1920, 1080), (3840, 2160), true, false),
-        ((1920, 1080), (3840, 2160), false, false),
+        ((1920, 1080), (3840, 2160), false),
         // Smaller than asked.
-        ((1920, 1080), (1918, 1080), true, false),
-        ((1920, 1080), (1920, 1078), true, false),
+        ((1920, 1080), (1918, 1080), false),
     ];
-    for (requested, negotiated, on_d3d, took) in cases {
+    for (requested, negotiated, took) in cases {
         assert_eq!(
-            scale_took(requested, negotiated, on_d3d),
+            scale_took(requested, negotiated),
             took,
-            "{requested:?} → {negotiated:?}, d3d {on_d3d}"
+            "{requested:?} → {negotiated:?}"
+        );
+    }
+}
+
+/// Review round 1: a scaled picture's surface is the video processor's, so
+/// it tells nothing of the decoder's path: no GPU decode (and no software
+/// one) is counted for it.
+#[test]
+fn only_an_unscaled_d3d_picture_tells_the_decoders_path() {
+    assert!(decoder_path_visible(true, false));
+    assert!(!decoder_path_visible(true, true));
+    assert!(!decoder_path_visible(false, false));
+    assert!(!decoder_path_visible(false, true));
+}
+
+/// One output pixel aspect: (native, native ratio, scaled, ratio).
+type ParCase = (
+    (u32, u32),
+    Option<(u32, u32)>,
+    (u32, u32),
+    Option<(u32, u32)>,
+);
+
+/// Review round 1: the scaled size is a fraction of a pixel off the native
+/// aspect; the output ratio keeps the display aspect exactly, so a video
+/// processor that keeps it letterboxes nothing.
+#[test]
+fn a_scaled_output_keeps_the_native_display_aspect() {
+    let cases: [ParCase; 13] = [
+        ((3840, 2160), None, (1920, 1080), Some((1, 1))),
+        ((3840, 1606), None, (1920, 804), Some((804, 803))),
+        ((4096, 2160), None, (3840, 2026), Some((2026, 2025))),
+        ((2560, 1350), None, (1920, 1012), Some((2024, 2025))),
+        // The Windows CI fixture at a cap of 50.
+        ((160, 120), None, (66, 50), Some((100, 99))),
+        // An anamorphic source keeps its own ratio.
+        ((1440, 1080), Some((4, 3)), (960, 720), Some((4, 3))),
+        // A ratio with a zero term is square pixels.
+        ((3840, 1606), Some((0, 1)), (1920, 804), Some((804, 803))),
+        ((3840, 1606), Some((1, 0)), (1920, 804), Some((804, 803))),
+        // No size: no ratio.
+        ((0, 1080), None, (1920, 1080), None),
+        ((3840, 0), None, (1920, 1080), None),
+        ((3840, 2160), None, (0, 1080), None),
+        // A reduced term over a `u32`: no ratio.
+        ((u32::MAX, 1), Some((u32::MAX, 1)), (1, 1), None),
+        // Reduced by 3: 4294967295 = 3 × 1431655765.
+        ((u32::MAX, 3), None, (2, 1), Some((1_431_655_765, 2))),
+    ];
+    for (native, par, scaled, expected) in cases {
+        assert_eq!(
+            scaled_pixel_aspect(native, par, scaled),
+            expected,
+            "{native:?} at {par:?} → {scaled:?}"
         );
     }
 }

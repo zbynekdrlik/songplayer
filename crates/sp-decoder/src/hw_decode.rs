@@ -489,10 +489,9 @@ pub fn mapped_from_scanline0(start: usize, scanline0: usize, len: usize) -> Opti
 const BOX_ASPECT_W: u64 = 16;
 const BOX_ASPECT_H: u64 = 9;
 
-/// On the D3D11 path a decoder or video processor may pad the current
-/// type's frame size (NVDEC pads to 16 rows); the readback cuts up to 15
-/// padded rows or columns ([`visible_size`]).
-const D3D_PAD_SLACK: u32 = 16;
+/// Euclid's worst case on `u128` (consecutive Fibonacci numbers) is 185
+/// steps; the bound keeps a mutated step from looping forever.
+const EUCLID_MAX_STEPS: u32 = 200;
 
 /// The box of the decode cap `cap` (rows): `cap` × 16/9 wide and `cap`
 /// tall, each side rounded down to even (an odd cap set through the API
@@ -556,27 +555,84 @@ pub fn visible_reference(
 }
 
 /// Whether Media Foundation took a scaled open: the type it negotiated is
-/// the `requested` size, give or take the padding the readback cuts on the
-/// D3D11 path (each side from the requested one to 15 over it). In
-/// software the picture is handed over at the type's size uncut, so only
-/// the exact size counts. A reader that kept the native size refused (on
-/// the D3D11 path it would otherwise hand over the top-left of the native
-/// picture).
-pub fn scale_took(requested: (u32, u32), negotiated: (u32, u32), on_d3d: bool) -> bool {
-    let slack = if on_d3d { D3D_PAD_SLACK } else { 1 };
-    let side = |asked: u32, got: u32| got.checked_sub(asked).is_some_and(|over| over < slack);
+/// exactly the `requested` size. Behind the video processor the output
+/// type is ours and the processor draws the picture into all of it, so a
+/// larger type (even by NVDEC's padding) would be picture the readback
+/// cuts off, and a reader that kept the native size would hand over the
+/// top-left of the native picture on the D3D11 path. Anything but the
+/// exact size is a refusal: the file plays at its own size, counted in
+/// `scale_refusals`. (A padded TEXTURE with an exact type is fine: the
+/// readback takes the UV plane's offset from the texture's height.)
+pub fn scale_took(requested: (u32, u32), negotiated: (u32, u32)) -> bool {
+    let side = |asked: u32, got: u32| got.checked_sub(asked).is_some_and(|over| over < 16);
     side(requested.0, negotiated.0) && side(requested.1, negotiated.1)
 }
 
+/// #282: whether a picture's surface tells the DECODER's path: only on
+/// the D3D11 path of an unscaled open. A scaled open's picture lies in
+/// the video processor's texture ([`DecodePath::of_surface`]), so its
+/// first picture is neither a GPU decode nor a software one in
+/// [`HwCounters`] (the scaled open is counted in `scaled_opens`); the
+/// decoder's own path behind the processor shows only in the bench's
+/// timings.
+pub fn decoder_path_visible(on_d3d: bool, _scaled: bool) -> bool {
+    on_d3d
+}
+
+/// `a` and `b`'s greatest common divisor (`a` when `b` is 0).
+fn gcd(mut a: u128, mut b: u128) -> u128 {
+    for _ in 0..EUCLID_MAX_STEPS {
+        if b == 0 {
+            break;
+        }
+        (a, b) = (b, a % b);
+    }
+    a
+}
+
+/// #282: the pixel aspect ratio of a scaled open's output type that keeps
+/// the picture's display aspect exactly: the `native` size at its own
+/// `native_par` (`MF_MT_PIXEL_ASPECT_RATIO`; none or a zero term = square
+/// pixels) shown at the `scaled` size, reduced. The nearest-even rounding
+/// of [`scaled_size`] leaves the scaled size a fraction of a pixel off the
+/// native aspect (3840×1606 → 1920×804: 804:803), and a video processor
+/// that keeps the display aspect would letterbox that fraction into a
+/// one-pixel black edge; with this ratio it fills the whole frame (the
+/// stretch, 0.1 %, is invisible). `None` when a size is 0 or a reduced
+/// term does not fit a `u32` (the type then carries no ratio).
+pub fn scaled_pixel_aspect(
+    native: (u32, u32),
+    native_par: Option<(u32, u32)>,
+    scaled: (u32, u32),
+) -> Option<(u32, u32)> {
+    let (par_w, par_h) = match native_par {
+        Some((w, h)) if w > 0 && h > 0 => (u128::from(w), u128::from(h)),
+        _ => (1, 1),
+    };
+    let num = par_w * u128::from(native.0) * u128::from(scaled.1);
+    let den = par_h * u128::from(native.1) * u128::from(scaled.1);
+    if num == 0 || den == 0 {
+        return None;
+    }
+    let common = gcd(num, den);
+    Some((
+        u32::try_from(num / common).ok()?,
+        u32::try_from(den / common).ok()?,
+    ))
+}
+
 /// What the hardware path did across the process, every open asked for in
-/// `Hardware` mode (the decode bench's included).
+/// `Hardware` mode (the decode bench's included); and (#282) the scaled
+/// opens of any mode.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HwDecodeStats {
     /// Opens asked for in `Hardware` mode, counted before the open: a file
     /// that then opened nowhere (no reader at all) counts here and in none of
     /// the counts below.
     pub requested: u64,
-    /// Of those, the ones whose first picture came out of the GPU decoder.
+    /// Of those, the ones whose first picture came out of the GPU decoder
+    /// (a scaled open's never counts here nor in `mf_software`:
+    /// [`decoder_path_visible`]).
     pub gpu_decodes: u64,
     /// Of those, the ones on the D3D path whose first picture Media
     /// Foundation's decoder made in software (it found no decoder on the
@@ -596,12 +652,15 @@ pub struct HwDecodeStats {
     /// Foundation scaled at decode, in any mode (a software reopen after a
     /// decode error on the D3D path counts again).
     pub scaled_opens: u64,
-    /// #282: scaled opens Media Foundation refused; each of those files
-    /// opened at its own size.
+    /// #282: scaled opens Media Foundation refused (or negotiated at
+    /// another size, [`scale_took`]); each of those readers opened that file
+    /// at its own size (a refused D3D11 open that then fell back to software
+    /// may open it scaled there, counted in `scaled_opens`).
     pub scale_refusals: u64,
 }
 
-/// The process's [`HwDecodeStats`], counted as the readers go.
+/// The process's [`HwDecodeStats`], counted as the readers go (every
+/// `Hardware` open, and the scaled opens of any mode).
 #[derive(Debug, Default)]
 pub struct HwCounters {
     requested: AtomicU64,

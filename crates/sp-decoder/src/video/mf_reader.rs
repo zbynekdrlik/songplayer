@@ -379,7 +379,7 @@ impl MediaFoundationVideoReader {
         };
         let decoded = frame_size(&negotiated_video);
         if let Some(requested) = scaled
-            && !scale_took(requested, decoded, hw.is_some())
+            && !scale_took(requested, decoded)
         {
             return Err(DecoderError::NoStream(format!(
                 "video: the scaled type was negotiated at {}x{}, not {}x{}",
