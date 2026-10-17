@@ -29,6 +29,13 @@
 //! Every test that changes or reads the process-wide `hw_counters()` (or
 //! arms the refusal hook) holds `COUNTERS`, so a counter's change is that
 //! test's own and is pinned exactly.
+//!
+//! #282 follow-up: each scaled open writes what it read of Media
+//! Foundation to stderr (past libtest's capture, so every CI log shows the
+//! runner's facts): the transform chain, the decoder's output at the open
+//! and at the first picture, the native geometric aperture and the colour
+//! descriptions. It then asserts the chain holds a video processor and the
+//! decoder's output was read.
 
 #![cfg(windows)]
 
@@ -158,8 +165,10 @@ fn unscaled() -> (MediaFoundationVideoReader, Vec<DecodedVideoFrame>) {
 }
 
 /// A capped reader's open, its facts against the unscaled reader's, and
-/// the counters' change; it writes what Media Foundation negotiated
-/// straight to stderr (past libtest's capture), so every CI log shows it.
+/// the counters' change; it writes what Media Foundation negotiated and
+/// what the scaled open read (`ScaledOpenFacts`) straight to stderr (past
+/// libtest's capture), so every CI log shows it, then asserts the chain
+/// holds a video processor and the decoder's output was read.
 fn open_scaled(
     cap: u32,
     size: (u32, u32),
@@ -182,6 +191,11 @@ fn open_scaled(
         reader.scaled_decoder_output(),
         after.scaled_opens - before.scaled_opens,
         after.scale_refusals - before.scale_refusals
+    );
+    let facts = reader.scaled_open_facts().cloned();
+    let _ = writeln!(
+        std::io::stderr(),
+        "mf_decode_cap: cap {cap}: what the scaled open read: {facts:?}"
     );
     assert_eq!(
         after.scale_refusals, before.scale_refusals,
@@ -206,7 +220,100 @@ fn open_scaled(
         "cap {cap}: the stream's own rate, {scaled_rate:?} vs {plain_rate:?}"
     );
     assert!(reader.frame_rate_known(), "cap {cap}: not the 29.97 guess");
+    let facts = facts.unwrap_or_else(|| panic!("cap {cap}: a scaled open keeps its facts"));
+    assert!(
+        facts.has_video_processor(),
+        "cap {cap}: the source reader's chain holds a video processor: {:?}",
+        facts.chain
+    );
+    assert!(
+        reader.scaled_decoder_output().is_some(),
+        "cap {cap}: the decoder's output was read at the open: {:?}",
+        facts.decoder
+    );
+    assert_eq!(
+        facts.decoder_at_first_picture, None,
+        "cap {cap}: the decoder's output is read again only at the first picture"
+    );
     reader
+}
+
+/// #282 follow-up: after a scaled reader's first picture, the decoder's
+/// output was read again, once; written to stderr (the CI log's fact for
+/// the software decoder after its first frame).
+fn assert_reread_at_first_picture(reader: &MediaFoundationVideoReader, what: &str) {
+    let facts = reader
+        .scaled_open_facts()
+        .unwrap_or_else(|| panic!("{what}: a scaled reader keeps its facts"));
+    let _ = writeln!(
+        std::io::stderr(),
+        "mf_decode_cap: {what}: the decoder's output at the open {:?}, at the first picture {:?}",
+        facts.decoder,
+        facts.decoder_at_first_picture
+    );
+    assert!(
+        matches!(facts.decoder_at_first_picture, Some(Ok(_))),
+        "{what}: the decoder's output was read again at the first picture: {:?}",
+        facts.decoder_at_first_picture
+    );
+}
+
+/// The pictures handed over after the reader decoded 60 (past 1 900 ms)
+/// and then sought BACK to the middle, with the seek's target. The
+/// fixture's one keyframe is at 0, so a real seek hands over a picture at
+/// or before the target; a seek that did nothing would hand over the 61st
+/// picture (~2 000 ms).
+fn after_a_seek(
+    reader: &mut MediaFoundationVideoReader,
+    what: &str,
+) -> (u64, Vec<DecodedVideoFrame>) {
+    for i in 0..60 {
+        reader
+            .next_frame()
+            .unwrap_or_else(|e| panic!("{what}: decode {i}: {e}"))
+            .unwrap_or_else(|| panic!("{what}: picture {i}"));
+    }
+    let target = reader.duration_ms() / 2;
+    reader
+        .seek(target)
+        .unwrap_or_else(|e| panic!("{what}: seek to {target} ms: {e}"));
+    let mut rest = Vec::new();
+    while let Some(frame) = reader
+        .next_frame()
+        .unwrap_or_else(|e| panic!("{what}: decode {} after the seek: {e}", rest.len()))
+    {
+        rest.push(frame);
+    }
+    assert!(!rest.is_empty(), "{what}: pictures after the seek");
+    assert!(
+        rest[0].timestamp_ms <= target,
+        "{what}: the seek moved back to {target} ms or before, got {} ms",
+        rest[0].timestamp_ms
+    );
+    (target, rest)
+}
+
+/// Every `scaled` picture is 80×60 (stride 80) and matches the `plain`
+/// picture at the same place by regions (the module doc's tolerances).
+fn assert_scaled_like(scaled: &[DecodedVideoFrame], plain: &[DecodedVideoFrame], what: &str) {
+    assert_eq!(scaled.len(), plain.len(), "{what}: one picture each");
+    for (i, (s, p)) in scaled.iter().zip(plain).enumerate() {
+        assert_eq!(
+            s.timestamp_ms, p.timestamp_ms,
+            "{what}, picture {i}: its time"
+        );
+        assert_eq!(
+            (s.width, s.height, s.stride),
+            (80, 60, 80),
+            "{what}, picture {i}: the scaled size"
+        );
+        let _ = visible(s, 80, 60);
+        let grid_diff = worst(&grid(s, 80, 60), &grid(p, W, H));
+        assert!(
+            grid_diff < 6.0,
+            "{what}, picture {i}: a 4x4 luma block off by {grid_diff:.1}"
+        );
+    }
 }
 
 /// A cap of 60 rows: the box is 106×60 (60 × 16/9 = 106.7 → 106), the
@@ -218,6 +325,7 @@ fn a_cap_smaller_than_the_picture_hands_every_picture_over_scaled() {
     let (plain_reader, plain) = unscaled();
     let mut reader = open_scaled(60, (80, 60), &plain_reader);
     let scaled = decode_all(&mut reader, "scaled");
+    assert_reread_at_first_picture(&reader, "cap 60");
     assert_eq!(
         scaled.len(),
         plain.len(),
@@ -261,6 +369,7 @@ fn an_inexact_ratio_fills_the_whole_frame() {
     let (plain_reader, plain) = unscaled();
     let mut reader = open_scaled(50, (66, 50), &plain_reader);
     let scaled = decode_all(&mut reader, "scaled at 66x50");
+    assert_reread_at_first_picture(&reader, "cap 50");
     assert_eq!(scaled.len(), plain.len());
     // 66 is 2 mod 4: where a stride the type does not state would shear.
     let _ = writeln!(
@@ -296,6 +405,10 @@ fn a_cap_at_or_above_the_picture_changes_nothing() {
                 .expect("open");
         assert_eq!((reader.width(), reader.height()), (160, 120), "cap {cap}");
         assert_eq!(reader.scaled_from(), None, "cap {cap}: not scaled");
+        assert!(
+            reader.scaled_open_facts().is_none(),
+            "cap {cap}: no scaled open, no facts"
+        );
         let pictures = decode_all(&mut reader, "capped, inside the box");
         assert_eq!(pictures.len(), plain.len(), "cap {cap}");
         for (i, (c, p)) in pictures.iter().zip(&plain).enumerate() {
@@ -323,15 +436,20 @@ fn a_refused_scaled_open_plays_the_file_at_its_own_size() {
     let _alone = counters_alone();
     let (_, plain) = unscaled();
     let before = hw_counters().snapshot();
-    MediaFoundationVideoReader::refuse_next_scaled_open_for_test();
+    let refusal = MediaFoundationVideoReader::refuse_next_scaled_open_for_test();
     let mut reader =
         MediaFoundationVideoReader::open_with(&fixture(), DecodeMode::Software, Some(60))
             .expect("a refused scaled open still opens the file");
+    drop(refusal);
     let after = hw_counters().snapshot();
     assert_eq!(after.scale_refusals, before.scale_refusals + 1, "counted");
     assert_eq!(after.scaled_opens, before.scaled_opens, "not scaled");
     assert_eq!((reader.width(), reader.height()), (160, 120));
     assert_eq!(reader.scaled_from(), None, "a refused open is not scaled");
+    assert!(
+        reader.scaled_open_facts().is_none(),
+        "a refused open has no facts"
+    );
     let pictures = decode_all(&mut reader, "refused, unscaled");
     assert_eq!(pictures.len(), plain.len());
     for (i, (c, p)) in pictures.iter().zip(&plain).enumerate() {
@@ -345,4 +463,91 @@ fn a_refused_scaled_open_plays_the_file_at_its_own_size() {
             "picture {i}: the same bytes as an uncapped reader"
         );
     }
+}
+
+/// #282 follow-up: the refusal hook is disarmed when its guard drops, so a
+/// test that panics between arming it and its open (the unwind drops the
+/// guard) can never refuse a later test's scaled open.
+#[test]
+fn a_dropped_refusal_guard_refuses_no_later_scaled_open() {
+    let _alone = counters_alone();
+    let (plain_reader, _) = unscaled();
+    let refusal = MediaFoundationVideoReader::refuse_next_scaled_open_for_test();
+    drop(refusal);
+    // `open_scaled` asserts the open was scaled and nothing was refused.
+    let reader = open_scaled(60, (80, 60), &plain_reader);
+    assert_eq!(reader.scaled_from(), Some((160, 120)));
+}
+
+/// #282 follow-up: a seek on a scaled reader lands where the unscaled
+/// reader's lands, and every picture after it keeps the scaled size (the
+/// video processor follows the seek; nothing reopens).
+#[test]
+fn a_seek_on_a_scaled_reader_lands_and_keeps_the_scaled_size() {
+    let _alone = counters_alone();
+    let (plain_reader, _) = unscaled();
+    let mut scaled = open_scaled(60, (80, 60), &plain_reader);
+    let before = hw_counters().snapshot();
+    let (target, scaled_rest) = after_a_seek(&mut scaled, "scaled");
+    let after = hw_counters().snapshot();
+    assert_eq!(
+        (after.scaled_opens, after.scale_refusals),
+        (before.scaled_opens, before.scale_refusals),
+        "a seek reopens nothing"
+    );
+    let mut plain = MediaFoundationVideoReader::open(&fixture()).expect("software open");
+    let (plain_target, plain_rest) = after_a_seek(&mut plain, "unscaled");
+    assert_eq!(target, plain_target, "the same target");
+    let _ = writeln!(
+        std::io::stderr(),
+        "mf_decode_cap: a seek to {target} ms: the first scaled picture at {} ms ({}x{}), \
+         the unscaled at {} ms, {} pictures after it",
+        scaled_rest[0].timestamp_ms,
+        scaled_rest[0].width,
+        scaled_rest[0].height,
+        plain_rest[0].timestamp_ms,
+        scaled_rest.len()
+    );
+    assert_scaled_like(&scaled_rest, &plain_rest, "after the seek");
+    assert_eq!(scaled.scaled_from(), Some((160, 120)), "still scaled");
+}
+
+/// #282: a software reopen after a decode error keeps the decode cap: the
+/// rest of the song comes scaled too (a second scaled open, counted, whose
+/// decoder output is read again at its first picture), with no picture lost
+/// or handed over twice. CI injects the decode error (the D3D path's own
+/// cannot be reached, `mf_hw_decode.rs`).
+#[test]
+fn a_reopen_after_a_decode_error_keeps_the_decode_cap() {
+    let _alone = counters_alone();
+    let (plain_reader, plain) = unscaled();
+    let mut reader = open_scaled(60, (80, 60), &plain_reader);
+    let mut got = Vec::new();
+    for i in 0..10 {
+        got.push(
+            reader
+                .next_frame()
+                .unwrap_or_else(|e| panic!("decode {i}: {e}"))
+                .unwrap_or_else(|| panic!("picture {i}")),
+        );
+    }
+    let before = hw_counters().snapshot();
+    reader.fail_next_read_for_test();
+    // The fixture's one keyframe is at 0: the reopen decodes pictures 0..=9
+    // again and must drop them.
+    got.extend(decode_all(&mut reader, "after the reopen"));
+    let after = hw_counters().snapshot();
+    assert_eq!(
+        after.mid_stream_fallbacks,
+        before.mid_stream_fallbacks + 1,
+        "the injected error reopened the file"
+    );
+    assert_eq!(
+        (after.scaled_opens, after.scale_refusals),
+        (before.scaled_opens + 1, before.scale_refusals),
+        "the reopen opened scaled too"
+    );
+    assert_eq!(reader.scaled_from(), Some((160, 120)));
+    assert_reread_at_first_picture(&reader, "the reopen");
+    assert_scaled_like(&got, &plain, "across the reopen");
 }
