@@ -79,6 +79,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (40, MIGRATION_V40),
     (41, MIGRATION_V41),
     (42, MIGRATION_V42),
+    (43, MIGRATION_V43),
 ];
 
 const MIGRATION_V1: &str = "
@@ -673,6 +674,31 @@ CREATE TABLE IF NOT EXISTS ui_usage (
 CREATE INDEX IF NOT EXISTS idx_ui_usage_ts ON ui_usage (ts_ms);
 ";
 
+/// #261 (no infinite archive):
+///
+/// - `resolume_clip_mappings` goes: no code ever wrote it (V1's).
+/// - `play_history` gets an index by video, then playlist: the foreign
+///   key's cascade and the video upgrade's retention look a video up, the
+///   rotation counts a playlist's own plays of it, and the daily bound
+///   (`playlist::history_bound`) keeps the latest row per playlist and video.
+/// - `playlists.deactivated_at` (UTC ms; NULL = active): a deactivation
+///   marks the playlist's rows `removed_at` with this value (a row already
+///   marked keeps its mark), so #260's retention deletes them a year later;
+///   a reactivation clears exactly those marks (`removed_at >=` it), never
+///   the sync's earlier ones (`db::models_membership::deactivate` /
+///   `reactivate`). Back-filled once for every playlist inactive now, never
+///   the test item's.
+const MIGRATION_V43: &str = "
+DROP TABLE IF EXISTS resolume_clip_mappings;
+CREATE INDEX IF NOT EXISTS idx_play_history_video ON play_history (video_id, playlist_id);
+ALTER TABLE playlists ADD COLUMN deactivated_at INTEGER;
+UPDATE playlists SET deactivated_at = CAST(strftime('%s', 'now') AS INTEGER) * 1000
+WHERE is_active = 0 AND kind != 'test';
+UPDATE videos SET removed_at = (SELECT p.deactivated_at FROM playlists p WHERE p.id = videos.playlist_id)
+WHERE removed_at IS NULL
+  AND playlist_id IN (SELECT id FROM playlists WHERE deactivated_at IS NOT NULL)
+";
+
 /// Connection-pool tuning for the FILE-backed pool (#184 round A).
 ///
 /// WAL + NORMAL synchronous remove reader/writer blocking for this
@@ -872,6 +898,9 @@ mod tests_v41;
 #[path = "mod_tests_v42.rs"]
 #[cfg(test)]
 mod tests_v42;
+#[path = "mod_tests_v43.rs"]
+#[cfg(test)]
+mod tests_v43;
 
 #[path = "mod_tests_pool.rs"]
 #[cfg(test)]
