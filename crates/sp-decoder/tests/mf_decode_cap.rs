@@ -36,10 +36,17 @@
 //! and at the first picture, the native geometric aperture and the colour
 //! descriptions. It then asserts the chain is the decoder followed by
 //! another transform (the video processor), the decoder's output was read
-//! and the native colour values are on the scaled type;
-//! `a_scaled_open_lists_the_video_processor_in_its_chain` pins the
-//! processor's category on its own. The tests that decode from the first
-//! picture also assert the decoder's output was read again there.
+//! and each colour value the native type states is on the negotiated
+//! scaled type (`GetCurrentMediaType` keeps what was set: Wine's
+//! Windows-run conformance tests; the fixture has no colour description,
+//! no VUI signal type and no `colr` box, so on it this is most likely
+//! vacuous until a CI log shows a stated `native_colour`). The tests that
+//! decode from the first picture also assert the decoder's output was read
+//! again there. Two runner premises only their first CI run proves sit in
+//! their own tests, so a runner that disagrees fails there alone:
+//! `a_scaled_open_lists_the_video_processor_in_its_chain` (the processor's
+//! category) and `the_first_picture_shows_no_decoder_padding_in_reach`
+//! (the decoder's crop shown as `MF_MT_MINIMUM_DISPLAY_APERTURE`).
 
 #![cfg(windows)]
 
@@ -173,7 +180,8 @@ fn unscaled() -> (MediaFoundationVideoReader, Vec<DecodedVideoFrame>) {
 /// the counters' change; it writes what Media Foundation negotiated and
 /// what the scaled open read (`ScaledOpenFacts`) straight to stderr (past
 /// libtest's capture), so every CI log shows it, then asserts the chain is
-/// the decoder and a transform after it and the decoder's output was read.
+/// the decoder and a transform after it, the decoder's output was read,
+/// and each stated native colour value is on the negotiated type.
 fn open_scaled(
     cap: u32,
     size: (u32, u32),
@@ -285,13 +293,9 @@ fn assert_reread_at_first_picture(reader: &MediaFoundationVideoReader, what: &st
         "{what}: the decoder's output was read again at the first picture: {:?}",
         facts.decoder_at_first_picture
     );
-    // The fixture's pictures fill the frame (the edge bands), so no padding
-    // reaches the processor; this pins that the check reads the stream's
-    // own size (160x120), not the scaled one.
-    assert_eq!(
-        facts.first_picture_padding_in_reach,
-        Some(false),
-        "{what}: no decoder padding in reach of the processor at the first picture"
+    assert!(
+        facts.first_picture_padding_in_reach.is_some(),
+        "{what}: the padding check ran with the re-read"
     );
 }
 
@@ -517,6 +521,34 @@ fn a_scaled_open_lists_the_video_processor_in_its_chain() {
         facts.has_video_processor(),
         "a video processor in the chain: {:?}",
         facts.chain
+    );
+}
+
+/// #282 follow-up: at the first picture the decoder's padding does not
+/// reach the processor (`first_picture_padding_in_reach` `Some(false)`).
+/// The fixture's pictures fill the frame (the edge bands of the tests
+/// above), so this pins that the check reads the stream's own size
+/// (160x120), never the scaled one (80x60: "padded" on every file). Its
+/// premise, that the decoder shows its crop (coded 160x128) as
+/// `MF_MT_MINIMUM_DISPLAY_APERTURE` (Wine's H.264 decoder tests, run
+/// against Windows) or shows no padding at all, is proven by its first CI
+/// run; a runner that shows the crop another way fails here alone.
+#[test]
+fn the_first_picture_shows_no_decoder_padding_in_reach() {
+    let _alone = counters_alone();
+    let (plain_reader, _) = unscaled();
+    let mut reader = open_scaled(60, (80, 60), &plain_reader);
+    reader
+        .next_frame()
+        .expect("decode the first picture")
+        .expect("a first picture");
+    assert_reread_at_first_picture(&reader, "the padding check");
+    let facts = reader.scaled_open_facts().expect("scaled facts");
+    assert_eq!(
+        facts.first_picture_padding_in_reach,
+        Some(false),
+        "no decoder padding in reach of the processor at the first picture: {:?}",
+        facts.decoder_at_first_picture
     );
 }
 

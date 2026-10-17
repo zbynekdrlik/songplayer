@@ -206,11 +206,13 @@ rounds 1–2):
     nominal range (`MF_MT_YUV_MATRIX`: 1 = BT.709, 2 = BT.601;
     `MF_MT_VIDEO_NOMINAL_RANGE`: 1 = full, 2 = 16..235) of the native type
     (put on the scaled type), the negotiated scaled type and the
-    decoder's output. `colour_out` mostly echoes the native type (ours).
-    Only two STATED, unequal values of `colour_out` and `colour_decoder`
-    suggest a conversion; an unstated (`None`) side says nothing, as the
-    processor then takes its own default. The proof stays the hue check
-    against the uncapped song.
+    decoder's output. `colour_out` carries each value the native type
+    states (ours, `ScaledType::apply`; the CI test asserts it where the
+    native type states one, which the CI fixture does not). Only two
+    STATED, unequal values of `colour_out` and `colour_decoder` suggest a
+    conversion; an unstated (`None`) side says nothing (the processor then
+    takes some default of its own: reasoned, not measured). The proof
+    stays the hue check against the uncapped song.
 - **The first scaled picture** (#282 follow-up): the decoder MFT found at
   the open is kept and its output type read again ONCE there, then let go,
   with no `GetTransformForStream` call mid-stream (Microsoft: drain the
@@ -310,11 +312,17 @@ rounds 1–2):
   output at the open and at the first picture. Every scaled open asserts
   the chain is the decoder at index 0 and a transform (not an `Error`)
   after it, the decoder's output read (`scaled_decoder_output()` Some),
-  and each native colour value stated again on the negotiated type. The
-  tests that decode from the first picture (cap 60, cap 50, the seek, the
-  reopen's second open) also assert the re-read (`Some(Ok)`) with
-  `first_picture_padding_in_reach` `Some(false)` (the fixture fills its
-  frame, so this pins that the check reads the stream's own size). Evidence for the chain's shape: Microsoft
+  and each native colour value stated again on the negotiated type (the
+  CI fixture states none: no VUI signal type, no `colr` box, so this is
+  most likely vacuous there). The tests that decode from the first
+  picture (cap 60, cap 50, the seek, the reopen's second open) also
+  assert the re-read (`Some(Ok)`) and that the padding check ran.
+  `the_first_picture_shows_no_decoder_padding_in_reach` alone pins
+  `first_picture_padding_in_reach` `Some(false)`. The fixture fills its
+  frame, so this pins that the check reads the stream's own size. Its
+  premise (the decoder shows its crop as `MF_MT_MINIMUM_DISPLAY_APERTURE`
+  or no padding at all; Wine's H.264 decoder tests) is proven by its
+  first CI run. Evidence for the chain's shape: Microsoft
   (a decoder at index 0) and Wine's conformance tests, which run against
   Windows (`dlls/mfreadwrite/tests/mfplat.c`: "the video processor can be
   accessed at index 1 with MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING",
