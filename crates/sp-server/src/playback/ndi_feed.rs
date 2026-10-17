@@ -18,7 +18,7 @@
 //!   while the setting says `gpu` AND the feed's newest picture is at most
 //!   [`NDI_FEED_STALE_SLOTS`] behind the boundary, else the CPU canvas, so a
 //!   compositor that cannot run (off Windows, no adapter, a backoff) never
-//!   freezes NDI. [`ndi_switch`] names a change of source.
+//!   freezes NDI.
 //! - [`ReturnGate`] (pure, #279 ROZHODNUTÉ 6232669201 item 3): after an
 //!   automatic fallback to the canvas NDI goes back to the GPU only after
 //!   [`NDI_RETURN_ON_TIME`] on-time readbacks in a row, so a fallback never
@@ -212,29 +212,6 @@ pub fn ndi_source_for(setting: NdiSource, newest: Option<i64>, b_100ns: i64) -> 
         NdiPick::Gpu
     } else {
         NdiPick::Cpu(CpuWhy::Stale)
-    }
-}
-
-/// A change of NDI's source between two boundaries.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NdiSwitch {
-    /// To the GPU readback: that boundary's pair is held, nothing goes to
-    /// NDI (one missing frame).
-    ToGpu,
-    /// To the CPU canvas, and why: the held pair goes out first (its
-    /// readback, else the last picture, else the black), then the boundary
-    /// on the canvas — two submits, contiguous stamps, no audio block lost
-    /// (#279 ROZHODNUTÉ 6232669201 item 1).
-    ToCpu(CpuWhy),
-}
-
-/// The switch from `previous` (the source of the boundary before) to
-/// `pick`, if the source changes.
-pub fn ndi_switch(previous: NdiSource, pick: NdiPick) -> Option<NdiSwitch> {
-    match (previous, pick) {
-        (NdiSource::Cpu, NdiPick::Gpu) => Some(NdiSwitch::ToGpu),
-        (NdiSource::Gpu, NdiPick::Cpu(why)) => Some(NdiSwitch::ToCpu(why)),
-        _ => None,
     }
 }
 

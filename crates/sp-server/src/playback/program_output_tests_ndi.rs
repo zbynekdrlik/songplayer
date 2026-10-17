@@ -449,6 +449,25 @@ fn after_a_fallback_a_missing_readback_starts_the_count_again() {
     assert_eq!((status.source, status.switches), ("gpu", 3), "{status:?}");
 }
 
+/// The first switch to the GPU (no fallback before it) needs no run of
+/// on-time readbacks: NDI waits on the canvas only for the first picture,
+/// then goes to the GPU at once. The gate holds only after a fallback.
+#[test]
+fn the_first_switch_to_the_gpu_needs_no_run_of_on_time_readbacks() {
+    let mut rig = rig(NdiSource::Gpu);
+    rig.out.submit(source(0, 0.25));
+    assert_eq!(
+        sends(&rig),
+        [AUDIO, NV12],
+        "no picture read back yet: the canvas"
+    );
+    rig.max.ndi.push(at(0), uyvy(1));
+    rig.out.submit(source(1, 0.25));
+    assert_eq!(sends(&rig).len(), 2, "b1 held: on the GPU at once");
+    let status = rig.max.ndi_status();
+    assert_eq!((status.source, status.switches), ("gpu", 1), "{status:?}");
+}
+
 /// The setting's switch to the canvas ends a fallback's count: a later
 /// flip back to `gpu` goes to the GPU at the first fresh picture, as the
 /// first switch does.

@@ -1,14 +1,16 @@
 //! #279 P1b: the NDI feed (depth, take and drop-older, late pictures, the
 //! coalesce, freshness), the per-boundary source rule (the 30-slot edge on
-//! both sides, a setting flip), the switches and the telemetry.
+//! both sides, a setting flip), the way back after a fallback
+//! (`ReturnGate`), the switch lines (`SwitchLog`) and the telemetry.
 //! Wired via `#[cfg(test)] #[path = "ndi_feed_tests.rs"] mod tests;`.
 
 use sp_core::config::NdiSource;
 use sp_core::genlock::{GENLOCK_GRID_FPS, grid_boundary_100ns};
 
 use super::{
-    BlackUyvy, CpuWhy, FeedCore, NDI_FEED_DEPTH, NDI_FEED_STALE_SLOTS, NdiFeed, NdiPick, NdiSwitch,
-    Pushed, UYVY_BLACK_PAIR, black_uyvy, delay_slots, fourcc, ndi_source_for, ndi_switch, uyvy_len,
+    BlackUyvy, CpuWhy, FeedCore, NDI_FEED_DEPTH, NDI_FEED_STALE_SLOTS, NDI_RETURN_ON_TIME,
+    NDI_SWITCH_LOG_EVERY_100NS, NdiFeed, NdiPick, Pushed, ReturnGate, SwitchLog, UYVY_BLACK_PAIR,
+    black_uyvy, delay_slots, fourcc, ndi_source_for, uyvy_len,
 };
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_max::MAX_STAT_WINDOW;
@@ -141,28 +143,24 @@ fn ndi_comes_from_the_gpu_while_the_setting_says_gpu_and_the_feed_is_fresh() {
 }
 
 #[test]
-fn a_pick_names_its_source_and_a_change_is_a_switch() {
+fn a_pick_names_its_source_and_its_reason() {
     assert_eq!(NdiPick::Gpu.source(), NdiSource::Gpu);
-    for why in [CpuWhy::Setting, CpuWhy::NoReadback, CpuWhy::Stale] {
+    for why in [
+        CpuWhy::Setting,
+        CpuWhy::NoReadback,
+        CpuWhy::Stale,
+        CpuWhy::Settling,
+    ] {
         assert_eq!(NdiPick::Cpu(why).source(), NdiSource::Cpu);
-        assert_eq!(
-            ndi_switch(NdiSource::Gpu, NdiPick::Cpu(why)),
-            Some(NdiSwitch::ToCpu(why))
-        );
-        assert_eq!(ndi_switch(NdiSource::Cpu, NdiPick::Cpu(why)), None);
     }
-    assert_eq!(
-        ndi_switch(NdiSource::Cpu, NdiPick::Gpu),
-        Some(NdiSwitch::ToGpu)
-    );
-    assert_eq!(ndi_switch(NdiSource::Gpu, NdiPick::Gpu), None);
     assert_eq!(
         [
             CpuWhy::Setting.as_str(),
             CpuWhy::NoReadback.as_str(),
-            CpuWhy::Stale.as_str()
+            CpuWhy::Stale.as_str(),
+            CpuWhy::Settling.as_str()
         ],
-        ["setting", "no_readback", "stale"]
+        ["setting", "no_readback", "stale", "settling"]
     );
     assert_eq!(
         (delay_slots(NdiSource::Gpu), delay_slots(NdiSource::Cpu)),
@@ -172,6 +170,118 @@ fn a_pick_names_its_source_and_a_change_is_a_switch() {
         (fourcc(NdiSource::Gpu), fourcc(NdiSource::Cpu)),
         ("UYVY", "NV12")
     );
+}
+
+/// #279 ROZHODNUTÉ 6232669201 item 3: only a fallback from the GPU (not
+/// the setting's) arms the gate; armed, 29 on-time readbacks in a row hold
+/// the canvas and the 30th lets the GPU through; the GPU disarms it.
+#[test]
+fn a_fallback_arms_the_gate_and_30_on_time_readbacks_let_the_gpu_through() {
+    assert_eq!(NDI_RETURN_ON_TIME, 30);
+    let mut gate = ReturnGate::default();
+    assert!(!gate.counting());
+    assert_eq!(gate.admit(NdiPick::Gpu), NdiPick::Gpu, "not armed");
+    gate.after(NdiSource::Cpu, NdiPick::Cpu(CpuWhy::NoReadback));
+    assert!(
+        !gate.counting(),
+        "the canvas before the GPU was ever on (a first entry) arms nothing"
+    );
+    for why in [CpuWhy::NoReadback, CpuWhy::Stale] {
+        let mut gate = ReturnGate::default();
+        gate.after(NdiSource::Gpu, NdiPick::Cpu(why));
+        assert!(gate.counting(), "{why:?}");
+        assert_eq!(gate.admit(NdiPick::Gpu), NdiPick::Cpu(CpuWhy::Settling));
+    }
+    let mut gate = ReturnGate::default();
+    gate.after(NdiSource::Gpu, NdiPick::Cpu(CpuWhy::Setting));
+    assert!(!gate.counting(), "the setting's canvas never arms it");
+
+    let mut gate = ReturnGate::default();
+    gate.after(NdiSource::Gpu, NdiPick::Cpu(CpuWhy::Stale));
+    for n in 1..NDI_RETURN_ON_TIME {
+        gate.observe(true);
+        assert_eq!(
+            gate.admit(NdiPick::Gpu),
+            NdiPick::Cpu(CpuWhy::Settling),
+            "{n} in a row"
+        );
+        gate.after(NdiSource::Cpu, NdiPick::Cpu(CpuWhy::Settling));
+        assert!(gate.counting(), "the canvas keeps it armed");
+    }
+    gate.observe(true);
+    assert_eq!(gate.admit(NdiPick::Gpu), NdiPick::Gpu, "30 in a row");
+    assert_eq!(
+        gate.admit(NdiPick::Cpu(CpuWhy::Stale)),
+        NdiPick::Cpu(CpuWhy::Stale),
+        "a canvas pick passes as it is"
+    );
+    gate.after(NdiSource::Cpu, NdiPick::Gpu);
+    assert!(!gate.counting(), "back on the GPU: disarmed");
+}
+
+#[test]
+fn a_late_readback_starts_the_gate_s_count_again() {
+    let mut gate = ReturnGate::default();
+    gate.after(NdiSource::Gpu, NdiPick::Cpu(CpuWhy::Stale));
+    for _ in 0..29 {
+        gate.observe(true);
+    }
+    gate.observe(false);
+    for _ in 0..29 {
+        gate.observe(true);
+    }
+    assert_eq!(
+        gate.admit(NdiPick::Gpu),
+        NdiPick::Cpu(CpuWhy::Settling),
+        "29 since the late one"
+    );
+    gate.observe(true);
+    assert_eq!(gate.admit(NdiPick::Gpu), NdiPick::Gpu);
+    gate.after(NdiSource::Cpu, NdiPick::Cpu(CpuWhy::Setting));
+    gate.observe(true);
+    assert!(
+        !gate.counting(),
+        "the setting's canvas disarms it, and a disarmed gate counts nothing"
+    );
+}
+
+/// A change of source is said once, at most once per 5 s of the timeline;
+/// one held back is said by the first boundary after the window, as the
+/// source is then, with the boundaries held back; a change that went back
+/// inside the window says nothing.
+#[test]
+fn a_switch_is_said_once_and_one_held_back_after_the_window() {
+    assert_eq!(NDI_SWITCH_LOG_EVERY_100NS, 50_000_000);
+    let (gpu, stale, settling) = (
+        NdiPick::Gpu,
+        NdiPick::Cpu(CpuWhy::Stale),
+        NdiPick::Cpu(CpuWhy::Settling),
+    );
+    let mut log = SwitchLog::default();
+    assert_eq!(
+        log.observe(b(0), NdiPick::Cpu(CpuWhy::Setting)),
+        None,
+        "the canvas at the start: nothing to say"
+    );
+    assert_eq!(log.observe(b(1), gpu), Some((gpu, 0)));
+    assert_eq!(log.observe(b(2), gpu), None, "no change");
+    assert_eq!(log.observe(b(3), stale), None, "inside the window");
+    assert_eq!(log.observe(b(4), settling), None);
+    let after = b(1) + NDI_SWITCH_LOG_EVERY_100NS;
+    assert_eq!(
+        log.observe(after, settling),
+        Some((settling, 2)),
+        "the source as it is now, two boundaries held back"
+    );
+    assert_eq!(log.observe(after + 1, gpu), None, "held back");
+    assert_eq!(
+        log.observe(after + 2, stale),
+        None,
+        "back where the log is: nothing to say"
+    );
+    let later = after + NDI_SWITCH_LOG_EVERY_100NS;
+    assert_eq!(log.observe(later, stale), None, "still where the log is");
+    assert_eq!(log.observe(later + 1, gpu), Some((gpu, 1)));
 }
 
 #[test]

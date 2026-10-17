@@ -58,8 +58,7 @@ use tracing::{info, warn};
 use super::{PROGRAM_STANDBY_H, PROGRAM_STANDBY_W, Pair, ProgramOutput};
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::ndi_feed::{
-    BlackUyvy, CpuWhy, NDI_RETURN_ON_TIME, NdiPick, ReturnGate, SwitchLog, ndi_source_for,
-    ndi_switch, uyvy_len,
+    BlackUyvy, CpuWhy, NDI_RETURN_ON_TIME, NdiPick, ReturnGate, SwitchLog, ndi_source_for, uyvy_len,
 };
 use crate::playback::program_burn;
 use crate::playback::program_item::ItemFrame;
@@ -152,7 +151,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
             .rejoin
             .admit(ndi_source_for(setting, newest, stamp_100ns));
         let previous = self.ndi.source;
-        let switched = ndi_switch(previous, pick).is_some();
+        let switched = previous != pick.source();
         log_switch(self.ndi.switch_log.observe(stamp_100ns, pick));
         self.ndi.rejoin.after(previous, pick);
         self.ndi.source = pick.source();
