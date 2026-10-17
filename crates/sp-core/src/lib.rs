@@ -31,6 +31,7 @@ pub mod prod_env; // #233: the production environment's problems, status and hea
 pub mod program_refusal;
 pub mod seek_model;
 pub mod status_chip;
+pub mod ui_usage; // #256: the dashboard's usage log (wire, client rules, summary, Nastavenia line)
 pub mod video_upgrade_view; // #223 S13: Nastavenia's view of the 4K upgrade
 pub mod wall; // #259: the LED wall's state, problems, status and health segment
 pub mod wall_clip; // #275: SongPlayer's clip on the wall (the fact and the health bar's note)
