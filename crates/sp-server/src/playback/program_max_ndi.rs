@@ -7,10 +7,13 @@
 //!   (`MaxWorker::ndi_pass`); otherwise it is disabled, so the CPU mode
 //!   pays no readback. A failed enable is tried again only after
 //!   [`MAX_RETRY_BACKOFF`] (it makes textures and compiles a shader). A
-//!   device lost at the enable is lost there, like one lost while building
-//!   ([`MaxWorker::device_ready`], review round 5 B5-1: with MAX off
-//!   nothing else composes to find it, and the removed compositor was
-//!   kept, its enable failing every backoff for good).
+//!   device lost at the enable is lost there ([`MaxWorker::device_ready`],
+//!   review round 5 B5-1: with MAX off nothing else composes to find it,
+//!   and the removed compositor was kept, its enable failing every backoff
+//!   for good): like one lost while building when the compositor was built
+//!   for this boundary (the backoff), else like one a compose finds (round
+//!   6: rebuilt at the next job if a boundary went out since the last
+//!   loss).
 //! - The pass has ONE log, a `StateLog` of its state ([`PassLine`]: off,
 //!   on, failing), observed at every boundary that holds a compositor and
 //!   at each release (review round 5 F2: with MAX off nothing observed it
@@ -118,10 +121,13 @@ impl<G: MaxGpu> MaxWorker<'_, G> {
         wanted: bool,
         now: Instant,
     ) -> (Result<(), Skip>, Option<(PassLine, u64)>) {
+        // The enable of a compositor built for this boundary is part of its
+        // build (review round 6).
+        let building = self.device.compositor.is_none();
         if let Err(skip) = self.build_device(now) {
             return (Err(skip), None);
         }
-        let (lost, line) = self.ndi_pass(wanted, now);
+        let (lost, line) = self.ndi_pass(wanted, building, now);
         match lost {
             Some(error) => (Err(Skip::Failed(error)), line),
             None => (Ok(()), line),
@@ -132,13 +138,17 @@ impl<G: MaxGpu> MaxWorker<'_, G> {
     /// `wanted`, off otherwise (a backoff forgotten). Nothing without a
     /// compositor. The feed is left alone: the `SP-program` sender lets its
     /// pictures go (review round 5 F1). A device lost at the enable is lost
-    /// here, as while building (`lose_device`: the compositor goes, the
-    /// rebuild waits the backoff). Returns that loss and the line the
-    /// pass's log wrote (its state and the boundaries held back): the log
-    /// is observed at every boundary that holds a compositor.
+    /// here (`lose_device`: the compositor goes): `building` (the compositor
+    /// was built for this boundary) as a loss while building, which waits
+    /// the backoff; else as a loss a compose finds, rebuilt at the next job
+    /// unless nothing went out since the last loss (review round 6). Returns
+    /// that loss and the line the pass's log wrote (its state and the
+    /// boundaries held back): the log is observed at every boundary that
+    /// holds a compositor.
     fn ndi_pass(
         &mut self,
         wanted: bool,
+        building: bool,
         now: Instant,
     ) -> (Option<GpuError>, Option<(PassLine, u64)>) {
         let Some(compositor) = self.device.compositor.as_mut() else {
@@ -163,7 +173,7 @@ impl<G: MaxGpu> MaxWorker<'_, G> {
         let state = pass_line(wanted, self.ndi.on, self.ndi.enable_failing.as_ref());
         let line = self.say_pass(state, now);
         if lost.is_some() {
-            self.lose_device(now, true);
+            self.lose_device(now, building);
         }
         (lost, line)
     }
