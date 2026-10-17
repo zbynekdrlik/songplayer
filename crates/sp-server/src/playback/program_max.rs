@@ -52,6 +52,12 @@
 //! can leave one of Spout's locks abandoned, and the receiver it is handed
 //! to (Arena) keeps Spout's sender list for good (PP, 12.10.2026). The
 //! child module `program_max_quiesce.rs`.
+//!
+//! #279 P1b: the same compositor draws NDI `SP-program`'s picture. While
+//! `program_ndi_source` = `gpu` the thread takes jobs whatever MAX's
+//! setting (MAX off: the FHD target alone is composed and read back, `max`
+//! reads `off`), and [`MaxOut::ndi`] hands the read-back pictures to the
+//! `SP-program` sender (`ndi_feed.rs`).
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -59,7 +65,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use sp_core::config::{
-    DEFAULT_PROGRAM_MAX_COMPOSE_PHASE_US, DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US,
+    DEFAULT_PROGRAM_MAX_COMPOSE_PHASE_US, DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US, NdiSource,
     SETTING_PROGRAM_MAX_ENABLED, program_max_enabled,
 };
 use sp_gpu::{
@@ -72,6 +78,7 @@ use tracing::{info, warn};
 
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::loop_stats::percentile_ceil;
+use crate::playback::ndi_feed::NdiFeed;
 use crate::playback::program_max_list::ListHolderStatus;
 use crate::playback::program_max_send::SendTiming;
 use crate::playback::program_max_vblank::{Aligned, VblankLog, vblank_log};
@@ -86,7 +93,9 @@ mod quiesce;
 pub use quiesce::{MAX_STOP_WAIT, QUIESCE_EXPIRY, stop_and_wait};
 #[path = "program_max_phase.rs"]
 mod phase;
-pub use phase::{load_max_compose_phase_us, load_max_vblank_phase_us, load_video_quiet_us};
+pub use phase::{
+    load_max_compose_phase_us, load_max_vblank_phase_us, load_ndi_source, load_video_quiet_us,
+};
 #[path = "program_max_upload.rs"]
 mod upload;
 pub use upload::UPLOAD_RATE_SPAN;
@@ -341,6 +350,8 @@ struct Queue {
     compose_phase_us: u64,
     /// #239: the setting `program_spout_fhd_enabled`, as last applied.
     fhd_enabled: bool,
+    /// #279 P1b: the setting `program_ndi_source`, as last applied.
+    ndi: NdiSource,
     /// A `program-max` thread takes jobs.
     consumer: bool,
     stop: bool,
@@ -354,14 +365,20 @@ struct Queue {
 }
 
 impl Queue {
+    /// #279 P1b: whether anything wants the compositor: MAX (and with it
+    /// the FHD Spout sender) or NDI from the GPU.
+    fn wanted(&self) -> bool {
+        self.enabled || self.ndi == NdiSource::Gpu
+    }
+
     /// Whether an offered job would be taken.
     fn accepting(&self) -> bool {
-        self.enabled && self.consumer && !self.stop && self.quiesced_until.is_none()
+        self.wanted() && self.consumer && !self.stop && self.quiesced_until.is_none()
     }
 
     /// The thread's next step at `now`, if one is ready: a stop wins, then
-    /// a quiesce's (`Queue::quiesce_step`); while off, `Release` when it
-    /// holds GPU objects; else the oldest job.
+    /// a quiesce's (`Queue::quiesce_step`); while nothing wants the
+    /// compositor, `Release` when it holds GPU objects; else the oldest job.
     fn step(&mut self, holding: bool, now: Instant) -> Option<MaxNext> {
         if self.stop {
             return Some(MaxNext::Stop);
@@ -369,7 +386,7 @@ impl Queue {
         if let Some(until) = self.quiesced_until {
             return self.quiesce_step(until, now);
         }
-        if !self.enabled {
+        if !self.wanted() {
             return holding.then_some(MaxNext::Release);
         }
         self.jobs
@@ -378,19 +395,20 @@ impl Queue {
     }
 }
 
-/// The last sent frames' costs, µs (at most [`MAX_STAT_WINDOW`]).
+/// The last sent frames' costs, µs (at most [`MAX_STAT_WINDOW`]; #279 P1b:
+/// NDI's readback figures too, `ndi_feed.rs`).
 #[derive(Clone, Default)]
-struct Window(VecDeque<u64>);
+pub(crate) struct Window(VecDeque<u64>);
 
 impl Window {
-    fn push(&mut self, us: u64) {
+    pub(crate) fn push(&mut self, us: u64) {
         self.0.push_back(us);
         if self.0.len() > MAX_STAT_WINDOW {
             self.0.pop_front();
         }
     }
 
-    fn p99(&self) -> u64 {
+    pub(crate) fn p99(&self) -> u64 {
         percentile_ceil(&self.0, 99)
     }
 
@@ -448,6 +466,8 @@ pub struct MaxOut {
     /// #251 step 4: the refresh grid this thread paces on, for the
     /// `SP-program` video side's quiet window (`program_video_quiet.rs`).
     pub video: VideoQuiet,
+    /// #279 P1b: NDI's read-back pictures and NDI's telemetry.
+    pub ndi: NdiFeed,
     /// Tests: run inside every offer, before its lock — what the program
     /// thread has done by then.
     #[cfg(test)]
@@ -493,6 +513,7 @@ impl MaxOut {
                 vblank_phase_us: DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US,
                 compose_phase_us: DEFAULT_PROGRAM_MAX_COMPOSE_PHASE_US,
                 fhd_enabled: false,
+                ndi: NdiSource::Cpu,
                 consumer: false,
                 stop: false,
                 quiesced_until: None,
@@ -529,6 +550,7 @@ impl MaxOut {
             }),
             fhd: Mutex::new(fhd::FhdStats::new()),
             video: VideoQuiet::default(),
+            ndi: NdiFeed::default(),
             #[cfg(test)]
             on_offer: Mutex::new(None),
         }
@@ -557,13 +579,14 @@ impl MaxOut {
     }
 
     /// Apply the setting; returns whether it changed. Off drops the queued
-    /// jobs; the thread is woken either way (off: it releases the sender).
+    /// jobs unless NDI still wants the compositor (#279 P1b); the thread
+    /// is woken either way (off: it releases what nothing wants).
     pub fn set_enabled(&self, on: bool) -> bool {
         let changed = {
             let mut queue = self.lock_queue();
             let changed = queue.enabled != on;
             queue.enabled = on;
-            if !on {
+            if !queue.wanted() {
                 while queue.jobs.take().is_some() {}
             }
             changed

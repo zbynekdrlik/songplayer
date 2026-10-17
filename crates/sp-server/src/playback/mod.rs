@@ -37,6 +37,7 @@ pub mod loop_stats; // the per-minute `pipeline: loop-stats` line + the shared p
 mod lyrics_loader;
 mod mix; // #184 round G set_mix (impl PlaybackEngine, 1000-line cap split)
 pub mod mmcss; // #210 part 2: a real-time sender thread as an MMCSS "Pro Audio" thread
+pub mod ndi_feed; // #279 P1b: NDI SP-program from the GPU readback (the feed + the source rule, pure)
 pub mod ndi_health;
 pub(crate) mod ndi_health_expect; // #221: SP-program's receiver (the program's degraded reason + log)
 mod ndi_health_transport; // #201 round 2: pure reported-label -> TransportState (Linux-tested)

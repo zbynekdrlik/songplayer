@@ -8,19 +8,22 @@
 //! (`apply_phase_settings`), and take effect at the next boundary. #251
 //! step 4: so is the `SP-program` video side's quiet window
 //! (`program_video_quiet_from_ms` / `_to_ms`, `program_video_quiet.rs`).
+//! #279 P1b: so is `program_ndi_source` (NDI `SP-program` from the GPU
+//! readback, `ndi_feed.rs`), with the queue's rules it drives.
 
 use std::time::Duration;
 
 use sp_core::config::{
-    SETTING_PROGRAM_MAX_COMPOSE_PHASE_MS, SETTING_PROGRAM_MAX_VBLANK_PHASE_MS,
-    SETTING_PROGRAM_VIDEO_QUIET_FROM_MS, SETTING_PROGRAM_VIDEO_QUIET_TO_MS,
-    program_max_compose_phase_us, program_max_vblank_phase_us, program_video_quiet_from_us,
-    program_video_quiet_to_us,
+    NdiSource, SETTING_PROGRAM_MAX_COMPOSE_PHASE_MS, SETTING_PROGRAM_MAX_VBLANK_PHASE_MS,
+    SETTING_PROGRAM_NDI_SOURCE, SETTING_PROGRAM_VIDEO_QUIET_FROM_MS,
+    SETTING_PROGRAM_VIDEO_QUIET_TO_MS, program_max_compose_phase_us, program_max_vblank_phase_us,
+    program_ndi_source, program_video_quiet_from_us, program_video_quiet_to_us,
 };
 use sqlx::SqlitePool;
 use tracing::{info, warn};
 
 use super::MaxOut;
+use crate::playback::ndi_feed::NdiStatus;
 
 impl MaxOut {
     /// Apply `program_max_vblank_phase_ms` (µs); returns whether it changed.
@@ -49,6 +52,53 @@ impl MaxOut {
     pub fn compose_phase(&self) -> Duration {
         Duration::from_micros(self.lock_queue().compose_phase_us)
     }
+
+    /// #279 P1b: apply `program_ndi_source`; returns whether it changed.
+    /// When nothing wants the compositor any more the queued jobs go, and
+    /// the thread is woken either way (it releases what nothing wants).
+    pub fn set_ndi_source(&self, source: NdiSource) -> bool {
+        let changed = {
+            let mut queue = self.lock_queue();
+            let changed = queue.ndi != source;
+            queue.ndi = source;
+            if !queue.wanted() {
+                while queue.jobs.take().is_some() {}
+            }
+            changed
+        };
+        self.ready.notify_all();
+        changed
+    }
+
+    /// #279 P1b: `program_ndi_source`, as last applied.
+    pub fn ndi_source(&self) -> NdiSource {
+        self.lock_queue().ndi
+    }
+
+    /// #279 P1b: whether the thread reads NDI's picture back.
+    pub fn ndi_wanted(&self) -> bool {
+        self.ndi_source() == NdiSource::Gpu
+    }
+
+    /// #279 P1b: whether the thread runs MAX's target and sender. A job
+    /// comes only while the compositor is wanted (MAX on, or NDI on the
+    /// GPU), so with NDI off a job means MAX on: MAX goes only while it is
+    /// off with NDI on the GPU.
+    pub fn max_wanted(&self) -> bool {
+        let queue = self.lock_queue();
+        queue.enabled || queue.ndi != NdiSource::Gpu
+    }
+
+    /// #279 P1b: the `ndi` block of `GET /api/v1/program`.
+    pub fn ndi_status(&self) -> NdiStatus {
+        self.ndi.status(self.ndi_source())
+    }
+}
+
+/// #279 P1b: read `program_ndi_source` (`sp_core::config`'s rule).
+pub async fn load_ndi_source(pool: &SqlitePool) -> Result<NdiSource, sqlx::Error> {
+    let raw = crate::db::models::get_setting(pool, SETTING_PROGRAM_NDI_SOURCE).await?;
+    Ok(program_ndi_source(raw.as_deref()))
 }
 
 /// Read `program_max_vblank_phase_ms`, µs (`sp_core::config`'s rule).
@@ -101,4 +151,19 @@ pub(super) async fn apply_phase_settings(pool: &SqlitePool, max: &MaxOut) {
         }
         Err(e) => warn!(%e, "program output: reading the video quiet window failed"),
     }
+    match load_ndi_source(pool).await {
+        Ok(source) => {
+            if max.set_ndi_source(source) {
+                info!(
+                    source = source.as_str(),
+                    "program output: NDI source setting applied"
+                );
+            }
+        }
+        Err(e) => warn!(%e, "program output: reading the NDI source setting failed"),
+    }
 }
+
+#[cfg(test)]
+#[path = "program_max_tests_ndi.rs"]
+mod tests_ndi;

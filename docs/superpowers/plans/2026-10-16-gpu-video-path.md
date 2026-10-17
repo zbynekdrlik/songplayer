@@ -630,10 +630,10 @@ Order: the NDI readback must exist before decode may stay on the GPU. Otherwise 
 
 ### P1b: NDI from the GPU
 
-- The compositor always runs (MAX optional).
-- The worker: readback → `NdiFeed`, before the sends.
-- `program-output`: the delay line; UYVY FourCC; the burn on UYVY; `program_ndi_source`.
-- The fake GPU on Linux.
+- The compositor runs while MAX or NDI wants it: its PRIMARY target is the FHD program, MAX's target is added only while MAX is on (design comment 6218637444).
+- The worker (`program_max_ndi.rs`): `read_uyvy` → `MaxOut::ndi` (the pure `ndi_feed.rs`), after the compose and before the sends; a Black boundary pushes the cached UYVY black.
+- `program-output` (`program_output_ndi.rs`): the delay line (`ndi_source_for`: the canvas again past 30 stale slots; the switches); `FourCCVideoType::UYVY`; `program_burn::burned_uyvy`; `program_ndi_source` (default `cpu`); `ndi` on `GET /api/v1/program`.
+- The fake GPU on Linux (`FakeCompositor`'s `enable_uyvy` / `read_uyvy`); WARP: the real loop's UYVY within ±1 of `uyvy::reference` of the FHD target.
 - **Gates:** NDI receiver 1920×1080; `ndi.repeats` +0; A/V gate; `max-gate`; `genlock-fifo audit` stable (`shallow_depth` +1 expected and stable).
 - **Wall:** A/B `program_ndi_source`, ≥ 46 blocks. The CPU canvas fit and fade leave the drifting phase, so expect fewer jumps at the bad phases for 4K and blended content.
 

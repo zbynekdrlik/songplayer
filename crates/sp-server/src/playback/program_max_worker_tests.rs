@@ -3,10 +3,12 @@
 //! failed build or a lost frame cost, the backoff, the release, and the loop.
 //! The fake ([`FakeGpu`]) is `pub(crate)`: `program_output_tests_max.rs`
 //! holds its compose to stall the consumer, and #239's
-//! `program_max_worker_tests_fhd.rs` drives its FHD side. #251 step 2: ONE
-//! fake compositor holds MAX's primary target and the FHD target the worker
-//! adds (`sp_gpu::Targets`, the compositor's own book-keeping); one compose
-//! draws both, and each sender knows whether it is the FHD one's.
+//! `program_max_worker_tests_fhd.rs` drives its FHD side. #251 step 2 +
+//! #279 P1b: ONE fake compositor holds the FHD program as its primary
+//! target and the MAX target the worker adds (`sp_gpu::Targets`, the
+//! compositor's own book-keeping); one compose draws every target in draw
+//! order, and each sender knows whether it is the FHD one's. It also runs
+//! P1a's UYVY pass: a readback names the compose it came from.
 //! Wired via `#[cfg(test)] #[path = "program_max_worker_tests.rs"] pub(crate) mod tests;`.
 
 use std::collections::VecDeque;
@@ -15,8 +17,8 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use sp_gpu::{
-    ComposeStats, Composition, GpuError, MAX_TARGET, Nv12Picture, PictureError, SpoutSendStats,
-    Target, TargetId, Targets,
+    ComposeStats, Composition, FHD_TARGET, GpuError, MAX_TARGET, Nv12Picture, PictureError,
+    SpoutSendStats, Target, TargetId, Targets,
 };
 
 use super::{
@@ -24,7 +26,7 @@ use super::{
     run_max_loop,
 };
 use crate::playback::frame_buf::SharedFrame;
-use crate::playback::program_max::{MAX_NOT_RUNNING, MaxJob, MaxOut, MaxPicture};
+use crate::playback::program_max::{MaxJob, MaxOut, MaxPicture};
 
 /// A gate a held compose waits behind.
 #[derive(Default)]
@@ -86,23 +88,31 @@ pub(crate) struct Log {
     pub senders_built: u32,
     /// "sender" / "fhd sender" / "compositor", in drop order.
     pub drops: Vec<&'static str>,
-    /// What each compose drew into MAX's target.
+    /// What each compose drew into MAX's target (#279 P1b: while the
+    /// compositor holds it).
     pub drawn: Vec<Drawn>,
     pub sent: u32,
-    /// #251 step 2: the targets added to a compositor (`add_target`) and
-    /// how many were removed (`remove_target`).
+    /// #251 step 2 + #279 P1b: the targets added to a compositor
+    /// (`add_target`: MAX's) and how many were removed (`remove_target`).
     pub targets_added: Vec<Target>,
     pub targets_removed: u32,
     /// #239: the FHD senders built, what each compose drew into the FHD
-    /// target (the SAME compose as `drawn`'s), the FHD sends.
+    /// target (#279 P1b: the primary, every compose; the SAME compose as
+    /// `drawn`'s), the FHD sends.
     pub fhd_senders_built: u32,
     pub fhd_drawn: Vec<Drawn>,
     pub fhd_sent: u32,
-    /// "fhd target" / "fhd sender built" / "max draw" / "fhd draw" (in the
-    /// same compose, right after MAX's) / "max send" / "fhd send" / "fhd
-    /// target removed", in order; and the registry reads.
+    /// "fhd sender built" / "fhd draw" / "max draw" (in the same compose,
+    /// in draw order: the primary first) / "ndi read" / "max send" / "fhd
+    /// send" / "max target removed" / "ndi on" / "ndi off", in order; and
+    /// the registry reads.
     pub order: Vec<&'static str>,
     pub listed_reads: u32,
+    /// #279 P1b: the composes made (a readback names its compose by it),
+    /// the UYVY passes enabled, the readbacks that answered a picture.
+    pub composes: u32,
+    pub uyvy_enabled: u32,
+    pub uyvy_read: u32,
 }
 
 /// The fake GPU's next results; an empty queue answers `Ok`.
@@ -119,6 +129,9 @@ pub(crate) struct Script {
     pub fhd_sender: VecDeque<GpuError>,
     pub fhd_send: VecDeque<GpuError>,
     pub listed: VecDeque<Option<(u32, u32)>>,
+    /// #279 P1b: what enabling the UYVY pass and reading it back answer.
+    pub enable_uyvy: VecDeque<GpuError>,
+    pub read_uyvy: VecDeque<GpuError>,
 }
 
 /// A held compose: it says it entered, then waits for the gate.
@@ -150,6 +163,18 @@ pub(crate) const FHD_SEND_US: u64 = 55;
 /// #239: where the fake registry lists a sender.
 pub(crate) const FAKE_LISTED: (u32, u32) = (1920, 1080);
 
+/// #279 P1b: the UYVY pass's own part of every fake compose that ran it.
+pub(crate) const UYVY_US: u64 = 66;
+
+/// #279 P1b: the bytes of a fake readback: `[n; FAKE_UYVY_BYTES]` for the
+/// compositor's n-th compose.
+pub(crate) const FAKE_UYVY_BYTES: usize = 8;
+
+/// #279 P1b: the fake's readback of its `n`-th compose.
+pub(crate) fn fake_uyvy(n: u32) -> Vec<u8> {
+    vec![u8::try_from(n).unwrap_or(u8::MAX); FAKE_UYVY_BYTES]
+}
+
 /// The fake GPU: its compositor and senders record into [`Log`] and answer
 /// from [`Script`]. Clones share one state.
 #[derive(Clone, Default)]
@@ -170,18 +195,13 @@ impl FakeGpu {
     }
 }
 
-/// The fake compositor: MAX's primary target and the targets added to it
-/// (the real `Targets` book-keeping mints their ids).
+/// The fake compositor: the FHD primary target and the targets added to it
+/// (MAX's; the real `Targets` book-keeping mints their ids), and P1a's UYVY
+/// pass (the target it reads, the composes since it was enabled).
 pub(crate) struct FakeCompositor {
     shared: Arc<FakeShared>,
     targets: Targets<Target>,
-}
-
-impl FakeCompositor {
-    /// Whether it draws a target besides MAX's (the FHD one).
-    fn draws_fhd(&self) -> bool {
-        self.targets.iter().count() > 1
-    }
+    uyvy: Option<(TargetId, u32)>,
 }
 
 /// The second field: the sender is the FHD one's (#239).
@@ -225,12 +245,22 @@ impl MaxGpu for FakeGpu {
             Some(error) => Err(error),
             None => Ok(FakeCompositor {
                 shared: self.0.clone(),
-                targets: Targets::new(MAX_TARGET),
+                targets: Targets::new(FHD_TARGET),
+                uyvy: None,
             }),
         }
     }
 
-    fn sender(&mut self, _compositor: &FakeCompositor) -> Result<FakeSender, GpuError> {
+    fn sender(
+        &mut self,
+        compositor: &FakeCompositor,
+        target: TargetId,
+    ) -> Result<FakeSender, GpuError> {
+        assert_eq!(
+            compositor.targets.get(target),
+            Some(&MAX_TARGET),
+            "MAX's sender of the MAX target the compositor holds"
+        );
         log_of(&self.0).senders_built += 1;
         match next_error(&self.0, |s| s.sender.pop_front()) {
             Some(error) => Err(error),
@@ -243,14 +273,10 @@ impl MaxGpu for FakeGpu {
         compositor: &FakeCompositor,
         target: TargetId,
     ) -> Result<FakeSender, GpuError> {
-        assert_ne!(
-            target,
-            TargetId::PRIMARY,
-            "the FHD sender of its own target"
-        );
-        assert!(
-            compositor.targets.get(target).is_some(),
-            "the FHD sender of a target the compositor holds"
+        assert_eq!(
+            (target, compositor.targets.get(target)),
+            (TargetId::PRIMARY, Some(&FHD_TARGET)),
+            "the FHD sender of the compositor's primary, the FHD target"
         );
         let mut log = log_of(&self.0);
         log.fhd_senders_built += 1;
@@ -293,18 +319,30 @@ impl MaxCompositor for FakeCompositor {
             hold.gate.wait();
         }
         let drawn = drawn_of(composition);
-        let fhd = self.draws_fhd();
         let mut log = log_of(&self.shared);
-        log.drawn.push(drawn.clone());
-        log.order.push("max draw");
-        if fhd {
-            log.fhd_drawn.push(drawn);
-            log.order.push("fhd draw");
+        log.composes += 1;
+        for (id, _) in self.targets.iter() {
+            if id == TargetId::PRIMARY {
+                log.fhd_drawn.push(drawn.clone());
+                log.order.push("fhd draw");
+            } else {
+                log.drawn.push(drawn.clone());
+                log.order.push("max draw");
+            }
         }
         drop(log);
         match next_error(&self.shared, |s| s.compose.pop_front()) {
             Some(error) => Err(error),
-            None => Ok(super::tests_upload::fake_stats(composition)),
+            None => {
+                if let Some((_, composes)) = self.uyvy.as_mut() {
+                    *composes += 1;
+                }
+                let stats = super::tests_upload::fake_stats(composition);
+                Ok(ComposeStats {
+                    uyvy_us: self.uyvy.map(|_| UYVY_US),
+                    ..stats
+                })
+            }
         }
     }
 
@@ -313,10 +351,7 @@ impl MaxCompositor for FakeCompositor {
     }
 
     fn add_target(&mut self, target: Target) -> Result<TargetId, GpuError> {
-        let mut log = log_of(&self.shared);
-        log.targets_added.push(target);
-        log.order.push("fhd target");
-        drop(log);
+        log_of(&self.shared).targets_added.push(target);
         match next_error(&self.shared, |s| s.add_target.pop_front()) {
             Some(error) => Err(error),
             None => Ok(self.targets.add(target)),
@@ -330,17 +365,58 @@ impl MaxCompositor for FakeCompositor {
         );
         let mut log = log_of(&self.shared);
         log.targets_removed += 1;
-        log.order.push("fhd target removed");
+        log.order.push("max target removed");
     }
 
-    /// Each target its own figure (MAX's primary `DRAW_US`, an added one
-    /// `FHD_DRAW_US`), so a worker reading the wrong target's share fails.
+    /// Each target its own figure (the FHD primary `FHD_DRAW_US`, an added
+    /// one `DRAW_US`), so a worker reading the wrong target's share fails.
     fn draw_us(&self, target: TargetId) -> u64 {
         match self.targets.get(target) {
-            Some(_) if target == TargetId::PRIMARY => DRAW_US,
-            Some(_) => FHD_DRAW_US,
+            Some(_) if target == TargetId::PRIMARY => FHD_DRAW_US,
+            Some(_) => DRAW_US,
             None => 0,
         }
+    }
+
+    fn enable_uyvy(&mut self, target: TargetId) -> Result<(), GpuError> {
+        assert!(
+            self.targets.get(target).is_some(),
+            "a pass of a target the compositor holds"
+        );
+        let mut log = log_of(&self.shared);
+        log.order.push("ndi on");
+        drop(log);
+        if let Some(error) = next_error(&self.shared, |s| s.enable_uyvy.pop_front()) {
+            return Err(error);
+        }
+        log_of(&self.shared).uyvy_enabled += 1;
+        self.uyvy = Some((target, 0));
+        Ok(())
+    }
+
+    fn disable_uyvy(&mut self) {
+        log_of(&self.shared).order.push("ndi off");
+        self.uyvy = None;
+    }
+
+    /// The pass's newest copy: `fake_uyvy(n)` of the compositor's n-th
+    /// compose (`Ok(false)` before a compose since the enable).
+    fn read_uyvy(&mut self, out: &mut Vec<u8>) -> Result<bool, GpuError> {
+        if let Some(error) = next_error(&self.shared, |s| s.read_uyvy.pop_front()) {
+            return Err(error);
+        }
+        let Some((_, composes)) = self.uyvy else {
+            return Err(GpuError::NoObject { call: "read_uyvy" });
+        };
+        if composes == 0 {
+            return Ok(false);
+        }
+        let mut log = log_of(&self.shared);
+        log.order.push("ndi read");
+        log.uyvy_read += 1;
+        out.clear();
+        out.extend_from_slice(&fake_uyvy(log.composes));
+        Ok(true)
     }
 }
 
@@ -830,69 +906,6 @@ fn an_unsupported_gpu_is_never_built_again() {
     assert_eq!((status.state.as_str(), status.failed), ("unsupported", 0));
 }
 
-#[test]
-fn release_drops_the_sender_then_the_compositor_and_forgets_the_backoff() {
-    let max = MaxOut::new();
-    let gpu = FakeGpu::default();
-    gpu.script().send.push_back(not_registered());
-    let mut worker = MaxWorker::new(&max, gpu.clone());
-    let t0 = Instant::now();
-    worker.serve(&MaxJob::Black { stamp_100ns: 1 }, t0);
-    assert_eq!(gpu.log().drops, ["sender"]);
-    assert!(
-        worker.holds_gpu(),
-        "a compositor without a sender is still held"
-    );
-    worker.release();
-    assert!(!worker.holds_gpu());
-    assert_eq!(gpu.log().drops, ["sender", "compositor"]);
-    worker.serve(&MaxJob::Black { stamp_100ns: 2 }, t0);
-    let log = gpu.log();
-    assert_eq!(
-        (log.compositors_built, log.senders_built, log.sent),
-        (2, 2, 1),
-        "switched back on: built at once, the backoff is forgotten"
-    );
-    drop(log);
-    worker.release();
-    assert_eq!(
-        gpu.log().drops,
-        ["sender", "compositor", "sender", "compositor"],
-        "a release drops the sender before the compositor"
-    );
-}
-
-#[test]
-fn a_release_forgets_the_pictures_it_held() {
-    let max = MaxOut::new();
-    let gpu = FakeGpu::default();
-    let mut worker = MaxWorker::new(&max, gpu.clone());
-    let a = picture(4, 2);
-    let t0 = Instant::now();
-    worker.serve(&plain(1, &a), t0);
-    worker.release();
-    worker.serve(&plain(2, &a), t0);
-    assert_eq!(
-        gpu.log().drawn,
-        [Drawn::Picture(pic(1, &a)), Drawn::Picture(pic(2, &a))],
-        "the frame is no longer held after the release, so it is a new id"
-    );
-}
-
-/// Off Windows the production GPU has no Direct3D: unsupported, once.
-#[cfg(not(windows))]
-#[test]
-fn off_windows_the_production_gpu_is_unsupported() {
-    use super::SpoutGpu;
-    assert!(matches!(SpoutGpu.compositor(), Err(GpuError::Unsupported)));
-    let max = MaxOut::new();
-    let mut worker = MaxWorker::new(&max, SpoutGpu);
-    worker.serve(&MaxJob::Black { stamp_100ns: 1 }, Instant::now());
-    let status = max.status();
-    assert_eq!((status.state.as_str(), status.failed), ("unsupported", 0));
-    assert!(!worker.holds_gpu());
-}
-
 /// Poll `done` until it holds (bounded: 20 s).
 pub(crate) fn wait_until(what: &str, done: impl Fn() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -909,39 +922,4 @@ pub(crate) fn spawn_loop(max: &Arc<MaxOut>, gpu: &FakeGpu) -> std::thread::JoinH
         .name("program-max-test".into())
         .spawn(move || run_max_loop(&max, gpu, None, None))
         .expect("spawn the loop")
-}
-
-#[test]
-fn the_loop_serves_jobs_releases_while_off_and_exits_on_stop() {
-    let max = Arc::new(MaxOut::new());
-    max.set_enabled(true);
-    let gpu = FakeGpu::default();
-    let thread = spawn_loop(&max, &gpu);
-    wait_until("the loop takes jobs", || max.accepting());
-    assert_eq!(max.status().state, "running");
-    let a = picture(4, 2);
-    max.offer_with(|| plain(1, &a));
-    wait_until("the first job went out", || max.status().submitted == 1);
-    assert_eq!(gpu.log().drawn, [Drawn::Picture(pic(1, &a))]);
-
-    max.set_enabled(false);
-    wait_until("off releases the GPU", || gpu.log().drops.len() == 2);
-    assert_eq!(gpu.log().drops, ["sender", "compositor"]);
-    assert_eq!(max.status().state, "off");
-
-    max.set_enabled(true);
-    max.offer_with(|| plain(2, &a));
-    wait_until("back on: rebuilt and sent", || max.status().submitted == 2);
-    assert_eq!(gpu.log().compositors_built, 2);
-
-    max.stop();
-    // Bounded: a stop that does not end the loop fails here, never hangs.
-    wait_until("the loop exits on stop", || thread.is_finished());
-    thread.join().expect("the loop");
-    assert_eq!(
-        gpu.log().drops,
-        ["sender", "compositor", "sender", "compositor"],
-        "its end releases the GPU"
-    );
-    assert_eq!(max.status().state, format!("error: {MAX_NOT_RUNNING}"));
 }

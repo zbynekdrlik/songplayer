@@ -92,26 +92,40 @@ fn black_nv12_bytes(width: u32, height: u32) -> Vec<u8> {
     data
 }
 
-/// The standby NV12 black (#147 standby same-path), cached: built once for a
-/// size and handed out by `Arc` clone (a refcount bump, no pixel copy); a
-/// different size rebuilds it once. The `SP-program` sender's submitter and
-/// every playlist pipeline's paced output (`paced_output::PipelineOutput`,
-/// #221 lane 3) keep one each.
+/// A constant picture cached for one size: built once by its maker and
+/// handed out by `Arc` clone (a refcount bump, no pixel copy); another size
+/// builds it again. #279 P1b: the NV12 standby black's cache, shared with
+/// NDI's UYVY black (`ndi_feed::BlackUyvy`).
 #[derive(Debug, Default)]
-pub struct BlackNv12(Option<(u32, u32, SharedFrame)>);
+pub struct PerSize(Option<(u32, u32, SharedFrame)>);
 
-impl BlackNv12 {
-    /// The neutral NV12 black of `width`×`height`.
-    pub fn get(&mut self, width: u32, height: u32) -> SharedFrame {
+impl PerSize {
+    /// The picture of `width`×`height`, its bytes `make`'s.
+    pub fn get(&mut self, width: u32, height: u32, make: fn(u32, u32) -> Vec<u8>) -> SharedFrame {
         if let Some((w, h, frame)) = &self.0
             && *w == width
             && *h == height
         {
             return frame.clone();
         }
-        let frame = SharedFrame::new(black_nv12_bytes(width, height));
+        let frame = SharedFrame::new(make(width, height));
         self.0 = Some((width, height, frame.clone()));
         frame
+    }
+}
+
+/// The standby NV12 black (#147 standby same-path), cached: built once for a
+/// size and handed out by `Arc` clone (a refcount bump, no pixel copy); a
+/// different size rebuilds it once. The `SP-program` sender's submitter and
+/// every playlist pipeline's paced output (`paced_output::PipelineOutput`,
+/// #221 lane 3) keep one each.
+#[derive(Debug, Default)]
+pub struct BlackNv12(PerSize);
+
+impl BlackNv12 {
+    /// The neutral NV12 black of `width`×`height`.
+    pub fn get(&mut self, width: u32, height: u32) -> SharedFrame {
+        self.0.get(width, height, black_nv12_bytes)
     }
 }
 

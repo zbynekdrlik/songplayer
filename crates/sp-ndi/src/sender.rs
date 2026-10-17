@@ -191,10 +191,7 @@ impl<B: NdiBackend> NdiSender<B> {
 
     /// Send a video frame synchronously.
     pub fn send_video(&self, frame: &VideoFrame) {
-        let four_cc = match frame.pixel_format {
-            PixelFormat::Bgra => FourCCVideoType::BGRA,
-            PixelFormat::Nv12 => FourCCVideoType::NV12,
-        };
+        let four_cc = frame.pixel_format.four_cc();
         self.backend.send_video(
             self.handle,
             four_cc,
@@ -217,10 +214,7 @@ impl<B: NdiBackend> NdiSender<B> {
     /// `send_video_flush`, or when the sender is dropped. If the buffer is
     /// freed before that point, the NDI SDK will dereference freed memory (UB).
     pub unsafe fn send_video_async(&self, frame: &VideoFrame) {
-        let four_cc = match frame.pixel_format {
-            PixelFormat::Bgra => FourCCVideoType::BGRA,
-            PixelFormat::Nv12 => FourCCVideoType::NV12,
-        };
+        let four_cc = frame.pixel_format.four_cc();
         unsafe {
             self.backend.send_video_async(
                 self.handle,
@@ -265,10 +259,7 @@ impl<B: NdiBackend> NdiSender<B> {
         timecode_100ns: Option<i64>,
         data: &[u8],
     ) {
-        let four_cc = match pixel_format {
-            PixelFormat::Bgra => FourCCVideoType::BGRA,
-            PixelFormat::Nv12 => FourCCVideoType::NV12,
-        };
+        let four_cc = pixel_format.four_cc();
         unsafe {
             self.backend.send_video_async(
                 self.handle,
@@ -468,6 +459,39 @@ mod tests {
         // It is still an async video send with the right descriptor.
         let calls = backend.calls();
         assert_eq!(calls[1], "send_video_async(42,NV12,4x2,stride=4,30/1)");
+    }
+
+    /// #279 P1b: `SP-program` from the GPU readback is UYVY (stride = width
+    /// · 2); the mock records each async send's FourCC, the last one.
+    #[test]
+    fn send_video_async_slice_tells_ndi_the_uyvy_fourcc() {
+        let uyvy = [16u8; 4 * 2 * 2];
+        let nv12 = [0u8; 4 * 2 * 3 / 2];
+        let backend = Arc::new(MockNdiBackend::new());
+        let sender = NdiSender::new_with_clocking(backend.clone(), "U", false, false).unwrap();
+        assert_eq!(backend.last_async_video_fourcc(), None, "no async send yet");
+        // SAFETY: `uyvy` and `nv12` are declared before the sender, so they
+        // outlive its drop flush.
+        unsafe {
+            sender.send_video_async_slice(4, 2, 8, 30, 1, PixelFormat::Uyvy, None, &uyvy[..]);
+        }
+        assert_eq!(
+            backend.last_async_video_fourcc(),
+            Some(FourCCVideoType::UYVY)
+        );
+        assert_eq!(
+            backend.calls()[1],
+            "send_video_async(42,UYVY,4x2,stride=8,30/1)"
+        );
+        // SAFETY: as above.
+        unsafe {
+            sender.send_video_async_slice(4, 2, 4, 30, 1, PixelFormat::Nv12, None, &nv12[..]);
+        }
+        assert_eq!(
+            backend.last_async_video_fourcc(),
+            Some(FourCCVideoType::NV12),
+            "the LAST send's FourCC"
+        );
     }
 
     #[test]
