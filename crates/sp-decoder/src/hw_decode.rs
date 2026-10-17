@@ -708,10 +708,13 @@ fn gcd(mut a: u128, mut b: u128) -> u128 {
 /// `native_par` (`MF_MT_PIXEL_ASPECT_RATIO`; none or a zero term = square
 /// pixels) shown at the `scaled` size, reduced. The nearest-even rounding
 /// of [`scaled_size`] leaves the scaled size a fraction of a pixel off the
-/// native aspect (3840×1606 → 1920×804: 804:803), and a video processor
-/// that keeps the display aspect would letterbox that fraction into a
-/// one-pixel black edge; with this ratio it fills the whole frame (the
-/// stretch, 0.1 %, is invisible). `None` when a size is 0 or a reduced
+/// native aspect (3840×1606 → 1920×804: 804:803); this ratio states the
+/// picture's true pixel aspect at that size (the stretch, 0.1 %, is
+/// invisible). It is not what fills the frame: Windows' source reader
+/// ignores an output type's pixel aspect under advanced video processing
+/// (Wine's Windows-run `test_source_reader_aspect_ratio`, `.not_present` on Windows),
+/// the explicit `MF_MT_FRAME_SIZE` governs, and the CI test's 66×50 edge
+/// bands prove the picture fills it. `None` when a size is 0 or a reduced
 /// term does not fit a `u32` (the type then carries no ratio).
 pub fn scaled_pixel_aspect(
     native: (u32, u32),

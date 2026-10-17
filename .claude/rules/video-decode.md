@@ -140,10 +140,15 @@ rounds 1–2):
   all carry the smaller picture. In software it scales on the CPU.
 - **The scaled output type** (`mf_scaled::ScaledType::apply`) carries:
   - `MF_MT_FRAME_SIZE` = the scaled size;
-  - `MF_MT_PIXEL_ASPECT_RATIO` = `hw_decode::scaled_pixel_aspect`. This
-    keeps the native display aspect exactly (3840×1606 → 1920×804 is
-    804:803), so a processor that keeps the aspect letterboxes no one-pixel
-    edge;
+  - `MF_MT_PIXEL_ASPECT_RATIO` = `hw_decode::scaled_pixel_aspect`, the
+    native display aspect kept exactly (3840×1606 → 1920×804 is 804:803).
+    Windows' source reader IGNORES an output type's pixel aspect under
+    advanced video processing (Wine's Windows-run `test_source_reader_aspect_ratio` in
+    `dlls/mfreadwrite/tests/mfplat.c`: "Aspect ratio in output type is
+    ignored", `.not_present` in the current type; with no frame size the
+    reader rescales by the INPUT's aspect, with one the frame size wins).
+    So the explicit `MF_MT_FRAME_SIZE` is what fills the frame, as the CI
+    test's 66×50 edge bands prove; the ratio is harmless and kept;
   - the native type's `MF_MT_YUV_MATRIX` and `MF_MT_VIDEO_NOMINAL_RANGE`
     when it has them. The processor then converts no colour; a size-based
     default, e.g. BT.601 for an SD output, would shift the hues the
@@ -206,9 +211,11 @@ rounds 1–2):
     nominal range (`MF_MT_YUV_MATRIX`: 1 = BT.709, 2 = BT.601;
     `MF_MT_VIDEO_NOMINAL_RANGE`: 1 = full, 2 = 16..235) of the native type
     (put on the scaled type), the negotiated scaled type and the
-    decoder's output. `colour_out` carries each value the native type
-    states (ours, `ScaledType::apply`; the CI test asserts it where the
-    native type states one, which the CI fixture does not). Only two
+    decoder's output. Whether `colour_out` keeps each value the native
+    type states (ours, `ScaledType::apply`) is NOT proven: the reader drops
+    an output pixel aspect (above), so it may drop these too. The CI test
+    fails only on a stated, unequal value, and the CI fixture most likely
+    states none. Only two
     STATED, unequal values of `colour_out` and `colour_decoder` suggest a
     conversion; an unstated (`None`) side says nothing (the processor then
     takes some default of its own: reasoned, not measured). The proof
@@ -309,20 +316,21 @@ rounds 1–2):
 
   Each scaled open writes to stderr (the CI log) what MF negotiated and
   its whole `ScaledOpenFacts`, and after the first picture the decoder's
-  output at the open and at the first picture. Every scaled open asserts
-  the chain is the decoder at index 0 and a transform (not an `Error`)
-  after it, the decoder's output read (`scaled_decoder_output()` Some),
-  and each native colour value stated again on the negotiated type (the
-  CI fixture states none: no VUI signal type, no `colr` box, so this is
-  most likely vacuous there). The tests that decode from the first
+  output at the open and at the first picture. Every scaled open made
+  through the `open_scaled` helper asserts the chain is the decoder at
+  index 0 and a transform (not an `Error`) after it, the decoder's output
+  read (`scaled_decoder_output()` Some), and no colour value on the
+  negotiated type OTHER than the native type's (the CI fixture most
+  likely states none: no VUI signal type, no `colr` box, so this is most
+  likely vacuous there). The tests that decode from the first
   picture (cap 60, cap 50, the seek, the reopen's second open) also
   assert the re-read (`Some(Ok)`) and that the padding check ran.
   `the_first_picture_shows_no_decoder_padding_in_reach` alone pins
   `first_picture_padding_in_reach` `Some(false)`. The fixture fills its
   frame, so this pins that the check reads the stream's own size. Its
   premise (the decoder shows its crop as `MF_MT_MINIMUM_DISPLAY_APERTURE`
-  or no padding at all; Wine's H.264 decoder tests) is proven by its
-  first CI run. Evidence for the chain's shape: Microsoft
+  or no padding at all; Wine's H.264 decoder tests) is proven only once
+  its first CI run passes. Evidence for the chain's shape: Microsoft
   (a decoder at index 0) and Wine's conformance tests, which run against
   Windows (`dlls/mfreadwrite/tests/mfplat.c`: "the video processor can be
   accessed at index 1 with MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING",

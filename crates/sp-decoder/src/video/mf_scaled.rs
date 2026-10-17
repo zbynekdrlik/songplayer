@@ -7,8 +7,9 @@
 //! `mf_reader.rs` for the 1000-line cap; the reader's own scaled half is
 //! `mf_reader_scaled.rs`.
 //!
-//! The output type (`apply`) carries the scaled size, the pixel aspect that
-//! keeps the native display aspect (`hw_decode::scaled_pixel_aspect`), and
+//! The output type (`apply`) carries the scaled size, the picture's pixel
+//! aspect (`hw_decode::scaled_pixel_aspect`; Windows' reader ignores an
+//! output type's pixel aspect, the frame size governs), and
 //! the native type's YUV matrix and nominal range when it has them (so the
 //! video processor converts no colour: a size-based default, e.g. BT.601
 //! for an SD output, would shift the hues the compositor reads as BT.709).
@@ -84,7 +85,7 @@ pub(super) struct ScaledType {
     /// `hw_decode::scaled_size`.
     pub(super) size: (u32, u32),
     /// `hw_decode::scaled_pixel_aspect`: the native display aspect, kept
-    /// exactly.
+    /// exactly (stated on the type; Windows' reader ignores it).
     pub(super) pixel_aspect: Option<(u32, u32)>,
     /// The native type's colour description, put on the output type.
     pub(super) colour: Colour,

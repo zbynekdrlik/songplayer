@@ -6,8 +6,9 @@
 //! processor's scale is proven on the box only. What runs here is the same
 //! open — a first source reader read for the stream's own size, then a
 //! second one with `MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING` and
-//! the NV12 output type's `MF_MT_FRAME_SIZE` (+ the pixel aspect that keeps
-//! the display aspect and the native colour description; no frame rate) —
+//! the NV12 output type's `MF_MT_FRAME_SIZE` (+ the picture's pixel aspect,
+//! which Windows' reader ignores, and the native colour description; no
+//! frame rate) —
 //! with Media Foundation's video processor scaling on the CPU.
 //!
 //! The picture checks compare the scaled picture with the unscaled one by
@@ -36,14 +37,18 @@
 //! and at the first picture, the native geometric aperture and the colour
 //! descriptions. It then asserts the chain is the decoder followed by
 //! another transform (the video processor), the decoder's output was read
-//! and each colour value the native type states is on the negotiated
-//! scaled type (`GetCurrentMediaType` keeps what was set: Wine's
-//! Windows-run conformance tests; the fixture has no colour description,
-//! no VUI signal type and no `colr` box, so on it this is most likely
-//! vacuous until a CI log shows a stated `native_colour`). The tests that
+//! and the negotiated scaled type states no colour value OTHER than the
+//! native type's (a stated, unequal value would be a conversion). Whether
+//! `GetCurrentMediaType` keeps the matrix and range that were set is not
+//! proven: Wine's Windows-run `test_source_reader_aspect_ratio` shows the reader drops an output
+//! type's pixel aspect, so an unstated value passes. The fixture has no
+//! colour description (no VUI signal type, no `colr` box), so on it this is
+//! most likely vacuous until a CI log shows a stated `native_colour`. The
+//! tests that
 //! decode from the first picture also assert the decoder's output was read
-//! again there. Two runner premises only their first CI run proves sit in
-//! their own tests, so a runner that disagrees fails there alone:
+//! again there. Two runner premises, proven only once their first CI run
+//! passes, sit in their own tests, so a runner that disagrees fails there
+//! alone:
 //! `a_scaled_open_lists_the_video_processor_in_its_chain` (the processor's
 //! category) and `the_first_picture_shows_no_decoder_padding_in_reach`
 //! (the decoder's crop shown as `MF_MT_MINIMUM_DISPLAY_APERTURE`).
@@ -181,7 +186,8 @@ fn unscaled() -> (MediaFoundationVideoReader, Vec<DecodedVideoFrame>) {
 /// what the scaled open read (`ScaledOpenFacts`) straight to stderr (past
 /// libtest's capture), so every CI log shows it, then asserts the chain is
 /// the decoder and a transform after it, the decoder's output was read,
-/// and each stated native colour value is on the negotiated type.
+/// and the negotiated type states no colour value other than the native
+/// type's.
 fn open_scaled(
     cap: u32,
     size: (u32, u32),
@@ -247,20 +253,22 @@ fn open_scaled(
         facts.chain
     );
     // `ScaledType::apply` puts each colour value the native type states on
-    // the scaled type, so the processor converts no colour.
+    // the scaled type. Whether the reader's current type keeps it is not
+    // proven (it drops an output pixel aspect), so only a STATED, unequal
+    // value fails: that would be a colour conversion.
     let out = facts.out_colour;
     if let Some(matrix) = facts.native_colour.matrix {
-        assert_eq!(
-            out.and_then(|c| c.matrix),
-            Some(matrix),
-            "cap {cap}: the native YUV matrix on the scaled type"
+        let stated = out.and_then(|c| c.matrix);
+        assert!(
+            stated.is_none_or(|m| m == matrix),
+            "cap {cap}: the scaled type states the YUV matrix {stated:?}, the native {matrix}"
         );
     }
     if let Some(range) = facts.native_colour.range {
-        assert_eq!(
-            out.and_then(|c| c.range),
-            Some(range),
-            "cap {cap}: the native nominal range on the scaled type"
+        let stated = out.and_then(|c| c.range);
+        assert!(
+            stated.is_none_or(|r| r == range),
+            "cap {cap}: the scaled type states the nominal range {stated:?}, the native {range}"
         );
     }
     assert!(
@@ -403,7 +411,10 @@ fn a_cap_smaller_than_the_picture_hands_every_picture_over_scaled() {
 
 /// A cap of 50 rows: the box is 88×50, the picture is decoded at 66×50, a
 /// fraction of a pixel off the native aspect (pixel aspect 100:99): the
-/// picture must still fill the frame (no letterboxed edge).
+/// picture must still fill the frame (no letterboxed edge). This is what
+/// proves the fill: Windows' reader ignores the output type's pixel aspect
+/// (Wine's Windows-run `test_source_reader_aspect_ratio`), so the explicit frame size
+/// governs.
 #[test]
 fn an_inexact_ratio_fills_the_whole_frame() {
     let _alone = counters_alone();
@@ -531,8 +542,9 @@ fn a_scaled_open_lists_the_video_processor_in_its_chain() {
 /// (160x120), never the scaled one (80x60: "padded" on every file). Its
 /// premise, that the decoder shows its crop (coded 160x128) as
 /// `MF_MT_MINIMUM_DISPLAY_APERTURE` (Wine's H.264 decoder tests, run
-/// against Windows) or shows no padding at all, is proven by its first CI
-/// run; a runner that shows the crop another way fails here alone.
+/// against Windows) or shows no padding at all, is proven only once its
+/// first CI run passes; a runner that shows the crop another way fails
+/// here alone.
 #[test]
 fn the_first_picture_shows_no_decoder_padding_in_reach() {
     let _alone = counters_alone();
