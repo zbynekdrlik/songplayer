@@ -105,8 +105,8 @@ pub async fn load_hw_decode(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
 /// #282: the decode cap from the stored `max_resolution` and `hw`
 /// (`video_hw_decode`): the download's own rule.
 pub async fn load_max_height(pool: &SqlitePool, hw: bool) -> Result<u32, sqlx::Error> {
-    let _raw = crate::db::models::get_setting(pool, SETTING_MAX_RESOLUTION).await?;
-    Ok(max_resolution(None, hw))
+    let raw = crate::db::models::get_setting(pool, SETTING_MAX_RESOLUTION).await?;
+    Ok(max_resolution(raw.as_deref(), hw))
 }
 
 /// `video_hw_decode` and the decode cap it gives `max_resolution`.
