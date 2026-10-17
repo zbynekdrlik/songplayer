@@ -13,6 +13,8 @@
 
 use std::collections::HashMap;
 
+use tracing::warn;
+
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Graphics::Direct3D11::{
     ID3D11Device, ID3D11Device1, ID3D11ShaderResourceView, ID3D11Texture2D,
@@ -83,8 +85,10 @@ impl Drop for Held {
     fn drop(&mut self) {
         for held in &self.0 {
             // SAFETY: the mutex was acquired by this compose with key 1. A
-            // failed release leaves the key held: the writer's bounded
-            // acquire then kills the ring (`ring_state::writer_step`).
+            // failed release (a device reset mid-compose) leaves the key
+            // held, abandoned once the compositor is dropped: the next
+            // acquire of it, the writer's or the rebuilt compositor's,
+            // kills the ring (`ring_state::writer_step`, `slot_draw`).
             let _ = unsafe { held.mutex.ReleaseSync(KEY_CONSUMER) };
         }
     }
@@ -142,7 +146,11 @@ impl RingSlots {
                 SlotDraw::KillRing => {
                     self.keys.forget(key);
                     self.opened.remove(&key);
-                    frame.kill_ring(why_killed(open));
+                    let hresult = match open {
+                        SlotOpen::Acquired(answer) => Some(answer.hresult()),
+                        _ => None,
+                    };
+                    frame.kill_ring(why_killed(open), hresult);
                 }
                 SlotDraw::DeviceLost => {
                     return Err(GpuError::removed(removed.unwrap_or_default()));
@@ -169,7 +177,8 @@ impl RingSlots {
                     self.opened.insert(key, opened);
                     stats.gpu_opens += 1;
                 }
-                Err(_) => {
+                Err(error) => {
+                    warn!(%error, ?key, "sp-gpu: a ring slot did not open on the compositor");
                     self.keys.forget(key);
                     return SlotOpen::Failed;
                 }

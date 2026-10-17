@@ -1910,12 +1910,15 @@ behaviour change).
     slot's allocation) and `stale_texture` (a slot emptied or made again);
   - the compositor: `slot_draw(SlotOpen, device_removed)` → `Draw` (held),
     `Black` (busy), `Gone` (a dead ring's slot: black, closed), `KillRing`
-    (abandoned: the
-    producer's device lost; a failed acquire or open on a HEALTHY
-    compositor), `DeviceLost` (a failed acquire or open while the
-    compositor's own device is removed, read only then: the compose
-    fails, the compositor is rebuilt, the ring lives on), `why_killed`
-    for the kill's WARN; and `OpenedKeys` (a slot opened once per
+    (abandoned: a device was lost holding the key, the producer's or the
+    compositor's own before its rebuild — a compose cut short by a GPU
+    reset leaves the keys it held abandoned; the design's rule, P4
+    decides whether such a slot is made again instead; or a failed
+    acquire or open on a HEALTHY compositor), `DeviceLost` (a failed
+    acquire or open while the compositor's own device is removed, read
+    only then: the compose fails, the compositor is rebuilt), `why_killed`
+    for the kill's WARN (with `Acquired::hresult`, the raw HRESULT; a
+    failed open WARNs its error first); and `OpenedKeys` (a slot opened once per
     `SlotKey {ring, slot, alloc_gen}`, an older allocation of the same
     slot closed the moment the new one is drawn, at most `OPENED_MAX` =
     40 = 2 × `RING_CAPACITY` open, the least recently drawn closed first,
@@ -1927,8 +1930,8 @@ behaviour change).
   waits while every slot is in use (`wait_timeout_while(!has_room)`,
   `RING_WAIT` = 100 ms, counted `waits`), then `GpuError::RingFull
   {waited_ms}` (counted `full`); a dead ring is `RingDead` and wakes its
-  waiter; its first kill WARNs once with why (`RingCore::kill`, from the
-  writer or `GpuFrame::kill_ring`). `hand_over` marks the slot written and
+  waiter; its first kill WARNs once with why and the HRESULT that told it
+  (`RingCore::kill`, from the writer or `GpuFrame::kill_ring`). `hand_over` marks the slot written and
   makes the
   `GpuFrame(Arc<FrameInner>)`: a process-wide id (never reused: MAX's
   label), the picture's size, its slot texture's even size, `key()`, a
@@ -1995,7 +1998,9 @@ behaviour change).
   `tests/ring.rs` (its NV12 sources shader-resource bound, the texture
   P0 proved on WARP): a slot written on one device drawn on another
   within S1a's reference, opened once and uploading nothing; slice 2 of
-  a 4-slice 640×368 array; a fade of an upload and a slot, and of two
+  a 4-slice 640×368 array (an NV12 ARRAY with initial data and a boxed
+  copy out of a slice are WARP premises P0 did not prove: a refusal
+  fails that test, never skips it — read the Build (Windows) log); a fade of an upload and a slot, and of two
   slots; a slot held by a third device drawn black and counted, then
   drawn; a full ring's `RingFull` then a reuse; a new size written over
   a free slot of the other (made again, drawn); the refusals; an odd

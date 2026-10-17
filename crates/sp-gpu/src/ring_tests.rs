@@ -152,8 +152,8 @@ fn a_dead_ring_refuses_writes_and_wakes_its_writer() {
         })
     };
     assert!(done_rx.recv_timeout(Duration::from_millis(200)).is_err());
-    assert!(held.kill_ring("a test"), "its first kill");
-    assert!(!held.kill_ring("a test"), "already dead");
+    assert!(held.kill_ring("a test", Some(0x80)), "its first kill");
+    assert!(!held.kill_ring("a test", None), "already dead");
     assert_eq!(
         done_rx
             .recv_timeout(LONG)

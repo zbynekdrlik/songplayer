@@ -43,12 +43,15 @@
 //!   [`WRITER_ACQUIRE_MS`], and any answer but held kills the ring
 //!   ([`writer_step`]).
 //! - **A lost device.** On the compositor's side ([`slot_draw`]): a slot
-//!   whose mutex answers `WAIT_ABANDONED` (the producer's device was lost
-//!   holding it) kills its ring; an acquire or an open that fails kills it
-//!   too while the compositor's own device is healthy, and is the
-//!   compositor's own lost device otherwise (the compose fails, the
-//!   compositor is rebuilt, the ring lives on). A dead ring's pictures are
-//!   drawn black and counted, and its next write fails with
+//!   whose mutex answers `WAIT_ABANDONED` kills its ring (the design's
+//!   rule): a device was lost holding its key, the producer's, or the
+//!   compositor's own before its rebuild (a compose cut short by a GPU
+//!   reset leaves the keys it held abandoned), and the slot's content is
+//!   undefined. An acquire or an open that FAILS kills the ring while the
+//!   compositor's own device is healthy, and is the compositor's own lost
+//!   device otherwise (the compose fails, the compositor is rebuilt, the
+//!   ring lives on). A dead ring's pictures are drawn black and counted,
+//!   and its next write fails with
 //!   [`GpuError::RingDead`](crate::GpuError::RingDead), so the reader goes
 //!   on in software.
 //! - **The compositor's open slots** ([`OpenedKeys`]). It opens a slot's
@@ -154,8 +157,9 @@ pub enum Acquired {
     /// `WAIT_TIMEOUT`: another side holds it (the compositor's 0 ms acquire
     /// of a slot the writer still writes: the picture is not ready).
     Busy,
-    /// `WAIT_ABANDONED`: the other side's device was lost holding it; the
-    /// texture's content is undefined.
+    /// `WAIT_ABANDONED`: a device was lost holding it (the other side's,
+    /// or the compositor's own before its rebuild); the texture's content
+    /// is undefined.
     Abandoned,
     /// Any other HRESULT: the acquire failed.
     Failed(u32),
@@ -171,17 +175,28 @@ impl Acquired {
             other => Acquired::Failed(other),
         }
     }
+
+    /// The raw HRESULT the answer was read from ([`of`](Self::of) back):
+    /// what a ring's death WARN names.
+    pub fn hresult(self) -> u32 {
+        match self {
+            Acquired::Held => S_OK,
+            Acquired::Busy => WAIT_TIMEOUT,
+            Acquired::Abandoned => WAIT_ABANDONED,
+            Acquired::Failed(hresult) => hresult,
+        }
+    }
 }
 
 /// What a writer does with its slot's acquire answer: write on a held key;
 /// anything else kills the ring, with why (a free slot's key is never the
-/// compositor's: busy is a broken protocol, abandoned the compositor's
-/// device lost holding it, failed the writer's own call).
+/// compositor's: busy is a broken protocol, abandoned a device lost
+/// holding it, failed the writer's own call).
 pub fn writer_step(acquired: Acquired) -> Result<(), &'static str> {
     match acquired {
         Acquired::Held => Ok(()),
         Acquired::Busy => Err("the writer found its free slot's key held (a broken protocol)"),
-        Acquired::Abandoned => Err("the compositor's device was lost holding a free slot's key"),
+        Acquired::Abandoned => Err("a device was lost holding a free slot's key (WAIT_ABANDONED)"),
         Acquired::Failed(_) => Err("the writer's acquire of a free slot failed"),
     }
 }
@@ -240,7 +255,7 @@ pub fn slot_draw(open: SlotOpen, device_removed: impl FnOnce() -> bool) -> SlotD
 pub fn why_killed(open: SlotOpen) -> &'static str {
     match open {
         SlotOpen::Acquired(Acquired::Abandoned) => {
-            "the producer's device was lost holding a slot (WAIT_ABANDONED)"
+            "a device was lost holding a slot's key (WAIT_ABANDONED)"
         }
         SlotOpen::Failed => "the compositor could not open a slot",
         _ => "the compositor's acquire of a slot failed",

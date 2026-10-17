@@ -111,6 +111,13 @@ fn an_acquire_is_read_from_its_raw_hresult() {
 }
 
 #[test]
+fn an_answer_names_the_hresult_it_was_read_from() {
+    for hresult in [0, 0x102, 0x80, 0x887A_0005, 1] {
+        assert_eq!(Acquired::of(hresult).hresult(), hresult);
+    }
+}
+
+#[test]
 fn a_writer_writes_only_on_a_held_key_and_kills_the_ring_on_any_other() {
     assert_eq!(writer_step(Acquired::Held), Ok(()));
     let whys = [

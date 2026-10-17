@@ -152,14 +152,17 @@ impl RingCore {
 
     /// Kill the ring: every later write is [`GpuError::RingDead`]; a
     /// waiting writer wakes to see it. Its first kill is logged once, with
-    /// `why`; whether this call killed it.
-    pub(crate) fn kill(&self, why: &'static str) -> bool {
+    /// `why` and the `hresult` that told it, if any; whether this call
+    /// killed it.
+    pub(crate) fn kill(&self, why: &'static str, hresult: Option<u32>) -> bool {
         let first = self.lock().kill();
         self.freed.notify_all();
         if first {
+            let hresult = hresult.map(|h| format!("{h:#010x}")).unwrap_or_default();
             warn!(
                 ring = self.id,
                 why,
+                hresult = %hresult,
                 "sp-gpu: a picture ring died: its pipeline decodes in software from here (#279)"
             );
         }
@@ -198,8 +201,8 @@ pub(crate) struct Written {
     pub class: SizeClass,
     /// The picture's own size, inside the slot's (even) texture.
     pub size: (u32, u32),
-    /// The slot texture's NT handle (the compositor opens it), `0` on the
-    /// fake ring.
+    /// The slot texture's NT handle (the compositor opens it);
+    /// `FAKE_HANDLE_BASE + 4·(slot + 1)` on the fake ring.
     pub handle: isize,
     /// Kept alive while a frame refers to the slot: on Windows the NT
     /// handle, so the compositor can open it whatever the ring does.
@@ -300,10 +303,10 @@ impl GpuFrame {
     /// The compositor found the slot's producer device lost (its mutex
     /// abandoned), or the slot failed on a healthy compositor
     /// (`ring_state::slot_draw`): the ring dies, and its writer goes on in
-    /// software. `why` goes into the ring's one WARN; whether this call
-    /// killed it.
-    pub fn kill_ring(&self, why: &'static str) -> bool {
-        self.0.core.kill(why)
+    /// software. `why` and the `hresult` that told it go into the ring's
+    /// one WARN; whether this call killed it.
+    pub fn kill_ring(&self, why: &'static str, hresult: Option<u32>) -> bool {
+        self.0.core.kill(why, hresult)
     }
 
     /// Whether the frame's ring is dead.
@@ -387,7 +390,7 @@ impl FakeRing {
     /// Kill the ring (a test of the writer's or the compositor's answer to
     /// a lost device); whether this call killed it.
     pub fn kill(&self) -> bool {
-        self.core.kill("a test killed the fake ring")
+        self.core.kill("a test killed the fake ring", None)
     }
 }
 

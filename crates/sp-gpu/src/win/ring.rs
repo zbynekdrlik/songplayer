@@ -107,9 +107,10 @@ impl PictureRing {
     /// updated on one device must be flushed there), release key 1. While
     /// every slot is in use the write waits for a frame to drop, at most
     /// `RING_WAIT` ([`GpuError::RingFull`]). A slot whose key the writer
-    /// does not get within `WRITER_ACQUIRE_MS` (`ring_state::writer_step`),
-    /// or whose release fails, kills the ring ([`GpuError::RingDead`]); the
-    /// reader then goes on in software.
+    /// does not get within `WRITER_ACQUIRE_MS` (`ring_state::writer_step`:
+    /// [`GpuError::RingDead`]), or whose release fails (that call's error),
+    /// kills the ring: every later write is `RingDead`, and the reader goes
+    /// on in software.
     pub fn copy_from(
         &mut self,
         source: &ID3D11Texture2D,
@@ -170,7 +171,7 @@ impl PictureRing {
         let slot = self.textures[taken.slot].as_ref().ok_or(NO_SLOT_TEXTURE)?;
         let answer = Acquired::of(acquire(&slot.mutex, taken.key, WRITER_ACQUIRE_MS));
         if let Err(why) = writer_step(answer) {
-            self.core.kill(why);
+            self.core.kill(why, Some(answer.hresult()));
             return Err(GpuError::RingDead);
         }
         let region = D3D11_BOX {
@@ -198,7 +199,10 @@ impl PictureRing {
             self.context.Flush();
         }
         if let Err(e) = unsafe { slot.mutex.ReleaseSync(KEY_CONSUMER) } {
-            self.core.kill("the writer's release of a slot failed");
+            self.core.kill(
+                "the writer's release of a slot failed",
+                Some(e.code().0 as u32),
+            );
             return Err(failed(
                 "IDXGIKeyedMutex::ReleaseSync (a ring slot, the writer)",
                 &e,

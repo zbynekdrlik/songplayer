@@ -134,6 +134,8 @@ pub use picture::{MAX_PICTURE_SIDE, Nv12Picture, PictureError, Plane, Planes};
 pub use quad::{QUAD_CONSTANTS_BYTES, QuadConstants, ndc_rect, uv_in_texture, uv_rect};
 pub use readback::{mapped_len, unpad_rows, unpad_rows_into};
 pub use residency::{Resident, Upload, swap_slots, upload_for};
+#[doc(hidden)]
+pub use ring::FAKE_HANDLE_BASE;
 pub use ring::{FakeRing, GpuFrame, RingStats};
 pub use ring_state::{RING_CAPACITY, RING_WAIT, RingFormat, SizeClass, SlotKey};
 pub use spout::{

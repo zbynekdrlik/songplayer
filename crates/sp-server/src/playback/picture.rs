@@ -16,8 +16,9 @@
 //! a MISS ([`Picture::cpu_for`]): counted by the consumer
 //! ([`CpuMisses`]), WARNed at most once a minute with the count, and the
 //! consumer shows black (the canvas) or no picture (the preview), never a
-//! panic. P3a / P3b give them their GPU paths (and put the counts on the
-//! API with the ring's telemetry).
+//! panic. The preview gets its GPU path in P3b; the canvas never does (NDI
+//! takes the compositor's readback since P1b, and P5 deletes the canvas),
+//! so a GPU picture there stays black (#279: a P3a precondition).
 
 use std::fmt;
 
