@@ -634,13 +634,55 @@ pub fn padding_reaches_processor(
     native: (u32, u32),
 ) -> bool {
     let padded = decoded.0 > native.0 || decoded.1 > native.1;
-    let cropped = aperture.is_some_and(|area| {
+    padded && !aperture_is(aperture, native)
+}
+
+/// Whether `aperture` is exactly the `native` picture at the origin.
+fn aperture_is(aperture: Option<VideoArea>, native: (u32, u32)) -> bool {
+    aperture.is_some_and(|area| {
         area.x == 0
             && area.y == 0
             && i64::from(area.width) == i64::from(native.0)
             && i64::from(area.height) == i64::from(native.1)
-    });
-    padded && !cropped
+    })
+}
+
+/// NVDEC pads its surfaces and output types to whole 16-pixel blocks
+/// (1080 → 1088, 858 → 864, 1350 → 1360 on SNV; 1440 / 1280 / 720 never).
+const DECODER_BLOCK: u32 = 2;
+
+/// #282 (review round 3): whether a scaled open may go on, judged at its
+/// open from what the decoder hands the video processor (`decoder`: its
+/// output type's size and display aperture; `None` when the source
+/// reader's chain could not be read).
+///
+/// - The decoder's padding in reach of the processor
+///   ([`padding_reaches_processor`]): refused.
+/// - On the D3D11 path the decoder may only learn its padded size at the
+///   first frame, after this check (a VP9 / AV1 sample entry carries no
+///   frame header), so a stream whose size is not whole 16-pixel blocks is
+///   scaled only when the decoder has already shown the native aperture;
+///   one in whole blocks (3840×2160, 2560×1440, 4096×2160) cannot be
+///   padded.
+/// - In software Media Foundation's decoders hand over the stream's own
+///   size (the CI fixture: 160×120 coded 160×128), so only the padding seen
+///   at open refuses.
+///
+/// A refusal plays the file at its own size: never a green strip.
+pub fn scaled_open_safe(
+    native: (u32, u32),
+    decoder: Option<((u32, u32), Option<VideoArea>)>,
+    on_d3d: bool,
+) -> bool {
+    let whole_blocks =
+        native.0.is_multiple_of(DECODER_BLOCK) && native.1.is_multiple_of(DECODER_BLOCK);
+    match decoder {
+        Some((size, aperture)) => {
+            !padding_reaches_processor(size, aperture, native)
+                && (!on_d3d || whole_blocks || aperture_is(aperture, native))
+        }
+        None => !on_d3d || whole_blocks,
+    }
 }
 
 /// `a` and `b`'s greatest common divisor (`a` when `b` is 0).

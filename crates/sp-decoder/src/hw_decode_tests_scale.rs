@@ -8,8 +8,8 @@
 
 use super::{
     D3D11_BIND_DECODER, DecodePath, VideoArea, decode_box, decoder_path_visible,
-    padding_reaches_processor, scale_took, scaled_frame_rate, scaled_pixel_aspect, scaled_size,
-    video_area, visible_reference,
+    padding_reaches_processor, scale_took, scaled_frame_rate, scaled_open_safe,
+    scaled_pixel_aspect, scaled_size, video_area, visible_reference,
 };
 
 /// One cap's box: (cap, (width, height)).
@@ -359,6 +359,100 @@ fn a_padded_decoder_picture_is_scaled_only_with_its_aperture() {
         assert!(
             padding_reaches_processor((3840, 1616), Some(wrong), native),
             "{wrong:?}"
+        );
+    }
+}
+
+/// One scaled open's safety: (native, the decoder's output at open, on
+/// the D3D11 path, may go on).
+type SafeCase = (
+    (u32, u32),
+    Option<((u32, u32), Option<VideoArea>)>,
+    bool,
+    bool,
+);
+
+/// Review round 3: the decoder check runs at open, and on the D3D11 path
+/// NVDEC may pad at the first frame, after it: a stream that is not whole
+/// 16-pixel blocks is scaled there only once the decoder has shown the
+/// native aperture; an unreadable chain refuses it too.
+#[test]
+fn a_scaled_open_goes_on_only_where_no_padding_can_reach_the_processor() {
+    let exact = Some(VideoArea {
+        x: 0,
+        y: 0,
+        width: 3840,
+        height: 1606,
+    });
+    let off = |x: i16, y: i16, width: i32, height: i32| {
+        Some(VideoArea {
+            x,
+            y,
+            width,
+            height,
+        })
+    };
+    let cases: [SafeCase; 22] = [
+        // The D3D11 path, the chain unreadable: whole blocks only.
+        ((3840, 2160), None, true, true),
+        ((3840, 1606), None, true, false),
+        ((3848, 1600), None, true, false),
+        // Software, the chain unreadable: Media Foundation's software
+        // decoders hand over the stream's own size.
+        ((3840, 1606), None, false, true),
+        // The D3D11 path, read: whole blocks, or the aperture shown.
+        ((3840, 2160), Some(((3840, 2160), None)), true, true),
+        ((3840, 1606), Some(((3840, 1606), None)), true, false),
+        ((3840, 1606), Some(((3840, 1616), exact)), true, true),
+        ((3840, 1606), Some(((3840, 1606), exact)), true, true),
+        ((3840, 1606), Some(((3840, 1616), None)), true, false),
+        ((3848, 1600), Some(((3848, 1600), None)), true, false),
+        (
+            (3840, 1606),
+            Some(((3840, 1616), off(2, 0, 3840, 1606))),
+            true,
+            false,
+        ),
+        (
+            (3840, 1606),
+            Some(((3840, 1616), off(0, 2, 3840, 1606))),
+            true,
+            false,
+        ),
+        (
+            (3840, 1606),
+            Some(((3840, 1616), off(0, 0, 3830, 1606))),
+            true,
+            false,
+        ),
+        (
+            (3840, 1606),
+            Some(((3840, 1616), off(0, 0, 3840, 1600))),
+            true,
+            false,
+        ),
+        ((3840, 1606), Some(((3856, 1606), None)), true, false),
+        // Whole blocks, yet padded at open with no aperture: refused.
+        ((3840, 2160), Some(((3840, 2176), None)), true, false),
+        // Software, read: only the padding seen at open refuses.
+        ((3840, 1606), Some(((3840, 1616), None)), false, false),
+        ((3840, 1606), Some(((3856, 1606), None)), false, false),
+        ((3840, 1606), Some(((3840, 1606), None)), false, true),
+        // The CI fixture (160x120, coded 160x128).
+        ((160, 120), Some(((160, 120), None)), false, true),
+        (
+            (160, 120),
+            Some(((160, 128), off(0, 0, 160, 120))),
+            false,
+            true,
+        ),
+        ((160, 120), Some(((160, 128), None)), false, false),
+    ];
+    for (native, decoder, on_d3d, safe) in cases {
+        assert_eq!(
+            scaled_open_safe(native, decoder, on_d3d),
+            safe,
+            "{native:?} with {decoder:?}, d3d {on_d3d}"
         );
     }
 }
