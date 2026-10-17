@@ -9,7 +9,8 @@ use super::{
     Acquired, KEY_CONSUMER, KEY_PRODUCER, MAX_SIZE_CLASSES, OPENED_IDLE_COMPOSES, OPENED_MAX,
     OpenedKeys, RING_CAPACITY, RING_WAIT, Release, RingFormat, RingState, SizeClass, SlotDraw,
     SlotKey, SlotOpen, SlotState, Take, Touch, WRITER_ACQUIRE_MS, copy_box, hresult_text,
-    make_texture, producer_key, slot_draw, stale_texture, why_killed, writer_step,
+    make_texture, producer_key, slot_draw, stale_texture, subresource_count, why_killed,
+    writer_step,
 };
 
 /// A class of an even `width`×`height` (NV12).
@@ -92,6 +93,14 @@ fn an_empty_or_oversized_picture_has_no_copy_box() {
     assert_eq!(copy_box(big, big), Some(big), "16384 is a texture's side");
     assert_eq!(copy_box((16_385, 1080), (32_768, 2160)), None);
     assert_eq!(copy_box((1920, 16_385), (1920, 32_768)), None);
+}
+
+#[test]
+fn a_source_has_its_slices_times_its_mips_subresources() {
+    assert_eq!(subresource_count(4, 1), 4, "a decoder's texture array");
+    assert_eq!(subresource_count(1, 1), 1);
+    assert_eq!(subresource_count(3, 2), 6);
+    assert_eq!(subresource_count(u32::MAX, 2), u32::MAX, "saturated");
 }
 
 #[test]

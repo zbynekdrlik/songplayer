@@ -6,7 +6,7 @@
 //! slot under the slot's keyed mutex and hands it over as a
 //! [`GpuFrame`]. Every decision (which slot, the size classes, the wait,
 //! the keys, a lost device) is `crate::ring_state`'s, the shared state
-//! `crate::ring`'s; this module only calls Direct3D. Proven on two WARP
+//! `crate::ring`'s; this module only calls Direct3D. Pinned on two WARP
 //! devices by `tests/ring.rs`.
 
 use std::sync::Arc;
@@ -31,7 +31,7 @@ use crate::error::GpuError;
 use crate::ring::{GpuFrame, RingCore, RingStats, Taken, Written, hand_over};
 use crate::ring_state::{
     Acquired, KEY_CONSUMER, RING_WAIT, RingFormat, SizeClass, WRITER_ACQUIRE_MS, copy_box,
-    make_texture, stale_texture, writer_step,
+    make_texture, stale_texture, subresource_count, writer_step,
 };
 
 /// A slot taken for a write holds no texture after the write made one: a
@@ -123,6 +123,10 @@ impl PictureRing {
             return Err(GpuError::RingSourceFormat {
                 format: desc.Format.0 as u32,
             });
+        }
+        let count = subresource_count(desc.ArraySize, desc.MipLevels);
+        if subresource >= count {
+            return Err(GpuError::RingSubresource { subresource, count });
         }
         let copy = copy_box(visible, (desc.Width, desc.Height)).ok_or(GpuError::RingPicture {
             width: visible.0,

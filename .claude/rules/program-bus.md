@@ -332,11 +332,12 @@ there is drawn as the canvas black (a blend partner's side as black),
 counted (`canvas_misses`) and WARNed at most once a minute with the
 count, with the source's
 own audio and stamps unchanged: never a panic, never a hole. The canvas
-never gets a GPU path (NDI takes the compositor's readback since P1b, and
-P5 deletes the canvas), so P3a must keep a ring frame off the canvas: with
-`program_ndi_source=cpu`, or during the delay line's canvas fallback
-(`stale` / `no_readback`), a GPU-decoded song would show black on NDI
-`SP-program` (#279 P3a precondition). Tests:
+never gets a GPU path (NDI can take the compositor's readback since P1b,
+with `program_ndi_source=gpu`, default `cpu`; P5 deletes the canvas), so
+P3a must keep a ring frame off the canvas: whenever NDI sends the canvas
+(`CpuWhy` `setting` / `no_readback` / `stale` / `settling`), a
+GPU-decoded song would show black on NDI `SP-program` (#279 P3a
+precondition). Tests:
 `program_bus_tests.rs::a_ring_frame_crosses_the_bus_by_arc_and_the_canvas_shows_black`,
 `program_output_tests_max.rs::a_ring_frame_goes_to_max_itself_and_the_canvas_counts_a_miss`.
 

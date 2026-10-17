@@ -303,8 +303,9 @@ impl GpuFrame {
     /// The compositor found the slot's key abandoned (a device was lost
     /// holding it: the producer's, or its own before its rebuild), or the
     /// slot failed on a healthy compositor (`ring_state::slot_draw`): the
-    /// ring dies, and its writer goes on in software. `why` and the `hresult` that told it go into the ring's
-    /// one WARN; whether this call killed it.
+    /// ring dies, and its writer goes on in software. `why` and the
+    /// `hresult` that told it go into the ring's one WARN; whether this
+    /// call killed it.
     pub fn kill_ring(&self, why: &'static str, hresult: Option<u32>) -> bool {
         self.0.core.kill(why, hresult)
     }

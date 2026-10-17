@@ -135,6 +135,10 @@ pub enum GpuError {
     /// NV12 only; `format` is its `DXGI_FORMAT`).
     #[error("the picture ring copies NV12 textures, this one is DXGI format {format}")]
     RingSourceFormat { format: u32 },
+    /// #279 P2: a copy out of a subresource the source does not have
+    /// (`ring_state::subresource_count`): Direct3D would drop it silently.
+    #[error("subresource {subresource} of a source that has {count}")]
+    RingSubresource { subresource: u32, count: u32 },
 }
 
 /// #243: " (held by <holder>)" for a refusal whose lock a program kept,

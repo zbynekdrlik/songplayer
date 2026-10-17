@@ -141,6 +141,14 @@ pub fn copy_box(visible: (u32, u32), surface: (u32, u32)) -> Option<(u32, u32)> 
     (box_width <= surface.0 && box_height <= surface.1).then_some((box_width, box_height))
 }
 
+/// How many subresources a source texture has (`array_size` slices of
+/// `mip_levels` mips each, saturated): a copy out of one at or past it
+/// would be dropped by Direct3D with no error, and the slot handed over
+/// with stale content, so the write refuses it first.
+pub fn subresource_count(array_size: u32, mip_levels: u32) -> u32 {
+    array_size.saturating_mul(mip_levels)
+}
+
 /// The key a write acquires its slot's mutex with: a new texture's
 /// [`KEY_PRODUCER`], else the [`KEY_CONSUMER`] its last release left (the
 /// writer's own, or the compositor's).

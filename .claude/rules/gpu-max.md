@@ -1947,8 +1947,12 @@ behaviour change).
   slot, makes its texture when told (`BIND_SHADER_RESOURCE`,
   `MISC_SHARED_NTHANDLE | MISC_SHARED_KEYEDMUTEX`, `CreateSharedHandle`),
   acquires the slot's key (the raw HRESULT through the vtable,
-  `writer_step`), `CopySubresourceRegion`s the even box (a texture-array
-  slice works), `Flush`es, `ReleaseSync(1)`, hands over. A key not held,
+  `writer_step`), `CopySubresourceRegion`s the even box out of a
+  subresource the source has (`subresource_count`, else
+  `RingSubresource`: Direct3D would drop the copy silently; a
+  texture-array slice is the WARP test
+  `a_slot_is_copied_out_of_a_slice_of_a_decoder_like_texture_array`),
+  `Flush`es, `ReleaseSync(1)`, hands over. A key not held,
   or a failed release, kills the ring; a failed write gives the slot
   back.
 - **The compositor (`win/sides.rs` `RingSlots`, glue).** Each compose

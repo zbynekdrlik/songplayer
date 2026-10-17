@@ -17,8 +17,9 @@
 //! ([`CpuMisses`]), WARNed at most once a minute with the count, and the
 //! consumer shows black (the canvas) or no picture (the preview), never a
 //! panic. The preview gets its GPU path in P3b; the canvas never does (NDI
-//! takes the compositor's readback since P1b, and P5 deletes the canvas),
-//! so a GPU picture there stays black (#279: a P3a precondition).
+//! can take the compositor's readback since P1b, `program_ndi_source=gpu`,
+//! default `cpu`; P5 deletes the canvas), so a GPU picture there stays
+//! black whenever NDI sends the canvas (#279: a P3a precondition).
 
 use std::fmt;
 

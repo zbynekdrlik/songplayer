@@ -159,28 +159,30 @@ fn a_ring_frame_goes_to_max_itself_and_the_canvas_counts_a_miss() {
         Some(vec![16, 16, 16, 16, 128, 128]),
         "the canvas black"
     );
+    let partner = ring.frame(2, 2, Duration::ZERO).expect("a free slot");
     let blended = SubmitJob {
         blend: Some(FrameBlend {
-            video: frame.clone().into(),
-            weight_q8: 128,
+            video: partner.clone().into(),
+            weight_q8: 64,
         }),
         ..source(2, at(1))
     };
     out.submit(ProgramJob::Source(blended));
     assert_eq!(out.canvas_misses(), 2, "the blend's ring side");
-    // The 2x2 canvas picture (every byte 90) half way to the black:
-    // (90 * 128 + 16 * 128 + 128) >> 8 = 53, (90 * 128 + 128 * 128 + 128) >> 8 = 109.
+    // The 2x2 canvas picture (every byte 90) a quarter of the way to the
+    // black: (90 * 192 + 16 * 64 + 128) >> 8 = 72, (90 * 192 + 128 * 64 +
+    // 128) >> 8 = 100 (the sides swapped would read 35 / 119).
     let wire = out.wire_frame().map(|f| f[..].to_vec());
     assert_eq!(
         wire,
-        Some(vec![53, 53, 53, 53, 109, 109]),
+        Some(vec![72, 72, 72, 72, 100, 100]),
         "the CPU side faded toward the ring side's black"
     );
     let MaxJob::Fade { to, .. } = next_job(&max) else {
         panic!("a blended boundary is a fade on MAX");
     };
     let to = to.expect("the blend's next frame");
-    assert!(to.video.gpu().is_some_and(|f| f.ptr_eq(&frame)));
+    assert!(to.video.gpu().is_some_and(|f| f.ptr_eq(&partner)));
     let sends = backend
         .calls()
         .into_iter()
