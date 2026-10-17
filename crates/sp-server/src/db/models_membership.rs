@@ -107,14 +107,16 @@ pub async fn deactivate(
 }
 
 /// #261: a reactivation clears exactly the marks its deactivation set
-/// (`removed_at` at or after the playlist's `deactivated_at`), then the
-/// column: a song the sync marked before it stays marked, so it is never
-/// picked again before the next sync, and its year keeps counting. On
-/// `conn`, the caller's transaction. The rows it cleared.
+/// (`removed_at` = the playlist's `deactivated_at`: [`deactivate`] gives
+/// every mark that very value, so a sync's mark never equals it, even
+/// after a clock step), then the column: a song the sync marked before it
+/// stays marked, so it is never picked again before the next sync, and its
+/// year keeps counting. On `conn`, the caller's transaction. The rows it
+/// cleared.
 pub async fn reactivate(conn: &mut SqliteConnection, playlist_id: i64) -> Result<u64, sqlx::Error> {
     let cleared = sqlx::query(
         "UPDATE videos SET removed_at = NULL WHERE playlist_id = ?1 \
-         AND removed_at >= (SELECT deactivated_at FROM playlists WHERE id = ?1)",
+         AND removed_at = (SELECT deactivated_at FROM playlists WHERE id = ?1)",
     )
     .bind(playlist_id)
     .execute(&mut *conn)
@@ -125,6 +127,23 @@ pub async fn reactivate(conn: &mut SqliteConnection, playlist_id: i64) -> Result
         .execute(&mut *conn)
         .await?;
     Ok(cleared)
+}
+
+/// #261: what an `is_active` write does to the playlist's rows, on `conn`
+/// (the PUT's transaction, `routes::update_playlist`): a deactivation marks
+/// them at `now_ms` ([`deactivate`]), a reactivation clears those marks
+/// ([`reactivate`]). The rows it marked or cleared.
+pub async fn follow_activation(
+    conn: &mut SqliteConnection,
+    playlist_id: i64,
+    active: bool,
+    now_ms: i64,
+) -> Result<u64, sqlx::Error> {
+    if active {
+        reactivate(conn, playlist_id).await
+    } else {
+        deactivate(conn, playlist_id, now_ms).await
+    }
 }
 
 /// Membership + readiness check for the `videos.playlist_id` model used by

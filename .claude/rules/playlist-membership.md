@@ -165,10 +165,14 @@ archiv!". Design: #261 comment 6228880917; the lane's notes: the
     V43 `playlists.deactivated_at` (UTC ms; NULL = active), and every row
     not marked yet gets exactly that value as `removed_at` (a sync's mark
     stays); never the test item's playlist (kind `test`, pinned clips);
-  - `true` → `reactivate`: clears exactly the rows with `removed_at >=
-    deactivated_at`, then the column. A song the sync marked before the
-    deactivation stays marked (cleared, it would be picked again until the
-    next sync, and a sync during a #230 hold is dropped).
+  - `true` → `reactivate`: clears exactly the rows with `removed_at =
+    deactivated_at` (every deactivation mark carries that very value, so a
+    sync's mark never equals it, even after a clock step), then the column.
+    A song the sync marked before the deactivation stays marked (cleared,
+    it would be picked again until the next sync, and a sync during a #230
+    hold is dropped).
+  - The song-file lock is released with the transaction, before the engine
+    is told (`EnsurePipeline` / `RemovePipeline`).
   - One INFO `playlist activation: its songs' marks follow it (#261)`
     (`active`, `songs` = rows marked / cleared).
   - V43 back-filled every playlist inactive at the migration (its
@@ -215,9 +219,12 @@ archiv!". Design: #261 comment 6228880917; the lane's notes: the
   removed current one → the item before the one that followed it, so the
   next pick is that one; none before it → the last item, the next pick
   wraps). A hole used to make `select_next_custom` wrap to 0 and skip
-  every item after it.
+  every item after it. Accepted: a restart right after the CURRENT item
+  was taken out resumes at the current position and plays the item before
+  it once more (the live pick is exact).
 - **The exchange's records of a video no row has go daily**
-  (`peer::leftovers`, `peer-exchange.md`).
+  (`peer::leftovers`, `peer-exchange.md`); V43's `idx_videos_youtube`
+  keeps its lookups (and the exchange's per-video reads) off a scan.
 - **V43 dropped `resolume_clip_mappings`** (no code ever wrote it).
 - Tests: `history_bound_tests.rs`, `models_set_list_tests.rs`,
   `mod_tests_v43.rs`, `api/routes_tests_retention.rs` (the DELETE through
@@ -231,6 +238,22 @@ archiv!". Design: #261 comment 6228880917; the lane's notes: the
   waits for the song-file lock (a deadlock until a timeout).
 
 ## Box acceptance (MAIN SESSION OPS, after the deploy)
+
+#261 lane 1 (V43 runs at the first start of the release, on SNV and on PP):
+
+- BEFORE the deploy, list each box's inactive playlists
+  (`GET /api/v1/playlists` → `is_active: false`, each with its kind and
+  its row count): V43 marks their rows at that start. Tell the owner, by
+  name, that their songs then leave every worker queue and the dashboard
+  list and are deleted with their files a year later unless the playlist
+  is turned on again before then (a set list's item never). A `dabing`
+  playlist among them would take its imported videos with it: ask the
+  owner before the release reaches that box.
+- 5 min after the start (then daily): the INFO lines `play history:
+  deleted …` and `exchange leftovers: deleted …`, or their DEBUG
+  "nothing to delete".
+
+#260:
 
 On SNV and PP, after the next sync of ytfast (playlist 7): its
 `playlist sync complete` line reads `marked=6` and names the six ids;

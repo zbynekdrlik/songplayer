@@ -672,6 +672,12 @@ wait for a peer that has the song", below).
   coincidental match only keeps an entry; an empty id never counts). Until
   then a later ask of the same video inherits its spent bound and runs the
   job here at once. A record whose video still has a row is never touched.
+  No statement scans a table per row of another (review round 1 measured
+  10 s of a held write lock at 4 000 rows / 20 000 hashes, past the 5 s
+  busy timeout): the records' `NOT EXISTS` uses V43's
+  `idx_videos_youtube`; the hashes are decided in Rust
+  (`leftovers::names_a_video`, the ids and the paths read once) and each
+  orphan deleted by its own `remove_hash`.
 - `Exchange::fetched` ends the wait and records each artifact's origin in
   `peer_fetches` (node, version, sha256; `source = peer:<node>` in the INFO
   `exchange: done with a peer's copy`). The row's `metadata_source` /

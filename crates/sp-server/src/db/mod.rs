@@ -693,6 +693,10 @@ CREATE INDEX IF NOT EXISTS idx_ui_usage_ts ON ui_usage (ts_ms);
 ///   key's cascade and the video upgrade's retention look a video up, the
 ///   rotation counts a playlist's own plays of it, and the daily bound
 ///   (`playlist::history_bound`) keeps the latest row per playlist and video.
+/// - `videos` gets an index by YouTube id: the daily `peer::leftovers` pass
+///   looks every exchange record's video up by it (without it, a scan of
+///   `videos` per record held the write lock for seconds), as do the
+///   exchange's per-video reads.
 /// - `playlists.deactivated_at` (UTC ms; NULL = active): a deactivation
 ///   marks the playlist's rows `removed_at` with this value (a row already
 ///   marked keeps its mark), so #260's retention deletes them a year later;
@@ -703,6 +707,7 @@ CREATE INDEX IF NOT EXISTS idx_ui_usage_ts ON ui_usage (ts_ms);
 const MIGRATION_V43: &str = "
 DROP TABLE IF EXISTS resolume_clip_mappings;
 CREATE INDEX IF NOT EXISTS idx_play_history_video ON play_history (video_id, playlist_id);
+CREATE INDEX IF NOT EXISTS idx_videos_youtube ON videos (youtube_id);
 ALTER TABLE playlists ADD COLUMN deactivated_at INTEGER;
 UPDATE playlists SET deactivated_at = CAST(strftime('%s', 'now') AS INTEGER) * 1000
 WHERE is_active = 0 AND kind != 'test';

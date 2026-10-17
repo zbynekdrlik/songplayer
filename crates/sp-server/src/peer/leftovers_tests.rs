@@ -1,9 +1,27 @@
 //! #261: the exchange's records of a video no row has any more go; every
 //! record a row still needs stays.
 
+use std::collections::{BTreeSet, HashSet};
+
 use sqlx::SqlitePool;
 
-use super::{Dropped, pass};
+use super::{Dropped, names_a_video, pass};
+
+/// A path names a video when any window of an id's length is one of the
+/// ids: at the start, inside, at the end; ids of two lengths.
+#[test]
+fn a_path_names_a_video_by_any_of_its_ids() {
+    let ids = ["aaaaaaaaaaa", "bbbbbbbbbbb", "xyz"];
+    let known: HashSet<&[u8]> = ids.iter().map(|id| id.as_bytes()).collect();
+    let lengths: BTreeSet<usize> = ids.iter().map(|id| id.len()).collect();
+    let names = |path: &str| names_a_video(path, &known, &lengths);
+    assert!(names("/c/aaaaaaaaaaa_lyrics.json"));
+    assert!(names("/c/Song_Artist_bbbbbbbbbbb_normalized_audio.flac"));
+    assert!(names("/c/Song_Artist_qqqqqqqqqqq_normalized_audio.xyz"));
+    assert!(!names("/c/Song_Artist_zzzzzzzzzzz_normalized_audio.flac"));
+    assert!(!names("/c/aaaaaaaaaa_lyrics.json"), "one letter short");
+    assert!(!names(""));
+}
 
 /// Rows of `aaaaaaaaaaa` and `bbbbbbbbbbb` (and one with an empty id, which
 /// must not keep every hash entry); records of those, of `gone0000001` (no

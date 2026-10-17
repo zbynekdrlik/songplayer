@@ -4,7 +4,8 @@
 use super::test_helpers::{apply_first_n, apply_upto, column_names};
 use super::*;
 
-/// The table is gone, the index exists with its columns, the column is new.
+/// The table is gone, both indexes exist with their columns, the column is
+/// new.
 #[tokio::test]
 async fn v43_drops_the_clip_mappings_and_indexes_the_plays_by_video() {
     let pool = create_memory_pool().await.unwrap();
@@ -24,6 +25,13 @@ async fn v43_drops_the_clip_mappings_and_indexes_the_plays_by_video() {
     .await
     .unwrap();
     assert_eq!(columns, ["video_id", "playlist_id"]);
+    let columns: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM pragma_index_info('idx_videos_youtube') ORDER BY seqno",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(columns, ["youtube_id"]);
     assert!(
         column_names(&pool, "playlists")
             .await

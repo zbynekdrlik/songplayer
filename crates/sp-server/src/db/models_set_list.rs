@@ -16,7 +16,10 @@ use sqlx::{SqliteConnection, SqlitePool};
 /// is kept; else the item before the first kept one that followed it, so
 /// the next pick (current + 1) is the item that came after the one taken
 /// out (with none kept before it, the last item: the next pick wraps to the
-/// first). 0 for an empty set list.
+/// first). 0 for an empty set list. Kept as it is, accepted: a restart
+/// right after the CURRENT item was taken out resumes at the current
+/// position (`current_video_id` is gone then), so it plays that item before
+/// once more; the live pick, the common case, is exact.
 pub fn shifted_current(current: i64, kept: &[i64]) -> i64 {
     let before = kept.iter().filter(|&&p| p < current).count() as i64;
     if kept.contains(&current) || kept.is_empty() {
