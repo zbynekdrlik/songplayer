@@ -7,6 +7,7 @@ pub mod models_peer; // #229 the node exchange's tables (own module, models.rs i
 pub mod models_playlist_fx; // #242 a playlist's own volume + EQ (V33 columns)
 pub mod models_playlists; // #225 every playlist id, for the WS on-connect replay (own module, 1000-line cap)
 pub mod models_register; // #250 a lyrics track's register check (V36 columns)
+pub mod models_set_list; // #261 a set list stays numbered 0..N-1 (removal, a playlist's DELETE)
 pub mod models_stems; // #14 karaoke stem-separation queries (own module, 1000-line cap)
 pub mod models_stems_priority; // #195 tiered in-use-first stems selector (own module, 1000-line cap)
 pub mod models_ui_usage; // #256 the dashboard's usage log (V42)

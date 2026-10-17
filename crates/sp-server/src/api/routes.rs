@@ -344,13 +344,10 @@ pub async fn delete_playlist(
 ) -> impl IntoResponse {
     // #225 unit 2: never between a mode change's write and its tell.
     let _order = MODE_ORDER.lock().await;
-    match sqlx::query("DELETE FROM playlists WHERE id = ?")
-        .bind(id)
-        .execute(&state.pool)
-        .await
-    {
-        Ok(result) => {
-            if result.rows_affected() == 0 {
+    // #261: every set list that held one of its songs is numbered again.
+    match crate::db::models_set_list::delete_playlist(&state.pool, id).await {
+        Ok(deleted) => {
+            if !deleted {
                 StatusCode::NOT_FOUND.into_response()
             } else {
                 // #132: tear down the deleted playlist's pipeline symmetrically.

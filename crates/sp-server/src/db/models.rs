@@ -643,7 +643,8 @@ pub async fn append_playlist_item(
 }
 
 /// Remove a video from a custom playlist's set list and compact positions
-/// so there are no gaps afterwards.
+/// so there are no gaps afterwards; the current position follows its item
+/// (`models_set_list::compact`, #261: shared with a playlist's DELETE).
 pub async fn remove_playlist_item(
     pool: &SqlitePool,
     playlist_id: i64,
@@ -655,49 +656,7 @@ pub async fn remove_playlist_item(
         .bind(video_id)
         .execute(&mut *tx)
         .await?;
-
-    // Compact: rewrite positions 0..N-1 preserving order. Two-step to avoid
-    // PRIMARY KEY collisions: first negate all positions, then assign
-    // sequential non-negative positions based on the negated ordering.
-    sqlx::query(
-        "UPDATE playlist_items SET position = -position - 1
-         WHERE playlist_id = ?",
-    )
-    .bind(playlist_id)
-    .execute(&mut *tx)
-    .await?;
-    let rows = sqlx::query(
-        "SELECT video_id FROM playlist_items
-         WHERE playlist_id = ? ORDER BY position DESC",
-    )
-    .bind(playlist_id)
-    .fetch_all(&mut *tx)
-    .await?;
-    for (new_pos, r) in rows.iter().enumerate() {
-        let vid: i64 = r.get("video_id");
-        sqlx::query(
-            "UPDATE playlist_items SET position = ?
-             WHERE playlist_id = ? AND video_id = ?",
-        )
-        .bind(new_pos as i64)
-        .bind(playlist_id)
-        .bind(vid)
-        .execute(&mut *tx)
-        .await?;
-    }
-
-    // Clamp current_position to the new valid range.
-    sqlx::query(
-        "UPDATE playlists
-         SET current_position = MIN(current_position,
-             COALESCE((SELECT MAX(position) FROM playlist_items WHERE playlist_id = ?), 0))
-         WHERE id = ?",
-    )
-    .bind(playlist_id)
-    .bind(playlist_id)
-    .execute(&mut *tx)
-    .await?;
-
+    super::models_set_list::compact(&mut *tx, playlist_id).await?;
     tx.commit().await?;
     Ok(())
 }
