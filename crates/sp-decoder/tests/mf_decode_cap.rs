@@ -17,11 +17,14 @@
 //! limited→full range conversion, a BT.601→709 matrix change, 8 padding
 //! rows scaled in and a 2-row shift; review round 1):
 //!
-//! - luma means of a 4×4 grid: a correct scale ≤ 2.7, a defect ≥ 10.9
-//!   (tolerance 6);
+//! - luma means of a 4×4 grid (tolerance 6): a correct scale ≤ 4.95
+//!   (ffmpeg's fast_bilinear; the others ≤ 2.9), a defect ≥ 7.0 (a
+//!   1-column pillarbox; a range conversion 10.8). Maxima over all 90
+//!   pictures, re-measured in review round 2;
 //! - the edge bands (2 rows / columns of the scaled picture against the
-//!   matching rows / columns of the unscaled one): a correct scale ≤ 0.5 at
-//!   80×60 and ≤ 4.8 at 66×50, a defect ≥ 9.9 (tolerance 6 and 10).
+//!   matching rows / columns of the unscaled one): a correct scale ≤ 1.34
+//!   at 80×60 (tolerance 6) and ≤ 7.2 at 66×50 (tolerance 10), a 1–2 px
+//!   letterbox or pillarbox ≥ 25.
 //!
 //! Every test that changes or reads the process-wide `hw_counters()` (or
 //! arms the refusal hook) holds `COUNTERS`, so a counter's change is that

@@ -100,9 +100,14 @@ failed`).
   not the request's `hw` (on a box with the setting off, automatic is
   1440 even for a `"hw": true` run). Set `max_resolution` back to
   automatic to measure a 4K sample at 4K (`video-decode.md` "The decode
-  cap"). A scaled run's `decode_path` reads `"hardware"` for any DXGI
-  surface (the video processor's texture tells nothing of the decoder):
-  judge NVDEC by the timings.
+  cap"). The report carries `max_height` (the cap the run opened under)
+  and `scaled_from` (`[w, h]`, the stream's own size, when the run decoded
+  it scaled; `null` otherwise); a scaled run's end line adds
+  ` scaled_from=WxH max_height=N`. A scaled run's `decode_path` reads
+  `"hardware"` for any DXGI surface (the video processor's texture tells
+  nothing of the decoder): judge NVDEC by the timings, and compare
+  `frames` / `source_fps` with an uncapped run of the same file (a
+  difference = the processor converted the rate).
 - It runs on its own thread, `decode-bench`. That thread is started by
   `playback::decode_thread::spawn_decode_thread`, exactly like the producer's
   `paced-decode-<playlist id>`, so both get `THREAD_PRIORITY_NORMAL` inside
