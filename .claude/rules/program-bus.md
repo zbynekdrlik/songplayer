@@ -334,6 +334,11 @@ side does (`program_output_ndi.rs`, an impl split of `ProgramOutput`;
   most 30 grid slots (1 s) behind b, else the CPU canvas (`setting` /
   `no_readback` / `stale`). Without a `MaxOut` (the unit tests' outputs)
   it is always the canvas. A compositor that cannot run never freezes NDI.
+  After an automatic fallback the way back is gated (`ReturnGate`,
+  ROZHODNUTÉ 6232669201 item 3): each canvas boundary takes the boundary
+  before's readback as the GPU would, and only 30 on time in a row bring
+  NDI back (`CpuWhy::Settling` until then) — never a boundary-by-boundary
+  flap. The setting's flip to `gpu` is a first entry: at once.
 - **From the canvas**: `submit_video`, stamped b, exactly as before.
 - **From the GPU**: the pair HELD at b − 1 goes out with `feed.take(b −
   1)` (its limited audio moved in, the standby silence for a standby
@@ -344,10 +349,15 @@ side does (`program_output_ndi.rs`, an impl split of `ProgramOutput`;
   not whole UYVY for the canvas is never sent. VBAN and MAX still get b at
   b (`program_output_tests_order.rs`: VBAN before any NDI call).
 - **A switch**: to the GPU, b is held and nothing goes to NDI (one missing
-  frame); back to the canvas, the held pair is dropped and b goes out on
-  the canvas (one frame skipped). Logged once, counted (`ndi.switches`).
-- `health.timing.submit_us` is the NDI submit alone from the GPU; the
-  trace's `wire_100ns` names the stamp NDI got (b − 1's;
+  frame). Back to the canvas NO audio block is lost (ROZHODNUTÉ 6232669201
+  item 1): the held pair goes out first (its readback, else the last
+  picture, else the black: a repeat), then b on the canvas — two submits,
+  contiguous stamps. Logged once, rate-limited (`SwitchLog`: a change held
+  back is said after the window, as the source is then), counted
+  (`ndi.switches`).
+- `health.timing.submit_us` is the NDI submit alone from the GPU (both
+  submits at a switch to the canvas); the trace's `wire_100ns` names the
+  stamp NDI got (b − 1's; b's own at a switch to the canvas;
   `TraceWriter::record_sent`).
 - `GET /api/v1/program` → `ndi {setting, source, delay_slots, fourcc,
   repeats, readback_late, feed_coalesced, switches, readback_us_p99,

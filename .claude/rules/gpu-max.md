@@ -1536,9 +1536,20 @@ nothing on air (default `cpu`).
   `gpu`). `set_enabled(false)` / `set_ndi_source(cpu)` drop the queue only
   when nothing wants it, and wake the thread; with nothing wanted it
   releases everything as before.
-- `MaxOut::max_wanted` = enabled OR NDI not on the GPU (a job with NDI on
-  the canvas means MAX on), `ndi_wanted` = NDI on the GPU; `fhd_wanted` is
+- MAX's own output is wanted by its setting alone (`MaxOut::enabled`),
+  NDI's readback by `ndi_wanted` (NDI on the GPU); `fhd_wanted` is
   unchanged (the FHD Spout sender still needs MAX on, `fhd_off_reason`).
+  The worker reads them per job (`serve_lines`' `Wants`). A job served
+  while NOTHING wants the compositor (MAX off and NDI on the canvas: the
+  setting changed after the thread took the job) builds and composes
+  nothing, and the next step releases. The lane's first cut inferred MAX
+  from the job (`max_wanted` = enabled OR NDI not on the GPU, "a job
+  means MAX on"); that inference is exact only under the dequeue's lock,
+  and read later it built MAX's 4K target and the `SP-program-MAX` Spout
+  sender for one stray boundary with MAX off (resume lane,
+  `a_job_served_when_nothing_wants_the_compositor_builds_nothing`). A
+  worker test that serves a job switches MAX on itself
+  (`max.set_enabled(true)`).
 - MAX off with NDI on the GPU: MAX's sender and target go (`release_max`),
   the compositor keeps composing the FHD target for NDI, `max.state` reads
   `off` and MAX counts nothing.
@@ -1550,9 +1561,13 @@ nothing on air (default `cpu`).
 - `MaxWorker::ndi_pass(wanted)`: P1a's UYVY pass is enabled on the PRIMARY
   while NDI is wanted, disabled otherwise (the canvas mode pays no
   readback). A failed enable is tried again only after
-  `MAX_RETRY_BACKOFF` (it makes textures and compiles a shader). The pass
-  goes with the compositor (`NdiPass::forget` in `drop_gpu`): a rebuilt
-  compositor enables it again.
+  `MAX_RETRY_BACKOFF` (it makes textures and compiles a shader) and is
+  WARNed once per failing spell (its own `LogGate`), its recovery once.
+  The pass goes with the compositor (`NdiPass::forget` in `drop_gpu`): a
+  rebuilt compositor enables it again. The pass switched off, and every
+  release (nothing wants the compositor, a quiesce, the thread's end),
+  let the feed's pictures go (`NdiFeed::clear`): nothing takes them, so
+  no 4 MB buffer stays out of `frame_pool` (round 2 + resume lane).
 - After each compose, at the compose instant and BEFORE the Spout sends
   (a 67 ms Spout lock wait never delays NDI): `read_back` maps the newest
   staging copy (`read_uyvy`, never a wait) into a `frame_pool` buffer of
@@ -1601,7 +1616,25 @@ nothing on air (default `cpu`).
   `NDI_FEED_STALE_SLOTS` = 30 grid slots (1 s) behind b; else `cpu` with
   its why (`setting`, `no_readback`, `stale`). A compositor that cannot
   run (off Windows — every Linux test and the CI box —, no adapter, a 3 s
-  device backoff) never freezes NDI.
+  device backoff) never freezes NDI. A readback that keeps arriving late
+  goes `stale` too: a late picture never enters the feed.
+- **The way back after a fallback** (ROZHODNUTÉ 6232669201 item 3,
+  `ndi_feed::ReturnGate`, `NDI_RETURN_ON_TIME` = 30). A fallback from the
+  GPU for any reason but the setting arms it. While armed, every boundary
+  on the canvas takes the boundary before's readback from the feed exactly
+  as the GPU path would (`take_on_time`: whole UYVY for the canvas, kept
+  as the last picture), and counts the on-time ones in a row; a late or a
+  missing one starts the count again. A GPU pick before 30 in a row stays
+  on the canvas (`CpuWhy::Settling`). So a fallback never flaps boundary
+  by boundary: before the gate, the readback's first kept push after a
+  `stale` fallback brought NDI back at once (nobody took pictures on the
+  canvas, so every push was "fresh"), and a readback that stayed late
+  fell back again 30 slots later, round after round. The return to the
+  GPU and the setting's canvas disarm it; the setting's flip to `gpu` is a
+  first entry, not a return: it goes to the GPU at the first fresh
+  picture, as designed. On the canvas after a fallback `readback_late`
+  keeps counting the late pictures and `feed_coalesced` no longer climbs
+  (the canvas takes them).
 - cpu: `submit_video` as before (the NV12 canvas), stamped b.
 - gpu: the pair held at b − 1 goes out: its audio after the limiter
   (moved in, no copy; the standby silence for a standby pair), its stamps
@@ -1614,14 +1647,33 @@ nothing on air (default `cpu`).
   fade's audio is crossfaded in `split`, its picture is the compositor's
   fade; a mixed boundary joins `MixRun.boundaries` when it goes out
   (`fitted` and `max_picture_us` stay 0).
-- A switch: to the GPU holds b and sends nothing (one missing frame); to
-  the canvas drops the held pair (and forgets the last picture) and b goes
-  out on the canvas (one frame skipped). One INFO (to the GPU, or back for
-  the setting) or WARN (back for `no_readback` / `stale`) per switch,
-  counted in `ndi.switches`; the setting flip is one.
-- `health.timing.submit_us` is the NDI submit alone from the GPU. The
-  trace's `wire_100ns` is the wire stamp of the stamp NDI got
-  (`TraceWriter::record_sent`; b's own when nothing went out).
+- A switch to the GPU holds b and sends nothing (one missing frame).
+- **A switch to the canvas never drops an audio block** (ROZHODNUTÉ
+  6232669201 item 1; the owner's rule: popping audio is the worst
+  failure). The held pair goes out FIRST through `send_held` (its
+  readback, else the last picture, else the black: a repeat), then b on
+  the canvas: two submits back to back, contiguous stamps. The lane's
+  first cut dropped the held pair, which lost b − 1's limited 33 ms block
+  on `SP-program` (cg OBS, the stream) at every setting flip and every
+  automatic fallback; VBAN / FOH never lost it.
+- The last picture: the setting's switch to the canvas forgets it (after
+  that send); an automatic fallback keeps it (round 2: a re-entry then
+  repeats the last read-back picture, never the black).
+- The lines (`ndi_feed::SwitchLog`, pure): a change of source is said at
+  most once per `NDI_SWITCH_LOG_EVERY_100NS` (5 s) of the timeline, and a
+  change held back is said by the first boundary after the window, as the
+  source is then (`held_back`), so the log never ends on a source NDI
+  left. An INFO to the GPU or for the setting; a WARN for an automatic
+  fallback (`reason`, `on_time_needed`). Every switch is counted in
+  `ndi.switches` all the same; the setting flip is one.
+- `health.timing.submit_us` is the NDI submit alone from the GPU (at a
+  switch to the canvas, the held pair's submit and b's canvas picture).
+  The trace's `wire_100ns` is the wire stamp of the stamp NDI got
+  (`TraceWriter::record_sent`; b's own when nothing went out, and b's own
+  at a switch to the canvas, where b − 1 went out just before it).
+- The quiet wait (`program_video_quiet.rs`) runs only while MAX is on
+  (`MaxOut::enabled`): with MAX off nothing goes out over Spout for Arena,
+  though the compositor still paces for NDI (round 2).
 - The canvas is `FHD_TARGET`'s size in production (a const assert in
   `program_output_ndi.rs`); the tests use small canvases and fill the feed
   themselves.
@@ -1649,16 +1701,21 @@ nothing on air (default `cpu`).
 ### Tests
 
 `ndi_feed_tests.rs` (the depth, take and drop-older, late, coalesce,
-freshness, the 30-slot edge both ways, the switches, the status and its
-900-window), `program_output_tests_ndi.rs` (over the mock NDI with a feed
-the test fills: b's audio to VBAN at b and to NDI at b + 1 with b's
-stamps, the repeat and the black, a short picture never sent, both
-switches, stale, a fade, the trace's stamp), `program_output_tests_order.rs`
-(VBAN before any NDI call from the GPU), `program_max_tests_ndi.rs` (the
-queue's rules, the setting), `program_max_worker_tests_ndi.rs` (the fake's
-`order`: the readback after the compose and before MAX's send, Black, MAX
-off, the pass off, the enable's backoff, a failed readback, a lost device,
-`lost_unsent`, a coalesce's gap), `api/program_tests_ndi.rs`,
+freshness, the 30-slot edge both ways, the gate's arming / count /
+restart / disarming, the switch lines, the status and its 900-window),
+`program_output_tests_ndi.rs` (over the mock NDI with a feed the test
+fills: b's audio to VBAN at b and to NDI at b + 1 with b's stamps, the
+repeat and the black, a short picture never sent, both switches with the
+held pair sent first and contiguous audio stamps, stale, a readback that
+stays late never flapping back, the 30-in-a-row return and its restart,
+the first entry at once, a fade, the trace's stamp),
+`program_output_tests_order.rs` (VBAN before any NDI call from the GPU),
+`program_max_tests_ndi.rs` (the queue's rules, the setting),
+`program_max_worker_tests_ndi.rs` (the fake's `order`: the readback after
+the compose and before MAX's send, Black, MAX off, the pass off, the
+enable's backoff, a failed readback, a lost device, `lost_unsent`, a
+coalesce's gap, a job with nothing wanted, the release's feed),
+`api/program_tests_ndi.rs`,
 `program_burn_tests_uyvy.rs`, sp-ndi's FourCC tests, and the WARP proof
 above.
 
@@ -1669,7 +1726,12 @@ above.
 2. Tell camera-box what changes on `SP-program` (plan §8 R2): the FourCC
    NV12 → UYVY, a constant +33.3 ms arrival lag, its genlock FIFO
    `shallow_depth` +1 expected and stable.
-3. Flip SNV to `gpu`: an NDI receiver reads 1920×1080 UYVY; `ndi.repeats`
+3. Before the flip (ROZHODNUTÉ 6232669201 item 2: the one-slot delay
+   stays, and only a measured miss justifies a bounded wait or a 2-slot
+   delay): read `ndi.repeats` / `readback_late` against
+   `health.timing.ready_late_us_*` over a whole ~45 min drift cycle,
+   binned by offer phase. Then flip SNV to `gpu`: an NDI receiver reads
+   1920×1080 UYVY; `ndi.repeats`
    and `readback_late` +0 over 10 min of songs and fades; the A/V gate
    (`post-deploy-av-sync.spec.ts`), `max-gate` and cg OBS's `genlock-fifo
    audit` hold.
