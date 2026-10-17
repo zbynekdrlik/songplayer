@@ -14,3 +14,8 @@ mod mf_scaled; // #282: the scaled open's output type and decoder check
 #[doc(hidden)]
 pub use dxgi_frame::{DxgiPicture, read_texture_as_decoded_sample};
 pub use mf_reader::MediaFoundationVideoReader;
+// #282 follow-up: what a scaled open read of Media Foundation, and the
+// tests' refusal guard (`MediaFoundationVideoReader::scaled_open_facts`,
+// `refuse_next_scaled_open_for_test`).
+#[doc(hidden)]
+pub use mf_scaled::{ChainStage, Colour, DecoderOutput, ScaledOpenFacts, ScaledOpenRefusal};

@@ -16,22 +16,24 @@
 //! Media Foundation.
 //!
 //! #282: a reader opened with a decode cap (`open_with`'s `max_height`)
-//! opens a file whose picture is larger than the cap's 16:9 box SCALED:
-//! a second source reader with `MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING`
-//! and the NV12 output type's `MF_MT_FRAME_SIZE` at
-//! `hw_decode::scaled_size`, so Media Foundation's video processor scales
-//! each picture at decode (on the GPU on the D3D path). The first reader
-//! is made exactly as before and only read for the stream's own size; a
-//! file inside the box keeps it, with no other call. What the scaled
-//! output type carries, and the native facts it keeps, is `mf_scaled.rs`.
-//! A scaled open Media Foundation refuses, negotiates at another size
-//! (`hw_decode::scale_took`), or where the decoder's padding could reach
-//! the processor (`hw_decode::scaled_open_safe`, the green strip: judged at
-//! open; on the D3D path only a stream of whole 16-pixel blocks, or one
-//! whose decoder already shows the native aperture, is scaled) opens
-//! unscaled, with a WARN: never a dead song. A scaled picture lies in the
-//! video processor's texture,
-//! so it tells nothing of the decoder's own path
+//! opens a file whose picture is larger than the cap's 16:9 box SCALED: a
+//! second source reader with
+//! `MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING` and the NV12 output
+//! type's `MF_MT_FRAME_SIZE` at `hw_decode::scaled_size`, so Media
+//! Foundation's video processor scales each picture at decode (on the GPU
+//! on the D3D path). The first reader is made exactly as before and only
+//! read for the stream's own size; a file inside the box keeps it, with no
+//! other call. What the scaled output type carries, and the native facts
+//! it keeps, is `mf_scaled.rs`; the reader's scaled half (the second
+//! reader, its log lines, the first picture's re-read of the decoder's
+//! output) is the child module `mf_reader_scaled.rs`. A scaled open Media
+//! Foundation refuses, negotiates at another size (`hw_decode::scale_took`),
+//! or where the decoder's padding could reach the processor
+//! (`hw_decode::scaled_open_safe`, the green strip: judged at open; on the
+//! D3D path only a stream of whole 16-pixel blocks, or one whose decoder
+//! already shows the native aperture, is scaled) opens unscaled, with a
+//! WARN: never a dead song. A scaled picture lies in the video processor's
+//! texture, so it tells nothing of the decoder's own path
 //! (`hw_decode::decoder_path_visible`).
 
 use std::os::windows::ffi::OsStrExt;
@@ -40,9 +42,9 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
 use windows::Win32::Media::MediaFoundation::{
-    IMFAttributes, IMFMediaBuffer, IMFMediaType, IMFSample, IMFSourceReader, MF_API_VERSION,
-    MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_PD_DURATION,
-    MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, MF_SOURCE_READER_D3D_MANAGER,
+    IMFAttributes, IMFMediaBuffer, IMFMediaType, IMFSample, IMFSourceReader, IMFTransform,
+    MF_API_VERSION, MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE,
+    MF_PD_DURATION, MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, MF_SOURCE_READER_D3D_MANAGER,
     MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, MF_SOURCE_READER_FIRST_VIDEO_STREAM,
     MF_SOURCE_READER_MEDIASOURCE, MF_SOURCE_READERF_ENDOFSTREAM, MFCreateAttributes,
     MFCreateMediaType, MFCreateSourceReaderFromURL, MFMediaType_Video, MFSTARTUP_NOSOCKET,
@@ -54,16 +56,21 @@ use windows::core::PCWSTR;
 use super::dxgi_frame::DxgiSurface;
 use super::hw_session::{HwDevice, HwSession};
 use super::mf_scaled::{
-    self, DecoderOutput, ScaledType, frame_rate_of, known_frame_size, native_media_type,
+    ScaledOpenFacts, ScaledType, frame_rate_of, known_frame_size, native_media_type,
 };
 use crate::error::DecoderError;
 use crate::hw_decode::{
     DecodeMode, DecodePath, FallbackGate, FallbackStage, HwFallback, OnDecodeError, PathNote,
-    PathTracker, Resume, VideoArea, decoder_path_visible, hw_counters, scale_took,
-    scaled_frame_rate, scaled_open_safe, scaled_size, visible_reference, visible_size,
+    PathTracker, Resume, decoder_path_visible, hw_counters, scale_took, scaled_frame_rate,
+    scaled_size, visible_reference, visible_size,
 };
 use crate::stream::{MediaStream, VideoStream};
 use crate::types::{DecodedVideoFrame, PixelFormat};
+
+// #282: the reader's scaled half (the second source reader, its log lines,
+// the first picture's re-read, the tests' accessors), split for the cap.
+#[path = "mf_reader_scaled.rs"]
+mod scaled;
 
 pub(super) const VIDEO_STREAM: u32 = MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32;
 
@@ -88,12 +95,22 @@ pub struct MediaFoundationVideoReader {
     /// #282: the stream's own size when the file was opened scaled to the
     /// decode cap.
     scaled_from: Option<(u32, u32)>,
-    /// #282: what the decoder hands the video processor, read at a scaled
-    /// open (`None` unscaled, or when the chain could not be read).
-    decoder_out: Option<DecoderOutput>,
-    /// #282: the decode cap the reader was opened with (a software reopen
-    /// keeps it, so the picture size stays the same unless only one of the
-    /// two opens is refused).
+    /// #282: what the scaled open read of Media Foundation: the transform
+    /// chain, what the decoder hands the video processor at the open and at
+    /// the first picture, the native aperture and the colour descriptions
+    /// (`None` unscaled).
+    scaled_facts: Option<ScaledOpenFacts>,
+    /// #282: the decoder MFT of a scaled open, kept until the first
+    /// picture's re-read of its output type, then let go.
+    decoder_mft: Option<IMFTransform>,
+    /// #282: the decode cap the reader was opened with. A software reopen
+    /// after a decode error on the D3D path keeps it but judges the scale
+    /// afresh (`hw_decode::scaled_open_safe` reads the new decoder), so the
+    /// picture size can change mid-song, either way: a D3D11 open that
+    /// scaled, then a reopen that is refused, goes on at the stream's own
+    /// size; a D3D11 open that was refused (a stream that is not whole
+    /// 16-pixel blocks), then a software reopen that scales, goes on at the
+    /// scaled size. The canvas fits any size.
     max_height: Option<u32>,
     /// What the caller asked for.
     mode: DecodeMode,
@@ -132,7 +149,8 @@ struct Opened {
     frame_rate_known: bool,
     reference: Option<(u32, u32)>,
     scaled_from: Option<(u32, u32)>,
-    decoder_out: Option<DecoderOutput>,
+    scaled_facts: Option<ScaledOpenFacts>,
+    decoder_mft: Option<IMFTransform>,
 }
 
 impl MediaFoundationVideoReader {
@@ -250,7 +268,8 @@ impl MediaFoundationVideoReader {
             frame_rate_known: opened.frame_rate_known,
             reference: opened.reference,
             scaled_from: opened.scaled_from,
-            decoder_out: opened.decoder_out,
+            scaled_facts: opened.scaled_facts,
+            decoder_mft: opened.decoder_mft,
             max_height,
             mode,
             hw,
@@ -293,15 +312,6 @@ impl MediaFoundationVideoReader {
             match Self::open_scaled(path, &wide_path, hw, &shape) {
                 Ok(opened) => {
                     hw_counters().scaled_open();
-                    info!(
-                        file = %path.display(),
-                        from = %format!("{}x{}", from.0, from.1),
-                        to = %format!("{}x{}", to.0, to.1),
-                        pixel_aspect = ?shape.pixel_aspect,
-                        decoder = ?opened.decoder_out,
-                        path = on,
-                        "mf_reader: opened scaled to the decode cap (#282); the decoder's own path is not visible behind the video processor"
-                    );
                     return Ok(opened);
                 }
                 Err(e) => {
@@ -318,73 +328,6 @@ impl MediaFoundationVideoReader {
             }
         }
         Self::configure(reader, hw, native, None)
-    }
-
-    /// #282: a second source reader on the file, with Media Foundation's
-    /// video processor, negotiated at `shape`. Refused where the decoder's
-    /// padding could reach the processor (`hw_decode::scaled_open_safe`,
-    /// from the decoder's output type in the reader's chain): the processor
-    /// would scale the padding rows (green) into the picture.
-    fn open_scaled(
-        path: &Path,
-        wide_path: &[u16],
-        hw: Option<&HwSession>,
-        shape: &ScaledType,
-    ) -> Result<Opened, DecoderError> {
-        if mf_scaled::refused_by_test() {
-            return Err(DecoderError::NoStream(
-                "video: a scaled open refused by a test".into(),
-            ));
-        }
-        let reader = Self::source_reader(wide_path, hw, true)?;
-        let mut opened = Self::configure(reader, hw, Some(shape.from), Some(shape))?;
-        let read = mf_scaled::decoder_output(&opened.reader);
-        opened.decoder_out = read.as_ref().ok().copied();
-        let seen = opened.decoder_out.map(|out| (out.size, out.aperture));
-        let decoder = match &read {
-            Ok(out) => format!("{}x{} aperture {:?}", out.size.0, out.size.1, out.aperture),
-            Err(why) => format!("unreadable ({why})"),
-        };
-        if !scaled_open_safe(shape.from, seen, hw.is_some()) {
-            return Err(DecoderError::NoStream(format!(
-                "video: the decoder's padding could reach the video processor for a {}x{} \
-                 stream (decoder output: {decoder})",
-                shape.from.0, shape.from.1
-            )));
-        }
-        if read.is_err() {
-            warn!(
-                file = %path.display(),
-                decoder = %decoder,
-                "mf_reader: the decoder's output type could not be read; this software scaled \
-                 open relies on the decoder handing over the stream's own size"
-            );
-        }
-        Ok(opened)
-    }
-
-    /// Make the next scaled open in this process fail as a refusal by Media
-    /// Foundation would, so that reader opens its file at its own size: the
-    /// only way CI reaches the refusal path (Media Foundation takes the
-    /// scaled type there). For tests, not production.
-    #[doc(hidden)]
-    pub fn refuse_next_scaled_open_for_test() {
-        mf_scaled::refuse_next();
-    }
-
-    /// #282: the stream's own size when this file was opened scaled to the
-    /// decode cap (the reader's `width` / `height` are then the scaled
-    /// size); `None` at its own size.
-    pub fn scaled_from(&self) -> Option<(u32, u32)> {
-        self.scaled_from
-    }
-
-    /// #282: what the decoder handed the video processor at a scaled open:
-    /// its output type's size and display aperture. For tests and the box
-    /// check, not production.
-    #[doc(hidden)]
-    pub fn scaled_decoder_output(&self) -> Option<((u32, u32), Option<VideoArea>)> {
-        self.decoder_out.map(|out| (out.size, out.aperture))
     }
 
     /// A source reader on the NUL-terminated `wide_path`, with hardware
@@ -503,7 +446,8 @@ impl MediaFoundationVideoReader {
             frame_rate_known,
             reference,
             scaled_from: requested.and(native),
-            decoder_out: None,
+            scaled_facts: None,
+            decoder_mft: None,
         })
     }
 
@@ -745,6 +689,7 @@ impl MediaFoundationVideoReader {
             }
         };
         self.observe(path);
+        self.reread_decoder_output();
 
         if timestamp_ms > self.duration_ms {
             self.duration_ms = timestamp_ms;
@@ -800,7 +745,9 @@ impl MediaFoundationVideoReader {
     }
 
     /// Reopen the file in software after `error` on the D3D path, where the
-    /// last picture handed over was (#223 S3b, once per file).
+    /// last picture handed over was (#223 S3b, once per file). #282: under
+    /// the reader's decode cap, the scale judged afresh, so the rest of the
+    /// song may come at another size than before (`max_height`'s doc).
     fn reopen_in_software(&mut self, error: &DecoderError) -> Result<(), DecoderError> {
         let fallback = HwFallback {
             stage: FallbackStage::MidStream,
@@ -820,7 +767,8 @@ impl MediaFoundationVideoReader {
         self.height = opened.height;
         self.reference = opened.reference;
         self.scaled_from = opened.scaled_from;
-        self.decoder_out = opened.decoder_out;
+        self.scaled_facts = opened.scaled_facts;
+        self.decoder_mft = opened.decoder_mft;
         self.duration_ms = self.duration_ms.max(opened.duration_ms);
         if let Some(position_ms) = self.resume.reopen() {
             self.set_position(position_ms)?;
