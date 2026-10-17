@@ -7,7 +7,7 @@ use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use tokio::fs;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 use super::routes_mode::{MODE_ORDER, requested_mode};
 use crate::metadata::manual::refused_title;
@@ -308,11 +308,36 @@ pub async fn update_playlist(
     query = query.bind(id);
 
     let _order = MODE_ORDER.lock().await; // the row, then the engine (#225)
-    match query.execute(&state.pool).await {
-        Ok(result) => {
-            if result.rows_affected() == 0 {
+    // #261: an `is_active` write takes its playlist's marks with it, in one
+    // transaction, under the song-file lock (the sync's marks and #260's
+    // retention take it too: a reactivation never races a file delete).
+    let _files = match body.is_active {
+        Some(_) => Some(crate::downloader::cache::SONG_FILES.lock().await),
+        None => None,
+    };
+    let written = async {
+        let mut tx = state.pool.begin().await?;
+        let rows = query.execute(&mut *tx).await?.rows_affected();
+        // No row (an unknown id) has no songs to mark either.
+        let songs = match body.is_active {
+            Some(active) => Some(follow_activation(&mut *tx, id, active).await?),
+            None => None,
+        };
+        tx.commit().await?;
+        Ok::<_, sqlx::Error>((rows, songs))
+    }
+    .await;
+    match written {
+        Ok((rows, songs)) => {
+            if rows == 0 {
                 StatusCode::NOT_FOUND.into_response()
             } else {
+                if let (Some(active), Some(songs)) = (body.is_active, songs) {
+                    info!(
+                        playlist_id = id,
+                        active, songs, "playlist activation: its songs' marks follow it (#261)"
+                    );
+                }
                 if let Some(mode) = mode {
                     super::routes_mode::tell_engine(&state.engine_tx, id, mode).await;
                 }
@@ -335,6 +360,22 @@ pub async fn update_playlist(
             error!(id, %e, "update_playlist: the row was not written");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
+    }
+}
+
+/// #261: a deactivation marks the playlist's rows (#260's clock starts), a
+/// reactivation clears those marks (`db::models_membership`). The rows it
+/// marked or cleared.
+async fn follow_activation(
+    conn: &mut sqlx::SqliteConnection,
+    id: i64,
+    active: bool,
+) -> Result<u64, sqlx::Error> {
+    use crate::db::models_membership::{deactivate, reactivate};
+    if active {
+        reactivate(conn, id).await
+    } else {
+        deactivate(conn, id, chrono::Utc::now().timestamp_millis()).await
     }
 }
 

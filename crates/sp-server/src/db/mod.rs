@@ -34,6 +34,18 @@ macro_rules! queue_row {
 }
 pub(crate) use queue_row;
 
+/// #261: a row of an ACTIVE playlist (an unqualified fragment like
+/// [`queue_row!`]). The stems queue (pick, tiers, position, count) and the
+/// video upgrade's counts splice it, as the download and lyrics queues
+/// already ask `p.is_active = 1`: a deactivated playlist's songs are not
+/// processed while they wait for #260's retention.
+macro_rules! active_playlist {
+    () => {
+        "playlist_id IN (SELECT id FROM playlists WHERE is_active = 1)"
+    };
+}
+pub(crate) use active_playlist;
+
 /// All migrations as (version, SQL) tuples.
 /// Each SQL string may contain multiple statements separated by semicolons.
 const MIGRATIONS: &[(i32, &str)] = &[
