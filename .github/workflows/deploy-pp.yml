@@ -371,7 +371,9 @@ jobs:
       # post-deploy-max.spec.ts + post-deploy-audio-asio.spec.ts (#233: DVS
       # registered, the ASIO outputs SP_ASIO_OUTPUTS_EXPECTED names run) +
       # post-deploy-pp-preview.spec.ts (#266: the on-program card's live
-      # preview decodes video and audio, in Edge).
+      # preview decodes video and audio, in Edge) +
+      # post-deploy-ui-usage.spec.ts (#256: PP's own usage log answers its
+      # summary, and the gate's automated session adds nothing to it).
       - name: Post-deploy Playwright (PP subset)
         shell: powershell
         env:

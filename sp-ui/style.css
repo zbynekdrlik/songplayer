@@ -608,6 +608,8 @@ body {
 .save-status { color: var(--text-dim); font-size: 0.85rem; }
 /* #239: a note under the Spout outputs (the FHD sender needs MAX on). */
 .settings-hint { color: var(--text-dim); font-size: 0.85rem; }
+/* #256: Nastavenia's line about the usage log. */
+.ui-usage-line { color: var(--text-dim); font-size: 0.85rem; }
 
 /* #233: "Zvukové výstupy" — the look of the form's fieldsets, one framed
    block per output, its cells in a grid that wraps on a narrow page. */

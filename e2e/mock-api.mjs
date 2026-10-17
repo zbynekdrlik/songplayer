@@ -1682,6 +1682,121 @@ app.post("/__mock/background-hold-reset", (_req, res) => {
   res.json(backgroundHold);
 });
 
+// #256: the dashboard's usage log, as the server takes it
+// (`sp_core::ui_usage`): `POST /api/v1/ui-usage` reads the body as text
+// whatever its content type (a `navigator.sendBeacon` string arrives as
+// text/plain), takes at most 200 events, page and control at most 120
+// characters, kind click|change|submit|page, else a 400 with the fixed text
+// and nothing kept; a kept batch is a 204. Each kept POST is recorded with
+// its content type for the specs (`GET /__mock/ui-usage` → `{posts:
+// [{content_type, events}]}`, cleared by `POST /__mock/ui-usage-reset`).
+// `GET /api/v1/ui-usage/summary?days=N` (1..=400, default 400) answers the
+// server's shape from what was recorded; the mock has no program source, so
+// no row counts a use on air.
+const UI_USAGE_KINDS = ["click", "change", "submit", "page"];
+const UI_USAGE_MAX_EVENTS = 200;
+const UI_USAGE_MAX_CHARS = 120;
+const UI_USAGE_DAY_MS = 86_400_000;
+const UI_USAGE_REFUSAL =
+  'a usage batch is {"events": [{"ts_ms", "page", "control", "kind"}]}: at most 200 events, ' +
+  "page and control at most 120 characters each, kind click, change, submit or page";
+const UI_USAGE_DAYS_REFUSAL = "days must be a whole number from 1 to 400";
+let uiUsagePosts = [];
+
+// The batch's events as the server keeps them, or null when it refuses.
+function uiUsageEvents(body) {
+  let batch = body;
+  if (typeof body === "string") {
+    try {
+      batch = JSON.parse(body);
+    } catch {
+      return null;
+    }
+  }
+  if (!batch || !Array.isArray(batch.events)) return null;
+  if (batch.events.length > UI_USAGE_MAX_EVENTS) return null;
+  const events = [];
+  for (const e of batch.events) {
+    if (!e || !Number.isInteger(e.ts_ms)) return null;
+    if (typeof e.page !== "string" || typeof e.control !== "string") return null;
+    if (!UI_USAGE_KINDS.includes(e.kind)) return null;
+    if ([...e.page].length > UI_USAGE_MAX_CHARS) return null;
+    if ([...e.control].length > UI_USAGE_MAX_CHARS) return null;
+    events.push({ ts_ms: e.ts_ms, page: e.page, control: e.control, kind: e.kind });
+  }
+  return events;
+}
+
+app.post("/api/v1/ui-usage", express.text({ type: () => true }), (req, res) => {
+  const events = uiUsageEvents(req.body);
+  if (events === null) {
+    res.status(400).type("text/plain").send(UI_USAGE_REFUSAL);
+    return;
+  }
+  uiUsagePosts.push({ content_type: req.get("content-type") || "", events });
+  res.status(204).end();
+});
+app.get("/api/v1/ui-usage/summary", (req, res) => {
+  let days = 400;
+  if (req.query.days !== undefined) {
+    const raw = req.query.days;
+    const n = typeof raw === "string" && /^[0-9]+$/.test(raw) ? Number(raw) : 0;
+    if (n < 1 || n > 400) {
+      res.status(400).type("text/plain").send(UI_USAGE_DAYS_REFUSAL);
+      return;
+    }
+    days = n;
+  }
+  const now_ms = Date.now();
+  const from_ms = now_ms - days * UI_USAGE_DAY_MS;
+  const groups = new Map();
+  for (const post of uiUsagePosts) {
+    for (const e of post.events) {
+      if (e.ts_ms < from_ms) continue;
+      const key = JSON.stringify([e.page, e.control, e.kind]);
+      const g = groups.get(key) ?? {
+        page: e.page,
+        control: e.control,
+        kind: e.kind,
+        count: 0,
+        days: new Set(),
+        first_ms: e.ts_ms,
+        last_ms: e.ts_ms,
+      };
+      g.count += 1;
+      g.days.add(new Date(e.ts_ms).toDateString());
+      g.first_ms = Math.min(g.first_ms, e.ts_ms);
+      g.last_ms = Math.max(g.last_ms, e.ts_ms);
+      groups.set(key, g);
+    }
+  }
+  const order = (a, b) =>
+    b.count - a.count ||
+    a.page.localeCompare(b.page) ||
+    a.control.localeCompare(b.control) ||
+    a.kind.localeCompare(b.kind);
+  const rows = [...groups.values()].sort(order).map((g) => ({
+    page: g.page,
+    control: g.control,
+    kind: g.kind,
+    count: g.count,
+    days_used: g.days.size,
+    first_ms: g.first_ms,
+    last_ms: g.last_ms,
+    on_air: 0,
+  }));
+  const events = rows.reduce((sum, r) => sum + r.count, 0);
+  const first_ms = rows.length ? Math.min(...rows.map((r) => r.first_ms)) : null;
+  res.json({ now_ms, days, from_ms, events, first_ms, rows });
+});
+app.get("/__mock/ui-usage", (_req, res) => {
+  res.json({ posts: uiUsagePosts });
+});
+app.post("/__mock/ui-usage-reset", (_req, res) => {
+  uiUsagePosts = [];
+  res.json({ posts: uiUsagePosts });
+});
+
 // NDI genlock health (#150) — polled every 1 s by the dashboard's
 // GlobalLockBadge (which fills store.ndi_health for the per-card LockBadges).
 // Mirrors the real `GET /api/v1/ndi/health` array of PipelineHealthSnapshot:
