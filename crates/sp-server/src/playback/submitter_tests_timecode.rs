@@ -162,7 +162,15 @@ fn frame_submitter_submit_shared_is_zero_copy_via_the_owned_path() {
 
     let frame = SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]);
     let src_ptr = frame.as_ptr() as usize;
-    sub.submit_shared(4, 2, 4, frame, &[], 333_333, 333_333);
+    sub.submit_shared(
+        4,
+        2,
+        4,
+        crate::playback::picture::Picture::Cpu(frame),
+        &[],
+        333_333,
+        333_333,
+    );
 
     let calls = backend.calls();
     assert!(
