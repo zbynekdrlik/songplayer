@@ -28,6 +28,7 @@
 
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tracing::{debug, info, warn};
 
@@ -54,6 +55,10 @@ use crate::stream::{MediaStream, VideoStream};
 use crate::types::{DecodedVideoFrame, PixelFormat};
 
 const VIDEO_STREAM: u32 = MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32;
+
+/// #282: a test's refusal of the next scaled open
+/// ([`MediaFoundationVideoReader::refuse_next_scaled_open_for_test`]).
+static REFUSE_NEXT_SCALED_OPEN: AtomicBool = AtomicBool::new(false);
 
 /// Video-only Media Foundation source reader.
 pub struct MediaFoundationVideoReader {
@@ -308,6 +313,15 @@ impl MediaFoundationVideoReader {
     ) -> Result<Opened, DecoderError> {
         let reader = Self::source_reader(wide_path, hw, true)?;
         Self::configure(reader, hw, native, Some(to))
+    }
+
+    /// Make the next scaled open in this process fail as a refusal by Media
+    /// Foundation would, so that reader opens its file at its own size: the
+    /// only way CI reaches the refusal path (Media Foundation takes the
+    /// scaled type there). For tests, not production.
+    #[doc(hidden)]
+    pub fn refuse_next_scaled_open_for_test() {
+        REFUSE_NEXT_SCALED_OPEN.store(true, Ordering::SeqCst);
     }
 
     /// A source reader on the NUL-terminated `wide_path`, with hardware
