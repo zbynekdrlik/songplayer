@@ -83,9 +83,15 @@ pub(crate) async fn import_video_core(
 }
 
 /// The import's row in `playlist_id` (`normalized = 0`, the download
-/// worker's next pick; an existing row only takes the title). The row's id.
-/// The DB half of [`import_video_core`], apart from its yt-dlp fetch so a
-/// test can drive it.
+/// worker's next pick; an existing row only takes the title and keeps its
+/// mark). The row's id. The DB half of [`import_video_core`], apart from its
+/// yt-dlp fetch so a test can drive it.
+///
+/// #261: a NEW row of an inactive playlist is marked like the playlist's
+/// other songs: `removed_at` = its `deactivated_at` (NULL while active, and
+/// for the test item's playlist), the very mark its reactivation clears
+/// (`models_membership::reactivate`). One statement, so it reads the
+/// playlist as an activation's transaction left it.
 pub(crate) async fn upsert_imported(
     pool: &SqlitePool,
     playlist_id: i64,
@@ -94,8 +100,8 @@ pub(crate) async fn upsert_imported(
     duration_ms: Option<i64>,
 ) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar(
-        "INSERT INTO videos (playlist_id, youtube_id, title, duration_ms, normalized) \
-         VALUES (?1, ?2, ?3, ?4, 0) \
+        "INSERT INTO videos (playlist_id, youtube_id, title, duration_ms, normalized, removed_at) \
+         VALUES (?1, ?2, ?3, ?4, 0, (SELECT deactivated_at FROM playlists WHERE id = ?1)) \
          ON CONFLICT(playlist_id, youtube_id) DO UPDATE SET title = excluded.title \
          RETURNING id",
     )
