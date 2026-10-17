@@ -88,7 +88,11 @@ Design: #282 comment 6233842555 (Approach 1); the lane's implementation
 note, comment 6233930202. A TEMPORARY lever until #279 (the GPU-resident
 path): the wall's jumps back follow the bytes SongPlayer moves (#251
 comment 6232632646). Setting `max_resolution` back to automatic restores
-4K with no code change.
+3840×2160 with no code change, WITH hardware decode on (SNV, PP). Two
+things automatic still scales (the rule is the download's, review round
+1): a picture wider than 16:9 at 2160 rows (DCI 4096×2160 → 3840×2026,
+on the GPU), and, on a box with `video_hw_decode` off (automatic = 1440),
+every 4K file, on the CPU.
 
 - **One knob.** `max_resolution` (Nastavenia "Najvyššie rozlíšenie
   sťahovania") caps decode through the download's own rule
@@ -113,38 +117,55 @@ comment 6232632646). Setting `max_resolution` back to automatic restores
   (`MF_READWRITE_DISABLE_CONVERTERS` must stay unset) and the NV12 output
   type's `MF_MT_FRAME_SIZE` = the scaled size. Microsoft: the source reader
   then inserts a video processor that matches the output type's frame
-  size; on the D3D path it is D3D11-aware and scales on the GPU before the
-  readback, so the readback, the frame pool, MAX's upload and the canvas
-  all carry the smaller picture. In software it scales on the CPU. One INFO
-  per scaled open: `mf_reader: opened scaled to the decode cap (#282)`
-  (`from`, `to`, `path` D3D11 / software), `scaled_opens` +1.
+  rate, frame size, interlace mode, pixel aspect and subtype; on the D3D
+  path it is D3D11-aware and scales on the GPU before the readback, so the
+  readback, the frame pool, MAX's upload and the canvas all carry the
+  smaller picture. In software it scales on the CPU. The scaled type also
+  carries (review round 1):
+  - the native type's `MF_MT_FRAME_RATE`: no rate conversion, and the
+    reader reports the stream's own rate (a type with none would fall back
+    to 29.97, and the lock rule would read DEGRADED for a 24/25 fps song);
+  - `MF_MT_PIXEL_ASPECT_RATIO` = `hw_decode::scaled_pixel_aspect`: the
+    native display aspect kept exactly (3840×1606 → 1920×804 is 804:803),
+    so a processor that keeps the aspect letterboxes no one-pixel edge.
+
+  One INFO per scaled open: `mf_reader: opened scaled to the decode cap
+  (#282); the decoder's own path is not visible behind the video
+  processor` (`from`, `to`, `pixel_aspect`, `path` D3D11 / software),
+  `scaled_opens` +1.
 - **Never a dead song, never a wrong picture.** The negotiated type must be
-  the requested size (`hw_decode::scale_took`): exactly in software (the
-  picture is handed over at the type's size, uncut), up to 15 over per
-  side on the D3D path (the padding the readback cuts). Anything else — MF
-  refusing the attribute or the type, or silently keeping the native size
-  (on the D3D path that would have handed over the top-left of the native
-  picture) — is a refusal: WARN `mf_reader: the scaled open was refused;
-  this file decodes at its own size`, `scale_refusals` +1, the first
-  reader configured unscaled.
+  EXACTLY the requested size (`hw_decode::scale_took`, review round 1),
+  on the D3D path too: behind the processor the output type is ours and
+  the picture fills it, so a padded type would be picture the readback
+  cuts off. Anything else — MF refusing the attribute or the type, a
+  padded type, or a reader that silently kept the native size (on the D3D
+  path it would have handed over the top-left of the native picture) — is
+  a refusal: WARN `mf_reader: the scaled open was refused; this file
+  decodes at its own size`, `scale_refusals` +1, the first reader
+  configured unscaled. A padded TEXTURE with an exact type is fine: the
+  readback takes the UV offset from the texture's height.
 - **The reference size.** With scaling, `visible_size`'s reference is the
   REQUESTED size (`hw_decode::visible_reference`), never the native one
   (it never fits a scaled surface).
 - **The path label.** A scaled picture lies in the video processor's
-  texture, which carries no `D3D11_BIND_DECODER`, so
-  `DecodePath::of_surface(bind_flags, scaled)` counts every DXGI surface
-  of a scaled open as `hardware` (else every scaled song would WARN "MF
-  decodes this file in software" and count `mf_software`). Its blind spot:
-  the decoder MFT's own fall back to software behind the video processor
-  (a GPU with no decoder for the codec). Tell it on the box by the bench's
-  timings (a scaled 4K hardware run far slower than ~20 ms a picture is
-  not NVDEC).
+  texture, which carries no `D3D11_BIND_DECODER`, so it tells nothing of
+  the DECODER's path. `DecodePath::of_surface(bind_flags, scaled)` labels
+  every DXGI surface of a scaled open `hardware` (the bench's
+  `decode_path`: on the GPU), and `hw_decode::decoder_path_visible` keeps
+  its first picture out of `gpu_decodes` AND `mf_software` (no "hardware
+  decode active" INFO, no "MF decodes this file in software" WARN). So
+  with the cap in force the 16.10 software-decode guard (`mf_software`)
+  is blind for scaled songs: a decoder MFT falling back to software behind
+  the processor (a GPU with no decoder for the codec) shows only in the
+  bench's timings (a scaled 4K hardware run far slower than ~20 ms a
+  picture is not NVDEC).
 - **A mid-stream software reopen keeps the cap** (`max_height` on the
   reader), so the picture size never changes mid-song; it counts in
   `scaled_opens` again.
 - **Which readers take the cap.** The paced producer and the decode bench
-  (the cap in force: the bench measures what playback runs; set the
-  setting back to automatic to bench a 4K sample at 4K). The video
+  (the cap in force, computed with the SETTING's `video_hw_decode`, not
+  the bench request's `hw`: the bench measures what playback runs; set
+  the setting back to automatic to bench a 4K sample at 4K). The video
   upgrade's facts and the repair's codec open with `None`: they measure the
   FILE (a 4K file read at 1080 would look 1080 to the upgrade worker, which
   would download it again).
@@ -154,10 +175,24 @@ comment 6232632646). Setting `max_resolution` back to automatic restores
 - **Tests:** `hw_decode_tests_scale.rs` (Linux; every pin from a scratch
   model that also killed each listed mutant), `video_decode_tests.rs` (the
   cap from the setting, the JSON names), and on Windows
-  `tests/mf_decode_cap.rs`: the software reader on the 160×120 fixture
-  with a cap of 60 hands every picture over at 80×60 (stride 80, the same
-  timestamps and mean luma as unscaled, one scaled open); caps of 120 and
-  2160 change nothing.
+  `tests/mf_decode_cap.rs`:
+  - the software reader on the 160×120 fixture with a cap of 60 hands every
+    picture over at 80×60 (stride 80, one scaled open);
+  - the timestamps and the frame rate equal the unscaled reader's;
+  - the picture is compared region by region: a 4×4 grid of luma means
+    and the four edge bands, tolerance 6. The tolerances were measured on
+    the fixture with ffmpeg's scalers against a crop, a 1–2 px letterbox, a
+    range conversion, a matrix change, padding scaled in and a shift: a
+    correct scale ≤ 2.7, a defect ≥ 9.9. One whole-picture mean cannot see
+    a range conversion here, because its value sits near that conversion's
+    fixed point;
+  - a cap of 50 (66×50, pixel aspect 100:99) must fill the frame (edge
+    bands, tolerance 10);
+  - caps of 120 and 2160 change nothing;
+  - an injected refusal (`refuse_next_scaled_open_for_test`, doc-hidden)
+    plays the file unscaled with `scale_refusals` +1.
+
+  Each scaled open writes what MF negotiated to stderr (the CI log).
 - **Box checks (CI cannot run the D3D path):**
   - PATCH `max_resolution` to 1080, wait 5 s, run the decode bench with
     `"hw": true` on a 4K sample: `width`/`height` 1920×1080 (or the
@@ -165,13 +200,21 @@ comment 6232632646). Setting `max_resolution` back to automatic restores
     the unscaled run's; the log's `opened scaled to the decode cap` line
     says `path=D3D11`;
   - play a 4K song: `status.video_decode.scaled_opens` +1 and
-    `scale_refusals` +0; `GET /api/v1/program` `max.upload_mb_s` should drop
-    from ~298 to about a quarter;
+    `scale_refusals` +0 (a refusal's WARN names the negotiated size);
+    `GET /api/v1/program` `max.upload_mb_s` should drop from ~298 to about
+    a quarter;
+  - a 2560×1350 or 3840×1606 song at 1080 (a fraction of a pixel off the
+    aspect): no black column or row at MAX's / the wall's edges;
   - a widescreen 4K song whose rows are not a multiple of 16 (3840×1606:
     NVDEC pads to 1616): check its bottom rows on MAX / the wall for a thin
     green line — if the decoder's padded type carries no display aperture,
     the video processor would scale the padding rows in (Microsoft's video
-    processor honours `MF_MT_MINIMUM_DISPLAY_APERTURE` on its input).
+    processor honours `MF_MT_MINIMUM_DISPLAY_APERTURE` on its input). The
+    exact fix if it shows (review round 1): ONE reader with
+    `IMFSourceReaderEx::AddTransformForStream` inserting a
+    `CLSID_VideoProcessorMFT` whose `IMFVideoProcessorControl::
+    SetSourceRectangle` is the native picture, so the geometry is ours
+    instead of the decoder's aperture.
 
 ## Which path really decoded (read from the pictures, not from the mode)
 

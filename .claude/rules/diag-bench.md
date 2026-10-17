@@ -96,8 +96,13 @@ failed`).
 - #282: it opens under the decode cap in force (`max_resolution`, the
   start line's `max_height`), as the producer does: a sample larger than
   the cap's 16:9 box is decoded scaled, and `width` / `height` report the
-  scaled size. Set `max_resolution` back to automatic to measure a 4K
-  sample at 4K (`video-decode.md` "The decode cap").
+  scaled size. The cap is computed with the SETTING's `video_hw_decode`,
+  not the request's `hw` (on a box with the setting off, automatic is
+  1440 even for a `"hw": true` run). Set `max_resolution` back to
+  automatic to measure a 4K sample at 4K (`video-decode.md` "The decode
+  cap"). A scaled run's `decode_path` reads `"hardware"` for any DXGI
+  surface (the video processor's texture tells nothing of the decoder):
+  judge NVDEC by the timings.
 - It runs on its own thread, `decode-bench`. That thread is started by
   `playback::decode_thread::spawn_decode_thread`, exactly like the producer's
   `paced-decode-<playlist id>`, so both get `THREAD_PRIORITY_NORMAL` inside
