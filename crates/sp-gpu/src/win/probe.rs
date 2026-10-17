@@ -6,16 +6,13 @@
 
 use std::ffi::c_void;
 
-use windows::Win32::Foundation::{CloseHandle, HANDLE};
-use windows::Win32::Graphics::Direct3D::D3D11_SRV_DIMENSION_TEXTURE2D;
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_CPU_ACCESS_READ,
     D3D11_FEATURE_D3D11_OPTIONS, D3D11_FEATURE_DATA_D3D11_OPTIONS, D3D11_MAP_FLAG_DO_NOT_WAIT,
     D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX,
-    D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_SHADER_RESOURCE_VIEW_DESC,
-    D3D11_SHADER_RESOURCE_VIEW_DESC_0, D3D11_SUBRESOURCE_DATA, D3D11_TEX2D_SRV,
-    D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING, ID3D11Device, ID3D11Device1,
-    ID3D11RenderTargetView, ID3D11ShaderResourceView, ID3D11Texture2D,
+    D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC,
+    D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING, ID3D11Device, ID3D11Device1, ID3D11RenderTargetView,
+    ID3D11ShaderResourceView, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_FORMAT, DXGI_FORMAT_NV12, DXGI_FORMAT_R8_UNORM, DXGI_FORMAT_R8G8_UNORM,
@@ -28,7 +25,8 @@ use windows::Win32::Graphics::Dxgi::{
 use windows::core::{Interface, PCWSTR};
 
 use super::device::{self, Device, DeviceUse};
-use super::{pipeline, textures};
+use super::pipeline;
+use super::textures::{self, NtHandle};
 use crate::adapter::AdapterInfo;
 use crate::error::GpuError;
 use crate::probe::{
@@ -138,17 +136,6 @@ fn nv12(bind: u32, misc: u32) -> D3D11_TEXTURE2D_DESC {
     )
 }
 
-/// An NT handle, closed when dropped (the opened resource stays open).
-struct NtHandle(HANDLE);
-
-impl Drop for NtHandle {
-    fn drop(&mut self) {
-        // SAFETY: the handle came from `CreateSharedHandle` and is closed
-        // once, here.
-        let _ = unsafe { CloseHandle(self.0) };
-    }
-}
-
 /// An NV12 texture made on A for sharing, and the same texture opened on B.
 struct SharedNv12 {
     made: ID3D11Texture2D,
@@ -174,11 +161,11 @@ fn shared_nv12(a: &Device, b: &Device) -> Result<SharedNv12, ProbeError> {
     let access = DXGI_SHARED_RESOURCE_READ.0 | DXGI_SHARED_RESOURCE_WRITE.0;
     let handle = unsafe { resource.CreateSharedHandle(None, access, PCWSTR::null()) }
         .map_err(|e| ProbeError::failed("IDXGIResource1::CreateSharedHandle", code(&e)))?;
-    let handle = NtHandle(handle);
+    let handle = NtHandle(handle.0 as isize);
     let device1: ID3D11Device1 =
         b.0.cast()
             .map_err(|e| ProbeError::failed("ID3D11Device1 (B)", code(&e)))?;
-    let opened: ID3D11Texture2D = unsafe { device1.OpenSharedResource1(handle.0) }
+    let opened: ID3D11Texture2D = unsafe { device1.OpenSharedResource1(handle.handle()) }
         .map_err(|e| ProbeError::failed("ID3D11Device1::OpenSharedResource1 (B)", code(&e)))?;
     Ok(SharedNv12 { made, opened })
 }
@@ -186,7 +173,7 @@ fn shared_nv12(a: &Device, b: &Device) -> Result<SharedNv12, ProbeError> {
 /// A keyed mutex's `AcquireSync`, its RAW HRESULT: the `windows` crate's
 /// `Result` would turn `WAIT_TIMEOUT` and `WAIT_ABANDONED` (success codes)
 /// into `Ok` (`probe::acquire_step` reads it).
-fn acquire(mutex: &IDXGIKeyedMutex, key: u64, milliseconds: u32) -> u32 {
+pub(super) fn acquire(mutex: &IDXGIKeyedMutex, key: u64, milliseconds: u32) -> u32 {
     // SAFETY: the interface's own vtable entry, called on its own pointer.
     let hresult = unsafe {
         (Interface::vtable(mutex).AcquireSync)(Interface::as_raw(mutex), key, milliseconds)
@@ -291,16 +278,7 @@ fn plane_view(
     format: DXGI_FORMAT,
     call: &'static str,
 ) -> ProbeStep {
-    let desc = D3D11_SHADER_RESOURCE_VIEW_DESC {
-        Format: format,
-        ViewDimension: D3D11_SRV_DIMENSION_TEXTURE2D,
-        Anonymous: D3D11_SHADER_RESOURCE_VIEW_DESC_0 {
-            Texture2D: D3D11_TEX2D_SRV {
-                MostDetailedMip: 0,
-                MipLevels: 1,
-            },
-        },
-    };
+    let desc = textures::plane_view_desc(format);
     let mut view: Option<ID3D11ShaderResourceView> = None;
     unsafe { device.CreateShaderResourceView(texture, Some(&desc), Some(&mut view)) }
         .map_err(|e| ProbeError::failed(call, code(&e)))?;

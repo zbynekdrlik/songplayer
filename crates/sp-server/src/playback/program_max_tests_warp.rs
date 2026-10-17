@@ -35,7 +35,8 @@ use sp_core::genlock::{GENLOCK_GRID_FPS, floor_boundary_100ns, strict_next_bound
 use sp_gpu::uyvy::{UYVY_TOLERANCE, reference as uyvy_reference};
 use sp_gpu::{
     CANVAS_HEIGHT, CANVAS_WIDTH, Composition, Compositor, FHD_FIT, FHD_HEIGHT, FHD_WIDTH, GpuError,
-    Layer, Nv12Picture, SpoutSender, TargetId, read_shared_texture, reference, spout_sender_info,
+    Layer, Nv12Picture, Side, SpoutSender, TargetId, read_shared_texture, reference,
+    spout_sender_info,
 };
 use sp_ndi::test_util::MockNdiBackend;
 use sp_ndi::{AudioFrame, FourCCVideoType, NdiSender};
@@ -129,7 +130,7 @@ fn source(width: u32, height: u32, seed: u32, stamp: i64) -> SubmitJob {
         width,
         height,
         stride,
-        video: SharedFrame::new(data),
+        video: SharedFrame::new(data).into(),
         audio: vec![AudioFrame {
             data: vec![0.0; 3200],
             channels: 2,
@@ -144,14 +145,15 @@ fn source(width: u32, height: u32, seed: u32, stamp: i64) -> SubmitJob {
     }
 }
 
-fn nv12(job: &SubmitJob) -> Nv12Picture<'_> {
-    Nv12Picture {
+/// `job`'s picture as an uploaded side, for the CPU reference.
+fn nv12(job: &SubmitJob) -> Side<'_> {
+    Side::Cpu(Nv12Picture {
         id: 0,
         width: job.width,
         height: job.height,
         stride: job.stride,
-        data: &job.video,
-    }
+        data: job.video.expect_cpu(),
+    })
 }
 
 /// The k-th grid boundary from now.

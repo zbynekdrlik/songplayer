@@ -57,7 +57,7 @@
 //! `aspect_fit` ([`FHD_FIT`], #267). #251 step 2: that target is a SECOND
 //! target of MAX's compositor ([`FHD_TARGET`], `Compositor::add_target`,
 //! ids and draw order in the pure [`Targets`]): one device, one upload of
-//! each picture ([`Composition::pictures`]), every target drawn from it,
+//! each picture ([`Composition::uploads`]), every target drawn from it,
 //! one wait; `SpoutSender::for_target` sends any one of them, and each
 //! target's own share of the draw is [`target_draws_us`].
 //!
@@ -80,6 +80,18 @@
 //! `R8G8B8A8_UNORM` texture, copied into a ring of staging textures inside
 //! the compose, read back without a wait (`Compositor::read_uyvy`). Its
 //! conversion, its CPU model and its ring are the pure [`uyvy`].
+//!
+//! #279 P2: the GPU-resident video path's picture ring. A pipeline's
+//! decoded pictures will (P3a) be copied into slots of its ring: shared
+//! NV12 textures (an NT handle and a keyed mutex each), made on its
+//! producer device (`PictureRing`, Windows). Each picture travels as a
+//! [`GpuFrame`] (an `Arc`, like sp-server's `SharedFrame`; its drop frees
+//! the slot) and is drawn as a [`Side::Gpu`] of a composition: the
+//! compositor opens each slot once on its own device and samples it in
+//! place under the keyed mutex, with no upload. Every decision (slots,
+//! size classes, back-pressure, keys, a lost device, the open slots) is
+//! the pure [`ring_state`]; [`FakeRing`] (doc-hidden) makes frames without
+//! textures, for the tests of every platform.
 
 mod adapter;
 mod color;
@@ -91,6 +103,8 @@ mod quad;
 mod readback;
 pub mod reference;
 mod residency;
+mod ring;
+pub mod ring_state;
 mod spout;
 mod spout_lock;
 pub mod spout_state;
@@ -110,16 +124,20 @@ pub use adapter::{
 pub use color::{BT709_LIMITED_TO_FULL, KB, KR, matrix_f32};
 pub use composition::{
     CANVAS_HEIGHT, CANVAS_WIDTH, Composition, FHD_FIT, FHD_HEIGHT, FHD_TARGET, FHD_WIDTH, Fit,
-    Layer, MAX_FIT, MAX_TARGET, Q8_ONE, Slot, Target,
+    Layer, MAX_FIT, MAX_TARGET, Q8_ONE, Side, Slot, Target,
 };
 pub use error::{
     DXGI_ERROR_DEVICE_HUNG, DXGI_ERROR_DEVICE_REMOVED, DXGI_ERROR_DEVICE_RESET,
     DXGI_ERROR_DRIVER_INTERNAL_ERROR, GpuError, is_device_lost,
 };
 pub use picture::{MAX_PICTURE_SIDE, Nv12Picture, PictureError, Plane, Planes};
-pub use quad::{QUAD_CONSTANTS_BYTES, QuadConstants, ndc_rect, uv_rect};
+pub use quad::{QUAD_CONSTANTS_BYTES, QuadConstants, ndc_rect, uv_in_texture, uv_rect};
 pub use readback::{mapped_len, unpad_rows, unpad_rows_into};
 pub use residency::{Resident, Upload, swap_slots, upload_for};
+#[doc(hidden)]
+pub use ring::FAKE_HANDLE_BASE;
+pub use ring::{FakeRing, GpuFrame, RingStats};
+pub use ring_state::{RING_CAPACITY, RING_WAIT, RingFormat, SizeClass, SlotKey};
 pub use spout::{
     NAME_SLOT_LEN, SENDER_NAMES_MAP, SHARED_TEXTURE_INFO_LEN, SPOUT_FHD_SENDER_NAME,
     SPOUT_NAME_MAX_LEN, SPOUT_SENDER_NAME, SharedTextureInfo, check_sender_name,
@@ -142,7 +160,7 @@ pub use stub::{
 };
 #[cfg(windows)]
 pub use win::{
-    Compositor, ListSentinel, SpoutSender, VblankTracker, VideoDevice, adapters, mutex_holder,
-    probe_gpu, probe_on_listed_adapter, probe_warp, read_shared_texture, spout_list_holder,
-    spout_sender_info, spout_sender_names,
+    Compositor, ListSentinel, PictureRing, SpoutSender, VblankTracker, VideoDevice, adapters,
+    mutex_holder, probe_gpu, probe_on_listed_adapter, probe_warp, read_shared_texture,
+    spout_list_holder, spout_sender_info, spout_sender_names,
 };

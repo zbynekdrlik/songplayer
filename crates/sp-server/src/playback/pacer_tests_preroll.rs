@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::playback::frame_buf::SharedFrame;
+use crate::playback::picture::Picture;
 use crate::playback::submitter::FrameSubmitter;
 use crate::playback::wallclock::{SettableClock, WallClock};
 use sp_ndi::test_util::MockNdiBackend;
@@ -27,11 +28,11 @@ fn anchored_pacer() -> (Pacer, SettableClock) {
 }
 
 /// The 4x2 standby black.
-fn black_frame() -> SharedFrame {
-    SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2])
+fn black_frame() -> Picture {
+    Picture::Cpu(SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]))
 }
 
-fn black(video: &SharedFrame) -> StandbyBlack<'_> {
+fn black(video: &Picture) -> StandbyBlack<'_> {
     StandbyBlack {
         width: 4,
         height: 2,
@@ -48,7 +49,7 @@ fn song_frame(pts_ns: i64) -> PacedFrame {
         width: 8,
         height: 2,
         stride: 8,
-        video: SharedFrame::new(vec![0u8; 8 * 2 * 3 / 2]),
+        video: SharedFrame::new(vec![0u8; 8 * 2 * 3 / 2]).into(),
         audio: vec![AudioFrame {
             data: vec![0.25; 1600 * 2],
             channels: 2,
@@ -67,10 +68,10 @@ fn slow_decoder(ready_on: u32) -> (Cell<u32>, u32) {
 /// and the audio block's `(channels, samples per channel)` (`None` = no audio).
 #[derive(Default)]
 struct Rec {
-    black: Option<SharedFrame>,
+    black: Option<Picture>,
     boundaries: Vec<Boundary>,
     /// The picture handed over on each boundary (identity checks).
-    videos: Vec<SharedFrame>,
+    videos: Vec<Picture>,
 }
 
 /// `(video stamp, video is the standby black, audio block (channels, samples))`.
@@ -290,7 +291,7 @@ fn preroll_gate_ends_at_once_on_a_failed_open() {
 }
 
 /// Idle standby at b(1)..b(3) into a recorder that knows the black.
-fn idle_three(blk: &SharedFrame) -> (Pacer, SettableClock, Rec) {
+fn idle_three(blk: &Picture) -> (Pacer, SettableClock, Rec) {
     let (mut pacer, clk) = anchored_pacer();
     let mut rec = Rec {
         black: Some(blk.clone()),
@@ -404,7 +405,7 @@ fn a_pause_before_the_first_frame_is_filled_with_the_standby_pair() {
 
 /// After idle b(1)..b(3) and an at-once pre-roll, play a 2-frame song on b(4),
 /// b(5). `rec.videos[4]` is then the last pre-seek picture.
-fn playing_after_preroll(blk: &SharedFrame) -> (Pacer, SettableClock, Rec) {
+fn playing_after_preroll(blk: &Picture) -> (Pacer, SettableClock, Rec) {
     let (mut pacer, clk, mut rec) = idle_three(blk);
     pacer.preroll(black(blk), &mut rec, || Some(()), |_, until| clk.set(until));
     let mut song: std::collections::VecDeque<PacedFrame> = (0..2)

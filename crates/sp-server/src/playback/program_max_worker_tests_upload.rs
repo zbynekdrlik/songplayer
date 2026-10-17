@@ -21,11 +21,12 @@ const MS: Duration = Duration::from_millis(1);
 /// pairs of two bytes.
 const FHD_PICTURE_BYTES: u64 = 1920 * 1080 + 2 * 960 * 540;
 
-/// The fake compositor's costs of one compose: every picture of
-/// `composition` uploaded, its plane bytes by sp-gpu's own rule
-/// (`Planes::upload_bytes`).
+/// The fake compositor's costs of one compose: every CPU picture of
+/// `composition` uploaded (`Composition::uploads`), its plane bytes by
+/// sp-gpu's own rule (`Planes::upload_bytes`); #279 P2: every ring slot
+/// drawn in place (`Composition::frames`), uploading nothing.
 pub(super) fn fake_stats(composition: &Composition<'_>) -> ComposeStats {
-    let pictures = composition.pictures();
+    let pictures = composition.uploads();
     let upload_bytes = pictures
         .iter()
         .map(|(_, picture)| picture.planes().map_or(0, |planes| planes.upload_bytes()))
@@ -35,7 +36,8 @@ pub(super) fn fake_stats(composition: &Composition<'_>) -> ComposeStats {
         draw_us: DRAW_US,
         uploads: u32::try_from(pictures.len()).unwrap_or(u32::MAX),
         upload_bytes,
-        uyvy_us: None,
+        gpu_sides: u32::try_from(composition.frames().len()).unwrap_or(u32::MAX),
+        ..ComposeStats::default()
     }
 }
 
@@ -43,8 +45,8 @@ pub(super) fn fake_stats(composition: &Composition<'_>) -> ComposeStats {
 fn the_fake_uploads_each_picture_of_its_composition() {
     let (a, b) = (picture(1920, 1080), picture(4, 2));
     let fade = Composition::Fade {
-        from: Some(a.nv12(1)),
-        to: Some(b.nv12(2)),
+        from: Some(a.side(1)),
+        to: Some(b.side(2)),
         weight_q8: 64,
     };
     let stats = fake_stats(&fade);

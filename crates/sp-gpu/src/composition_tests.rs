@@ -1,15 +1,19 @@
 //! Tests for a composition's layers (#223 S1a; #239: in a given target;
-//! #267: placed by the target's rule, MAX filling its width).
+//! #267: placed by the target's rule, MAX filling its width; #279 P2: a
+//! side in a ring slot).
+
+use std::time::Duration;
 
 use sp_core::fit::{Fill, Placement, aspect_fit, fill_width};
 
 use super::{
     CANVAS_HEIGHT, CANVAS_WIDTH, Composition, FHD_FIT, FHD_HEIGHT, FHD_TARGET, FHD_WIDTH, Fit,
-    Layer, MAX_FIT, MAX_TARGET, Slot, Target,
+    Layer, MAX_FIT, MAX_TARGET, Side, Slot, Target,
 };
 use crate::picture::Nv12Picture;
+use crate::ring::{FakeRing, GpuFrame};
 
-fn picture(id: u64, width: u32, height: u32) -> Nv12Picture<'static> {
+fn nv12(id: u64, width: u32, height: u32) -> Nv12Picture<'static> {
     Nv12Picture {
         id,
         width,
@@ -19,11 +23,16 @@ fn picture(id: u64, width: u32, height: u32) -> Nv12Picture<'static> {
     }
 }
 
+/// An uploaded picture's side.
+fn picture(id: u64, width: u32, height: u32) -> Side<'static> {
+    Side::Cpu(nv12(id, width, height))
+}
+
 /// (slot, picture id, place, uv_rect, weight) of each layer, in draw order.
 fn summary(layers: &[Layer<'_>]) -> Vec<(Slot, u64, Placement, [f32; 4], f32)> {
     layers
         .iter()
-        .map(|l| (l.slot, l.picture.id, l.place, l.uv_rect, l.weight))
+        .map(|l| (l.slot, l.side.id(), l.place, l.uv_rect, l.weight))
         .collect()
 }
 
@@ -323,18 +332,18 @@ fn the_two_targets_are_max_s_canvas_and_sp_program_s() {
     );
 }
 
-/// (slot, picture id) of each picture one compose uploads.
+/// (slot, picture id) of each side one compose draws.
 fn uploads(composition: &Composition<'_>) -> Vec<(Slot, u64)> {
     composition
         .pictures()
         .iter()
-        .map(|(slot, picture)| (*slot, picture.id))
+        .map(|(slot, side)| (*slot, side.id()))
         .collect()
 }
 
 /// (slot, picture id) of each layer a target draws.
 fn sampled(layers: &[Layer<'_>]) -> Vec<(Slot, u64)> {
-    layers.iter().map(|l| (l.slot, l.picture.id)).collect()
+    layers.iter().map(|l| (l.slot, l.side.id())).collect()
 }
 
 /// #251 step 2: ONE compose uploads `pictures()`, and EVERY target's
@@ -416,4 +425,103 @@ fn one_composition_is_placed_on_each_target_by_its_rule() {
         summary(&fade.layers_in(640, 480, Fit::FillWidth)),
         "any target: its own size and rule"
     );
+}
+
+/// #279 P2: a ring frame of `width`×`height` in a fake ring.
+fn ring_frame(ring: &FakeRing, width: u32, height: u32) -> GpuFrame {
+    ring.frame(width, height, Duration::ZERO)
+        .unwrap_or_else(|e| panic!("a free slot: {e}"))
+}
+
+/// #279 P2: a side reads its picture's id and size from an uploaded
+/// picture or a ring frame, and its texture's size: a ring slot's even
+/// sides.
+#[test]
+fn a_side_is_an_uploaded_picture_or_a_ring_frame() {
+    let cpu = picture(7, 1919, 1079);
+    assert_eq!(
+        (cpu.id(), cpu.width(), cpu.height(), cpu.texture_size()),
+        (7, 1919, 1079, (1919, 1079))
+    );
+    assert_eq!(cpu.cpu().map(|p| p.id), Some(7));
+    assert!(cpu.gpu().is_none());
+    let ring = FakeRing::new(1);
+    let frame = ring_frame(&ring, 1919, 1079);
+    let gpu = Side::from(&frame);
+    assert_eq!(
+        (gpu.id(), gpu.width(), gpu.height(), gpu.texture_size()),
+        (frame.id(), 1919, 1079, (1920, 1080))
+    );
+    assert!(gpu.cpu().is_none());
+    assert!(gpu.gpu().is_some_and(|f| f.ptr_eq(&frame)));
+    assert!(matches!(Side::from(nv12(9, 2, 2)), Side::Cpu(p) if p.id == 9));
+}
+
+/// #279 P2: a ring frame is placed by the target's rule like any picture,
+/// and its quad samples its own texels of the slot's even texture.
+#[test]
+fn a_ring_frame_is_placed_by_the_rule_and_sampled_inside_its_slot() {
+    let ring = FakeRing::new(1);
+    let frame = ring_frame(&ring, 1919, 1079);
+    let layers = Composition::Picture(Side::Gpu(&frame)).layers_on(FHD_TARGET);
+    let place = FHD_FIT.place(1919, 1079, FHD_WIDTH, FHD_HEIGHT).place;
+    let (su, sv) = (1919.0_f32 / 1920.0, 1079.0_f32 / 1080.0);
+    assert_eq!(
+        summary(&layers),
+        [(Slot::Outgoing, frame.id(), place, [0.0, 0.0, su, sv], 1.0)]
+    );
+    // An even frame's slot is its own size: exactly the picture's crop.
+    let even = FakeRing::new(1);
+    let frame = ring_frame(&even, 1440, 1080);
+    let layers = Composition::Picture(Side::Gpu(&frame)).layers();
+    assert_eq!(
+        summary(&layers),
+        [(Slot::Outgoing, frame.id(), FULL, CROP_4_3, 1.0)]
+    );
+}
+
+/// #279 P2: one compose uploads only the CPU pictures and opens each ring
+/// slot once, in draw order; a side not drawn (weight 0) neither.
+#[test]
+fn a_compose_uploads_its_cpu_pictures_and_opens_each_ring_slot_once() {
+    let ring = FakeRing::new(2);
+    let (a, b) = (ring_frame(&ring, 1920, 1080), ring_frame(&ring, 1280, 720));
+    let uploaded = |c: &Composition<'_>| -> Vec<(Slot, u64)> {
+        c.uploads().iter().map(|(slot, p)| (*slot, p.id)).collect()
+    };
+    let opened = |c: &Composition<'_>| -> Vec<u64> { c.frames().iter().map(|f| f.id()).collect() };
+    let mixed = Composition::Fade {
+        from: Some(picture(7, 2560, 1440)),
+        to: Some(Side::Gpu(&a)),
+        weight_q8: 64,
+    };
+    assert_eq!(uploaded(&mixed), [(Slot::Outgoing, 7)]);
+    assert_eq!(opened(&mixed), [a.id()]);
+    assert_eq!(
+        uploads(&mixed),
+        [(Slot::Outgoing, 7), (Slot::Incoming, a.id())],
+        "pictures() lists every drawn side"
+    );
+    let two = Composition::Fade {
+        from: Some(Side::Gpu(&b)),
+        to: Some(Side::Gpu(&a)),
+        weight_q8: 128,
+    };
+    assert_eq!(opened(&two), [b.id(), a.id()]);
+    assert!(uploaded(&two).is_empty());
+    let a_clone = a.clone();
+    let same = Composition::Fade {
+        from: Some(Side::Gpu(&a)),
+        to: Some(Side::Gpu(&a_clone)),
+        weight_q8: 128,
+    };
+    assert_eq!(opened(&same), [a.id()], "one slot, opened and held once");
+    let not_drawn = Composition::Fade {
+        from: Some(picture(7, 2560, 1440)),
+        to: Some(Side::Gpu(&a)),
+        weight_q8: 0,
+    };
+    assert!(opened(&not_drawn).is_empty());
+    assert!(opened(&Composition::Black).is_empty());
+    assert!(uploaded(&Composition::Black).is_empty());
 }

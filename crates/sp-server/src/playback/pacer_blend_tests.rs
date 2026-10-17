@@ -10,6 +10,7 @@ use sp_ndi::AudioFrame;
 use super::{BLEND_DEAD_BAND_100NS, FrameBlend, blend_weight_q8};
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::pacer::{PacedFrame, PacedSink, Pacer};
+use crate::playback::picture::Picture;
 use crate::playback::wallclock::{SettableClock, WallClock};
 
 /// One 30 fps grid slot (100 ns), the pacer's `interval_100ns(30)`.
@@ -28,7 +29,7 @@ fn frame(id: u8, pts_100ns: i64, width: u32) -> PacedFrame {
         width,
         height: 2,
         stride: width,
-        video: SharedFrame::new(vec![id; width as usize * 3]),
+        video: SharedFrame::new(vec![id; width as usize * 3]).into(),
         audio: Vec::new(),
     }
 }
@@ -50,7 +51,7 @@ struct Rec {
 impl PacedSink for Rec {
     fn emit(&mut self, video: &PacedFrame, _audio: &[AudioFrame], vtc: i64, atc: i64) {
         assert_eq!(vtc, atc, "audio and video stamped on one boundary");
-        self.shown.push(Shown::Plain(video.video[0]));
+        self.shown.push(Shown::Plain(video.video.expect_cpu()[0]));
         self.stamps.push(vtc);
     }
 
@@ -65,8 +66,8 @@ impl PacedSink for Rec {
         assert_eq!(vtc, atc, "audio and video stamped on one boundary");
         assert_eq!(blend.video.len(), video.video.len(), "same size");
         self.shown.push(Shown::Blended(
-            video.video[0],
-            blend.video[0],
+            video.video.expect_cpu()[0],
+            blend.video.expect_cpu()[0],
             blend.weight_q8,
         ));
         self.stamps.push(vtc);
@@ -81,7 +82,7 @@ struct PlainOnly {
 
 impl PacedSink for PlainOnly {
     fn emit(&mut self, video: &PacedFrame, _audio: &[AudioFrame], _vtc: i64, _atc: i64) {
-        self.shown.push(video.video[0]);
+        self.shown.push(video.video.expect_cpu()[0]);
     }
 }
 
@@ -187,7 +188,7 @@ fn a_25_fps_song_blends_every_boundary_between_two_frames() {
 
 #[test]
 fn the_next_frame_is_the_same_allocation_never_a_copy() {
-    struct Same(Option<bool>, SharedFrame);
+    struct Same(Option<bool>, Picture);
     impl PacedSink for Same {
         fn emit(&mut self, _: &PacedFrame, _: &[AudioFrame], _: i64, _: i64) {}
         fn emit_blended(

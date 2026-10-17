@@ -100,7 +100,7 @@ fn step(rig: &mut Rig, k: usize) -> Step {
         assert_standby(job);
     }
     Step {
-        picture: (job.width, job.video[0]),
+        picture: (job.width, job.video.expect_cpu()[0]),
         pending: rig.status().connects_pending,
     }
 }

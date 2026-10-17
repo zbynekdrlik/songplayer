@@ -17,7 +17,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use sp_gpu::{
-    ComposeStats, Composition, FHD_TARGET, GpuError, MAX_TARGET, Nv12Picture, PictureError,
+    ComposeStats, Composition, FHD_TARGET, GpuError, MAX_TARGET, PictureError, Side,
     SpoutSendStats, Target, TargetId, Targets,
 };
 
@@ -59,16 +59,30 @@ pub(crate) struct Pic {
     pub height: u32,
     pub stride: u32,
     pub len: usize,
+    /// #279 P2: a ring frame (`Side::Gpu`, no stride or bytes), not an
+    /// uploaded picture.
+    pub gpu: bool,
 }
 
 impl Pic {
-    fn of(picture: &Nv12Picture<'_>) -> Self {
-        Self {
-            id: picture.id,
-            width: picture.width,
-            height: picture.height,
-            stride: picture.stride,
-            len: picture.data.len(),
+    fn of(side: &Side<'_>) -> Self {
+        match side {
+            Side::Cpu(picture) => Self {
+                id: picture.id,
+                width: picture.width,
+                height: picture.height,
+                stride: picture.stride,
+                len: picture.data.len(),
+                gpu: false,
+            },
+            Side::Gpu(frame) => Self {
+                id: frame.id(),
+                width: frame.width(),
+                height: frame.height(),
+                stride: 0,
+                len: 0,
+                gpu: true,
+            },
         }
     }
 }
@@ -469,7 +483,7 @@ pub(crate) fn picture(width: u32, height: u32) -> MaxPicture {
         width,
         height,
         stride: width,
-        video: SharedFrame::new(vec![80; (width * height * 3 / 2) as usize]),
+        video: SharedFrame::new(vec![80; (width * height * 3 / 2) as usize]).into(),
     }
 }
 
@@ -487,6 +501,7 @@ pub(crate) fn pic(id: u64, picture: &MaxPicture) -> Pic {
         height: picture.height,
         stride: picture.stride,
         len: picture.video.len(),
+        gpu: false,
     }
 }
 
@@ -509,8 +524,8 @@ pub(crate) fn not_registered() -> GpuError {
 fn ids(composition: &Composition<'_>) -> Vec<Option<u64>> {
     match composition {
         Composition::Black => Vec::new(),
-        Composition::Picture(p) => vec![Some(p.id)],
-        Composition::Fade { from, to, .. } => vec![from.map(|p| p.id), to.map(|p| p.id)],
+        Composition::Picture(p) => vec![Some(p.id())],
+        Composition::Fade { from, to, .. } => vec![from.map(|p| p.id()), to.map(|p| p.id())],
     }
 }
 
@@ -525,7 +540,7 @@ fn a_picture_keeps_its_id_while_the_last_boundary_showed_it() {
         "the same allocation again (a held frame): the same id, no upload"
     );
     let same_bytes = MaxPicture {
-        video: SharedFrame::new(a.video.to_vec()),
+        video: SharedFrame::new(a.video.expect_cpu().to_vec()).into(),
         ..a.clone()
     };
     assert_eq!(
@@ -589,10 +604,10 @@ fn a_labelled_picture_is_the_jobs_own_bytes() {
     let a = picture(6, 4);
     let mut labels = PictureIds::default();
     let job = plain(1, &a);
-    let Composition::Picture(p) = labels.composition(&job) else {
-        panic!("a picture composes a picture");
+    let Composition::Picture(Side::Cpu(p)) = labels.composition(&job) else {
+        panic!("a CPU picture composes an uploaded picture");
     };
-    assert_eq!(p.data.as_ptr(), a.video.as_ptr());
+    assert_eq!(p.data.as_ptr(), a.video.expect_cpu().as_ptr());
     assert_eq!((p.width, p.height, p.stride, p.data.len()), (6, 4, 6, 36));
 }
 
@@ -930,3 +945,7 @@ pub(crate) fn spawn_loop(max: &Arc<MaxOut>, gpu: &FakeGpu) -> std::thread::JoinH
         .spawn(move || run_max_loop(&max, gpu, None, None))
         .expect("spawn the loop")
 }
+
+/// #279 P2: ring frames on MAX's side.
+#[path = "program_max_worker_tests_gpu.rs"]
+mod ring_frames;

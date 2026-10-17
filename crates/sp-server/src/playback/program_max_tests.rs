@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use sp_gpu::{ComposeStats, GpuError, SpoutSendStats};
+use sp_gpu::{ComposeStats, GpuError, Side, SpoutSendStats};
 use tokio::sync::broadcast;
 
 use super::{
@@ -235,8 +235,7 @@ fn compose(upload_us: u64, draw_us: u64) -> ComposeStats {
         upload_us,
         draw_us,
         uploads: 1,
-        upload_bytes: 0,
-        uyvy_us: None,
+        ..ComposeStats::default()
     }
 }
 
@@ -377,7 +376,7 @@ fn a_jobs_stamp_is_its_boundary() {
         width: 2,
         height: 2,
         stride: 2,
-        video: SharedFrame::new(vec![0; 6]),
+        video: SharedFrame::new(vec![0; 6]).into(),
     };
     assert_eq!(black(11).stamp_100ns(), 11);
     let one = MaxJob::Picture {
@@ -400,7 +399,7 @@ fn a_picture_is_the_jobs_own_frame_and_layout() {
         width: 6,
         height: 4,
         stride: 8,
-        video: SharedFrame::new(vec![7; 48]),
+        video: SharedFrame::new(vec![7; 48]).into(),
         audio: Vec::new(),
         video_tc_100ns: 5,
         audio_tc_100ns: 5,
@@ -411,12 +410,18 @@ fn a_picture_is_the_jobs_own_frame_and_layout() {
     let picture = MaxPicture::of(&job);
     assert_eq!((picture.width, picture.height, picture.stride), (6, 4, 8));
     assert!(picture.video.ptr_eq(&job.video), "an Arc bump, no copy");
-    let nv12 = picture.nv12(42);
+    let Side::Cpu(nv12) = picture.side(42) else {
+        panic!("a CPU picture is uploaded");
+    };
     assert_eq!(
         (nv12.id, nv12.width, nv12.height, nv12.stride),
         (42, 6, 4, 8)
     );
-    assert_eq!(nv12.data.as_ptr(), job.video.as_ptr(), "the same bytes");
+    assert_eq!(
+        nv12.data.as_ptr(),
+        job.video.expect_cpu().as_ptr(),
+        "the same bytes"
+    );
     assert_eq!(nv12.data.len(), 48);
 }
 

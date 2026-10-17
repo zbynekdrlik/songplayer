@@ -6,6 +6,8 @@
 
 use std::time::Instant;
 
+use crate::ring_state::{SlotDraw, SlotOpen};
+
 /// The cost of one `Compositor::compose` call, measured on the calling
 /// thread.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -28,6 +30,45 @@ pub struct ComposeStats {
     /// finished them, as [`target_draws_us`] counts a target's); `None`
     /// when no UYVY pass is enabled (`Compositor::enable_uyvy`).
     pub uyvy_us: Option<u64>,
+    /// #279 P2: the ring slots this compose drew from in place
+    /// (`Composition::frames`: each slot once), their keyed mutex held.
+    pub gpu_sides: u32,
+    /// #279 P2: the ring slots this compose opened on its device (a slot is
+    /// opened once, then kept: `ring_state::OpenedKeys`).
+    pub gpu_opens: u32,
+    /// #279 P2: the ring slots whose keyed mutex another side still held
+    /// (`WAIT_TIMEOUT` on the 0 ms acquire): drawn black this boundary.
+    pub km_acquire_timeouts: u32,
+    /// #279 P2: the ring slots whose key a device was lost holding
+    /// (`WAIT_ABANDONED`: the producer's, or the compositor's own before its
+    /// rebuild) or whose acquire failed on a healthy compositor, and the
+    /// slots of a dead ring: drawn black, their ring dead.
+    pub abandoned: u32,
+    /// #279 P2: the ring slots that did not open on a healthy compositor:
+    /// drawn black, their ring killed.
+    pub open_failures: u32,
+}
+
+impl ComposeStats {
+    /// #279 P2: count one ring slot of a compose: what the compositor
+    /// found of it (`open`) and what it does with it (`draw`,
+    /// `ring_state::slot_draw`). Drawn ([`gpu_sides`](Self::gpu_sides));
+    /// busy ([`km_acquire_timeouts`](Self::km_acquire_timeouts)); a dead
+    /// ring's, abandoned or a failed acquire
+    /// ([`abandoned`](Self::abandoned)); not opened
+    /// ([`open_failures`](Self::open_failures)); the compositor's own lost
+    /// device counts nothing (the compose fails).
+    pub fn count_slot(&mut self, open: SlotOpen, draw: SlotDraw) {
+        match (draw, open) {
+            (SlotDraw::Draw, _) => self.gpu_sides += 1,
+            (SlotDraw::Black, _) => self.km_acquire_timeouts += 1,
+            (SlotDraw::Gone, _) | (SlotDraw::KillRing, SlotOpen::Acquired(_)) => {
+                self.abandoned += 1;
+            }
+            (SlotDraw::KillRing, _) => self.open_failures += 1,
+            (SlotDraw::DeviceLost, _) => {}
+        }
+    }
 }
 
 /// #251 step 2: each target's own part of one compose's draw, µs, in draw

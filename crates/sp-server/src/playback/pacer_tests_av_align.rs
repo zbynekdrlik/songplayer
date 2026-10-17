@@ -83,7 +83,7 @@ fn frame(pts_100ns: i64, audio: Vec<AudioFrame>) -> PacedFrame {
         width: 4,
         height: 2,
         stride: 4,
-        video: SharedFrame::new(vec![0u8; 12]),
+        video: SharedFrame::new(vec![0u8; 12]).into(),
         audio,
     }
 }
@@ -157,6 +157,7 @@ impl PacedSink for Rec {
     ) {
         let mark = video
             .video
+            .expect_cpu()
             .get(..2)
             .map_or(0, |b| u16::from_le_bytes([b[0], b[1]]));
         self.shown.push(mark);

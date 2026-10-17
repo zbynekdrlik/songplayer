@@ -204,6 +204,26 @@ on exactly that. After the rewrite, list each `Type {` block's field values
 that are NOT in the new form (a scan over every file that names the type,
 non-literals included) and fix each one before the push.
 
+**A field that becomes an enum across ~50 files (#279 P2: `video:
+SharedFrame` → `Picture { Cpu, Gpu }` on 8 structs).** What kept the
+churn mechanical:
+
+- `impl From<Old> for New`, so every literal's value becomes `….into()`;
+- a `#[cfg(test)] pub(crate) fn expect_cpu(&self) -> &Old` accessor, so a
+  test that reads the old bytes becomes `.video.expect_cpu()[..]`, never
+  a `match` in every test;
+- a script that lists every struct literal's field value that is not yet
+  `.into()` / `New::…`, struct-update bases included (`..job(..)`);
+- a type of the same name already in a module (`paced_output.rs` had a
+  `Picture` struct) is renamed first (`FillPicture`), never shadowed;
+- a Windows-only file that only passes the value on (`pipeline_paced.rs`
+  `&black`) needs no edit when its producer's return type changes with
+  it.
+
+A child test module of a `#[path]` test file (`#[path = "x_tests_gpu.rs"]
+mod gpu;` at the end of `x_tests.rs`) resolves next to that file, and
+reaches its private helpers through `super::`.
+
 ## Moving a string or a call: grep the source-scan tests first (#144, 10.10.2026)
 
 Some tests read a source file with `include_str!` and assert it CONTAINS a

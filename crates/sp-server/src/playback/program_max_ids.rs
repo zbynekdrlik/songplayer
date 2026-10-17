@@ -1,10 +1,16 @@
 //! #223 S2: the ids of the pictures the `program-max` thread gives its
 //! compositor (moved out of `program_max_worker.rs`, #251 step 2, which sits
 //! at the 1000-line cap). Pure: tested in `program_max_worker_tests.rs`.
+//! #279 P2: a ring frame (`Picture::Gpu`) is labelled by its own id
+//! (`GpuFrame::id`, process-wide, never reused): only CPU pictures are
+//! labelled by allocation here. The two kinds number apart and may share a
+//! value: the compositor's residency compares the uploaded pictures' ids
+//! alone, and opens ring slots by `sp_gpu::SlotKey`.
 
-use sp_gpu::{Composition, Nv12Picture};
+use sp_gpu::{Composition, Side};
 
 use crate::playback::frame_buf::SharedFrame;
+use crate::playback::picture::Picture;
 use crate::playback::program_max::{MaxJob, MaxPicture};
 
 /// The ids of the pictures the compositor is given. `sp-gpu` skips the
@@ -51,18 +57,22 @@ impl PictureIds {
         self.held.clear();
     }
 
-    /// `picture` with its id: the id of the same allocation held or already
-    /// labelled in this job, else the next one.
+    /// `picture` with its id: a CPU picture's, the id of the same
+    /// allocation held or already labelled in this job, else the next one;
+    /// a ring frame names itself (`MaxPicture::side`).
     fn label<'a>(
         &mut self,
         labelled: &mut Vec<(SharedFrame, u64)>,
         picture: &'a MaxPicture,
-    ) -> Nv12Picture<'a> {
+    ) -> Side<'a> {
+        let Picture::Cpu(video) = &picture.video else {
+            return picture.side(0);
+        };
         let known = self
             .held
             .iter()
             .chain(labelled.iter())
-            .find(|(frame, _)| frame.ptr_eq(&picture.video))
+            .find(|(frame, _)| frame.ptr_eq(video))
             .map(|&(_, id)| id);
         let id = match known {
             Some(id) => id,
@@ -71,7 +81,7 @@ impl PictureIds {
                 self.next
             }
         };
-        labelled.push((picture.video.clone(), id));
-        picture.nv12(id)
+        labelled.push((video.clone(), id));
+        picture.side(id)
     }
 }

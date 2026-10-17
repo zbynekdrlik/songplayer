@@ -9,12 +9,17 @@
 //! `sp-decoder/src/video/`) and is proven on WARP on `windows-latest`: the
 //! compositor by the pixel pins (`tests/warp.rs`), the sender by
 //! `tests/spout.rs`. #279 P1a: the UYVY pass (`uyvy.rs`, its decisions the
-//! pure `crate::uyvy`) by `tests/uyvy.rs`.
+//! pure `crate::uyvy`) by `tests/uyvy.rs`. #279 P2: the picture ring on a
+//! producer device (`ring.rs`) and the compositor's ring slots
+//! (`sides.rs`), their decisions the pure `crate::ring_state`, by
+//! `tests/ring.rs`.
 
 mod device;
 mod pipeline;
 mod probe;
 mod receiver;
+mod ring;
+mod sides;
 mod spout_lock;
 mod spout_registry;
 mod spout_sender;
@@ -37,6 +42,7 @@ use windows::core::Interface;
 pub use device::adapters;
 pub use probe::{probe_gpu, probe_on_listed_adapter, probe_warp};
 pub use receiver::read_shared_texture;
+pub use ring::PictureRing;
 pub use spout_lock::{ListSentinel, mutex_holder, spout_list_holder};
 pub use spout_registry::{spout_sender_info, spout_sender_names};
 pub use spout_sender::SpoutSender;
@@ -44,7 +50,7 @@ pub use vblank::VblankTracker;
 pub use video_device::VideoDevice;
 
 use crate::adapter::AdapterInfo;
-use crate::composition::{CANVAS_HEIGHT, CANVAS_WIDTH, Composition, Fit, MAX_FIT, Target};
+use crate::composition::{CANVAS_HEIGHT, CANVAS_WIDTH, Composition, Fit, MAX_FIT, Side, Target};
 use crate::error::GpuError;
 use crate::quad::QuadConstants;
 use crate::residency::{Resident, Upload, swap_slots, upload_for};
@@ -53,6 +59,7 @@ use crate::targets::{TargetId, Targets};
 use crate::uyvy::UYVY_STAGING;
 use device::DeviceUse;
 use pipeline::{Pipeline, Quad};
+use sides::RingSlots;
 use textures::{PlaneTextures, RenderTarget};
 use uyvy::UyvyPass;
 
@@ -128,6 +135,8 @@ pub struct Compositor {
     pipeline: Pipeline,
     targets: Targets<Drawn>,
     slots: [Option<PlaneTextures>; 2],
+    /// #279 P2: the ring slots opened on this device (each once).
+    ring_slots: RingSlots,
     /// #279 P1a: the UYVY pass of one target, while enabled.
     uyvy: Option<UyvyPass>,
     /// Ties the compositor to its thread (a raw pointer is neither `Send`
@@ -211,6 +220,7 @@ impl Compositor {
             pipeline,
             targets: Targets::new(primary),
             slots: [None, None],
+            ring_slots: RingSlots::default(),
             uyvy: None,
             thread_bound: PhantomData,
         })
@@ -355,7 +365,7 @@ impl Compositor {
     /// (each target keeps the last frame). #251: the two slots first trade
     /// places when that saves uploads ([`swap_slots`]: a fade's incoming
     /// picture is the next fade's outgoing one). #251 step 2: each picture
-    /// ([`Composition::pictures`]) is uploaded ONCE into its slot, then
+    /// ([`Composition::uploads`]) is uploaded ONCE into its slot, then
     /// every target is drawn from those textures in draw order (the primary
     /// first), each placed by its own rule ([`Composition::layers_on`]); one
     /// flush and one wait for all of them, each target's own part kept for
@@ -363,14 +373,26 @@ impl Compositor {
     /// pass and its staging copy run after the targets, inside the same
     /// flush and wait (their part is `ComposeStats::uyvy_us`); the copy
     /// counts for [`read_uyvy`](Self::read_uyvy) only once the compose
-    /// finished. A [`GpuError::DeviceLost`] means the compositor must be
+    /// finished. #279 P2: a ring frame's side ([`Side::Gpu`]) is never
+    /// uploaded: its slot is opened once on this device and held for the
+    /// compose (acquired with key 1 and a 0 ms timeout before the draws,
+    /// released after the wait), decided by `ring_state::slot_draw`: a
+    /// busy slot, an abandoned one, a dead ring's and one that fails its
+    /// acquire or open on a healthy compositor are drawn black and counted
+    /// (`ComposeStats::km_acquire_timeouts` / `abandoned` /
+    /// `open_failures`); a failure while this device is removed fails the
+    /// compose. A [`GpuError::DeviceLost`] means the compositor must be
     /// rebuilt.
     pub fn compose(&mut self, composition: &Composition<'_>) -> Result<ComposeStats, GpuError> {
-        let pictures = composition.pictures();
+        let pictures = composition.uploads();
         let planes = pictures
             .iter()
             .map(|(_, picture)| picture.planes())
             .collect::<Result<Vec<_>, _>>()?;
+        let mut stats = ComposeStats::default();
+        let held = self
+            .ring_slots
+            .hold(&self.device, &composition.frames(), &mut stats)?;
 
         let upload_start = Instant::now();
         let resident = self
@@ -384,7 +406,6 @@ impl Compositor {
         if swap_slots(resident, wanted) {
             self.slots.swap(0, 1);
         }
-        let (mut uploads, mut upload_bytes) = (0, 0);
         for ((slot_of, picture), planes) in pictures.iter().zip(&planes) {
             let slot = &mut self.slots[slot_of.index()];
             let upload = upload_for(slot.as_ref().map(|t| t.resident), picture);
@@ -403,10 +424,10 @@ impl Compositor {
             }
             let textures = slot.as_mut().ok_or(NO_TEXTURES)?;
             textures.write(&self.context, picture, planes);
-            uploads += 1;
-            upload_bytes += planes.upload_bytes();
+            stats.uploads += 1;
+            stats.upload_bytes += planes.upload_bytes();
         }
-        let upload_us = micros_since(upload_start);
+        stats.upload_us = micros_since(upload_start);
 
         let draw_start = Instant::now();
         for (_, drawn) in self.targets.iter() {
@@ -414,7 +435,19 @@ impl Compositor {
             let layers = composition.layers_on(spec);
             let mut quads = Vec::with_capacity(layers.len());
             for layer in &layers {
-                let textures = self.slots[layer.slot.index()].as_ref().ok_or(NO_TEXTURES)?;
+                let views = match layer.side {
+                    Side::Cpu(_) => {
+                        let textures =
+                            self.slots[layer.slot.index()].as_ref().ok_or(NO_TEXTURES)?;
+                        Some((&textures.luma_view, &textures.chroma_view))
+                    }
+                    Side::Gpu(frame) => held.views(frame),
+                };
+                // #279 P2: a ring slot not held this compose adds nothing
+                // (black where it would be).
+                let Some((luma, chroma)) = views else {
+                    continue;
+                };
                 quads.push(Quad {
                     constants: QuadConstants::new(
                         layer.place,
@@ -423,7 +456,8 @@ impl Compositor {
                         spec.width,
                         spec.height,
                     ),
-                    textures,
+                    luma,
+                    chroma,
                 });
             }
             self.pipeline.draw(&self.context, &drawn.render, &quads);
@@ -436,7 +470,9 @@ impl Compositor {
         let targets_drawn = queries.len();
         queries.extend(self.uyvy.as_ref().map(|pass| &pass.done));
         let done = pipeline::wait_until_each_done(&self.context, &queries)?;
-        let draw_us = micros_since(draw_start);
+        // The GPU has finished reading every held ring slot: give them back.
+        drop(held);
+        stats.draw_us = micros_since(draw_start);
         let parts = target_draws_us(draw_start, &done);
         let (parts, uyvy_us) = split_uyvy_part(parts, targets_drawn);
         for ((_, drawn), part) in self.targets.iter_mut().zip(parts) {
@@ -447,13 +483,8 @@ impl Compositor {
         if let Some(pass) = &mut self.uyvy {
             pass.ring.written();
         }
-        Ok(ComposeStats {
-            upload_us,
-            draw_us,
-            uploads,
-            upload_bytes,
-            uyvy_us,
-        })
+        stats.uyvy_us = uyvy_us;
+        Ok(stats)
     }
 
     /// The primary render target's pixels: [`size`](Self::size) BGRA, row
