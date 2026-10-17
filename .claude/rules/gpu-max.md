@@ -2003,10 +2003,12 @@ behaviour change).
   `uv_in_texture` / reference / `count_slot` pins, and WARP
   `tests/ring.rs` (its NV12 sources shader-resource bound and made with
   initial data, the two NV12 textures P0 made on WARP, in one): a slot written on one device drawn on another
-  within S1a's reference, opened once and uploading nothing; slice 2 of
-  a 4-slice 640×368 array (an NV12 ARRAY with initial data and a boxed
-  copy out of a slice are WARP premises P0 did not prove: a refusal
-  fails that test, never skips it — read the Build (Windows) log); a fade of an upload and a slot, and of two
+  within S1a's reference, opened once and uploading nothing; slice 1 of
+  a 2-slice 640×368 array (WARP makes an NV12 ARRAY of at most 2 slices,
+  at any size: 3 or more is E_INVALIDARG — the first CI of P2,
+  39066250195, failed on a 4-slice one; measured on SNV with a WARP
+  device through Python ctypes, `diag\wall-bridge\warp_probe2.py`; a
+  refusal fails that test, never skips it — read the Build (Windows) log); a fade of an upload and a slot, and of two
   slots; a slot held by a third device drawn black and counted, then
   drawn; a full ring's `RingFull` then a reuse; a new size written over
   a free slot of the other (made again, drawn); the refusals; an odd

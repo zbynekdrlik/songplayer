@@ -82,7 +82,9 @@ fn warp_device() -> ID3D11Device {
 /// UV plane after ALL the luma rows, `width × height`). Shader-resource
 /// bound and made with initial data: the two NV12 textures P0's probe made
 /// on WARP, in one (a decoder's own surfaces are decoder-bound, which WARP
-/// cannot make).
+/// cannot make). WARP makes an NV12 ARRAY of at most 2 slices, at any size
+/// (3 or more: E_INVALIDARG; measured with a WARP device on SNV, 17.10.2026,
+/// and CI 39066250195), so an array here has 2.
 fn texture(
     device: &ID3D11Device,
     format: DXGI_FORMAT,
@@ -225,7 +227,7 @@ fn a_slot_written_on_one_device_is_drawn_in_place_on_another() {
 fn a_slot_is_copied_out_of_a_slice_of_a_decoder_like_texture_array() {
     let mut ring = ring(4);
     let (picture_size, surface_size) = ((640, 360), (640, 368));
-    let pictures: Vec<(u32, Vec<u8>)> = [0, 40, 80, 120]
+    let pictures: Vec<(u32, Vec<u8>)> = [0, 80]
         .into_iter()
         .map(|seed| pattern(picture_size.0, picture_size.1, seed))
         .collect();
@@ -235,20 +237,20 @@ fn a_slot_is_copied_out_of_a_slice_of_a_decoder_like_texture_array() {
         .collect();
     let array = texture(ring.device(), DXGI_FORMAT_NV12, surface_size, &slices);
     let frame = ring
-        .copy_from(&array, 2, picture_size)
-        .unwrap_or_else(|e| panic!("the copy of slice 2: {e}"));
+        .copy_from(&array, 1, picture_size)
+        .unwrap_or_else(|e| panic!("the copy of slice 1: {e}"));
     assert_eq!((frame.width(), frame.height()), picture_size);
     assert_eq!(frame.texture_size(), picture_size, "the visible box only");
     let mut compositor = warp_fhd();
     let (stats, bgra) = compose(&mut compositor, &Composition::Picture(Side::Gpu(&frame)));
     assert_eq!((stats.gpu_sides, stats.uploads), (1, 0));
-    let (stride, data) = &pictures[2];
+    let (stride, data) = &pictures[1];
     let cpu = Composition::Picture(picture(1, picture_size.0, picture_size.1, *stride, data));
     assert_matches_reference_in(
         &bgra,
         &cpu.layers_on(FHD_TARGET),
         FHD,
-        "slice 2 of a 4-slice 640x368 array, its 640x360 box",
+        "slice 1 of a 2-slice 640x368 array, its 640x360 box",
     );
 }
 
