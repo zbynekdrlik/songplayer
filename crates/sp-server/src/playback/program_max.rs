@@ -94,7 +94,8 @@ pub use quiesce::{MAX_STOP_WAIT, QUIESCE_EXPIRY, stop_and_wait};
 #[path = "program_max_phase.rs"]
 mod phase;
 pub use phase::{
-    load_max_compose_phase_us, load_max_vblank_phase_us, load_ndi_source, load_video_quiet_us,
+    Wants, load_max_compose_phase_us, load_max_vblank_phase_us, load_ndi_source,
+    load_video_quiet_us,
 };
 #[path = "program_max_upload.rs"]
 mod upload;
@@ -365,15 +366,10 @@ struct Queue {
 }
 
 impl Queue {
-    /// #279 P1b: whether anything wants the compositor: MAX (and with it
-    /// the FHD Spout sender) or NDI from the GPU.
-    fn wanted(&self) -> bool {
-        self.enabled || self.ndi == NdiSource::Gpu
-    }
-
-    /// Whether an offered job would be taken.
+    /// Whether an offered job would be taken (#279 P1b: while anything
+    /// wants the compositor, `Queue::wants`).
     fn accepting(&self) -> bool {
-        self.wanted() && self.consumer && !self.stop && self.quiesced_until.is_none()
+        self.wants().any() && self.consumer && !self.stop && self.quiesced_until.is_none()
     }
 
     /// The thread's next step at `now`, if one is ready: a stop wins, then
@@ -386,7 +382,7 @@ impl Queue {
         if let Some(until) = self.quiesced_until {
             return self.quiesce_step(until, now);
         }
-        if !self.wanted() {
+        if !self.wants().any() {
             return holding.then_some(MaxNext::Release);
         }
         self.jobs
@@ -586,7 +582,7 @@ impl MaxOut {
             let mut queue = self.lock_queue();
             let changed = queue.enabled != on;
             queue.enabled = on;
-            if !queue.wanted() {
+            if !queue.wants().any() {
                 while queue.jobs.take().is_some() {}
             }
             changed

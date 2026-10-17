@@ -86,7 +86,7 @@ use std::time::{Duration, Instant};
 use sp_gpu::{ComposeStats, GpuError, MAX_TARGET, SpoutSendStats, TargetId, VblankGrid};
 use tracing::{info, warn};
 
-use crate::playback::program_max::{MaxJob, MaxNext, MaxOut};
+use crate::playback::program_max::{MaxJob, MaxNext, MaxOut, Wants};
 pub use crate::playback::program_max_gpu::{
     MaxCompositor, MaxGpu, MaxSender, SpoutGpu, is_refusal,
 };
@@ -189,21 +189,6 @@ pub struct Lines {
     pub fhd: Option<LogLine>,
     /// #279 P1b: the compositor's for NDI alone (`None` while MAX is wanted).
     pub ndi: Option<LogLine>,
-}
-
-/// Who wants the compositor for a job (#279 P1b): MAX's output (its
-/// setting), the FHD Spout sender, NDI's readback.
-#[derive(Clone, Copy, Debug)]
-struct Wants {
-    max: bool,
-    fhd: bool,
-    ndi: bool,
-}
-
-impl Wants {
-    fn any(self) -> bool {
-        self.max || self.fhd || self.ndi
-    }
 }
 
 /// The `program-max` thread's state: the GPU objects it built, the picture
@@ -350,11 +335,7 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     /// returns the lines logged. An output no longer wanted is dropped first
     /// (MAX's with its target).
     pub fn serve_lines(&mut self, job: &MaxJob, offered: Instant, now: Instant) -> Lines {
-        let wants = Wants {
-            max: self.out.enabled(),
-            fhd: self.out.fhd_wanted(),
-            ndi: self.out.ndi_wanted(),
-        };
+        let wants = self.out.wants();
         if !wants.fhd && (self.fhd.sender.is_some() || self.fhd.retry_at.is_some()) {
             self.release_fhd();
         }

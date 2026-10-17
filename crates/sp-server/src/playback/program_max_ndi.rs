@@ -29,11 +29,11 @@ use tracing::{info, warn};
 
 use super::{
     LogGate, LogLine, MAX_LOG_EVERY_100NS, MAX_RETRY_BACKOFF, MaxCompositor, MaxGpu, MaxWorker,
-    Skip, Wants, elapsed_100ns,
+    Skip, elapsed_100ns,
 };
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::ndi_feed::{BlackUyvy, uyvy_len};
-use crate::playback::program_max::{MaxJob, MaxOut};
+use crate::playback::program_max::{MaxJob, MaxOut, Wants};
 use crate::playback::stat_window::WarnLimiter;
 
 /// The worker's NDI readback state.

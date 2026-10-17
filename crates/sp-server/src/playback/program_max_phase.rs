@@ -22,8 +22,39 @@ use sp_core::config::{
 use sqlx::SqlitePool;
 use tracing::{info, warn};
 
-use super::MaxOut;
+use super::{MaxOut, Queue, fhd_off_reason};
 use crate::playback::ndi_feed::NdiStatus;
+
+/// #279 P1b: who wants the compositor, from ONE read of the queue
+/// (`MaxOut::wants`): MAX's output (its setting), the FHD Spout sender (its
+/// setting AND MAX on, `fhd_off_reason`), NDI's readback
+/// (`program_ndi_source` = `gpu`). The queue's acceptance, its release and
+/// the worker read this one rule.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Wants {
+    pub max: bool,
+    pub fhd: bool,
+    pub ndi: bool,
+}
+
+impl Wants {
+    /// Whether anything wants the compositor: the thread takes jobs; with
+    /// nothing, it releases the GPU.
+    pub fn any(self) -> bool {
+        self.max || self.fhd || self.ndi
+    }
+}
+
+impl Queue {
+    /// Who wants the compositor now ([`Wants`]).
+    pub(super) fn wants(&self) -> Wants {
+        Wants {
+            max: self.enabled,
+            fhd: fhd_off_reason(self.fhd_enabled, self.enabled).is_none(),
+            ndi: self.ndi == NdiSource::Gpu,
+        }
+    }
+}
 
 impl MaxOut {
     /// Apply `program_max_vblank_phase_ms` (µs); returns whether it changed.
@@ -61,7 +92,7 @@ impl MaxOut {
             let mut queue = self.lock_queue();
             let changed = queue.ndi != source;
             queue.ndi = source;
-            if !queue.wanted() {
+            if !queue.wants().any() {
                 while queue.jobs.take().is_some() {}
             }
             changed
@@ -75,9 +106,14 @@ impl MaxOut {
         self.lock_queue().ndi
     }
 
+    /// #279 P1b: who wants the compositor ([`Wants`]), read under one lock.
+    pub fn wants(&self) -> Wants {
+        self.lock_queue().wants()
+    }
+
     /// #279 P1b: whether the thread reads NDI's picture back.
     pub fn ndi_wanted(&self) -> bool {
-        self.ndi_source() == NdiSource::Gpu
+        self.wants().ndi
     }
 
     /// #279 P1b: the `ndi` block of `GET /api/v1/program`.

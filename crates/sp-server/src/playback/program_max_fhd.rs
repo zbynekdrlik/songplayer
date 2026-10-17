@@ -139,8 +139,7 @@ impl MaxOut {
     /// Whether the thread runs the FHD sender: its setting on AND MAX on
     /// ([`fhd_off_reason`]).
     pub fn fhd_wanted(&self) -> bool {
-        let queue = self.lock_queue();
-        fhd_off_reason(queue.fhd_enabled, queue.enabled).is_none()
+        self.wants().fhd
     }
 
     /// The thread attached (`Running`) or ended (not running): the FHD
