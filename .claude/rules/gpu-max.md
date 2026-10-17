@@ -7,7 +7,7 @@ paths:
   - "crates/sp-server/src/api/program_tests_max.rs"
   - "crates/sp-server/src/playback/ndi_feed*.rs"
   - "crates/sp-server/src/playback/program_output_ndi*.rs"
-  - "crates/sp-server/src/playback/program_output_tests_ndi.rs"
+  - "crates/sp-server/src/playback/program_output_tests_ndi*.rs"
   - "crates/sp-server/src/api/program_tests_ndi.rs"
   - "src-tauri/resources/THIRD-PARTY-NOTICES.txt"
   - "e2e/post-deploy-max.spec.ts"
@@ -1566,18 +1566,29 @@ nothing on air (default `cpu`).
   readback). A failed enable is tried again only after
   `MAX_RETRY_BACKOFF` (it makes textures and compiles a shader).
 - **A device lost at the pass's enable is lost there** (review round 5
-  B5-1): `ndi_pass` calls `lose_device(now, true)` (the compositor goes,
-  `device_resets` +1, the rebuild waits the backoff), and
-  `MaxWorker::device_ready` (= `build_device` + `ndi_pass`, the first step
-  of `attempt`) fails the boundary as after a failed build: MAX's build
-  never runs on the gone compositor, which would arm a spurious MAX
-  backoff. Before, with MAX off nothing composed until the pass was on,
-  so nothing reached the compose's own device check: the removed
-  compositor was kept and its enable failed every 3 s, NDI on the canvas
-  for good. With MAX on the compose caught it. Lesson: catch a device
-  loss at EVERY device call that can return it, not only on the path one
-  consumer (MAX's compose) happens to run
-  (`with_max_off_a_device_lost_at_the_pass_s_enable_is_rebuilt_after_the_backoff`).
+  B5-1): `ndi_pass` calls `lose_device` (the compositor goes,
+  `device_resets` +1), and `MaxWorker::device_ready` (= `build_device` +
+  `ndi_pass`, the first step of `attempt`) fails the boundary as after a
+  failed build: MAX's build never runs on the gone compositor, which
+  would arm a spurious MAX backoff. Before, with MAX off nothing composed
+  until the pass was on, so nothing reached the compose's own device
+  check: the removed compositor was kept and its enable failed every 3 s,
+  NDI on the canvas for good. With MAX on the compose caught it one call
+  later. Round 6: the loss's kind follows the compositor's age
+  (`building` = `device_ready` built it for this boundary). The enable of
+  a fresh compositor is part of its build and waits the backoff. A
+  compositor that was up (NDI flipped to the GPU while MAX runs) is lost
+  like one a compose finds: rebuilt at the next job unless nothing went
+  out since the last loss. Round 5's fix first made every such loss wait
+  3 s (about 90 MAX boundaries), where the compose had rebuilt at once
+  (`with_max_off_a_device_lost_at_the_pass_s_enable_is_rebuilt_after_the_backoff`,
+  `a_device_lost_at_the_enable_of_a_running_compositor_is_rebuilt_at_once`).
+  Lesson: catch a device loss at a call after which nothing on the same
+  path would see it. With MAX off that is the enable, since nothing
+  composes until the pass is on. A READBACK's loss is left to the next
+  compose, which always runs while the pass is on (`read_back` only WARNs,
+  `a_failed_readback_pushes_nothing_and_costs_max_nothing`): never "fix"
+  that one too.
 - The pass has ONE log: a `StateLog<PassLine>` of its state (`pass_line`:
   `Off` while NDI is not wanted, `On` while the pass is enabled, else
   `Failing(why)` with the last enable error, an `Arc<str>` so a failing
@@ -1614,7 +1625,16 @@ nothing on air (default `cpu`).
   clear races the consumer's last take whichever thread reads the
   change first (`program_output_tests_ndi_switch.rs`: the worker on the
   fake GPU and the sender on one hand-off, the thread first, MAX on and
-  off).
+  off). A residual repeat stays (review round 6, both passes, ~0.1-0.2 %
+  of switches with MAX off, ~5 % with MAX on in their models): the
+  thread reads `wants()` when it TAKES a job, the sender reads the
+  setting after the offer and the quiet wait, so a flip between the two
+  reads holds b as a GPU boundary that the thread never reads back, and
+  the flush at b + 1 repeats one picture (no audio lost; ROZHODNUTÉ
+  6232669201 item 1 counts it as a repeat). The structural fix, if a
+  manual flip's one repeat ever matters: the sender decides the
+  boundary's NDI source once, before `offer_max`, and the `MaxJob`
+  carries "read me back".
 - After each compose, at the compose instant and BEFORE the Spout sends
   (a 67 ms Spout lock wait never delays NDI): `read_back` maps the newest
   staging copy (`read_uyvy`, never a wait) into a `frame_pool` buffer of
@@ -1682,7 +1702,7 @@ nothing on air (default `cpu`).
   first entry, not a return: it goes to the GPU as soon as the newest
   picture read back is fresh, as designed. A quick gpu → cpu → gpu flip
   within 1 s enters at once on the freshness of the pictures from before
-  (the feed let them go at the switch to the canvas, `newest` stays), so
+  (every canvas boundary under the setting let them go, `newest` stays), so
   its switch's take finds nothing and a missing picture is the black
   until the readback comes back (or the stale fallback after 30 slots).
   On the canvas after a fallback `readback_late`
@@ -1716,9 +1736,11 @@ nothing on air (default `cpu`).
   `the_setting_s_switch_lets_the_feed_s_pictures_go`). Every boundary,
   not only the switch: the thread can push one more picture after the
   switch (it read the setting late), and nothing else would let it go.
-  An automatic fallback does not clear: the gate takes the boundary
-  before's picture at every canvas boundary, and every older one goes
-  with it.
+  An ARMED fallback (from the GPU) does not clear: the gate takes the
+  boundary before's picture at every canvas boundary, and every older one
+  goes with it. A first entry's `stale` / `no_readback` canvas neither
+  clears nor takes: a picture kept there is fresh, and moves NDI to the
+  GPU at the next boundary.
 - The last picture (what a missing one repeats): every boundary on the
   canvas forgets it (after the held pair's flush; no 4 MB picture stays
   pinned while NDI is on the canvas). A switch to the GPU takes the
@@ -1742,8 +1764,10 @@ nothing on air (default `cpu`).
   fallback (`reason`, `on_time_needed`): ROZHODNUTÉ 6233825414 (the
   fallback is a fault the operator should see), pinned by a log capture
   (`the_fallback_is_a_warn_and_the_way_back_an_info`, its lines spaced
-  past the 5 s window). Every switch is counted in `ndi.switches` all the
-  same; the setting flip is one.
+  past the 5 s window). A fallback that heals inside the window after
+  the last line is never WARNed (the log says only the state at the
+  window's end): read `ndi.switches` and `repeats`, which count every
+  switch, the setting flip included.
 - `health.timing.submit_us` is the NDI submit alone from the GPU (at a
   switch to the canvas, the held pair's submit and b's canvas picture).
   The trace's `wire_100ns` is the wire stamp of the stamp NDI got
@@ -1790,8 +1814,9 @@ the first entry at once, a fade, the trace's stamp,
 the first switch repeating the boundary before, the held pair sent
 before the setting's switch forgets the last picture — read inside a
 later submit through `HookedNdi`, whose hook sees the mock —, the switch's
-`submit_start`, the feed let go at the setting's switch, the last picture
-back in the frame pool after a fallback),
+`submit_start`, the feed let go at the setting's switch and at every
+canvas boundary under it, the last picture back in the frame pool after a
+fallback),
 `program_output_tests_ndi_switch.rs` (round 5: the worker on the fake
 GPU and the sender on ONE hand-off, the thread reading the setting's
 switch first, MAX on and off — no repeat; the switch lines' levels by a
@@ -1800,7 +1825,8 @@ from the GPU; `HookedNdi`), `program_max_tests_ndi.rs` (the queue's
 rules, the setting), `program_max_worker_tests_ndi.rs` (the fake's
 `order`: the readback after the compose and before MAX's send, Black,
 MAX off, the pass off, the enable's backoff, a device lost at the
-enable, the pass log's on / off / failing lines, a quick recovery and
+enable (a fresh compositor waits the backoff, a running one is rebuilt
+at once), the pass log's on / off / failing lines, a quick recovery and
 the release's "off", a failed readback, a lost device, `lost_unsent`, a
 coalesce's gap, a job with nothing wanted, the feed left to the sender),
 `stat_window_tests.rs` (`StateLog`),
