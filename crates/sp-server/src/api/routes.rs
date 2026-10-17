@@ -324,7 +324,7 @@ pub async fn update_playlist(
             let rows = query.execute(&mut *tx).await?.rows_affected();
             // No row (an unknown id) has no songs to mark either.
             let songs = match body.is_active {
-                Some(active) => Some(follow_activation(&mut *tx, id, active, now_ms).await?),
+                Some(active) => Some(follow_activation(&mut tx, id, active, now_ms).await?),
                 None => None,
             };
             tx.commit().await?;

@@ -239,16 +239,25 @@ archiv!". Design: #261 comment 6228880917; the lane's notes: the
 
 ## Box acceptance (MAIN SESSION OPS, after the deploy)
 
-#261 lane 1 (V43 runs at the first start of the release, on SNV and on PP):
+#261 lane 1 (V43 runs at SongPlayer's first start on a build that has
+it: on SNV that is the DEPLOY OF THE DEV PUSH that integrates this lane
+(`ci.yml` deploys every dev push there), on PP the release that reaches
+it):
 
-- BEFORE the deploy, list each box's inactive playlists
-  (`GET /api/v1/playlists` → `is_active: false`, each with its kind and
-  its row count): V43 marks their rows at that start. Tell the owner, by
-  name, that their songs then leave every worker queue and the dashboard
-  list and are deleted with their files a year later unless the playlist
-  is turned on again before then (a set list's item never). A `dabing`
-  playlist among them would take its imported videos with it: ask the
-  owner before the release reaches that box.
+- BEFORE that push (SNV) / that release (PP), list the box's inactive
+  playlists (`GET /api/v1/playlists` → `is_active: false`, each with its
+  kind and its row count): V43 marks their rows at that start. Tell the
+  owner, by name, that their songs then leave every worker queue and the
+  dashboard list and are deleted with their files a year later unless the
+  playlist is turned on again before then (a set list's item never). A
+  `dabing` playlist among them would take its imported videos with it: ask
+  the owner before the build reaches that box.
+- A set list holed by a playlist DELETE BEFORE this lane stays holed (the
+  numbering runs at a removal or a DELETE): read ytlive's
+  `GET /api/v1/playlists/{id}/items`; positions must be `0..N-1`. On a gap,
+  remove its last item and add it back (`DELETE` then `POST
+  /api/v1/playlists/{id}/items`): the removal numbers the list again, the
+  add appends the item where it was.
 - 5 min after the start (then daily): the INFO lines `play history:
   deleted …` and `exchange leftovers: deleted …`, or their DEBUG
   "nothing to delete".

@@ -700,7 +700,7 @@ CREATE INDEX IF NOT EXISTS idx_ui_usage_ts ON ui_usage (ts_ms);
 /// - `playlists.deactivated_at` (UTC ms; NULL = active): a deactivation
 ///   marks the playlist's rows `removed_at` with this value (a row already
 ///   marked keeps its mark), so #260's retention deletes them a year later;
-///   a reactivation clears exactly those marks (`removed_at >=` it), never
+///   a reactivation clears exactly those marks (`removed_at =` it), never
 ///   the sync's earlier ones (`db::models_membership::deactivate` /
 ///   `reactivate`). Back-filled once for every playlist inactive now, never
 ///   the test item's.

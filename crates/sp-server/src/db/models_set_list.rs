@@ -91,7 +91,7 @@ pub async fn delete_playlist(pool: &SqlitePool, playlist_id: i64) -> Result<bool
         return Ok(false);
     }
     for holder in holders {
-        compact(&mut *tx, holder).await?;
+        compact(&mut tx, holder).await?;
     }
     tx.commit().await?;
     Ok(true)

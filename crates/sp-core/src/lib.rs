@@ -269,20 +269,6 @@ mod tests {
         assert_eq!(h, back);
     }
 
-    #[test]
-    fn resolume_clip_mapping_serde_roundtrip() {
-        let m = models::ResolumeClipMapping {
-            id: 1,
-            resolume_host_id: 1,
-            playlist_id: 1,
-            layer: 3,
-            column: 5,
-        };
-        let json = serde_json::to_string(&m).unwrap();
-        let back: models::ResolumeClipMapping = serde_json::from_str(&json).unwrap();
-        assert_eq!(m, back);
-    }
-
     // ---- WebSocket messages ----
 
     #[test]

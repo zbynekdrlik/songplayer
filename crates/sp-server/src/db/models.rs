@@ -656,7 +656,7 @@ pub async fn remove_playlist_item(
         .bind(video_id)
         .execute(&mut *tx)
         .await?;
-    super::models_set_list::compact(&mut *tx, playlist_id).await?;
+    super::models_set_list::compact(&mut tx, playlist_id).await?;
     tx.commit().await?;
     Ok(())
 }
