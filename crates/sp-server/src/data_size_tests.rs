@@ -31,7 +31,11 @@ fn a_walk_counts_every_file_in_the_tree_and_its_newest_write() {
     set_modified(&root.join("sub/deeper/c"), 4_102_444_800_123);
     let tree = walk(&root, None);
     assert_eq!(tree.bytes, 15);
-    assert_eq!(tree.newest_ms, Some(4_102_444_800_123));
+    // The listing's times: on NTFS the directory index may lag a write
+    // (the exact walk below reads each file's own record on every system).
+    if cfg!(unix) {
+        assert_eq!(tree.newest_ms, Some(4_102_444_800_123));
+    }
     assert!(tree.complete);
     assert!(!tree.skipped);
 }
@@ -91,4 +95,20 @@ fn a_symlink_is_never_followed() {
     let tree = walk(&root, None);
     assert_eq!(tree.bytes, 3);
     assert!(tree.complete);
+}
+
+/// The exact walk (the cache sweep's work dirs) finds what the walk finds,
+/// each entry read from its own record.
+#[test]
+fn an_exact_walk_reads_the_same_tree() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("root");
+    write(&root.join("a"), 3);
+    write(&root.join("sub/b"), 5);
+    set_modified(&root.join("sub/b"), 4_102_444_800_456);
+    let exact = super::walk_exact(&root);
+    assert_eq!(exact.bytes, 8);
+    assert_eq!(exact.newest_ms, Some(4_102_444_800_456));
+    assert!(exact.complete);
+    assert!(!exact.skipped);
 }

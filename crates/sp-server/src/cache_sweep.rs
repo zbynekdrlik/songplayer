@@ -63,6 +63,9 @@ pub struct Swept {
     pub failed: u64,
     /// Entries due beyond the pass's bound, left for the next day.
     pub left: u64,
+    /// How long the pass held `cache::SONG_FILES` (its log line's, the box
+    /// check's).
+    pub held_ms: u64,
 }
 
 impl Swept {
@@ -137,7 +140,7 @@ fn list_into(dir: &Path, place: Place, facts: &RowFacts, entries: &mut Vec<Entry
         };
         let (bytes, modified_ms) = if let Some(id) = &work_dir {
             if facts.may_take(id, None) {
-                let tree = data_size::walk(&path, None);
+                let tree = data_size::walk_exact(&path);
                 (tree.bytes, tree.newest_ms.filter(|_| tree.complete))
             } else {
                 (0, None) // a row has its video: never the plan's, not walked
@@ -221,14 +224,19 @@ pub fn execute(cache_dir: &Path, plan: &Plan) -> Swept {
 /// One pass at `now_ms` (module doc).
 pub async fn pass(pool: &SqlitePool, cache_dir: &Path, now_ms: i64) -> anyhow::Result<Swept> {
     let _files = cache::SONG_FILES.lock().await;
+    let held = std::time::Instant::now();
     let facts = row_facts(pool).await.context("reading the rows")?;
     if facts.is_empty() {
         warn!("cache sweep: the database has no row - no file of a video is deleted");
     }
     let dir = cache_dir.to_path_buf();
-    tokio::task::spawn_blocking(move || execute(&dir, &plan(&list(&dir, &facts), &facts, now_ms)))
-        .await
-        .context("the sweep's thread")
+    let mut swept = tokio::task::spawn_blocking(move || {
+        execute(&dir, &plan(&list(&dir, &facts), &facts, now_ms))
+    })
+    .await
+    .context("the sweep's thread")?;
+    swept.held_ms = u64::try_from(held.elapsed().as_millis()).unwrap_or(u64::MAX);
+    Ok(swept)
 }
 
 /// The pass's loop on the shared daily timer, until shutdown: the sweep,
@@ -244,7 +252,9 @@ pub async fn run(
         let (cache_dir, data_dir) = (cache_dir.clone(), data_dir.clone());
         async move {
             match pass(&pool, &cache_dir, now_ms).await {
-                Ok(swept) if swept.is_empty() => debug!("cache sweep: nothing to delete"),
+                Ok(swept) if swept.is_empty() => {
+                    debug!(held_ms = swept.held_ms, "cache sweep: nothing to delete")
+                }
                 Ok(swept) => info!(
                     files = swept.files,
                     dirs = swept.dirs,
@@ -256,6 +266,7 @@ pub async fn run(
                     parts = swept.count(Why::Part),
                     failed = swept.failed,
                     left = swept.left,
+                    held_ms = swept.held_ms,
                     "cache sweep: deleted what no row needs any more (#261)"
                 ),
                 Err(e) => warn!("cache sweep: the pass failed - trying again tomorrow: {e:#}"),

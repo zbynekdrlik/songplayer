@@ -165,3 +165,30 @@ fn a_stat_that_fails_is_an_error_never_no_log() {
     std::fs::write(&plain, "x").unwrap();
     assert!(rotate_if_over(&plain.join("x.log"), 10).is_err());
 }
+
+/// A rotation that failed is tried again only once the file grew by another
+/// sixteenth of the limit, never on every line; one that worked starts the
+/// count afresh.
+#[test]
+fn a_failed_rotation_is_retried_a_sixteenth_of_the_limit_later() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("host.log");
+    let blocker = rotated_path(&log);
+    std::fs::create_dir(&blocker).unwrap();
+    std::fs::write(blocker.join("keep"), "x").unwrap();
+    std::fs::write(&log, "x".repeat(32)).unwrap();
+
+    let mut file = RotatingFile::open(&log, 32).unwrap();
+    file.write_all(b"a").unwrap(); // tried at 32 and failed: next try at 34
+    std::fs::remove_dir_all(&blocker).unwrap();
+    file.write_all(b"b").unwrap(); // 33: not yet
+    assert!(!rotated_path(&log).exists(), "no try before 34");
+    file.write_all(b"c").unwrap(); // 34: rotates
+    assert_eq!(read(&rotated_path(&log)), format!("{}ab", "x".repeat(32)));
+    assert_eq!(read(&log), "c");
+
+    file.write_all("y".repeat(31).as_bytes()).unwrap(); // 32 again
+    file.write_all(b"d").unwrap(); // the count started afresh: rotates at 32
+    assert_eq!(read(&rotated_path(&log)), format!("c{}", "y".repeat(31)));
+    assert_eq!(read(&log), "d");
+}

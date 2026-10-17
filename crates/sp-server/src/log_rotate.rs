@@ -12,7 +12,8 @@
 //! The daily logs (`songplayer.<date>.log`) keep their own bound of 14
 //! files (`src-tauri/src/lib.rs`). A rotation that fails (the `.1` name
 //! taken by a directory, a file held open elsewhere) never loses a line: the
-//! log goes on in the same file and the next write tries again.
+//! log goes on in the same file and a later write tries again (once the
+//! file grew by another sixteenth of the limit, never on every line).
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
@@ -55,6 +56,9 @@ pub struct RotatingFile {
     file: Option<File>,
     /// Bytes in the current file.
     written: u64,
+    /// After a rotation that failed, the next try waits until the file
+    /// holds this much (another sixteenth of the limit), never every line.
+    retry_at: u64,
 }
 
 impl RotatingFile {
@@ -67,6 +71,7 @@ impl RotatingFile {
             limit,
             file: None,
             written: 0,
+            retry_at: 0,
         };
         log.reopen()?;
         Ok(log)
@@ -98,8 +103,11 @@ impl Write for RotatingFile {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if self.file.is_none() {
             self.reopen()?;
-        } else if self.written >= self.limit {
-            let _ = self.rotate();
+        } else if self.written >= self.limit && self.written >= self.retry_at {
+            self.retry_at = match self.rotate() {
+                Ok(()) => 0,
+                Err(_) => self.written.saturating_add(self.limit / 16),
+            };
         }
         let file = self
             .file

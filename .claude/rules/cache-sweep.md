@@ -32,7 +32,8 @@ comment 6230045110.
   listed outside it, a unit move caught half-way (its `<name>` and
   `<name>.replaced` both there, then a failed give-back) let the pass
   delete the only copy as `replaced`. The listing and the deletes run on
-  the blocking pool; the lock is held seconds a day.
+  the blocking pool; the pass's log line names how long it held the lock
+  (`held_ms`).
 - **A database with no row at all deletes no file of a video**
   (`RowFacts::is_empty`, one WARN `cache sweep: the database has no row`):
   a fresh or replaced database would make every song a video no row has.
@@ -45,7 +46,8 @@ comment 6230045110.
   lowercased: NTFS ignores case, and a match only KEEPS more).
 - **The listing** (`list`): the cache dir's FILES, its jobs' work DIRS
   (`{id}_isolation`, `{id}_stemsep`, `{id}_dub`: walked for their tree's
-  bytes and newest write, `data_size::walk`, only when the plan could take
+  bytes and newest write, `data_size::walk_exact` (each entry's own
+  record), only when the plan could take
   them (`RowFacts::may_take`: a video no row has); a row's video's work dir
   is listed with no time, never walked; an unreadable part of a tree = no
   time = never deleted), and `<cache>/peer/`'s files (only when `peer` is
@@ -107,7 +109,8 @@ comment 6230045110.
   `bytes`; `sp_server=debug` is on in the box's log); one INFO `cache
   sweep: deleted what no row needs any more (#261)` with `files`, `dirs`,
   `bytes`, `no_row`, `stale`, `replaced`, `dub_prev`, `parts`, `failed`,
-  `left` (DEBUG `nothing to delete`); a WARN when the pass failed.
+  `left`, `held_ms` (DEBUG `nothing to delete`, with `held_ms`); a WARN
+  when the pass failed.
 - **Untouched rules:** the startup self-heal (#136), #260's retention and
   the video upgrade's `.prev` retention keep their own rules; the sweep
   only adds what nothing deleted. An old stems pair or a superseded dub of
@@ -141,11 +144,15 @@ comment 6230045110.
   `<name>.1` (an older `.1` replaced). Each log keeps at most ~20 MiB.
 - `songplayer-panic.log` / `sp-audio-host-panic.log`: at the hook's install
   (its INFO line says `rotated`) and before each record
-  (`panic_hook::write_crash_record_at`).
+  (`panic_hook::write_crash_record_at`), one record at a time (`WRITING`:
+  two threads panicking at the limit would both rotate, the second moving
+  the first's fresh record over the full `.1`).
 - `sp-audio-host.log`: a `RotatingFile` (`audio_host/host_win.rs`), at the
   open and before every write that finds it full, so during a run too.
-- A rotation that fails never loses a line (the same file goes on, the
-  next write tries again). `log_rotate.rs` is on the host's no-spawn scan.
+- A rotation that fails never loses a line (the same file goes on); a
+  `RotatingFile` tries again once the file grew by another sixteenth of
+  the limit (`retry_at`), never on every line. `log_rotate.rs` is on the
+  host's no-spawn scan.
 - The daily `songplayer.<date>.log` keep their own 14-file bound.
 
 ## The import into an inactive playlist (`api/routes_import.rs`)
@@ -169,8 +176,9 @@ schema with Python sqlite3).
   shapes above and `GET /api/v1/playlists` + the videos' ids (no row = a
   candidate), with their mtime; anything unexpected = stop the deploy.
 - 5 min after the start: the INFO `cache sweep: deleted …` (or the DEBUG
-  `nothing to delete`), then `data dir: measured`; `GET /api/v1/status`
-  `data_dir_bytes` not null; Nastavenia's line.
+  `nothing to delete`) with its `held_ms` (how long the song-file lock was
+  held: expect seconds at most), then `data dir: measured`;
+  `GET /api/v1/status` `data_dir_bytes` not null; Nastavenia's line.
 
 ## Tests
 

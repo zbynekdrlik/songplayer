@@ -30,8 +30,21 @@ pub fn modified_ms(meta: &std::fs::Metadata) -> Option<i64> {
 }
 
 /// Walk `dir` and everything in it, symlinks left out and `skip` (a dir in
-/// it) left out whole.
+/// it) left out whole. Each entry's facts come from the directory listing
+/// (cheap; on NTFS updated lazily for a file still open).
 pub fn walk(dir: &Path, skip: Option<&Path>) -> Tree {
+    walk_with(dir, skip, false)
+}
+
+/// [`walk`], every entry read from its own record (`symlink_metadata`, one
+/// open each), never NTFS's lazily updated directory index: the cache
+/// sweep's work dirs, where a job may still be writing.
+pub fn walk_exact(dir: &Path) -> Tree {
+    walk_with(dir, None, true)
+}
+
+/// [`walk`] / [`walk_exact`].
+fn walk_with(dir: &Path, skip: Option<&Path>, exact: bool) -> Tree {
     let mut tree = Tree {
         complete: true,
         ..Tree::default()
@@ -57,8 +70,13 @@ pub fn walk(dir: &Path, skip: Option<&Path>) -> Tree {
                 tree.skipped = true;
                 continue;
             }
-            // `DirEntry::metadata` never follows a symlink (or a junction).
-            let Ok(meta) = entry.metadata() else {
+            // Neither follows a symlink (or a junction).
+            let meta = if exact {
+                std::fs::symlink_metadata(&path)
+            } else {
+                entry.metadata()
+            };
+            let Ok(meta) = meta else {
                 tree.complete = false;
                 continue;
             };

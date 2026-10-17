@@ -125,7 +125,11 @@ async fn the_status_carries_the_data_dir_size_null_until_measured() {
     let state = test_state().await;
     let json = status_json(state.clone()).await;
     for key in ["data_dir_bytes", "cache_bytes", "data_dir_measured_ms"] {
-        assert_eq!(json[key], serde_json::Value::Null, "{key} before a measure");
+        assert_eq!(
+            json.as_object().unwrap().get(key),
+            Some(&serde_json::Value::Null),
+            "{key} present and null before a measure"
+        );
     }
     crate::data_size::set(DataSize {
         data_dir_bytes: Some(5_000_000_000),

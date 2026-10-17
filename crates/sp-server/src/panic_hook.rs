@@ -71,8 +71,17 @@ fn write_crash_record(path: &Path, record: &str) -> std::io::Result<()> {
     write_crash_record_at(path, record, crate::log_rotate::ROTATE_AT_BYTES)
 }
 
+/// One crash record at a time (#261): two threads panicking at once at the
+/// limit would both rotate, the second moving the first's fresh record
+/// over the full `.1`. (A panic inside the hook aborts the process, so
+/// this lock is never taken twice by one thread.)
+static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// [`write_crash_record`] with the rotation's limit (a test's small one).
 fn write_crash_record_at(path: &Path, record: &str, limit: u64) -> std::io::Result<()> {
+    let _one_at_a_time = WRITING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     // Best-effort: ensure the crash dir exists so a very-early panic (before
     // the logger created the data dir) still lands a durable record.
     if let Some(parent) = path.parent() {
@@ -215,6 +224,37 @@ mod tests {
         let rotated = crate::log_rotate::rotated_path(&path);
         assert_eq!(std::fs::read_to_string(rotated).unwrap(), "123456789A");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "B");
+    }
+
+    /// #261: one crash record at a time — a record waits while another is
+    /// written (two at the limit would both rotate), then lands.
+    #[test]
+    fn a_crash_record_waits_for_the_one_being_written() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("songplayer-panic.log");
+        let held = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let writer = {
+            let path = path.clone();
+            std::thread::spawn(move || {
+                write_crash_record_at(&path, "waited", 10).expect("write");
+                done_tx.send(()).expect("send");
+            })
+        };
+        // Read while held, assert once released: a failing assert while
+        // holding the lock would hang an installed hook's own record.
+        let early = done_rx
+            .recv_timeout(std::time::Duration::from_millis(200))
+            .is_ok();
+        let written_early = path.exists();
+        drop(held);
+        assert!(!early, "the record waits for the lock");
+        assert!(!written_early);
+        done_rx
+            .recv_timeout(std::time::Duration::from_secs(60))
+            .expect("written once the lock is free");
+        writer.join().expect("join");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "waited");
     }
 
     #[test]
