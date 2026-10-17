@@ -158,6 +158,12 @@ message to worker` before blaming a person.
   SongPlayer: ci.yml's "Deliver the runner's auto-start" before "Deploy
   SongPlayer", deploy-pp.yml's after its box check, before "Stop
   SongPlayer". A non-zero exit fails the step with SongPlayer untouched.
+- A dispatched OLDER build (a rollback, #251: PP back to 0.82.0 before an
+  event) checks out a tree from before the script: deploy-pp's step then
+  warns and exits 0 (`Test-Path` first), the auto-start left as the last
+  deploy delivered it. It failed closed before, so no older build could
+  reach PP (run 39010164786). Guard:
+  `test_pps_deploy_skips_the_delivery_for_a_build_older_than_the_script`.
 - `setup-runner.ps1` runs it through `Install-RunnerAutostart` (the file
   next to it, or fetched from `dev` under `irm | iex`) on a new install and
   on a configured box; it holds no copy of the files.
