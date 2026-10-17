@@ -117,9 +117,11 @@ pub(super) struct DecoderOutput {
 }
 
 /// The decoder's output type in `reader`'s transform chain (after the
-/// output type was set), `None` when the chain cannot be read.
-pub(super) fn decoder_output(reader: &IMFSourceReader) -> Option<DecoderOutput> {
-    let chain: IMFSourceReaderEx = reader.cast().ok()?;
+/// output type was set), or why the chain could not be read.
+pub(super) fn decoder_output(reader: &IMFSourceReader) -> Result<DecoderOutput, String> {
+    let chain: IMFSourceReaderEx = reader
+        .cast()
+        .map_err(|e| format!("IMFSourceReaderEx: {e}"))?;
     for index in 0..MAX_TRANSFORMS {
         let mut category = GUID::from_u128(0);
         let mut transform: Option<IMFTransform> = None;
@@ -131,16 +133,20 @@ pub(super) fn decoder_output(reader: &IMFSourceReader) -> Option<DecoderOutput> 
                 &mut transform,
             )
         }
-        .ok()?;
+        .map_err(|e| format!("GetTransformForStream {index}: {e}"))?;
         if category == MFT_CATEGORY_VIDEO_DECODER {
-            let output = unsafe { transform?.GetOutputCurrentType(0) }.ok()?;
-            return Some(DecoderOutput {
+            let transform = transform.ok_or("the decoder MFT is null")?;
+            let output = unsafe { transform.GetOutputCurrentType(0) }
+                .map_err(|e| format!("GetOutputCurrentType: {e}"))?;
+            return Ok(DecoderOutput {
                 size: frame_size(&output),
                 aperture: aperture_of(&output),
             });
         }
     }
-    None
+    Err(format!(
+        "no decoder among the first {MAX_TRANSFORMS} transforms"
+    ))
 }
 
 /// The native (compressed) media type, `None` when MF does not answer.

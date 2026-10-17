@@ -6,9 +6,9 @@
 //! processor's scale is proven on the box only. What runs here is the same
 //! open — a first source reader read for the stream's own size, then a
 //! second one with `MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING` and
-//! the NV12 output type's `MF_MT_FRAME_SIZE` (+ the native frame rate and
-//! the pixel aspect that keeps the display aspect) — with Media
-//! Foundation's video processor scaling on the CPU.
+//! the NV12 output type's `MF_MT_FRAME_SIZE` (+ the pixel aspect that keeps
+//! the display aspect and the native colour description; no frame rate) —
+//! with Media Foundation's video processor scaling on the CPU.
 //!
 //! The picture checks compare the scaled picture with the unscaled one by
 //! regions, with tolerances measured on this fixture (ffmpeg's bilinear,

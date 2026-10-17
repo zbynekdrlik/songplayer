@@ -25,10 +25,12 @@
 //! file inside the box keeps it, with no other call. What the scaled
 //! output type carries, and the native facts it keeps, is `mf_scaled.rs`.
 //! A scaled open Media Foundation refuses, negotiates at another size
-//! (`hw_decode::scale_took`), or whose decoder hands the processor a padded
-//! picture with no display aperture (`hw_decode::padding_reaches_processor`,
-//! the green strip) opens unscaled, with a WARN: never a dead song, never a
-//! wrong picture. A scaled picture lies in the video processor's texture,
+//! (`hw_decode::scale_took`), or where the decoder's padding could reach
+//! the processor (`hw_decode::scaled_open_safe`, the green strip: judged at
+//! open; on the D3D path only a stream of whole 16-pixel blocks, or one
+//! whose decoder already shows the native aperture, is scaled) opens
+//! unscaled, with a WARN: never a dead song. A scaled picture lies in the
+//! video processor's texture,
 //! so it tells nothing of the decoder's own path
 //! (`hw_decode::decoder_path_visible`).
 
@@ -57,8 +59,8 @@ use super::mf_scaled::{
 use crate::error::DecoderError;
 use crate::hw_decode::{
     DecodeMode, DecodePath, FallbackGate, FallbackStage, HwFallback, OnDecodeError, PathNote,
-    PathTracker, Resume, VideoArea, decoder_path_visible, hw_counters, padding_reaches_processor,
-    scale_took, scaled_frame_rate, scaled_size, visible_reference, visible_size,
+    PathTracker, Resume, VideoArea, decoder_path_visible, hw_counters, scale_took,
+    scaled_frame_rate, scaled_open_safe, scaled_size, visible_reference, visible_size,
 };
 use crate::stream::{MediaStream, VideoStream};
 use crate::types::{DecodedVideoFrame, PixelFormat};
@@ -288,7 +290,7 @@ impl MediaFoundationVideoReader {
         if let Some((from, to)) = scale {
             let on = if hw.is_some() { "D3D11" } else { "software" };
             let shape = ScaledType::new(native_type.as_ref(), from, to);
-            match Self::open_scaled(&wide_path, hw, &shape) {
+            match Self::open_scaled(path, &wide_path, hw, &shape) {
                 Ok(opened) => {
                     hw_counters().scaled_open();
                     info!(
@@ -319,12 +321,12 @@ impl MediaFoundationVideoReader {
     }
 
     /// #282: a second source reader on the file, with Media Foundation's
-    /// video processor, negotiated at `shape`. Refused when the decoder in
-    /// its chain hands the processor a padded picture with no display
-    /// aperture: the processor would scale the padding rows (green) into
-    /// the picture. A chain that cannot be read is let through, with a
-    /// WARN (the picture then relies on the decoder's aperture).
+    /// video processor, negotiated at `shape`. Refused where the decoder's
+    /// padding could reach the processor (`hw_decode::scaled_open_safe`,
+    /// from the decoder's output type in the reader's chain): the processor
+    /// would scale the padding rows (green) into the picture.
     fn open_scaled(
+        path: &Path,
         wide_path: &[u16],
         hw: Option<&HwSession>,
         shape: &ScaledType,
@@ -336,20 +338,27 @@ impl MediaFoundationVideoReader {
         }
         let reader = Self::source_reader(wide_path, hw, true)?;
         let mut opened = Self::configure(reader, hw, Some(shape.from), Some(shape))?;
-        opened.decoder_out = mf_scaled::decoder_output(&opened.reader);
-        match opened.decoder_out {
-            Some(out) if padding_reaches_processor(out.size, out.aperture, shape.from) => {
-                return Err(DecoderError::NoStream(format!(
-                    "video: the decoder hands the video processor {}x{} with aperture {:?} for a \
-                     {}x{} stream; its padding would be scaled into the picture",
-                    out.size.0, out.size.1, out.aperture, shape.from.0, shape.from.1
-                )));
-            }
-            Some(_) => {}
-            None => warn!(
-                "mf_reader: the decoder's output type could not be read; the scaled picture \
-                 relies on its display aperture"
-            ),
+        let read = mf_scaled::decoder_output(&opened.reader);
+        opened.decoder_out = read.as_ref().ok().copied();
+        let seen = opened.decoder_out.map(|out| (out.size, out.aperture));
+        let decoder = match &read {
+            Ok(out) => format!("{}x{} aperture {:?}", out.size.0, out.size.1, out.aperture),
+            Err(why) => format!("unreadable ({why})"),
+        };
+        if !scaled_open_safe(shape.from, seen, hw.is_some()) {
+            return Err(DecoderError::NoStream(format!(
+                "video: the decoder's padding could reach the video processor for a {}x{} \
+                 stream (decoder output: {decoder})",
+                shape.from.0, shape.from.1
+            )));
+        }
+        if read.is_err() {
+            warn!(
+                file = %path.display(),
+                decoder = %decoder,
+                "mf_reader: the decoder's output type could not be read; this software scaled \
+                 open relies on the decoder handing over the stream's own size"
+            );
         }
         Ok(opened)
     }
