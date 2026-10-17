@@ -15,7 +15,6 @@
 //! or `RUST_LOG`). At the pipe's end every output is discarded and its
 //! worker given up to 2 s to release its driver before the process exits.
 
-use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -34,14 +33,13 @@ use crate::audio_host::log_forward::PipeLogs;
 use crate::audio_host::mono::mono_100ns;
 use crate::audio_host::protocol::Report;
 use crate::audio_host::remote_clock::RemoteClock;
+use crate::log_rotate::{ROTATE_AT_BYTES, RotatingFile};
 use crate::playback::asio_out::AsioOut;
 
 /// How long the host keeps trying to open a busy pipe.
 const OPEN_WAIT: Duration = Duration::from_secs(5);
 /// How long the workers get to release their drivers at the end.
 const RELEASE_WAIT: Duration = Duration::from_secs(2);
-/// A host log over this size is started afresh (bytes).
-const LOG_KEEP_BYTES: u64 = 10 * 1024 * 1024;
 
 /// The host process (module doc); the exit code.
 pub fn run(pipe: &str) -> i32 {
@@ -125,18 +123,13 @@ async fn open(pipe: &str) -> Result<NamedPipeClient, String> {
     }
 }
 
-/// The host's log: its file (kept while the pipe is down) and the pipe.
+/// The host's log: its file (kept while the pipe is down; #261: rotated to
+/// `.1` at 10 MiB, at the start and during a run) and the pipe.
 fn init_logging(path: &Path, reports: mpsc::Sender<Report>) {
-    let fresh = std::fs::metadata(path).is_ok_and(|m| m.len() > LOG_KEEP_BYTES);
-    let file = OpenOptions::new()
-        .create(true)
-        .append(!fresh)
-        .write(true)
-        .truncate(fresh)
-        .open(path);
+    let file = RotatingFile::open(path, ROTATE_AT_BYTES);
     let file_layer = file
         .ok()
-        .map(|f: File| fmt::layer().with_writer(Mutex::new(f)).with_ansi(false));
+        .map(|f| fmt::layer().with_writer(Mutex::new(f)).with_ansi(false));
     // SongPlayer re-logs a pipe line at its level: the line carries none.
     let pipe_layer = fmt::layer()
         .with_writer(PipeLogs::new(reports))

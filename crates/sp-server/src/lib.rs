@@ -16,6 +16,7 @@ mod engine_command;
 mod engine_dispatch;
 pub use engine_command::EngineCommand;
 pub mod gemini_api; // #136: the Gemini key-list contract every Gemini caller shares
+pub mod log_rotate; // #261: the crash records and the ASIO host's log rotate to .1 at 10 MiB
 pub mod lyrics;
 pub mod mdns;
 pub mod metadata;
