@@ -92,7 +92,9 @@ jumps back follow the bytes SongPlayer moves (#251 comment 6232632646).
 The owner then made it a permanent switch per site (ROZHODNUTÉ on #282,
 17.10.2026: "musi byt sposob to zmenit"), so `max_resolution` caps
 download AND decode for good. SNV runs it at 1440 since 17.10.2026 15:09Z
-(the box A/B on #282: 10-15× fewer jumps back under NVENC). The
+(the box A/B on #282: 10-15× fewer jumps back under NVENC, from two
+ABA rounds of 40 s takes on one AV1 song, a regression check and not a
+proof of a frame-exact path). The
 follow-up lane's design is #282 comment 6241829405.
 
 **Automatic.** Setting `max_resolution` back to automatic restores
@@ -124,6 +126,7 @@ rounds 1–2):
   3840×1606 → 1920×804; 4096×2160 at 2160 → 3840×2026. The cross products
   are u128 (no overflow at any `u32`).
 - **The open** (`video/mf_reader.rs::create`, the scaled half in
+  `video/mf_reader_scaled.rs` and the Media Foundation reads in
   `video/mf_scaled.rs`): the first source reader is made as before and only
   read for the native type (no output type set yet, so no decoder MFT is
   loaded). A scaled open makes a SECOND reader (`open_scaled` →
@@ -177,7 +180,8 @@ rounds 1–2):
       chain is let through with a WARN naming the file (the same WARN
       lets a D3D11 stream of whole blocks through; it names `path`). What
       is PROVEN of the software decoders: CI run 39040435639 printed
-      Microsoft's H.264 decoder showing `160×120`, no aperture, AT OPEN for
+      the runner's H.264 software decoder (the line names no MFT)
+      showing `160×120`, no aperture, AT OPEN for
       the fixture coded 160×128. The VP9 / AV1 software decoders and any
       decoder's type after its first frame are not proven; the CI log's
       `at the first picture` line (below) shows H.264's;
@@ -227,7 +231,7 @@ rounds 1–2):
   module `video/mf_reader_scaled.rs` (`#[path = "mf_reader_scaled.rs"]
   mod scaled;` inside `mf_reader.rs`, resolved next to it). As a child it
   reaches the reader's private fields and `source_reader` / `configure`,
-  so `mf_reader.rs` (898 lines) stayed under the cap with no field made
+  so `mf_reader.rs` (900 lines) stayed under the cap with no field made
   `pub(super)`. The chain walk and the Media Foundation reads are
   `mf_scaled.rs` (`read_chain`: every transform up to
   `MF_E_INVALIDINDEX`, the first decoder's output; Microsoft: a decoder
@@ -304,11 +308,13 @@ rounds 1–2):
   Each scaled open writes to stderr (the CI log) what MF negotiated and
   its whole `ScaledOpenFacts`, and after the first picture the decoder's
   output at the open and at the first picture. Every scaled open asserts
-  the chain is the decoder at index 0 and a transform after it, the
-  decoder's output read (`scaled_decoder_output()` Some) and, after the
-  first picture, re-read (`Some(Ok)`) with `first_picture_padding_in_reach`
-  `Some(false)` (the fixture fills its frame, so this pins that the check
-  reads the stream's own size). Evidence for the chain's shape: Microsoft
+  the chain is the decoder at index 0 and a transform (not an `Error`)
+  after it, the decoder's output read (`scaled_decoder_output()` Some),
+  and each native colour value stated again on the negotiated type. The
+  tests that decode from the first picture (cap 60, cap 50, the seek, the
+  reopen's second open) also assert the re-read (`Some(Ok)`) with
+  `first_picture_padding_in_reach` `Some(false)` (the fixture fills its
+  frame, so this pins that the check reads the stream's own size). Evidence for the chain's shape: Microsoft
   (a decoder at index 0) and Wine's conformance tests, which run against
   Windows (`dlls/mfreadwrite/tests/mfplat.c`: "the video processor can be
   accessed at index 1 with MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING",
@@ -333,7 +339,8 @@ rounds 1–2):
       after the `Decoder`) and the colours (two stated, unequal values of
       `colour_out` and `colour_decoder` suggest a conversion: check the
       hues); the `at the first scaled picture` line says
-      `padding_in_reach=false`.
+      `at_first_picture=Ok(…)` and `padding_in_reach=false` (a failed
+      re-read also prints `false`).
   - Play a 4K song: `status.video_decode.scaled_opens` +1 and
     `scale_refusals` +0. A refusal's WARN names the negotiated size or the
     decoder's padding. `GET /api/v1/program` `max.upload_mb_s` should drop

@@ -669,7 +669,7 @@ const DECODER_BLOCK: u32 = 16;
 ///   (3840×2160, 2560×1440, 4096×2160).
 /// - In software only the padding seen at open refuses, and an unreadable
 ///   chain goes on. What is proven of the software decoders: on CI's
-///   runner Microsoft's H.264 decoder showed the stream's own size at open
+///   runner its H.264 software decoder showed the stream's own size at open
 ///   with no aperture (160×120 for the fixture coded 160×128, CI run
 ///   39040435639); the VP9 / AV1 software decoders, and any decoder's type
 ///   after its first frame, are not proven here. The reader logs the

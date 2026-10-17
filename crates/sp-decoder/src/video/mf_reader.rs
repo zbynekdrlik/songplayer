@@ -130,12 +130,14 @@ pub struct MediaFoundationVideoReader {
     inject_failure: bool,
 }
 
-// SAFETY: IMFSourceReader is a COM interface that windows-rs marks as !Send.
-// MFCreateSourceReaderFromURL initialises MF in STA mode (COINIT_APARTMENTTHREADED).
-// Once opened the reader is driven from a single worker thread in the playback
-// pipeline; ownership transfer across threads happens only when the owning
-// thread is done with the reader.  We therefore assert Send manually, matching
-// the same pattern used by all video/audio readers in this crate.
+// SAFETY: IMFSourceReader (and the decoder IMFTransform a scaled open keeps
+// until its first picture, #282) are COM interfaces that windows-rs marks as
+// !Send. MFCreateSourceReaderFromURL initialises MF in STA mode
+// (COINIT_APARTMENTTHREADED). Once opened the reader is driven from a single
+// worker thread in the playback pipeline; ownership transfer across threads
+// happens only when the owning thread is done with the reader, its decoder
+// MFT included.  We therefore assert Send manually, matching the same pattern
+// used by all video/audio readers in this crate.
 unsafe impl Send for MediaFoundationVideoReader {}
 
 /// What a source reader negotiated at open.

@@ -35,9 +35,11 @@
 //! runner's facts): the transform chain, the decoder's output at the open
 //! and at the first picture, the native geometric aperture and the colour
 //! descriptions. It then asserts the chain is the decoder followed by
-//! another transform (the video processor) and the decoder's output was
-//! read; `a_scaled_open_lists_the_video_processor_in_its_chain` pins the
-//! processor's category on its own.
+//! another transform (the video processor), the decoder's output was read
+//! and the native colour values are on the scaled type;
+//! `a_scaled_open_lists_the_video_processor_in_its_chain` pins the
+//! processor's category on its own. The tests that decode from the first
+//! picture also assert the decoder's output was read again there.
 
 #![cfg(windows)]
 
@@ -228,10 +230,31 @@ fn open_scaled(
     // processor the reader inserts (Wine's conformance tests, run against
     // Windows, read it at index 1). Its category is pinned in its own test.
     assert!(
-        facts.chain.first() == Some(&ChainStage::Decoder) && facts.chain.len() >= 2,
+        facts.chain.first() == Some(&ChainStage::Decoder)
+            && facts
+                .chain
+                .get(1)
+                .is_some_and(|stage| !matches!(stage, ChainStage::Error(_))),
         "cap {cap}: the decoder, then the video processor: {:?}",
         facts.chain
     );
+    // `ScaledType::apply` puts each colour value the native type states on
+    // the scaled type, so the processor converts no colour.
+    let out = facts.out_colour;
+    if let Some(matrix) = facts.native_colour.matrix {
+        assert_eq!(
+            out.and_then(|c| c.matrix),
+            Some(matrix),
+            "cap {cap}: the native YUV matrix on the scaled type"
+        );
+    }
+    if let Some(range) = facts.native_colour.range {
+        assert_eq!(
+            out.and_then(|c| c.range),
+            Some(range),
+            "cap {cap}: the native nominal range on the scaled type"
+        );
+    }
     assert!(
         reader.scaled_decoder_output().is_some(),
         "cap {cap}: the decoder's output was read at the open: {:?}",
@@ -521,6 +544,7 @@ fn a_seek_on_a_scaled_reader_lands_and_keeps_the_scaled_size() {
     let mut scaled = open_scaled(60, (80, 60), &plain_reader);
     let before = hw_counters().snapshot();
     let (target, scaled_rest) = after_a_seek(&mut scaled, "scaled");
+    assert_reread_at_first_picture(&scaled, "the seek's reader");
     let after = hw_counters().snapshot();
     assert_eq!(
         (after.scaled_opens, after.scale_refusals),
