@@ -153,3 +153,15 @@ fn a_log_that_cannot_be_reopened_errors_then_recovers() {
     file.write_all(b"f").unwrap();
     assert_eq!(read(&log), "f");
 }
+
+/// A stat the system cannot answer (a path "inside" a regular file:
+/// ENOTDIR) is an error, never "no log yet". Unix only: Windows reads that
+/// path as not found.
+#[cfg(unix)]
+#[test]
+fn a_stat_that_fails_is_an_error_never_no_log() {
+    let dir = tempfile::tempdir().unwrap();
+    let plain = dir.path().join("plain");
+    std::fs::write(&plain, "x").unwrap();
+    assert!(rotate_if_over(&plain.join("x.log"), 10).is_err());
+}
