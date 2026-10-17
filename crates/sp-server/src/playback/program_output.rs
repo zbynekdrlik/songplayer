@@ -509,7 +509,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
     fn wait_video_quiet(&mut self) {
         // #279 P1b: with MAX off nothing goes out over Spout for Arena.
         if let Some(max) = &self.max
-            && max.max_wanted()
+            && max.enabled()
         {
             super::program_video_quiet::wait_out(&max.video, &mut *self.video_clock);
         }

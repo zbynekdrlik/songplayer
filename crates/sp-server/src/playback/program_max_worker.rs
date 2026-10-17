@@ -25,7 +25,7 @@
 //! #239 + #251 step 2 + #279 P1b: ONE compositor draws every output. Its
 //! PRIMARY target is the FHD program (`FHD_TARGET`, 1920×1080), there for
 //! its life; MAX's 3840×2160 target is ADDED with MAX's sender while MAX is
-//! wanted (`MaxOut::max_wanted`) and taken off with it. While the FHD Spout
+//! on (`MaxOut::enabled`) and taken off with it. While the FHD Spout
 //! sender is wanted (`program_spout_fhd_enabled` and MAX on,
 //! `MaxOut::fhd_wanted`) the sender `SP-program` sends the primary, the
 //! picture the NDI `SP-program` carries. One compose at the compose instant
@@ -181,7 +181,7 @@ struct Device<C> {
 }
 
 /// The log lines one boundary wrote ([`MaxWorker::serve_lines`]).
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct Lines {
     /// `SP-program-MAX`'s.
     pub max: Option<LogLine>,
@@ -191,13 +191,19 @@ pub struct Lines {
     pub ndi: Option<LogLine>,
 }
 
-/// Who wants the compositor for a job (#279 P1b): MAX's output, the FHD
-/// Spout sender, NDI's readback.
+/// Who wants the compositor for a job (#279 P1b): MAX's output (its
+/// setting), the FHD Spout sender, NDI's readback.
 #[derive(Clone, Copy, Debug)]
 struct Wants {
     max: bool,
     fhd: bool,
     ndi: bool,
+}
+
+impl Wants {
+    fn any(self) -> bool {
+        self.max || self.fhd || self.ndi
+    }
 }
 
 /// The `program-max` thread's state: the GPU objects it built, the picture
@@ -345,7 +351,7 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     /// (MAX's with its target).
     pub fn serve_lines(&mut self, job: &MaxJob, offered: Instant, now: Instant) -> Lines {
         let wants = Wants {
-            max: self.out.max_wanted(),
+            max: self.out.enabled(),
             fhd: self.out.fhd_wanted(),
             ndi: self.out.ndi_wanted(),
         };
@@ -354,6 +360,11 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         }
         if !wants.max && (self.max.sender.is_some() || self.max.retry_at.is_some()) {
             self.release_max();
+        }
+        if !wants.any() {
+            // Taken just before a setting left nothing wanting the
+            // compositor: nothing built for it, the next step releases.
+            return Lines::default();
         }
         let went = self.attempt(job, offered, now, wants);
         // #251 step 2: the device the FHD side lost after MAX's boundary went
@@ -840,11 +851,13 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
 
     /// Nothing wants the compositor (MAX off and NDI on the CPU), or the
     /// thread stops: drop both senders (Spout unregisters the names), then
-    /// the compositor, and forget every backoff.
+    /// the compositor, and forget every backoff; NDI's read-back pictures
+    /// go too (nothing takes them, no 4 MB buffer stays pinned).
     pub fn release(&mut self) {
         if self.holds_gpu() {
             info!("program max: the Spout senders and the compositor are released");
         }
+        self.out.ndi.clear();
         self.drop_gpu();
         self.device.retry_at = None;
         self.max.retry_at = None;

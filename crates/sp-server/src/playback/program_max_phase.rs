@@ -80,15 +80,6 @@ impl MaxOut {
         self.ndi_source() == NdiSource::Gpu
     }
 
-    /// #279 P1b: whether the thread runs MAX's target and sender. A job
-    /// comes only while the compositor is wanted (MAX on, or NDI on the
-    /// GPU), so with NDI off a job means MAX on: MAX goes only while it is
-    /// off with NDI on the GPU.
-    pub fn max_wanted(&self) -> bool {
-        let queue = self.lock_queue();
-        queue.enabled || queue.ndi != NdiSource::Gpu
-    }
-
     /// #279 P1b: the `ndi` block of `GET /api/v1/program`.
     pub fn ndi_status(&self) -> NdiStatus {
         self.ndi.status(self.ndi_source())

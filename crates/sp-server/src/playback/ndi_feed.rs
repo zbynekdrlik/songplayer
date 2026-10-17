@@ -19,6 +19,11 @@
 //!   [`NDI_FEED_STALE_SLOTS`] behind the boundary, else the CPU canvas, so a
 //!   compositor that cannot run (off Windows, no adapter, a backoff) never
 //!   freezes NDI. [`ndi_switch`] names a change of source.
+//! - [`ReturnGate`] (pure, #279 ROZHODNUTÉ 6232669201 item 3): after an
+//!   automatic fallback to the canvas NDI goes back to the GPU only after
+//!   [`NDI_RETURN_ON_TIME`] on-time readbacks in a row, so a fallback never
+//!   flaps boundary by boundary. [`SwitchLog`] (pure) says each change of
+//!   source once, rate-limited, and never ends on a source NDI left.
 //! - [`NdiFeed`] = the core + the NDI telemetry under ONE short lock per
 //!   call: nothing waits on the other thread. It is `MaxOut::ndi`, on
 //!   `ProgramBus::max()`; `GET /api/v1/program` serves [`NdiStatus`] as
@@ -33,6 +38,7 @@ use sp_core::genlock::{GENLOCK_GRID_FPS, grid_index_100ns};
 
 use crate::playback::frame_buf::{PerSize, SharedFrame};
 use crate::playback::program_max::Window;
+use crate::playback::stat_window::WarnLimiter;
 
 /// How many read-back pictures wait for the `program-output` thread; over
 /// it the oldest goes.
@@ -45,6 +51,11 @@ pub const NDI_FEED_STALE_SLOTS: i64 = 30;
 /// At most one log line of a change of NDI's source per this much timeline
 /// (100 ns; 5 s); every switch is counted all the same (`ndi.switches`).
 pub const NDI_SWITCH_LOG_EVERY_100NS: i64 = 50_000_000;
+
+/// #279 ROZHODNUTÉ 6232669201 item 3: after an automatic fallback to the
+/// canvas, NDI goes back to the GPU only after this many on-time readbacks
+/// in a row (1 s of the grid).
+pub const NDI_RETURN_ON_TIME: u32 = 30;
 
 /// The constant UYVY black: one pixel pair `U Y0 V Y1` of BT.709
 /// limited-range black, what the GPU's pass makes of the cleared target.
@@ -145,8 +156,14 @@ pub enum CpuWhy {
     Setting,
     /// The setting says `gpu`, but no picture was read back yet.
     NoReadback,
-    /// The newest picture read back is over [`NDI_FEED_STALE_SLOTS`] old.
+    /// The newest picture read back is over [`NDI_FEED_STALE_SLOTS`] old (a
+    /// readback that keeps arriving late, too: a late picture is never
+    /// kept, so it leaves the newest behind).
     Stale,
+    /// After an automatic fallback: the readback is fresh, but has not come
+    /// on time [`NDI_RETURN_ON_TIME`] boundaries in a row yet
+    /// ([`ReturnGate`]).
+    Settling,
 }
 
 impl CpuWhy {
@@ -156,6 +173,7 @@ impl CpuWhy {
             CpuWhy::Setting => "setting",
             CpuWhy::NoReadback => "no_readback",
             CpuWhy::Stale => "stale",
+            CpuWhy::Settling => "settling",
         }
     }
 }
@@ -203,8 +221,10 @@ pub enum NdiSwitch {
     /// To the GPU readback: that boundary's pair is held, nothing goes to
     /// NDI (one missing frame).
     ToGpu,
-    /// To the CPU canvas, and why: the held pair is dropped, the boundary
-    /// goes out on the canvas (one frame skipped).
+    /// To the CPU canvas, and why: the held pair goes out first (its
+    /// readback, else the last picture, else the black), then the boundary
+    /// on the canvas — two submits, contiguous stamps, no audio block lost
+    /// (#279 ROZHODNUTÉ 6232669201 item 1).
     ToCpu(CpuWhy),
 }
 
@@ -215,6 +235,84 @@ pub fn ndi_switch(previous: NdiSource, pick: NdiPick) -> Option<NdiSwitch> {
         (NdiSource::Cpu, NdiPick::Gpu) => Some(NdiSwitch::ToGpu),
         (NdiSource::Gpu, NdiPick::Cpu(why)) => Some(NdiSwitch::ToCpu(why)),
         _ => None,
+    }
+}
+
+/// The way back to the GPU after an automatic fallback (pure; #279
+/// ROZHODNUTÉ 6232669201 item 3). A fallback from the GPU for any reason
+/// but the setting arms it. While armed, every boundary on the canvas
+/// takes the boundary before's read-back picture from the feed, as the
+/// GPU would have, and counts the ones that came on time in a row; a late
+/// or a missing one starts the count again. A GPU pick before
+/// [`NDI_RETURN_ON_TIME`] in a row stays on the canvas (`Settling`). The
+/// return to the GPU, or the setting's canvas, disarms it: the setting's
+/// flip to `gpu` (a first entry) goes to the GPU at the first fresh
+/// picture, as designed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ReturnGate {
+    /// `Some(on-time readbacks in a row)` since an automatic fallback.
+    on_time: Option<u32>,
+}
+
+impl ReturnGate {
+    /// Whether it counts: NDI is on the canvas after an automatic fallback.
+    pub fn counting(self) -> bool {
+        self.on_time.is_some()
+    }
+
+    /// The boundary before's readback came on time (`true`), or did not.
+    pub fn observe(&mut self, came: bool) {
+        if let Some(run) = &mut self.on_time {
+            *run = if came { run.saturating_add(1) } else { 0 };
+        }
+    }
+
+    /// `pick` as the gate lets it through: a GPU pick before
+    /// [`NDI_RETURN_ON_TIME`] on-time readbacks in a row since a fallback
+    /// stays on the canvas.
+    pub fn admit(self, pick: NdiPick) -> NdiPick {
+        match (pick, self.on_time) {
+            (NdiPick::Gpu, Some(run)) if run < NDI_RETURN_ON_TIME => NdiPick::Cpu(CpuWhy::Settling),
+            _ => pick,
+        }
+    }
+
+    /// After the pick of a boundary whose boundary before came from
+    /// `previous`: a fallback from the GPU (not the setting's) arms the
+    /// gate, the GPU or the setting's canvas disarms it, the canvas keeps
+    /// it as it is.
+    pub fn after(&mut self, previous: NdiSource, pick: NdiPick) {
+        self.on_time = match pick {
+            NdiPick::Gpu | NdiPick::Cpu(CpuWhy::Setting) => None,
+            NdiPick::Cpu(_) if previous == NdiSource::Gpu => Some(0),
+            NdiPick::Cpu(_) => self.on_time,
+        };
+    }
+}
+
+/// What the log last said of NDI's source, and its rate limit (pure; the
+/// `SP-program` sender writes the line it returns). A change of source is
+/// said at most once per [`NDI_SWITCH_LOG_EVERY_100NS`] of the timeline; a
+/// change held back is said by the first boundary after the window, as the
+/// source is then, so the log never ends on a source NDI left. Every
+/// switch is counted all the same (`ndi.switches`).
+#[derive(Debug, Default)]
+pub struct SwitchLog {
+    limiter: WarnLimiter,
+    /// The source the log last named (the canvas at the start).
+    logged: NdiSource,
+}
+
+impl SwitchLog {
+    /// The boundary at `at_100ns` comes from `pick`: the line to write
+    /// (with the boundaries held back since the last one), if any.
+    pub fn observe(&mut self, at_100ns: i64, pick: NdiPick) -> Option<(NdiPick, u64)> {
+        if pick.source() == self.logged {
+            return None;
+        }
+        let held_back = self.limiter.admit(at_100ns, NDI_SWITCH_LOG_EVERY_100NS)?;
+        self.logged = pick.source();
+        Some((pick, held_back))
     }
 }
 
