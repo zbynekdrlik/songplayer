@@ -172,6 +172,13 @@ jobs:
         shell: powershell
         timeout-minutes: 2
         run: |
+          # An older build dispatched on purpose (a rollback, #251) checks out
+          # a tree from before this script: the auto-start stays as the last
+          # deploy delivered it, and the rollback goes on.
+          if (-not (Test-Path (Join-Path $env:GITHUB_WORKSPACE 'scripts/runner-autostart.ps1'))) {
+            Write-Host "::warning::this build predates scripts/runner-autostart.ps1 - the runner's auto-start is left as the last deploy delivered it"
+            exit 0
+          }
           powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE\scripts\runner-autostart.ps1"
           $code = $LASTEXITCODE
           if ($code -ne 0) {
