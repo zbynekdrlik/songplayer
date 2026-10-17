@@ -14,16 +14,23 @@
 //! the bytes on the CPU (`SP-program`'s canvas fit and fade, a held step's
 //! preview tap) take a CPU picture only: a GPU one reaching one of them is
 //! a MISS ([`Picture::cpu_for`]): counted by the consumer
-//! ([`CpuMisses`]), its first one logged (WARN), and the consumer shows
-//! black (the canvas) or no picture (the preview), never a panic. P3a / P3b
-//! give them their GPU paths.
+//! ([`CpuMisses`]), WARNed at most once a minute with the count, and the
+//! consumer shows black (the canvas) or no picture (the preview), never a
+//! panic. P3a / P3b give them their GPU paths (and put the counts on the
+//! API with the ring's telemetry).
 
 use std::fmt;
 
 use sp_gpu::GpuFrame;
 use tracing::warn;
 
+use crate::playback::fleet_shift;
 use crate::playback::frame_buf::SharedFrame;
+use crate::playback::stat_window::WarnLimiter;
+
+/// A consumer's misses are WARNed at most once per this (100 ns of the
+/// timeline: a minute).
+pub const CPU_MISS_WARN_EVERY_100NS: i64 = 600_000_000;
 
 /// One boundary's picture: NV12 bytes in CPU memory, or a decoded picture
 /// in a ring slot on the GPU.
@@ -64,11 +71,6 @@ impl Picture {
             .expect("the test built a CPU picture (Picture::Cpu)")
     }
 
-    /// Whether the picture is in VRAM.
-    pub fn is_gpu(&self) -> bool {
-        matches!(self, Picture::Gpu(_))
-    }
-
     /// The bytes it holds in CPU memory: a CPU picture's length, 0 for a
     /// GPU one (it holds none; a byte-size check refuses it).
     pub fn len(&self) -> usize {
@@ -92,13 +94,14 @@ impl Picture {
     }
 
     /// The bytes for the CPU consumer `consumer`: a CPU picture's; a GPU
-    /// picture is a miss, counted (and its first one logged) in `misses`,
+    /// picture is a miss, counted (and WARNed, rate-limited) in `misses`,
     /// and `None`: the consumer shows black or nothing, never a panic.
     pub fn cpu_for(&self, consumer: CpuUse, misses: &mut CpuMisses) -> Option<&SharedFrame> {
         match self {
             Picture::Cpu(frame) => Some(frame),
             Picture::Gpu(frame) => {
-                misses.note(consumer, frame);
+                let now_100ns = (misses.clock)();
+                misses.note(consumer, frame, now_100ns);
                 None
             }
         }
@@ -140,28 +143,44 @@ pub enum CpuUse {
 }
 
 /// A CPU consumer's misses: GPU pictures it could not read.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CpuMisses {
     count: u64,
-    warned: bool,
+    warn: WarnLimiter,
+    /// The timeline the WARN's rate limit reads
+    /// (`fleet_shift::timeline_now_100ns`).
+    clock: fn() -> i64,
+}
+
+impl Default for CpuMisses {
+    fn default() -> Self {
+        Self {
+            count: 0,
+            warn: WarnLimiter::default(),
+            clock: fleet_shift::timeline_now_100ns,
+        }
+    }
 }
 
 impl CpuMisses {
-    /// `frame` reached the CPU consumer `consumer`: counted; the first one
-    /// is logged (one WARN per consumer, a GPU picture there is a P3a / P3b
-    /// gap, never a per-boundary flood). Whether this one was logged.
-    pub fn note(&mut self, consumer: CpuUse, frame: &GpuFrame) -> bool {
+    /// `frame` reached the CPU consumer `consumer` at `at_100ns` (the
+    /// timeline): counted; a WARN at most once per
+    /// [`CPU_MISS_WARN_EVERY_100NS`], with the misses held back since and
+    /// the total (a GPU picture there is a P3a / P3b gap: never a
+    /// per-boundary flood, never silent for long). Whether it was WARNed.
+    pub fn note(&mut self, consumer: CpuUse, frame: &GpuFrame, at_100ns: i64) -> bool {
         self.count += 1;
-        let first = !self.warned;
-        self.warned = true;
-        if first {
-            warn!(
-                ?consumer,
-                frame = ?frame,
-                "a GPU picture reached a CPU-only consumer: shown as black (#279 P3a/P3b gives it its GPU path)"
-            );
-        }
-        first
+        let Some(held_back) = self.warn.admit(at_100ns, CPU_MISS_WARN_EVERY_100NS) else {
+            return false;
+        };
+        warn!(
+            ?consumer,
+            frame = ?frame,
+            held_back,
+            total = self.count,
+            "a GPU picture reached a CPU-only consumer: shown as black (#279 P3a/P3b gives it its GPU path)"
+        );
+        true
     }
 
     /// How many GPU pictures the consumer missed.

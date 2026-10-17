@@ -13,7 +13,8 @@
 //! - a slot opened once and held again, a fade of an uploaded picture and a
 //!   ring slot, two slots in one compose;
 //! - a slot another device holds is drawn black and counted, and drawn
-//!   again once let go; a full ring waits its bound, then refuses.
+//!   again once let go; a full ring waits its bound, then refuses; a new
+//!   size is written over a free slot of the other, made again.
 //!
 //! P0's probe proved NV12 sharing by NT handle + keyed mutex on two WARP
 //! devices (`gpu_resident_ok`, #279 comment 6217311216). Windows only: a
@@ -34,9 +35,9 @@ use sp_gpu::{
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_WARP, D3D_FEATURE_LEVEL_11_0};
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, D3D11_SUBRESOURCE_DATA,
-    D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11CreateDevice, ID3D11Device, ID3D11Device1,
-    ID3D11Texture2D,
+    D3D11_BIND_SHADER_RESOURCE, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION,
+    D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11CreateDevice,
+    ID3D11Device, ID3D11Device1, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_NV12, DXGI_SAMPLE_DESC,
@@ -78,7 +79,9 @@ fn warp_device() -> ID3D11Device {
 /// One `width`×`height` surface of `format` (NV12: `texture` = its aligned
 /// size), as a decoder hands its pictures over: an array of
 /// `slices.len()` slices, each made with its bytes (NV12 initial data: the
-/// UV plane after ALL the luma rows, `width × height`).
+/// UV plane after ALL the luma rows, `width × height`). Shader-resource
+/// bound, the NV12 texture P0's probe proved on WARP (a decoder's own
+/// surfaces are decoder-bound, which WARP cannot make).
 fn texture(
     device: &ID3D11Device,
     format: DXGI_FORMAT,
@@ -96,7 +99,7 @@ fn texture(
             Quality: 0,
         },
         Usage: D3D11_USAGE_DEFAULT,
-        BindFlags: 0,
+        BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
         CPUAccessFlags: 0,
         MiscFlags: 0,
     };
@@ -196,7 +199,14 @@ fn a_slot_written_on_one_device_is_drawn_in_place_on_another() {
         (1, 1, 0, 0),
         "sampled in place, opened once, nothing uploaded"
     );
-    assert_eq!((stats.km_acquire_timeouts, stats.abandoned), (0, 0));
+    assert_eq!(
+        (
+            stats.km_acquire_timeouts,
+            stats.abandoned,
+            stats.open_failures
+        ),
+        (0, 0, 0)
+    );
     let cpu = Composition::Picture(picture(1, 1280, 720, stride, &data));
     let layers = cpu.layers_on(FHD_TARGET);
     assert_matches_reference_in(&bgra, &layers, FHD, "a ring slot, 1280x720 in 1920x1080");
@@ -405,6 +415,46 @@ fn a_source_the_ring_does_not_take_is_refused() {
         })
     );
     assert_eq!(ring.stats().slots, 0, "nothing taken");
+}
+
+/// A ring of two slots full of one size takes a picture of another into
+/// its FREE slot, made again at the new size (a new allocation, its old
+/// texture let go), and the compositor draws the new texture: the writer's
+/// remake and its stale-texture rule (`ring_state::make_texture`,
+/// `stale_texture`) on a real device.
+#[test]
+fn a_new_size_is_written_over_a_free_slot_of_the_other() {
+    let mut ring = ring(2);
+    let (small_stride, small) = pattern(640, 360, 21);
+    let small_source = nv12_source(&ring, (640, 360), (small_stride, &small[..]));
+    let kept = ring
+        .copy_from(&small_source, 0, (640, 360))
+        .expect("slot 0");
+    let freed = ring
+        .copy_from(&small_source, 0, (640, 360))
+        .expect("slot 1");
+    let freed_key = freed.key();
+    drop(freed);
+    let (big_stride, big) = pattern(1280, 720, 99);
+    let big_source = nv12_source(&ring, (1280, 720), (big_stride, &big[..]));
+    let remade = ring
+        .copy_from(&big_source, 0, (1280, 720))
+        .expect("the free slot, made again");
+    assert_eq!(remade.key().slot, freed_key.slot, "the free slot");
+    assert_ne!(remade.key().alloc_gen, freed_key.alloc_gen, "a new texture");
+    assert_eq!(remade.texture_size(), (1280, 720));
+    assert_eq!((ring.stats().slots, ring.stats().in_use), (2, 2));
+    let mut compositor = warp_fhd();
+    let (stats, bgra) = compose(&mut compositor, &Composition::Picture(Side::Gpu(&remade)));
+    assert_eq!((stats.gpu_sides, stats.gpu_opens, stats.uploads), (1, 1, 0));
+    let cpu = Composition::Picture(picture(1, 1280, 720, big_stride, &big));
+    assert_matches_reference_in(
+        &bgra,
+        &cpu.layers_on(FHD_TARGET),
+        FHD,
+        "a slot made again at 1280x720",
+    );
+    assert!(!kept.ring_dead());
 }
 
 /// An odd picture takes a slot of even sides (its copy box rounded up

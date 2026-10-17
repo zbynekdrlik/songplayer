@@ -1,23 +1,20 @@
 //! #279 P2: the compositor's ring slots (glue). A ring frame's slot is
 //! opened ONCE on the compositor's device (`OpenSharedResource1` of its NT
 //! handle) with its two plane views (R8 luma, R8G8 chroma: the views the
-//! P0 probe proved), kept while it is drawn (`ring_state::OpenedKeys`:
-//! at most `OPENED_MAX`, an older texture of the slot closed when its new
-//! one is drawn), and held for ONE compose: acquired with key 1 and a 0 ms
-//! timeout before the draw (the compositor never waits on a producer),
-//! released with key 1 after the GPU finished the compose. A slot that is
-//! busy, abandoned (its producer device lost), fails its acquire or does
-//! not open is drawn black and counted (`ComposeStats::count_gpu_side`);
-//! a lost one kills its ring. Every decision is `crate::ring_state`'s and
-//! `crate::stats`'s.
+//! P0 probe proved), kept while it is drawn (`ring_state::OpenedKeys`: at
+//! most `OPENED_MAX`, an older texture of the slot closed when its new one
+//! is drawn, a slot no compose drew for `OPENED_IDLE_COMPOSES` closed), and
+//! held for ONE compose: acquired with key 1 and a 0 ms timeout before the
+//! draw (the compositor never waits on a producer), released with key 1
+//! after the GPU finished the compose. What a slot's answer means is
+//! `ring_state::slot_draw` (drawn, black, its ring killed, or the
+//! compositor's own lost device) and how it is counted
+//! `ComposeStats::count_slot`; this module only calls Direct3D.
 
 use std::collections::HashMap;
-use std::ffi::c_void;
 
 use windows::Win32::Foundation::HANDLE;
-use windows::Win32::Graphics::Direct3D::D3D11_SRV_DIMENSION_TEXTURE2D;
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_SHADER_RESOURCE_VIEW_DESC, D3D11_SHADER_RESOURCE_VIEW_DESC_0, D3D11_TEX2D_SRV,
     ID3D11Device, ID3D11Device1, ID3D11ShaderResourceView, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
@@ -26,11 +23,14 @@ use windows::Win32::Graphics::Dxgi::Common::{
 use windows::Win32::Graphics::Dxgi::IDXGIKeyedMutex;
 use windows::core::Interface;
 
-use super::failed;
 use super::probe::acquire;
+use super::{failed, textures};
 use crate::error::GpuError;
 use crate::ring::GpuFrame;
-use crate::ring_state::{Acquired, CONSUMER_ACQUIRE_MS, KEY_CONSUMER, OpenedKeys, SlotKey};
+use crate::ring_state::{
+    Acquired, CONSUMER_ACQUIRE_MS, KEY_CONSUMER, OpenedKeys, SlotDraw, SlotKey, SlotOpen,
+    slot_draw, why_killed,
+};
 use crate::stats::ComposeStats;
 
 /// A slot opened on the compositor's device: the texture, its keyed mutex
@@ -82,8 +82,9 @@ impl Held {
 impl Drop for Held {
     fn drop(&mut self) {
         for held in &self.0 {
-            // SAFETY: the mutex was acquired by this compose with key 1;
-            // a failed release leaves it to the producer's bounded acquire.
+            // SAFETY: the mutex was acquired by this compose with key 1. A
+            // failed release leaves the key held: the writer's bounded
+            // acquire then kills the ring (`ring_state::writer_step`).
             let _ = unsafe { held.mutex.ReleaseSync(KEY_CONSUMER) };
         }
     }
@@ -91,16 +92,19 @@ impl Drop for Held {
 
 impl RingSlots {
     /// Open (once) and acquire every ring frame of a compose (`frames`:
-    /// `Composition::frames`, each slot once), counting each in `stats`.
-    /// A slot that does not open, is busy, abandoned or fails its acquire
-    /// is left out (drawn black); a lost or failed one kills its ring. A
-    /// lost compositor device is the error.
+    /// `Composition::frames`, each slot once), counting each in `stats`;
+    /// first close the slots no compose drew for the idle bound. A slot
+    /// that is not drawn is left out (black). The compositor's own lost
+    /// device is the error.
     pub fn hold(
         &mut self,
         device: &ID3D11Device,
         frames: &[&GpuFrame],
         stats: &mut ComposeStats,
     ) -> Result<Held, GpuError> {
+        for idle in self.keys.begin_compose() {
+            self.opened.remove(&idle);
+        }
         let mut held = Held(Vec::with_capacity(frames.len()));
         for frame in frames {
             let key = frame.key();
@@ -108,41 +112,85 @@ impl RingSlots {
             for closed in &touch.close {
                 self.opened.remove(closed);
             }
-            if touch.open {
-                match open(device, frame) {
-                    Ok(opened) => {
-                        self.opened.insert(key, opened);
-                        stats.gpu_opens += 1;
-                    }
-                    Err(error) if error.is_device_lost() => {
-                        self.keys.forget(key);
-                        return Err(error);
-                    }
-                    Err(_) => {
-                        self.keys.forget(key);
-                        stats.abandoned += 1;
-                        frame.kill_ring();
-                        continue;
+            let open = if frame.ring_dead() {
+                SlotOpen::Dead
+            } else {
+                self.open_and_acquire(device, frame, touch.open, stats)
+            };
+            let mut removed = None;
+            let draw = slot_draw(open, || {
+                removed = removed_reason(device);
+                removed.is_some()
+            });
+            stats.count_slot(open, draw);
+            match draw {
+                SlotDraw::Draw => {
+                    if let Some(opened) = self.opened.get(&key) {
+                        held.0.push(HeldSlot {
+                            key,
+                            mutex: opened.mutex.clone(),
+                            luma: opened.luma.clone(),
+                            chroma: opened.chroma.clone(),
+                        });
                     }
                 }
-            }
-            let Some(opened) = self.opened.get(&key) else {
-                continue;
-            };
-            let answer = Acquired::of(acquire(&opened.mutex, KEY_CONSUMER, CONSUMER_ACQUIRE_MS));
-            if stats.count_gpu_side(answer) {
-                held.0.push(HeldSlot {
-                    key,
-                    mutex: opened.mutex.clone(),
-                    luma: opened.luma.clone(),
-                    chroma: opened.chroma.clone(),
-                });
-            } else if answer.kills_ring() {
-                frame.kill_ring();
+                SlotDraw::Black => {}
+                SlotDraw::Gone => {
+                    self.keys.forget(key);
+                    self.opened.remove(&key);
+                }
+                SlotDraw::KillRing => {
+                    self.keys.forget(key);
+                    self.opened.remove(&key);
+                    frame.kill_ring(why_killed(open));
+                }
+                SlotDraw::DeviceLost => {
+                    return Err(GpuError::removed(removed.unwrap_or_default()));
+                }
             }
         }
         Ok(held)
     }
+
+    /// `frame`'s slot opened (when `open_now`, or not open yet) and its
+    /// keyed mutex's answer to key 1 with a 0 ms timeout; `Failed` when it
+    /// does not open.
+    fn open_and_acquire(
+        &mut self,
+        device: &ID3D11Device,
+        frame: &GpuFrame,
+        open_now: bool,
+        stats: &mut ComposeStats,
+    ) -> SlotOpen {
+        let key = frame.key();
+        if open_now || !self.opened.contains_key(&key) {
+            match open(device, frame) {
+                Ok(opened) => {
+                    self.opened.insert(key, opened);
+                    stats.gpu_opens += 1;
+                }
+                Err(_) => {
+                    self.keys.forget(key);
+                    return SlotOpen::Failed;
+                }
+            }
+        }
+        match self.opened.get(&key) {
+            Some(opened) => SlotOpen::Acquired(Acquired::of(acquire(
+                &opened.mutex,
+                KEY_CONSUMER,
+                CONSUMER_ACQUIRE_MS,
+            ))),
+            None => SlotOpen::Failed,
+        }
+    }
+}
+
+/// The compositor device's removed reason, when it was removed.
+fn removed_reason(device: &ID3D11Device) -> Option<u32> {
+    unsafe { device.GetDeviceRemovedReason() }
+        .err()
+        .map(|e| e.code().0 as u32)
 }
 
 /// `frame`'s slot texture opened on `device`, with its mutex and views.
@@ -150,7 +198,7 @@ fn open(device: &ID3D11Device, frame: &GpuFrame) -> Result<Opened, GpuError> {
     let device1: ID3D11Device1 = device
         .cast()
         .map_err(|e| failed("ID3D11Device1 (the compositor)", &e))?;
-    let handle = HANDLE(frame.shared_handle() as *mut c_void);
+    let handle = HANDLE(frame.shared_handle() as *mut std::ffi::c_void);
     // SAFETY: the handle is the slot's NT handle, open while `frame` lives
     // (every frame keeps it).
     let texture: ID3D11Texture2D = unsafe { device1.OpenSharedResource1(handle) }
@@ -168,24 +216,15 @@ fn open(device: &ID3D11Device, frame: &GpuFrame) -> Result<Opened, GpuError> {
     })
 }
 
-/// A view of one plane of the opened NV12 texture (R8 = luma, R8G8 = the
-/// interleaved chroma at half size: Microsoft's NV12 view rule).
+/// A view of one plane of the opened NV12 texture
+/// (`textures::plane_view_desc`).
 fn plane_view(
     device: &ID3D11Device,
     texture: &ID3D11Texture2D,
     format: DXGI_FORMAT,
 ) -> Result<ID3D11ShaderResourceView, GpuError> {
     const CALL: &str = "CreateShaderResourceView (a ring slot's plane)";
-    let desc = D3D11_SHADER_RESOURCE_VIEW_DESC {
-        Format: format,
-        ViewDimension: D3D11_SRV_DIMENSION_TEXTURE2D,
-        Anonymous: D3D11_SHADER_RESOURCE_VIEW_DESC_0 {
-            Texture2D: D3D11_TEX2D_SRV {
-                MostDetailedMip: 0,
-                MipLevels: 1,
-            },
-        },
-    };
+    let desc = textures::plane_view_desc(format);
     let mut view: Option<ID3D11ShaderResourceView> = None;
     unsafe { device.CreateShaderResourceView(texture, Some(&desc), Some(&mut view)) }
         .map_err(|e| failed(CALL, &e))?;

@@ -3,7 +3,9 @@
 //! at the 1000-line cap). Pure: tested in `program_max_worker_tests.rs`.
 //! #279 P2: a ring frame (`Picture::Gpu`) is labelled by its own id
 //! (`GpuFrame::id`, process-wide, never reused): only CPU pictures are
-//! labelled by allocation here.
+//! labelled by allocation here. The two kinds number apart and may share a
+//! value: the compositor's residency compares the uploaded pictures' ids
+//! alone, and opens ring slots by `sp_gpu::SlotKey`.
 
 use sp_gpu::{Composition, Side};
 

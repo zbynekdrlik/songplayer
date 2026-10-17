@@ -329,7 +329,8 @@ forwards it, so a ring frame reaches MAX by `Arc` and MAX samples it in
 place (`gpu-max.md`, "The picture ring"). `SP-program`'s canvas reads
 bytes, so it takes a CPU picture only (`Picture::cpu_for`): a ring frame
 there is drawn as the canvas black (a blend partner's side as black),
-counted (`canvas_misses`) and its first one WARNed, with the source's
+counted (`canvas_misses`) and WARNed at most once a minute with the
+count, with the source's
 own audio and stamps unchanged: never a panic, never a hole. P3b gives
 the canvas its GPU path (NDI from the readback already draws ring frames
 through the compositor). Tests:

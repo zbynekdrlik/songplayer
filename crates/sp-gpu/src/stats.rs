@@ -6,7 +6,7 @@
 
 use std::time::Instant;
 
-use crate::ring_state::Acquired;
+use crate::ring_state::{SlotDraw, SlotOpen};
 
 /// The cost of one `Compositor::compose` call, measured on the calling
 /// thread.
@@ -40,32 +40,32 @@ pub struct ComposeStats {
     /// (`WAIT_TIMEOUT` on the 0 ms acquire): drawn black this boundary.
     pub km_acquire_timeouts: u32,
     /// #279 P2: the ring slots whose producer device was lost
-    /// (`WAIT_ABANDONED`), whose acquire failed or that did not open: drawn
-    /// black, and their ring is dead.
+    /// (`WAIT_ABANDONED`) or whose acquire failed on a healthy compositor,
+    /// and the slots of a dead ring: drawn black, their ring dead.
     pub abandoned: u32,
+    /// #279 P2: the ring slots that did not open on a healthy compositor:
+    /// drawn black, their ring killed.
+    pub open_failures: u32,
 }
 
 impl ComposeStats {
-    /// #279 P2: count one ring slot of a compose whose keyed mutex answered
-    /// `acquired`, and say whether it is drawn: held, yes
-    /// ([`gpu_sides`](Self::gpu_sides)); busy, no
-    /// ([`km_acquire_timeouts`](Self::km_acquire_timeouts)); abandoned or
-    /// failed, no ([`abandoned`](Self::abandoned): its ring dies,
-    /// `Acquired::kills_ring`).
-    pub fn count_gpu_side(&mut self, acquired: Acquired) -> bool {
-        match acquired {
-            Acquired::Held => {
-                self.gpu_sides += 1;
-                true
-            }
-            Acquired::Busy => {
-                self.km_acquire_timeouts += 1;
-                false
-            }
-            Acquired::Abandoned | Acquired::Failed(_) => {
+    /// #279 P2: count one ring slot of a compose: what the compositor
+    /// found of it (`open`) and what it does with it (`draw`,
+    /// `ring_state::slot_draw`). Drawn ([`gpu_sides`](Self::gpu_sides));
+    /// busy ([`km_acquire_timeouts`](Self::km_acquire_timeouts)); a dead
+    /// ring's, abandoned or a failed acquire
+    /// ([`abandoned`](Self::abandoned)); not opened
+    /// ([`open_failures`](Self::open_failures)); the compositor's own lost
+    /// device counts nothing (the compose fails).
+    pub fn count_slot(&mut self, open: SlotOpen, draw: SlotDraw) {
+        match (draw, open) {
+            (SlotDraw::Draw, _) => self.gpu_sides += 1,
+            (SlotDraw::Black, _) => self.km_acquire_timeouts += 1,
+            (SlotDraw::Gone, _) | (SlotDraw::KillRing, SlotOpen::Acquired(_)) => {
                 self.abandoned += 1;
-                false
             }
+            (SlotDraw::KillRing, _) => self.open_failures += 1,
+            (SlotDraw::DeviceLost, _) => {}
         }
     }
 }

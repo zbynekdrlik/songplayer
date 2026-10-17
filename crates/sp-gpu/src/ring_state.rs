@@ -38,21 +38,30 @@
 //!   compositor never read (an off-program pipeline) is acquired by the
 //!   writer with key 1 again. A slot is reused only once no frame refers to
 //!   it (the CPU refcount); the mutex adds the cross-device visibility and
-//!   order.
-//! - **A lost device** ([`Acquired::kills_ring`]). An acquire that answers
-//!   `WAIT_ABANDONED` (the other device was lost holding the mutex) or fails
-//!   kills the ring: its pictures are drawn black and counted, and the next
-//!   write fails with [`GpuError::RingDead`](crate::GpuError::RingDead), so
-//!   the reader goes on in software.
+//!   order. So a free slot's key is never the compositor's (it lets the key
+//!   go before the frame it draws drops): the writer waits at most
+//!   [`WRITER_ACQUIRE_MS`], and any answer but held kills the ring
+//!   ([`writer_step`]).
+//! - **A lost device.** On the compositor's side ([`slot_draw`]): a slot
+//!   whose mutex answers `WAIT_ABANDONED` (the producer's device was lost
+//!   holding it) kills its ring; an acquire or an open that fails kills it
+//!   too while the compositor's own device is healthy, and is the
+//!   compositor's own lost device otherwise (the compose fails, the
+//!   compositor is rebuilt, the ring lives on). A dead ring's pictures are
+//!   drawn black and counted, and its next write fails with
+//!   [`GpuError::RingDead`](crate::GpuError::RingDead), so the reader goes
+//!   on in software.
 //! - **The compositor's open slots** ([`OpenedKeys`]). It opens a slot's
 //!   texture once ([`SlotKey`]: ring, slot, allocation), keeps at most
-//!   [`OPENED_MAX`] open (the least recently drawn closed first), and closes
-//!   an older texture of a slot the moment its new one is drawn.
+//!   [`OPENED_MAX`] open (the least recently drawn closed first), closes an
+//!   older texture of a slot the moment its new one is drawn, and closes a
+//!   slot no compose drew for [`OPENED_IDLE_COMPOSES`] (a pipeline cut off
+//!   program, a dead or a dropped ring: no VRAM stays pinned).
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::picture::MAX_PICTURE_SIDE;
-pub use crate::probe::{CONSUMER_ACQUIRE_MS, KEY_CONSUMER, KEY_PRODUCER, PRODUCER_ACQUIRE_MS};
+pub use crate::probe::{CONSUMER_ACQUIRE_MS, KEY_CONSUMER, KEY_PRODUCER};
 use crate::probe::{S_OK, WAIT_ABANDONED, WAIT_TIMEOUT};
 
 /// How long a write waits for a free slot before it fails
@@ -67,8 +76,18 @@ pub const RING_CAPACITY: usize = 20;
 /// The size classes a ring keeps slots of.
 pub const MAX_SIZE_CLASSES: usize = 2;
 
-/// How many ring slots the compositor keeps open at most.
-pub const OPENED_MAX: usize = 64;
+/// How many ring slots the compositor keeps open at most: both sides of a
+/// fade between two rings (2 × [`RING_CAPACITY`]).
+pub const OPENED_MAX: usize = 40;
+
+/// A slot the compositor opened and no compose drew for this many composes
+/// (3 s at one compose a boundary) is closed.
+pub const OPENED_IDLE_COMPOSES: u64 = 90;
+
+/// How long a write waits for its free slot's key (ms). The key of a free
+/// slot is never held (the compositor lets it go before the frame it draws
+/// drops), so the wait only bounds a broken protocol: [`RING_WAIT`].
+pub const WRITER_ACQUIRE_MS: u32 = 100;
 
 /// A slot texture's format. P2 takes NV12, the decoders' 8-bit 4:2:0 output
 /// (10-bit P010 is #279 P4).
@@ -152,11 +171,79 @@ impl Acquired {
             other => Acquired::Failed(other),
         }
     }
+}
 
-    /// Whether the slot's ring dies of it: the other side lost its device,
-    /// or the acquire failed (a busy slot only misses this one draw).
-    pub fn kills_ring(self) -> bool {
-        matches!(self, Acquired::Abandoned | Acquired::Failed(_))
+/// What a writer does with its slot's acquire answer: write on a held key;
+/// anything else kills the ring, with why (a free slot's key is never the
+/// compositor's: busy is a broken protocol, abandoned the compositor's
+/// device lost holding it, failed the writer's own call).
+pub fn writer_step(acquired: Acquired) -> Result<(), &'static str> {
+    match acquired {
+        Acquired::Held => Ok(()),
+        Acquired::Busy => Err("the writer found its free slot's key held (a broken protocol)"),
+        Acquired::Abandoned => Err("the compositor's device was lost holding a free slot's key"),
+        Acquired::Failed(_) => Err("the writer's acquire of a free slot failed"),
+    }
+}
+
+/// What the compositor found of one ring slot of a compose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlotOpen {
+    /// The slot's ring is dead: neither opened nor acquired.
+    Dead,
+    /// The slot could not be opened on the compositor's device.
+    Failed,
+    /// The slot is open; its keyed mutex answered.
+    Acquired(Acquired),
+}
+
+/// What one compose does with a ring slot ([`slot_draw`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlotDraw {
+    /// Held: drawn, its key released after the GPU finished.
+    Draw,
+    /// Busy (the writer still writes it): drawn black this boundary.
+    Black,
+    /// Its ring is dead: drawn black, the slot closed.
+    Gone,
+    /// Drawn black and its ring killed: its producer's device was lost, or
+    /// the slot failed on a healthy compositor.
+    KillRing,
+    /// The compositor's own device is gone: the compose fails
+    /// ([`GpuError::DeviceLost`](crate::GpuError::DeviceLost)), the ring
+    /// lives on.
+    DeviceLost,
+}
+
+/// The compositor's rule for one ring slot: held = drawn; busy = black; a
+/// dead ring's = gone; abandoned = the ring dies; a failed acquire or open asks
+/// `device_removed` (read only then): the compositor's own lost device, or
+/// else the ring dies.
+pub fn slot_draw(open: SlotOpen, device_removed: impl FnOnce() -> bool) -> SlotDraw {
+    match open {
+        SlotOpen::Acquired(Acquired::Held) => SlotDraw::Draw,
+        SlotOpen::Acquired(Acquired::Busy) => SlotDraw::Black,
+        SlotOpen::Dead => SlotDraw::Gone,
+        SlotOpen::Acquired(Acquired::Abandoned) => SlotDraw::KillRing,
+        SlotOpen::Acquired(Acquired::Failed(_)) | SlotOpen::Failed => {
+            if device_removed() {
+                SlotDraw::DeviceLost
+            } else {
+                SlotDraw::KillRing
+            }
+        }
+    }
+}
+
+/// Why the compositor killed a slot's ring ([`SlotDraw::KillRing`]), for
+/// its one WARN.
+pub fn why_killed(open: SlotOpen) -> &'static str {
+    match open {
+        SlotOpen::Acquired(Acquired::Abandoned) => {
+            "the producer's device was lost holding a slot (WAIT_ABANDONED)"
+        }
+        SlotOpen::Failed => "the compositor could not open a slot",
+        _ => "the compositor's acquire of a slot failed",
     }
 }
 
@@ -249,8 +336,11 @@ impl RingState {
     }
 
     /// Kill the ring: every later [`take`](Self::take) is [`Take::Dead`].
-    pub fn kill(&mut self) {
+    /// Whether it was alive (its first kill).
+    pub fn kill(&mut self) -> bool {
+        let alive = !self.dead;
         self.dead = true;
+        alive
     }
 
     /// Whether a [`take`](Self::take) would end its wait now: a slot is
@@ -354,12 +444,19 @@ impl RingState {
     }
 }
 
-/// How much longer a write that began to wait at `since` may wait at `now`
-/// for a slot, bounded by `limit` ([`RING_WAIT`] in production): `None`
-/// once the bound is reached.
-pub fn wait_left(since: Instant, now: Instant, limit: Duration) -> Option<Duration> {
-    let waited = now.saturating_duration_since(since);
-    limit.checked_sub(waited).filter(|left| !left.is_zero())
+/// Whether a writer's texture of a slot (made under allocation
+/// `held_gen`) is stale: the ring emptied the slot (a class no longer
+/// kept) or made it again (another allocation). Its last frame dropped,
+/// so nothing reads it any more.
+pub fn stale_texture(state: Option<SlotState>, held_gen: u64) -> bool {
+    state.is_none_or(|state| state.alloc_gen != held_gen)
+}
+
+/// Whether a write must make its slot's texture first: the take made the
+/// slot (`create`), or the writer holds no texture of the slot's
+/// allocation `alloc_gen` (`held_gen`: the one it holds, if any).
+pub fn make_texture(create: bool, held_gen: Option<u64>, alloc_gen: u64) -> bool {
+    create || held_gen != Some(alloc_gen)
 }
 
 /// A ring slot's texture as the compositor opens it: the ring (a
@@ -383,48 +480,66 @@ pub struct Touch {
     pub close: Vec<SlotKey>,
 }
 
-/// The slots the compositor keeps open, the least recently drawn first.
+/// The slots the compositor keeps open, each with the compose that last
+/// drew it, the least recently drawn first.
 #[derive(Debug, Clone, Default)]
-pub struct OpenedKeys(Vec<SlotKey>);
+pub struct OpenedKeys {
+    keys: Vec<(SlotKey, u64)>,
+    /// The composes begun.
+    composes: u64,
+}
 
 impl OpenedKeys {
-    /// `key` is drawn now: whether it must be opened, and which open slots
-    /// to close.
+    /// A compose begins: the open slots no compose drew in the last
+    /// [`OPENED_IDLE_COMPOSES`] are to close.
+    pub fn begin_compose(&mut self) -> Vec<SlotKey> {
+        self.composes += 1;
+        let now = self.composes;
+        let idle = self
+            .keys
+            .iter()
+            .take_while(|&&(_, drawn)| now - drawn > OPENED_IDLE_COMPOSES)
+            .count();
+        self.keys.drain(..idle).map(|(key, _)| key).collect()
+    }
+
+    /// `key` is drawn by this compose: whether it must be opened, and which
+    /// open slots to close.
     pub fn touch(&mut self, key: SlotKey) -> Touch {
-        let open = match self.0.iter().position(|&held| held == key) {
+        let open = match self.keys.iter().position(|&(held, _)| held == key) {
             Some(at) => {
-                self.0.remove(at);
+                self.keys.remove(at);
                 false
             }
             None => true,
         };
         let mut close = Vec::new();
-        self.0.retain(|&held| {
+        self.keys.retain(|&(held, _)| {
             let older = held.ring == key.ring && held.slot == key.slot;
             if older {
                 close.push(held);
             }
             !older
         });
-        self.0.push(key);
-        let over = self.0.len().saturating_sub(OPENED_MAX);
-        close.extend(self.0.drain(..over));
+        self.keys.push((key, self.composes));
+        let over = self.keys.len().saturating_sub(OPENED_MAX);
+        close.extend(self.keys.drain(..over).map(|(key, _)| key));
         Touch { open, close }
     }
 
     /// `key` is not open (its open failed, or it was closed).
     pub fn forget(&mut self, key: SlotKey) {
-        self.0.retain(|&held| held != key);
+        self.keys.retain(|&(held, _)| held != key);
     }
 
     /// How many slots are open.
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.keys.len()
     }
 
     /// Whether no slot is open.
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.keys.is_empty()
     }
 }
 

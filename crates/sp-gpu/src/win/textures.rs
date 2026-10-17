@@ -6,9 +6,12 @@
 
 use std::ffi::c_void;
 
+use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use windows::Win32::Graphics::Direct3D::D3D11_SRV_DIMENSION_TEXTURE2D;
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_CPU_ACCESS_READ, D3D11_MAP_READ,
-    D3D11_MAPPED_SUBRESOURCE, D3D11_RESOURCE_MISC_SHARED, D3D11_TEXTURE2D_DESC, D3D11_USAGE,
+    D3D11_MAPPED_SUBRESOURCE, D3D11_RESOURCE_MISC_SHARED, D3D11_SHADER_RESOURCE_VIEW_DESC,
+    D3D11_SHADER_RESOURCE_VIEW_DESC_0, D3D11_TEX2D_SRV, D3D11_TEXTURE2D_DESC, D3D11_USAGE,
     D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING, ID3D11Device, ID3D11DeviceContext,
     ID3D11RenderTargetView, ID3D11ShaderResourceView, ID3D11Texture2D,
 };
@@ -63,6 +66,44 @@ pub(super) fn texture(
     texture.ok_or(GpuError::NoObject {
         call: "CreateTexture2D",
     })
+}
+
+/// #279 P0 / P2: the description of a shader view of ONE plane of an NV12
+/// texture as `format` (R8 = the luma, R8G8 = the interleaved chroma at
+/// half size: Microsoft's NV12 view rule): the probe's views and a ring
+/// slot's.
+pub(super) fn plane_view_desc(format: DXGI_FORMAT) -> D3D11_SHADER_RESOURCE_VIEW_DESC {
+    D3D11_SHADER_RESOURCE_VIEW_DESC {
+        Format: format,
+        ViewDimension: D3D11_SRV_DIMENSION_TEXTURE2D,
+        Anonymous: D3D11_SHADER_RESOURCE_VIEW_DESC_0 {
+            Texture2D: D3D11_TEX2D_SRV {
+                MostDetailedMip: 0,
+                MipLevels: 1,
+            },
+        },
+    }
+}
+
+/// #279 P0 / P2: a shared texture's NT handle (`CreateSharedHandle`),
+/// closed once when dropped (what was opened through it stays open). Kept
+/// as a number, so it is `Send` and `Sync`: every ring frame holds its
+/// slot's.
+pub(super) struct NtHandle(pub isize);
+
+impl NtHandle {
+    /// The handle, for a call that takes one.
+    pub fn handle(&self) -> HANDLE {
+        HANDLE(self.0 as *mut c_void)
+    }
+}
+
+impl Drop for NtHandle {
+    fn drop(&mut self) {
+        // SAFETY: the handle came from `CreateSharedHandle` and is closed
+        // once, here.
+        let _ = unsafe { CloseHandle(self.handle()) };
+    }
 }
 
 /// A shader view of the whole texture (#279 P1a: the UYVY pass reads its

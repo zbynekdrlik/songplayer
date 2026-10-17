@@ -6,7 +6,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use super::{FakeRing, GpuFrame, RingCore, RingStats, Taken, Written, hand_over};
+use super::{FAKE_HANDLE_BASE, FakeRing, GpuFrame, RingCore, RingStats, Taken, Written, hand_over};
 use crate::error::GpuError;
 use crate::ring_state::{KEY_CONSUMER, KEY_PRODUCER, RingFormat, SizeClass, SlotKey};
 
@@ -64,7 +64,11 @@ fn a_frame_carries_its_picture_its_slot_and_its_own_id() {
             alloc_gen: 1
         }
     );
-    assert_eq!((a.shared_handle(), b.shared_handle()), (4, 8));
+    assert_eq!(
+        (a.shared_handle(), b.shared_handle()),
+        (FAKE_HANDLE_BASE + 4, FAKE_HANDLE_BASE + 8),
+        "never a real handle's value"
+    );
     let ids = [a.id(), b.id(), c.id()];
     assert!(
         ids[0] != ids[1] && ids[1] != ids[2] && ids[0] != ids[2],
@@ -105,6 +109,13 @@ fn a_write_waits_for_a_frame_to_drop() {
         done_rx.recv_timeout(Duration::from_millis(200)).is_err(),
         "no write while every slot is in use"
     );
+    // `stats` takes the ring's lock, which the writer gives up only inside
+    // its wait: reading its counted wait proves it is parked there.
+    let parked = (0..20_000).any(|_| {
+        thread::sleep(Duration::from_millis(1));
+        ring.stats().waits == 1
+    });
+    assert!(parked, "the writer waits for a slot");
     drop(held);
     let written = done_rx
         .recv_timeout(LONG)
@@ -141,7 +152,8 @@ fn a_dead_ring_refuses_writes_and_wakes_its_writer() {
         })
     };
     assert!(done_rx.recv_timeout(Duration::from_millis(200)).is_err());
-    held.kill_ring();
+    assert!(held.kill_ring("a test"), "its first kill");
+    assert!(!held.kill_ring("a test"), "already dead");
     assert_eq!(
         done_rx
             .recv_timeout(LONG)
@@ -162,7 +174,8 @@ fn a_dead_ring_refuses_writes_and_wakes_its_writer() {
 #[test]
 fn the_fake_ring_dies_like_the_real_one() {
     let ring = FakeRing::new(2);
-    ring.kill();
+    assert!(ring.kill());
+    assert!(!ring.kill());
     assert!(ring.stats().dead);
     assert_eq!(
         ring.frame(64, 64, NOW).map(|f| f.id()),

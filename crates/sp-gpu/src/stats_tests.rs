@@ -3,7 +3,7 @@
 use std::time::{Duration, Instant};
 
 use super::{ComposeStats, split_uyvy_part, target_draws_us};
-use crate::ring_state::Acquired;
+use crate::ring_state::{Acquired, SlotDraw, SlotOpen};
 
 const MS: Duration = Duration::from_millis(1);
 
@@ -61,20 +61,40 @@ fn with_no_uyvy_pass_every_part_is_a_target_s() {
     assert_eq!(split_uyvy_part(Vec::new(), 0), (Vec::new(), None));
 }
 
-/// #279 P2: a held slot is drawn; a busy one and a lost one are drawn
-/// black, each counted on its own, over several slots of one compose.
+/// #279 P2: each ring slot of a compose is counted once, by what the
+/// compositor found and did: drawn, busy, a dead ring's / abandoned / a
+/// failed acquire, not opened; the compositor's own lost device counts
+/// nothing. Two of each, so every counter is pinned past its first step.
 #[test]
-fn each_ring_slot_is_drawn_or_counted_by_its_mutex_s_answer() {
+fn each_ring_slot_is_counted_by_what_the_compositor_found_and_did() {
     let mut stats = ComposeStats::default();
-    assert!(stats.count_gpu_side(Acquired::Held));
-    assert!(stats.count_gpu_side(Acquired::Held));
-    assert!(!stats.count_gpu_side(Acquired::Busy));
-    assert!(!stats.count_gpu_side(Acquired::Abandoned));
-    assert!(!stats.count_gpu_side(Acquired::Failed(0x8007_0057)));
-    assert!(!stats.count_gpu_side(Acquired::Busy));
+    let held = SlotOpen::Acquired(Acquired::Held);
+    let busy = SlotOpen::Acquired(Acquired::Busy);
+    let abandoned = SlotOpen::Acquired(Acquired::Abandoned);
+    let failed = SlotOpen::Acquired(Acquired::Failed(0x8007_0057));
+    for (open, draw) in [
+        (held, SlotDraw::Draw),
+        (busy, SlotDraw::Black),
+        (SlotOpen::Dead, SlotDraw::Gone),
+        (abandoned, SlotDraw::KillRing),
+        (failed, SlotDraw::KillRing),
+        (SlotOpen::Failed, SlotDraw::KillRing),
+        (failed, SlotDraw::DeviceLost),
+        (SlotOpen::Failed, SlotDraw::DeviceLost),
+        (held, SlotDraw::Draw),
+        (busy, SlotDraw::Black),
+        (SlotOpen::Failed, SlotDraw::KillRing),
+    ] {
+        stats.count_slot(open, draw);
+    }
     assert_eq!(
-        (stats.gpu_sides, stats.km_acquire_timeouts, stats.abandoned),
-        (2, 2, 2)
+        (
+            stats.gpu_sides,
+            stats.km_acquire_timeouts,
+            stats.abandoned,
+            stats.open_failures
+        ),
+        (2, 2, 3, 2)
     );
     assert_eq!(stats.gpu_opens, 0, "opening is not drawing");
     assert_eq!((stats.uploads, stats.upload_bytes), (0, 0));

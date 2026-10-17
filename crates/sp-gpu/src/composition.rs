@@ -135,7 +135,10 @@ pub enum Side<'a> {
 
 impl<'a> Side<'a> {
     /// The picture's id: an uploaded picture's (its caller's label), a ring
-    /// frame's own.
+    /// frame's own (process-wide). The two kinds number apart and may share
+    /// a value: an id names a picture only among its kind (the residency
+    /// compares the uploaded pictures' alone, the ring slots go by
+    /// [`SlotKey`](crate::SlotKey)).
     pub fn id(&self) -> u64 {
         match self {
             Side::Cpu(picture) => picture.id,
@@ -312,7 +315,7 @@ impl<'a> Composition<'a> {
     /// ONCE (both sides of a fade may show the same slot): what one compose
     /// opens and acquires.
     pub fn frames(&self) -> Vec<&'a GpuFrame> {
-        let mut frames: Vec<&'a GpuFrame> = Vec::with_capacity(2);
+        let mut frames: Vec<&'a GpuFrame> = Vec::new();
         for frame in self.sides().filter_map(|(_, side, _)| side.gpu()) {
             if frames.iter().all(|held| held.key() != frame.key()) {
                 frames.push(frame);

@@ -37,7 +37,7 @@ use crate::playback::pipeline_paced_submit::emit_heartbeat_paced;
 /// spike while the #162 stems child is resident is absorbed by the buffer instead
 /// of landing as a late boundary emit. 12 gives comfortable headroom (~500 ms at
 /// 24 fps, ~66 MB of NV12 per playing pipeline).
-const DECODE_QUEUE_BOUND: usize = 12;
+pub(crate) const DECODE_QUEUE_BOUND: usize = 12;
 
 /// Request a 1 ms Windows multimedia timer so the paced sleep granularity is
 /// ~1 ms rather than the default ~15.6 ms. Called at the start of every

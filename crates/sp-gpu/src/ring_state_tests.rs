@@ -2,11 +2,14 @@
 //! copy box, the keys, an acquire's answer, the slots a write takes and a
 //! drop frees, the writer's wait and the compositor's open slots.
 
-use std::time::{Duration, Instant};
+use std::cell::Cell;
+use std::time::Duration;
 
 use super::{
-    Acquired, KEY_CONSUMER, KEY_PRODUCER, MAX_SIZE_CLASSES, OPENED_MAX, OpenedKeys, Release,
-    RingFormat, RingState, SizeClass, SlotKey, Take, Touch, copy_box, producer_key, wait_left,
+    Acquired, KEY_CONSUMER, KEY_PRODUCER, MAX_SIZE_CLASSES, OPENED_IDLE_COMPOSES, OPENED_MAX,
+    OpenedKeys, RING_CAPACITY, RING_WAIT, Release, RingFormat, RingState, SizeClass, SlotDraw,
+    SlotKey, SlotOpen, SlotState, Take, Touch, WRITER_ACQUIRE_MS, copy_box, make_texture,
+    producer_key, slot_draw, stale_texture, why_killed, writer_step,
 };
 
 /// A class of an even `width`×`height` (NV12).
@@ -108,11 +111,84 @@ fn an_acquire_is_read_from_its_raw_hresult() {
 }
 
 #[test]
-fn only_a_lost_or_failed_acquire_kills_the_ring() {
-    assert!(!Acquired::Held.kills_ring());
-    assert!(!Acquired::Busy.kills_ring(), "a busy slot misses one draw");
-    assert!(Acquired::Abandoned.kills_ring());
-    assert!(Acquired::Failed(0x8007_0057).kills_ring());
+fn a_writer_writes_only_on_a_held_key_and_kills_the_ring_on_any_other() {
+    assert_eq!(writer_step(Acquired::Held), Ok(()));
+    let whys = [
+        writer_step(Acquired::Busy),
+        writer_step(Acquired::Abandoned),
+        writer_step(Acquired::Failed(0x8007_0057)),
+    ];
+    for why in whys {
+        assert!(why.is_err_and(|why| !why.is_empty()), "{why:?}");
+    }
+    assert!(
+        whys[0] != whys[1] && whys[1] != whys[2] && whys[0] != whys[2],
+        "each says its own why: {whys:?}"
+    );
+    assert_eq!(
+        Duration::from_millis(WRITER_ACQUIRE_MS.into()),
+        RING_WAIT,
+        "a writer waits for its key no longer than for its slot"
+    );
+}
+
+/// `slot_draw` with a device-removed answer that must never be read.
+fn not_asked(open: SlotOpen) -> SlotDraw {
+    slot_draw(open, || panic!("the device was asked for {open:?}"))
+}
+
+/// `slot_draw` with the device-removed answer `removed`, and whether it was
+/// asked.
+fn asked(open: SlotOpen, removed: bool) -> (SlotDraw, bool) {
+    let was_asked = Cell::new(false);
+    let draw = slot_draw(open, || {
+        was_asked.set(true);
+        removed
+    });
+    (draw, was_asked.get())
+}
+
+#[test]
+fn the_compositor_draws_a_held_slot_a_busy_one_black_and_closes_a_dead_ring_s() {
+    assert_eq!(
+        not_asked(SlotOpen::Acquired(Acquired::Held)),
+        SlotDraw::Draw
+    );
+    assert_eq!(
+        not_asked(SlotOpen::Acquired(Acquired::Busy)),
+        SlotDraw::Black
+    );
+    assert_eq!(not_asked(SlotOpen::Dead), SlotDraw::Gone);
+    assert_eq!(
+        not_asked(SlotOpen::Acquired(Acquired::Abandoned)),
+        SlotDraw::KillRing,
+        "the producer's device was lost holding it"
+    );
+}
+
+#[test]
+fn a_failed_slot_is_the_compositor_s_lost_device_or_else_kills_the_ring() {
+    for open in [
+        SlotOpen::Failed,
+        SlotOpen::Acquired(Acquired::Failed(0x887A_0005)),
+    ] {
+        assert_eq!(asked(open, true), (SlotDraw::DeviceLost, true), "{open:?}");
+        assert_eq!(asked(open, false), (SlotDraw::KillRing, true), "{open:?}");
+    }
+}
+
+#[test]
+fn each_kill_names_its_cause() {
+    let whys = [
+        why_killed(SlotOpen::Acquired(Acquired::Abandoned)),
+        why_killed(SlotOpen::Failed),
+        why_killed(SlotOpen::Acquired(Acquired::Failed(1))),
+    ];
+    assert!(whys.iter().all(|why| !why.is_empty()));
+    assert!(
+        whys[0] != whys[1] && whys[1] != whys[2] && whys[0] != whys[2],
+        "{whys:?}"
+    );
 }
 
 #[test]
@@ -227,7 +303,8 @@ fn a_dead_ring_takes_no_write_and_ends_every_wait() {
     let _ = ring.take(fhd());
     assert!(!ring.has_room());
     assert!(!ring.is_dead());
-    ring.kill();
+    assert!(ring.kill(), "its first kill");
+    assert!(!ring.kill(), "already dead");
     assert!(ring.is_dead());
     assert!(ring.has_room(), "a waiter wakes to see it dead");
     assert_eq!(ring.take(fhd()), Take::Dead);
@@ -323,24 +400,35 @@ fn a_full_ring_writes_a_new_class_over_a_free_slot_of_the_other() {
     assert_eq!(ring.release(b.0, 3), Release::Freed);
 }
 
+/// A slot of the ring under allocation `alloc_gen`.
+fn state(alloc_gen: u64) -> SlotState {
+    SlotState {
+        class: fhd(),
+        alloc_gen,
+        in_use: false,
+        written: true,
+    }
+}
+
 #[test]
-fn the_wait_ends_at_its_bound() {
-    let since = Instant::now();
-    let limit = Duration::from_millis(100);
-    assert_eq!(wait_left(since, since, limit), Some(limit));
-    assert_eq!(
-        wait_left(since, since + Duration::from_millis(30), limit),
-        Some(Duration::from_millis(70))
+fn a_writer_s_texture_is_stale_once_its_slot_is_emptied_or_made_again() {
+    assert!(!stale_texture(Some(state(3)), 3));
+    assert!(stale_texture(Some(state(4)), 3), "made again");
+    assert!(stale_texture(None, 3), "emptied");
+}
+
+#[test]
+fn a_write_makes_the_texture_of_a_new_slot_or_one_it_does_not_hold() {
+    assert!(make_texture(true, None, 5), "a new slot");
+    assert!(make_texture(true, Some(4), 5), "a slot made again");
+    assert!(!make_texture(false, Some(5), 5), "its texture held");
+    assert!(
+        make_texture(false, None, 5),
+        "a reused slot with no texture"
     );
-    assert_eq!(wait_left(since, since + limit, limit), None);
-    assert_eq!(
-        wait_left(since, since + Duration::from_millis(250), limit),
-        None
-    );
-    assert_eq!(
-        wait_left(since + Duration::from_millis(5), since, limit),
-        Some(limit),
-        "a clock read before the start counts no wait"
+    assert!(
+        make_texture(false, Some(4), 5),
+        "a texture of another allocation"
     );
 }
 
@@ -404,6 +492,40 @@ fn past_the_bound_the_least_recently_drawn_slot_is_closed() {
     );
     assert_eq!(keys.touch(key(2, 1, 1)), opened(vec![key(1, 2, 1)]));
     assert_eq!(keys.len(), OPENED_MAX);
+}
+
+#[test]
+fn the_open_slot_bound_holds_both_sides_of_a_fade_between_two_rings() {
+    assert_eq!(OPENED_MAX, 2 * RING_CAPACITY);
+    assert_eq!(OPENED_IDLE_COMPOSES, 90, "3 s at one compose a boundary");
+}
+
+#[test]
+fn a_slot_no_compose_drew_for_the_idle_bound_closes() {
+    let mut keys = OpenedKeys::default();
+    assert!(keys.begin_compose().is_empty());
+    let _ = keys.touch(key(1, 0, 1));
+    let _ = keys.touch(key(1, 1, 1));
+    for _ in 1..OPENED_IDLE_COMPOSES {
+        assert!(keys.begin_compose().is_empty());
+    }
+    assert!(
+        keys.begin_compose().is_empty(),
+        "undrawn for exactly the bound: still open"
+    );
+    let _ = keys.touch(key(1, 1, 1));
+    assert_eq!(
+        keys.begin_compose(),
+        vec![key(1, 0, 1)],
+        "slot 0, undrawn one compose past the bound, closes"
+    );
+    assert_eq!(keys.len(), 1);
+    assert_eq!(keys.touch(key(1, 1, 1)), kept(), "drawn since: still open");
+    assert_eq!(
+        keys.touch(key(1, 0, 1)),
+        opened(Vec::new()),
+        "a closed slot is opened again"
+    );
 }
 
 #[test]

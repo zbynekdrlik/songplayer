@@ -109,7 +109,10 @@ pub fn uv_rect(fill: Fill) -> [f32; 4] {
 /// its top-left: a ring slot's texture has even sides, so it can be one
 /// column wider and one row taller than its picture. u scales by width /
 /// texture width, v by height / texture height: exactly `uv` when the
-/// texture is the picture's size (an uploaded picture, an even one).
+/// texture is the picture's size (an uploaded picture, an even one). The
+/// quad then spans the picture's own texels; the bilinear filter clamps at
+/// the TEXTURE's edge, so an enlarged odd picture's last column (row)
+/// blends up to half a texel of the slot's extra one.
 pub fn uv_in_texture(uv: [f32; 4], picture: (u32, u32), texture: (u32, u32)) -> [f32; 4] {
     let scale = |side: u32, texture: u32| side as f32 / texture.max(1) as f32;
     let (su, sv) = (scale(picture.0, texture.0), scale(picture.1, texture.1));

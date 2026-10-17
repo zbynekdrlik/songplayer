@@ -146,10 +146,10 @@ fn a_texture_of_the_picture_s_size_keeps_the_texture_coordinates() {
     assert_eq!(uv_in_texture(WHOLE, (1440, 1080), (1440, 1080)), WHOLE);
 }
 
-/// #279 P2: an odd picture in a ring slot's even texture shows only its
-/// own columns and rows: u scales by 1919/1920, v by 1079/1080.
+/// #279 P2: an odd picture in a ring slot's even texture spans its own
+/// columns and rows: u scales by 1919/1920, v by 1079/1080.
 #[test]
-fn an_odd_picture_in_an_even_slot_shows_its_own_texels_only() {
+fn an_odd_picture_in_an_even_slot_spans_its_own_texels() {
     let (su, sv) = (1919.0_f32 / 1920.0, 1079.0_f32 / 1080.0);
     assert_eq!(
         uv_in_texture(WHOLE, (1919, 1079), (1920, 1080)),

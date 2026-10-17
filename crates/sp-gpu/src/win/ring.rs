@@ -9,11 +9,9 @@
 //! `crate::ring`'s; this module only calls Direct3D. Proven on two WARP
 //! devices by `tests/ring.rs`.
 
-use std::ffi::c_void;
 use std::sync::Arc;
 
 use tracing::debug;
-use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BIND_SHADER_RESOURCE, D3D11_BOX, D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX,
     D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, ID3D11Device,
@@ -26,13 +24,14 @@ use windows::Win32::Graphics::Dxgi::{
 use windows::core::{Interface, PCWSTR};
 
 use super::device::{self, DeviceUse};
+use super::failed;
 use super::probe::acquire;
-use super::{failed, textures};
+use super::textures::{self, NtHandle};
 use crate::error::GpuError;
-use crate::probe::WAIT_TIMEOUT;
 use crate::ring::{GpuFrame, RingCore, RingStats, Taken, Written, hand_over};
 use crate::ring_state::{
-    Acquired, KEY_CONSUMER, PRODUCER_ACQUIRE_MS, RING_WAIT, RingFormat, SizeClass, copy_box,
+    Acquired, KEY_CONSUMER, RING_WAIT, RingFormat, SizeClass, WRITER_ACQUIRE_MS, copy_box,
+    make_texture, stale_texture, writer_step,
 };
 
 /// A slot taken for a write holds no texture after the write made one: a
@@ -41,21 +40,10 @@ const NO_SLOT_TEXTURE: GpuError = GpuError::NoObject {
     call: "the ring slot's texture",
 };
 
-/// A slot texture's NT handle, closed once the texture's last frame and
-/// the ring's own reference are gone (every frame keeps it, so the
-/// compositor can open it whatever the ring does meanwhile).
-struct NtHandle(isize);
-
-impl Drop for NtHandle {
-    fn drop(&mut self) {
-        // SAFETY: the handle came from `CreateSharedHandle` and is closed
-        // once, here.
-        let _ = unsafe { CloseHandle(HANDLE(self.0 as *mut c_void)) };
-    }
-}
-
 /// One slot's texture on the producer device, under the ring's allocation
-/// number.
+/// number. Its NT handle is closed once the texture's last frame and the
+/// ring's own reference are gone (every frame keeps it, so the compositor
+/// can open it whatever the ring does meanwhile).
 struct SlotTexture {
     alloc_gen: u64,
     texture: ID3D11Texture2D,
@@ -118,10 +106,10 @@ impl PictureRing {
     /// slot's keyed mutex: its last key, the copy, a flush (a shared texture
     /// updated on one device must be flushed there), release key 1. While
     /// every slot is in use the write waits for a frame to drop, at most
-    /// `RING_WAIT` ([`GpuError::RingFull`]). A slot whose mutex the
-    /// compositor's lost device abandoned, or whose acquire or release
-    /// failed, kills the ring ([`GpuError::RingDead`]); the reader then
-    /// goes on in software.
+    /// `RING_WAIT` ([`GpuError::RingFull`]). A slot whose key the writer
+    /// does not get within `WRITER_ACQUIRE_MS` (`ring_state::writer_step`),
+    /// or whose release fails, kills the ring ([`GpuError::RingDead`]); the
+    /// reader then goes on in software.
     pub fn copy_from(
         &mut self,
         source: &ID3D11Texture2D,
@@ -173,25 +161,17 @@ impl PictureRing {
         taken: Taken,
     ) -> Result<Arc<NtHandle>, GpuError> {
         self.drop_stale_textures();
-        let current = self.textures[taken.slot]
+        let held_gen = self.textures[taken.slot]
             .as_ref()
-            .is_some_and(|slot| slot.alloc_gen == taken.alloc_gen);
-        if taken.create || !current {
+            .map(|slot| slot.alloc_gen);
+        if make_texture(taken.create, held_gen, taken.alloc_gen) {
             self.textures[taken.slot] = Some(self.make(class, taken.alloc_gen)?);
         }
         let slot = self.textures[taken.slot].as_ref().ok_or(NO_SLOT_TEXTURE)?;
-        match Acquired::of(acquire(&slot.mutex, taken.key, PRODUCER_ACQUIRE_MS)) {
-            Acquired::Held => {}
-            Acquired::Busy => {
-                return Err(GpuError::Api {
-                    call: "IDXGIKeyedMutex::AcquireSync (a ring slot, the writer)",
-                    hresult: WAIT_TIMEOUT,
-                });
-            }
-            Acquired::Abandoned | Acquired::Failed(_) => {
-                self.core.kill();
-                return Err(GpuError::RingDead);
-            }
+        let answer = Acquired::of(acquire(&slot.mutex, taken.key, WRITER_ACQUIRE_MS));
+        if let Err(why) = writer_step(answer) {
+            self.core.kill(why);
+            return Err(GpuError::RingDead);
         }
         let region = D3D11_BOX {
             left: 0,
@@ -218,7 +198,7 @@ impl PictureRing {
             self.context.Flush();
         }
         if let Err(e) = unsafe { slot.mutex.ReleaseSync(KEY_CONSUMER) } {
-            self.core.kill();
+            self.core.kill("the writer's release of a slot failed");
             return Err(failed(
                 "IDXGIKeyedMutex::ReleaseSync (a ring slot, the writer)",
                 &e,
@@ -270,10 +250,10 @@ impl PictureRing {
     fn drop_stale_textures(&mut self) {
         for (index, texture) in self.textures.iter_mut().enumerate() {
             let state = self.core.slot(index);
-            let stale = texture
+            if texture
                 .as_ref()
-                .is_some_and(|held| state.is_none_or(|state| state.alloc_gen != held.alloc_gen));
-            if stale {
+                .is_some_and(|held| stale_texture(state, held.alloc_gen))
+            {
                 *texture = None;
             }
         }

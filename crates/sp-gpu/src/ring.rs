@@ -18,6 +18,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
 use serde::Serialize;
+use tracing::warn;
 
 use crate::error::GpuError;
 use crate::picture::MAX_PICTURE_SIDE;
@@ -150,10 +151,19 @@ impl RingCore {
     }
 
     /// Kill the ring: every later write is [`GpuError::RingDead`]; a
-    /// waiting writer wakes to see it.
-    pub(crate) fn kill(&self) {
-        self.lock().kill();
+    /// waiting writer wakes to see it. Its first kill is logged once, with
+    /// `why`; whether this call killed it.
+    pub(crate) fn kill(&self, why: &'static str) -> bool {
+        let first = self.lock().kill();
         self.freed.notify_all();
+        if first {
+            warn!(
+                ring = self.id,
+                why,
+                "sp-gpu: a picture ring died: its pipeline decodes in software from here (#279)"
+            );
+        }
+        first
     }
 
     /// Whether the ring is dead.
@@ -287,11 +297,13 @@ impl GpuFrame {
         Arc::ptr_eq(&self.0, &other.0)
     }
 
-    /// The compositor found the slot's device lost (its mutex abandoned)
-    /// or could not acquire it: the ring dies, and its writer goes on in
-    /// software.
-    pub fn kill_ring(&self) {
-        self.0.core.kill();
+    /// The compositor found the slot's producer device lost (its mutex
+    /// abandoned), or the slot failed on a healthy compositor
+    /// (`ring_state::slot_draw`): the ring dies, and its writer goes on in
+    /// software. `why` goes into the ring's one WARN; whether this call
+    /// killed it.
+    pub fn kill_ring(&self, why: &'static str) -> bool {
+        self.0.core.kill(why)
     }
 
     /// Whether the frame's ring is dead.
@@ -313,10 +325,16 @@ impl fmt::Debug for GpuFrame {
     }
 }
 
+/// The made-up handle of a [`FakeRing`] slot `slot`:
+/// `FAKE_HANDLE_BASE + 4 × (slot + 1)`, a value no Windows handle has (a
+/// real one is a small positive multiple of 4, a pseudo-handle -1 … -6),
+/// so a fake frame that ever reached a real compositor opens nothing.
+pub const FAKE_HANDLE_BASE: isize = isize::MIN;
+
 /// A ring with no textures, for tests on every platform (sp-server's pacer,
 /// bus and MAX tests): its frames take and free slots exactly as the
-/// Windows ring's do, and carry a made-up handle, `4 × (slot + 1)`, so a
-/// test sees whose handle a frame carries. Not for production.
+/// Windows ring's do, and carry a made-up handle ([`FAKE_HANDLE_BASE`]), so
+/// a test sees whose slot a frame holds. Not for production.
 #[doc(hidden)]
 #[derive(Clone)]
 pub struct FakeRing {
@@ -355,7 +373,7 @@ impl FakeRing {
                 alloc_gen: taken.alloc_gen,
                 class,
                 size: (width, height),
-                handle: 4 * (taken.slot as isize + 1),
+                handle: FAKE_HANDLE_BASE + 4 * (taken.slot as isize + 1),
                 keep: None,
             },
         ))
@@ -367,9 +385,9 @@ impl FakeRing {
     }
 
     /// Kill the ring (a test of the writer's or the compositor's answer to
-    /// a lost device).
-    pub fn kill(&self) {
-        self.core.kill();
+    /// a lost device); whether this call killed it.
+    pub fn kill(&self) -> bool {
+        self.core.kill("a test killed the fake ring")
     }
 }
 
