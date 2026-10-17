@@ -78,7 +78,7 @@ fn pair(video: &SharedFrame, k: u32, media_pts_100ns: Option<i64>) -> SubmitJob 
         width: W,
         height: H,
         stride: W,
-        video: video.clone(),
+        video: video.clone().into(),
         audio: vec![AudioFrame {
             data: vec![0.25; 3200],
             channels: 2,

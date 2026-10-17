@@ -8,8 +8,8 @@
 use sp_core::genlock::UNITS_PER_SECOND;
 use sp_ndi::AudioFrame;
 
-use crate::playback::frame_buf::SharedFrame;
 use crate::playback::pacer::{PacedFrame, PacedSink};
+use crate::playback::picture::Picture;
 
 /// The pure sleep-plan decision (#147 change 4), factored out so it is testable
 /// without a live decode loop. `SystemClock` jumps and bad boundaries must never
@@ -58,7 +58,7 @@ pub(crate) fn default_submit_shared<S: PacedSink + ?Sized>(
     width: u32,
     height: u32,
     stride: u32,
-    video: SharedFrame,
+    video: Picture,
     audio: &[AudioFrame],
     video_tc_100ns: i64,
     audio_tc_100ns: i64,

@@ -35,7 +35,7 @@ fn frame_due_with_audio(target_100ns: i64, n: usize) -> PacedFrame {
         width: 4,
         height: 2,
         stride: 4,
-        video: SharedFrame::new(vec![0u8; 12]),
+        video: SharedFrame::new(vec![0u8; 12]).into(),
         audio: vec![AudioFrame {
             data,
             channels: 2,

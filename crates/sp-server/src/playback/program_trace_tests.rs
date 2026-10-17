@@ -320,7 +320,7 @@ fn submit_job(live: bool) -> SubmitJob {
         width: 2,
         height: 2,
         stride: 2,
-        video: SharedFrame::new(vec![0; 6]),
+        video: SharedFrame::new(vec![0; 6]).into(),
         audio: Vec::new(),
         video_tc_100ns: b(0),
         audio_tc_100ns: b(0),

@@ -267,7 +267,7 @@ pub(super) fn pair(width: u32, stamp: i64, audio_tc: i64, data: Vec<f32>) -> Sub
         width,
         height: 2,
         stride: width,
-        video: SharedFrame::new(vec![90u8; width as usize * 3]),
+        video: SharedFrame::new(vec![90u8; width as usize * 3]).into(),
         audio: vec![AudioFrame {
             data,
             channels: 2,

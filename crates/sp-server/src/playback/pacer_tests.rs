@@ -14,6 +14,7 @@
 
 use super::*;
 use crate::playback::frame_buf::SharedFrame;
+use crate::playback::picture::Picture;
 use crate::playback::wallclock::{SettableClock, WallClock};
 use sp_ndi::AudioFrame;
 
@@ -31,7 +32,7 @@ fn mk_frame(pts_ns: i64) -> PacedFrame {
         width: 4,
         height: 2,
         stride: 4,
-        video: SharedFrame::new(vec![0u8; 12]),
+        video: SharedFrame::new(vec![0u8; 12]).into(),
         audio: vec![],
     }
 }
@@ -42,7 +43,7 @@ fn mk_frame_with_audio(pts_ns: i64) -> PacedFrame {
         width: 4,
         height: 2,
         stride: 4,
-        video: SharedFrame::new(vec![0u8; 12]),
+        video: SharedFrame::new(vec![0u8; 12]).into(),
         audio: vec![AudioFrame {
             data: vec![0.1, 0.2, 0.3, 0.4],
             channels: 2,
@@ -721,7 +722,7 @@ fn standby_black_fills_boundaries_without_a_last_frame() {
     // Black fills the boundary with the supplied black frame instead.
     let (mut pacer, clk) = anchored_pacer();
     let mut sink = RecordingSink::default();
-    let black = SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]);
+    let black = Picture::Cpu(SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]));
 
     for k in 1..=50i64 {
         clk.set(b(k));
@@ -755,8 +756,8 @@ fn standby_black_fills_boundaries_without_a_last_frame() {
 /// (the play + FrozenLast repeat path) into `emitted`.
 #[derive(Default)]
 struct SharedRecordingSink {
-    shared: Vec<SharedFrame>,
-    emitted: Vec<SharedFrame>,
+    shared: Vec<Picture>,
+    emitted: Vec<Picture>,
 }
 
 impl PacedSink for SharedRecordingSink {
@@ -769,7 +770,7 @@ impl PacedSink for SharedRecordingSink {
         _width: u32,
         _height: u32,
         _stride: u32,
-        video: SharedFrame,
+        video: Picture,
         _audio: &[AudioFrame],
         _video_tc_100ns: i64,
         _audio_tc_100ns: i64,
@@ -785,7 +786,7 @@ fn service_standby_black_submits_the_same_allocation_every_slot() {
     // implements `submit_shared` records the frames and proves `ptr_eq`.
     let (mut pacer, clk) = anchored_pacer();
     let mut sink = SharedRecordingSink::default();
-    let black = SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]);
+    let black = Picture::Cpu(SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]));
 
     for k in 1..=4i64 {
         clk.set(b(k));
@@ -821,7 +822,7 @@ fn service_standby_frozen_last_repeats_the_same_allocation_every_slot() {
 
     // Play one real frame -> it becomes the pacer's `last_frame`.
     let real = frame_due_at(b(1));
-    let src_ptr = real.video.as_ptr();
+    let src_ptr = real.video.expect_cpu().as_ptr();
     clk.set(b(1));
     let mut first = Some(real);
     assert_eq!(
@@ -841,7 +842,7 @@ fn service_standby_frozen_last_repeats_the_same_allocation_every_slot() {
     assert_eq!(sink.emitted.len(), 5, "1 play + 4 frozen repeats recorded");
     for f in &sink.emitted {
         assert_eq!(
-            f.as_ptr(),
+            f.expect_cpu().as_ptr(),
             src_ptr,
             "every repeat is the SAME allocation as the original frame, no copy"
         );

@@ -16,6 +16,7 @@ use crate::playback::submit_handoff::SubmitJob;
 use sp_core::genlock::{
     GENLOCK_GRID_FPS, floor_boundary_100ns, interval_100ns, strict_next_boundary_100ns,
 };
+use sp_gpu::FakeRing;
 use sp_ndi::test_util::MockNdiBackend;
 use sp_ndi::{AudioFrame, NdiSender};
 use std::sync::Arc;
@@ -63,7 +64,7 @@ pub(super) fn job(w: u32, video: &SharedFrame, stamp: i64, level: f32) -> Submit
         width: w,
         height: 2,
         stride: w,
-        video: video.clone(),
+        video: video.clone().into(),
         audio: block(level),
         video_tc_100ns: stamp,
         audio_tc_100ns: stamp + 2 * MS,
@@ -248,6 +249,47 @@ fn a_cut_is_contiguous_with_one_pair_per_boundary() {
     );
     assert!(!core.is_candidate(SRC_A), "A is pruned after the cut");
     assert!(core.is_candidate(SRC_B));
+}
+
+#[test]
+fn a_ring_frame_crosses_the_bus_by_arc_and_the_canvas_shows_black() {
+    // #279 P2: a source whose pictures are ring frames (P3a's hardware
+    // decode). The bus forwards each boundary like a CPU one, the job's
+    // picture the source's own ring frame (an `Arc` bump); `SP-program`'s
+    // CPU canvas cannot read it, so it sends its black with the source's
+    // own audio, one counted miss a boundary, never a hole.
+    let ring = FakeRing::new(3);
+    let mut core = ProgramCore::new();
+    core.select_initial(SRC_A);
+    let (backend, mut out) = program();
+    for k in 1..=3 {
+        let gpu = ring.frame(4, 2, Duration::ZERO).expect("a free slot");
+        let ring_job = SubmitJob {
+            video: gpu.clone().into(),
+            ..job(4, &frame(4, 2), b(k), 0.1)
+        };
+        assert_eq!(core.offer(SRC_A, ring_job), OfferOutcome::Accepted);
+        let taken = core.take().expect("A's boundary is queued");
+        let ProgramJob::Source(forwarded) = &taken else {
+            panic!("A's own boundary: {}", shown(&taken));
+        };
+        assert!(
+            forwarded.video.gpu().is_some_and(|f| f.ptr_eq(&gpu)),
+            "b({k}): the ring frame itself"
+        );
+        let stamp = out.submit(taken);
+        core.record_submitted(stamp);
+    }
+    assert_eq!(backend.video_timecodes(), stamps(1..=3));
+    assert_eq!(shown_dims(&out), dims(&[("4x2", 3)]));
+    assert_eq!(out.out.canvas_misses(), 3, "the canvas missed each one");
+    let black = out.out.wire_frame().map(|f| f[..].to_vec());
+    assert_eq!(black, Some(vec![16, 16, 16, 16, 128, 128]), "its black");
+    let audio: Vec<i64> = (1..=3).map(|k| b(k) + 2 * MS).collect();
+    assert_eq!(backend.audio_timecodes(), audio, "the source's own audio");
+    assert_eq!(core.status().health.forwarded, 3);
+    drop((out, core));
+    assert_eq!(ring.stats().in_use, 0, "the bus and the sender let go");
 }
 
 #[test]

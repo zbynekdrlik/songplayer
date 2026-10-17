@@ -22,8 +22,8 @@
 
 use sp_ndi::AudioFrame;
 
-use crate::playback::frame_buf::SharedFrame;
 use crate::playback::pacer::{PacedFrame, PacedSink, Pacer};
+use crate::playback::picture::Picture;
 
 /// A boundary less than this (100 ns, 2 ms) after the shown frame's own
 /// present time shows that frame alone: the millisecond pts of a source
@@ -36,7 +36,7 @@ pub const BLEND_DEAD_BAND_100NS: i64 = 20_000;
 /// stride (the pacer checks it).
 #[derive(Clone, Debug)]
 pub struct FrameBlend {
-    pub video: SharedFrame,
+    pub video: Picture,
     pub weight_q8: u32,
 }
 

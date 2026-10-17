@@ -487,7 +487,7 @@ fn source_job(stamp: i64, v: f32) -> ProgramJob {
         width: 4,
         height: 2,
         stride: 4,
-        video: SharedFrame::new(vec![0u8; 4 * 2 * 3 / 2]),
+        video: SharedFrame::new(vec![0u8; 4 * 2 * 3 / 2]).into(),
         audio: vec![frame(vec![v; 3200], 2, 48_000)],
         video_tc_100ns: stamp,
         audio_tc_100ns: stamp + 5,

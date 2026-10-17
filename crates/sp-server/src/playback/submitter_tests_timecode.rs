@@ -198,10 +198,10 @@ fn paced_sink_emit_submits_the_pacer_frame_without_a_pixel_copy() {
         width: 4,
         height: 2,
         stride: 4,
-        video: SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]),
+        video: SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]).into(),
         audio: Vec::new(),
     };
-    let src_ptr = frame.video.as_ptr() as usize;
+    let src_ptr = frame.video.expect_cpu().as_ptr() as usize;
 
     PacedSink::emit(&mut sub, &frame, &[], 333_333, 333_333);
 
@@ -211,10 +211,17 @@ fn paced_sink_emit_submits_the_pacer_frame_without_a_pixel_copy() {
         "the SDK receives the pacer's own allocation — no copy"
     );
     assert!(
-        sub.prev_frame.as_ref().unwrap().ptr_eq(&frame.video),
+        sub.prev_frame
+            .as_ref()
+            .unwrap()
+            .ptr_eq(frame.video.expect_cpu()),
         "the holdover shares the pacer's allocation (an Arc bump)"
     );
-    assert_eq!(&frame.video[..], &[16u8; 12][..], "pacer pixels untouched");
+    assert_eq!(
+        &frame.video.expect_cpu()[..],
+        &[16u8; 12][..],
+        "pacer pixels untouched"
+    );
 }
 
 #[test]

@@ -84,7 +84,7 @@ fn pair(stamp: i64, data: Vec<f32>) -> SubmitJob {
         width: 2,
         height: 2,
         stride: 2,
-        video: SharedFrame::new(vec![90u8; 6]),
+        video: SharedFrame::new(vec![90u8; 6]).into(),
         audio: vec![block(data)],
         video_tc_100ns: stamp,
         audio_tc_100ns: stamp,

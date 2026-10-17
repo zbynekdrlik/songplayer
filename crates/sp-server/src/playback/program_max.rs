@@ -69,16 +69,16 @@ use sp_core::config::{
     SETTING_PROGRAM_MAX_ENABLED, program_max_enabled,
 };
 use sp_gpu::{
-    CANVAS_HEIGHT, CANVAS_WIDTH, ComposeStats, Nv12Picture, SPOUT_SENDER_NAME, SpoutSendStats,
-    VblankState,
+    CANVAS_HEIGHT, CANVAS_WIDTH, ComposeStats, Nv12Picture, SPOUT_SENDER_NAME, Side,
+    SpoutSendStats, VblankState,
 };
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
-use crate::playback::frame_buf::SharedFrame;
 use crate::playback::loop_stats::percentile_ceil;
 use crate::playback::ndi_feed::NdiFeed;
+use crate::playback::picture::Picture;
 use crate::playback::program_max_list::ListHolderStatus;
 use crate::playback::program_max_send::SendTiming;
 use crate::playback::program_max_vblank::{Aligned, VblankLog, vblank_log};
@@ -117,14 +117,15 @@ pub const MAX_STAT_WINDOW: usize = 900;
 /// starts, or after it ended).
 pub const MAX_NOT_RUNNING: &str = "the program-max thread is not running";
 
-/// One native NV12 picture of a boundary, as `SP-program` received it (an
-/// `Arc` of the source's own buffer, never a copy).
+/// One native picture of a boundary, as `SP-program` received it (an
+/// `Arc` of the source's own picture, never a copy; #279 P2: CPU NV12, or
+/// a ring frame MAX samples in place).
 #[derive(Clone, Debug)]
 pub struct MaxPicture {
     pub width: u32,
     pub height: u32,
     pub stride: u32,
-    pub video: SharedFrame,
+    pub video: Picture,
 }
 
 impl MaxPicture {
@@ -138,14 +139,19 @@ impl MaxPicture {
         }
     }
 
-    /// The picture as the compositor reads it, labelled `id`.
-    pub fn nv12(&self, id: u64) -> Nv12Picture<'_> {
-        Nv12Picture {
-            id,
-            width: self.width,
-            height: self.height,
-            stride: self.stride,
-            data: &self.video,
+    /// The picture as the compositor draws it: a CPU picture uploaded,
+    /// labelled `id`; #279 P2: a ring frame sampled in place, labelled by
+    /// its own id (`id` unused).
+    pub fn side(&self, id: u64) -> Side<'_> {
+        match &self.video {
+            Picture::Cpu(frame) => Side::Cpu(Nv12Picture {
+                id,
+                width: self.width,
+                height: self.height,
+                stride: self.stride,
+                data: frame,
+            }),
+            Picture::Gpu(frame) => Side::Gpu(frame),
         }
     }
 }

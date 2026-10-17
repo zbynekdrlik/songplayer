@@ -23,7 +23,7 @@ fn the_inputs_picture_reaches_sp_program_as_the_1920x1080_canvas() {
         (4, 2, 4),
         "the input offers its source's own size"
     );
-    let source = job.video.clone();
+    let source = job.video.expect_cpu().clone();
     let backend = Arc::new(MockNdiBackend::new());
     let sender = NdiSender::new_with_clocking(backend.clone(), PROGRAM_NDI_NAME, false, false)
         .expect("mock sender");

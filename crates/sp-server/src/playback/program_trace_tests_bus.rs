@@ -33,7 +33,7 @@ fn job(w: u32, stamp: i64, live: bool) -> SubmitJob {
         width: w,
         height: 2,
         stride: w,
-        video: SharedFrame::new(vec![0; (w * 3) as usize]),
+        video: SharedFrame::new(vec![0; (w * 3) as usize]).into(),
         audio: Vec::new(),
         video_tc_100ns: stamp,
         audio_tc_100ns: stamp,

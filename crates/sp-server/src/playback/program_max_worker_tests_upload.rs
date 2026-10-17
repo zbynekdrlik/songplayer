@@ -45,8 +45,8 @@ pub(super) fn fake_stats(composition: &Composition<'_>) -> ComposeStats {
 fn the_fake_uploads_each_picture_of_its_composition() {
     let (a, b) = (picture(1920, 1080), picture(4, 2));
     let fade = Composition::Fade {
-        from: Some(a.nv12(1).into()),
-        to: Some(b.nv12(2).into()),
+        from: Some(a.side(1)),
+        to: Some(b.side(2)),
         weight_q8: 64,
     };
     let stats = fake_stats(&fade);

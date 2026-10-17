@@ -483,7 +483,7 @@ pub(crate) fn picture(width: u32, height: u32) -> MaxPicture {
         width,
         height,
         stride: width,
-        video: SharedFrame::new(vec![80; (width * height * 3 / 2) as usize]),
+        video: SharedFrame::new(vec![80; (width * height * 3 / 2) as usize]).into(),
     }
 }
 
@@ -540,7 +540,7 @@ fn a_picture_keeps_its_id_while_the_last_boundary_showed_it() {
         "the same allocation again (a held frame): the same id, no upload"
     );
     let same_bytes = MaxPicture {
-        video: SharedFrame::new(a.video.to_vec()),
+        video: SharedFrame::new(a.video.expect_cpu().to_vec()).into(),
         ..a.clone()
     };
     assert_eq!(
@@ -607,7 +607,7 @@ fn a_labelled_picture_is_the_jobs_own_bytes() {
     let Composition::Picture(Side::Cpu(p)) = labels.composition(&job) else {
         panic!("a CPU picture composes an uploaded picture");
     };
-    assert_eq!(p.data.as_ptr(), a.video.as_ptr());
+    assert_eq!(p.data.as_ptr(), a.video.expect_cpu().as_ptr());
     assert_eq!((p.width, p.height, p.stride, p.data.len()), (6, 4, 6, 36));
 }
 
@@ -945,3 +945,7 @@ pub(crate) fn spawn_loop(max: &Arc<MaxOut>, gpu: &FakeGpu) -> std::thread::JoinH
         .spawn(move || run_max_loop(&max, gpu, None, None))
         .expect("spawn the loop")
 }
+
+/// #279 P2: ring frames on MAX's side.
+#[path = "program_max_worker_tests_gpu.rs"]
+mod ring_frames;

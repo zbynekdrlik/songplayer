@@ -230,7 +230,7 @@ fn a_30_fps_source_lands_one_frame_per_boundary() {
         assert!(job.live, "a captured picture is live (#215 cue gate)");
         // Frame k is all-`k` UYVY: NV12 luma `k` and chroma `k`.
         assert_eq!(
-            &job.video[..],
+            &job.video.expect_cpu()[..],
             &[k as u8; 12][..],
             "boundary {k} carries frame {k}"
         );
@@ -258,7 +258,7 @@ fn a_25_fps_source_is_repeated_onto_the_grid_without_reconverting() {
             same,
             "boundary {k}: a repeat re-offers the same converted picture"
         );
-        assert_eq!(jobs[k].video[0], schedule[k].unwrap() as u8);
+        assert_eq!(jobs[k].video.expect_cpu()[0], schedule[k].unwrap() as u8);
     }
     let st = rig.status();
     assert_eq!(st.frames_received, 25);
@@ -276,7 +276,7 @@ fn a_60_fps_source_is_decimated_onto_the_grid_and_the_drops_are_counted() {
     let jobs = rig.run(30);
     assert_one_pair_per_boundary(&jobs, 30);
     for (k, job) in jobs.iter().enumerate() {
-        assert_eq!(job.video[0], (2 * k) as u8);
+        assert_eq!(job.video.expect_cpu()[0], (2 * k) as u8);
     }
     let st = rig.status();
     assert_eq!(st.frames_received, 30);
@@ -294,7 +294,7 @@ fn assert_standby(job: &SubmitJob) {
     assert!(!job.live, "the standby pair is never live (#215 cue gate)");
     assert_eq!((job.width, job.height, job.stride), (2, 4, 2));
     assert_eq!(
-        &job.video[..],
+        &job.video.expect_cpu()[..],
         &[16, 16, 16, 16, 16, 16, 16, 16, 128, 128, 128, 128][..],
         "NV12 black: 2×4 luma 16, then 2×2 chroma 128"
     );
@@ -375,7 +375,7 @@ fn a_uyva_frame_converts_its_uyvy_plane() {
     f.data.extend([255u8; 8]); // the alpha plane after the UYVY plane
     let mut rig = rig(vec![f], vec![Some(0)]);
     let jobs = rig.run(1);
-    assert_eq!(&jobs[0].video[..], &[9u8; 12][..]);
+    assert_eq!(&jobs[0].video.expect_cpu()[..], &[9u8; 12][..]);
 }
 
 #[test]
@@ -394,7 +394,7 @@ fn a_stride_too_short_for_the_width_is_standby() {
     let mut tight = uyvy(0, 30, 1, 5);
     tight.line_stride = 8;
     let mut tight_rig = self::rig(vec![tight], vec![Some(0)]);
-    assert_eq!(&tight_rig.run(1)[0].video[..], &[5u8; 12][..]);
+    assert_eq!(&tight_rig.run(1)[0].video.expect_cpu()[..], &[5u8; 12][..]);
 }
 
 #[test]
@@ -462,7 +462,7 @@ fn off_program_the_input_captures_and_counts_but_offers_and_converts_nothing() {
     rig.input.service(b(3), &rig.bus);
     let jobs = drain(&rig.bus);
     assert_eq!(jobs.len(), 1);
-    assert_eq!(&jobs[0].video[..], &[0u8; 12][..]);
+    assert_eq!(&jobs[0].video.expect_cpu()[..], &[0u8; 12][..]);
     assert_eq!(jobs[0].video_tc_100ns, b(3));
 }
 
@@ -522,7 +522,7 @@ fn two_distinct_frames_with_the_same_timecode_are_two_frames_not_a_repeat() {
     );
     let jobs = rig.run(2);
     assert_eq!(
-        &jobs[1].video[..],
+        &jobs[1].video.expect_cpu()[..],
         &[2u8; 12][..],
         "the second frame, not a repeat of the first"
     );
@@ -564,7 +564,7 @@ fn an_interleaved_whole_frame_is_converted_like_a_progressive_one() {
     interleaved.frame_format_type = 0; // NDIlib_frame_format_type_interleaved
     let mut rig = rig(vec![interleaved], vec![Some(0)]);
     let jobs = rig.run(1);
-    assert_eq!(&jobs[0].video[..], &[6u8; 12][..]);
+    assert_eq!(&jobs[0].video.expect_cpu()[..], &[6u8; 12][..]);
     assert_eq!(rig.status().unsupported_boundaries, 0);
 }
 

@@ -1,0 +1,99 @@
+//! Tests for a boundary's picture (#279 P2): either kind, compared by
+//! identity, and a GPU picture at a CPU consumer counted, never a panic.
+
+use std::time::Duration;
+
+use sp_gpu::{FakeRing, GpuFrame};
+
+use super::{CpuMisses, CpuUse, Picture};
+use crate::playback::frame_buf::SharedFrame;
+
+/// A ring frame of a `width`×`height` picture in `ring`.
+fn frame(ring: &FakeRing, width: u32, height: u32) -> GpuFrame {
+    ring.frame(width, height, Duration::ZERO)
+        .unwrap_or_else(|e| panic!("a free slot: {e}"))
+}
+
+#[test]
+fn a_cpu_picture_is_its_bytes() {
+    let bytes = SharedFrame::new(vec![7u8; 6]);
+    let picture = Picture::from(bytes.clone());
+    assert!(!picture.is_gpu());
+    assert_eq!(picture.len(), 6);
+    assert!(!picture.is_empty());
+    assert!(picture.cpu().is_some_and(|f| f.ptr_eq(&bytes)));
+    assert!(picture.gpu().is_none());
+    let empty = Picture::Cpu(SharedFrame::new(Vec::new()));
+    assert!(empty.is_empty());
+}
+
+#[test]
+fn a_gpu_picture_holds_no_bytes() {
+    let ring = FakeRing::new(1);
+    let frame = frame(&ring, 1920, 1080);
+    let picture = Picture::from(frame.clone());
+    assert!(picture.is_gpu());
+    assert_eq!(picture.len(), 0);
+    assert!(picture.is_empty());
+    assert!(picture.cpu().is_none());
+    assert!(picture.gpu().is_some_and(|f| f.ptr_eq(&frame)));
+}
+
+#[test]
+fn the_same_picture_is_a_clone_of_the_same_allocation_or_frame() {
+    let ring = FakeRing::new(2);
+    let a = Picture::Cpu(SharedFrame::new(vec![1u8; 4]));
+    let same_bytes = Picture::Cpu(SharedFrame::new(vec![1u8; 4]));
+    let g = Picture::Gpu(frame(&ring, 64, 64));
+    let other_g = Picture::Gpu(frame(&ring, 64, 64));
+    assert!(a.ptr_eq(&a.clone()));
+    assert!(!a.ptr_eq(&same_bytes), "equal bytes, another allocation");
+    assert!(g.ptr_eq(&g.clone()));
+    assert!(!g.ptr_eq(&other_g), "another slot");
+    assert!(!a.ptr_eq(&g));
+    assert!(!g.ptr_eq(&a));
+}
+
+#[test]
+fn a_gpu_picture_at_a_cpu_consumer_is_a_counted_miss() {
+    let ring = FakeRing::new(1);
+    let gpu = Picture::Gpu(frame(&ring, 1280, 720));
+    let cpu = Picture::Cpu(SharedFrame::new(vec![3u8; 12]));
+    let mut misses = CpuMisses::default();
+    assert!(
+        cpu.cpu_for(CpuUse::Canvas, &mut misses)
+            .is_some_and(|f| f.len() == 12)
+    );
+    assert_eq!(misses.count(), 0, "a CPU picture is no miss");
+    assert!(gpu.cpu_for(CpuUse::Canvas, &mut misses).is_none());
+    assert!(gpu.cpu_for(CpuUse::Canvas, &mut misses).is_none());
+    assert_eq!(misses.count(), 2);
+}
+
+#[test]
+fn only_a_consumer_s_first_miss_is_logged() {
+    let ring = FakeRing::new(1);
+    let frame = frame(&ring, 64, 64);
+    let mut misses = CpuMisses::default();
+    assert!(misses.note(CpuUse::Preview, &frame), "the first: logged");
+    assert!(!misses.note(CpuUse::Preview, &frame));
+    assert!(!misses.note(CpuUse::Preview, &frame));
+    assert_eq!(misses.count(), 3);
+    let mut other = CpuMisses::default();
+    assert!(
+        other.note(CpuUse::Canvas, &frame),
+        "each consumer logs its own first"
+    );
+}
+
+#[test]
+fn a_picture_prints_its_kind_and_size_never_its_pixels() {
+    let ring = FakeRing::new(1);
+    let cpu = format!("{:?}", Picture::Cpu(SharedFrame::new(vec![0u8; 42])));
+    assert!(cpu.starts_with("Cpu(") && cpu.contains("42"), "{cpu}");
+    let gpu = format!("{:?}", Picture::Gpu(frame(&ring, 640, 360)));
+    assert!(
+        gpu.starts_with("Gpu(") && gpu.contains("640") && gpu.contains("360"),
+        "{gpu}"
+    );
+}

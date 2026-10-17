@@ -59,6 +59,7 @@ use tracing::{info, warn};
 
 use crate::playback::fleet_shift;
 use crate::playback::frame_buf::SharedFrame;
+use crate::playback::picture::Picture;
 use crate::playback::program_bus::ProgramBus;
 use crate::playback::submit_handoff::SubmitJob;
 use crate::playback::vban_out::VbanClock;
@@ -563,7 +564,7 @@ impl NdiInput {
             width: w,
             height: h,
             stride: w,
-            video,
+            video: Picture::Cpu(video),
             audio: vec![AudioFrame {
                 data: samples,
                 channels: INPUT_AUDIO_CHANNELS as u32,

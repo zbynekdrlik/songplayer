@@ -76,7 +76,7 @@ fn a_forwarded_boundary_keeps_the_sources_frame_audio_and_stamps() {
         width: 8,
         height: 2,
         stride: 8,
-        video: video.clone(),
+        video: video.clone().into(),
         audio: vec![AudioFrame {
             data: vec![0.5; 3200],
             channels: 2,
@@ -297,7 +297,7 @@ fn pair(width: u32, pixels: &[u8], stamp: i64, audio_tc: i64, level: f32) -> Sub
         width,
         height: 2,
         stride: width,
-        video: SharedFrame::new(pixels.to_vec()),
+        video: SharedFrame::new(pixels.to_vec()).into(),
         audio: vec![AudioFrame {
             data: vec![level; 3200],
             channels: 2,
@@ -354,7 +354,10 @@ fn a_mix_submits_the_crossfaded_block_then_the_blended_picture_on_its_boundary()
     let stamp = at(0);
     let from = pair(4, &FROM_4X2, stamp, stamp + 11, 0.25);
     let to = pair(4, &TO_4X2, stamp, stamp + 22, 0.5);
-    let sources = [from.video.clone(), to.video.clone()];
+    let sources = [
+        from.video.expect_cpu().clone(),
+        to.video.expect_cpu().clone(),
+    ];
     let mix = mix_at(stamp, Some(from), Some(to), 4, 9);
     assert_eq!(out.submit(ProgramJob::Mix(mix)), stamp);
     assert_eq!(
@@ -567,7 +570,7 @@ fn a_smaller_picture_is_fitted_into_the_canvas_as_it_is_blended() {
         "the pillarboxed outgoing picture blended at weight 100/256"
     );
     assert!(
-        !picture.ptr_eq(&from.video) && !picture.ptr_eq(&wide.video),
+        !picture.ptr_eq(from.video.expect_cpu()) && !picture.ptr_eq(wide.video.expect_cpu()),
         "its own buffer, never a source's picture"
     );
     let after = mix_at(at(1), Some(from.clone()), Some(wide.clone()), 4, 9);
@@ -643,7 +646,7 @@ fn a_window_builds_its_fit_plan_once_and_another_pair_of_layouts_builds_its_own(
         // on every boundary of its window, with the two plans kept.
         let tall = SubmitJob {
             height: 4,
-            video: SharedFrame::new(vec![7u8; 48]),
+            video: SharedFrame::new(vec![7u8; 48]).into(),
             ..pair(8, &[], at(9), at(9), 0.5)
         };
         for slot in 0..9u32 {

@@ -51,6 +51,7 @@ pub mod pacer_queue; // #147 producer/consumer: pure bounded look-ahead frame qu
 pub mod pacer_sink; // #203 pacer scheduling + shared-frame standby submit helpers
 pub mod pacer_spin; // #147 the boundary wait's spin: yields once the wall stands still (pure, Linux-tested)
 pub mod pacing_stats; // #147 PacingStats (split out of ndi_health.rs, 1000-line cap)
+pub mod picture; // #279 P2: a boundary's picture, CPU (SharedFrame) or GPU (a ring frame)
 pub mod pipeline;
 #[cfg(windows)]
 pub(crate) mod pipeline_paced;

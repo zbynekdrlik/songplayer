@@ -94,7 +94,7 @@ fn source(w: usize, h: usize, stride: usize, video: &SharedFrame) -> SubmitJob {
         width: w as u32,
         height: h as u32,
         stride: stride as u32,
-        video: video.clone(),
+        video: video.clone().into(),
         audio: vec![AudioFrame {
             data: vec![0.25; 3200],
             channels: 2,

@@ -48,8 +48,8 @@ const LAG_REANCHOR_AFTER_100NS: i64 = 10_000_000;
 const LATE_THRESHOLD_100NS: i64 = 20_000;
 
 use crate::playback::audio_grid::AudioGridBuffer;
-use crate::playback::frame_buf::SharedFrame;
 use crate::playback::ndi_health::PacingStats;
+use crate::playback::picture::Picture;
 use crate::playback::wallclock::WallClock;
 
 /// A decoded frame handed to the pacer. `pts_ns` is the presentation time
@@ -61,8 +61,8 @@ pub struct PacedFrame {
     pub width: u32,
     pub height: u32,
     pub stride: u32,
-    /// NV12 pixel data, shared without copying (#203 2b: repeat + handoff bump).
-    pub video: SharedFrame,
+    /// The picture (#279 P2: CPU NV12 or a ring frame), shared by `Arc`.
+    pub video: Picture,
     /// Audio chunk(s) paired with this frame, each carrying its 0-based MEDIA
     /// time in `timecode_100ns`. PUSHED into the pacer's `AudioGridBuffer` when
     /// the frame is PULLED — audio is then delivered on the audio grid, aligned
@@ -140,7 +140,7 @@ pub trait PacedSink {
         width: u32,
         height: u32,
         stride: u32,
-        video: SharedFrame,
+        video: Picture,
         audio: &[AudioFrame],
         video_tc_100ns: i64,
         audio_tc_100ns: i64,
@@ -199,7 +199,7 @@ pub enum Standby<'a> {
         width: u32,
         height: u32,
         stride: u32,
-        video: &'a SharedFrame,
+        video: &'a Picture,
     },
 }
 
@@ -977,3 +977,7 @@ mod pacer_tests_preroll;
 #[cfg(test)]
 #[path = "pacer_tests_live.rs"]
 mod pacer_tests_live;
+
+#[cfg(test)]
+#[path = "pacer_tests_gpu.rs"] // #279 P2: ring frames through the pacer
+mod pacer_tests_gpu;

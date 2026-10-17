@@ -103,6 +103,7 @@ use crate::playback::audio_out::AudioOutputs;
 use crate::playback::audio_out_block::{ProgramBlock, is_program_block};
 use crate::playback::band_pool::BandPool;
 use crate::playback::frame_buf::SharedFrame;
+use crate::playback::picture::{CpuMisses, CpuUse};
 use crate::playback::program_bus::{
     PROGRAM_NDI_NAME, ProgramBus, ProgramJob, Take, install, restore_selected_source,
 };
@@ -185,6 +186,8 @@ pub struct ProgramOutput<B: NdiBackend> {
     track: ItemTrack,
     /// #279 P1b: NDI's delay line (`program_output_ndi.rs`).
     ndi: ndi::NdiLine,
+    /// #279 P2: GPU pictures the canvas could not fit (shown black).
+    canvas_misses: CpuMisses,
 }
 
 /// #215: one run of mixed boundaries as the `SP-program` sender saw it: how
@@ -226,9 +229,12 @@ fn has_picture(mix: &MixJob) -> bool {
 }
 
 /// #223 follow-up: a window boundary's side as `Canvas::fade` reads it: its
-/// picture's layout and bytes, or `None` when the side is missing.
-fn fade_side(job: &Option<SubmitJob>) -> FadeSide<'_> {
-    job.as_ref().map(|job| (Layout::of(job), &job.video[..]))
+/// picture's layout and bytes, or `None` when the side is missing (#279 P2:
+/// or a GPU picture, counted in `misses`: the black).
+fn fade_side<'a>(job: &'a Option<SubmitJob>, misses: &mut CpuMisses) -> FadeSide<'a> {
+    let job = job.as_ref()?;
+    let video = job.video.cpu_for(CpuUse::Canvas, misses)?;
+    Some((Layout::of(job), &video[..]))
 }
 
 /// #210: one program boundary split at the VBAN hand-off
@@ -363,6 +369,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
             item: None,
             track: ItemTrack::default(),
             ndi: ndi::NdiLine::default(),
+            canvas_misses: CpuMisses::default(),
         }
     }
 
@@ -650,17 +657,29 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// #223 + #251: a forwarded pair's canvas picture: fitted (or passed
     /// through), or — blended by the pacer toward the next frame — both
     /// frames in ONE pass (`Canvas::fade`, the next one at its weight).
+    /// #279 P2: a GPU picture is a counted miss: the canvas black (a GPU
+    /// blend partner: that side black).
     fn source_picture(&mut self, job: &SubmitJob) -> SharedFrame {
         let layout = Layout::of(job);
+        let Some(video) = job.video.cpu_for(CpuUse::Canvas, &mut self.canvas_misses) else {
+            return self.canvas_black();
+        };
         match &job.blend {
-            Some(blend) => self.canvas.fade(
-                Some((layout, &job.video[..])),
-                Some((layout, &blend.video[..])),
-                blend.weight_q8,
-                &self.bands,
-            ),
-            None => self.canvas.fit(layout, &job.video, &self.bands),
+            Some(blend) => {
+                let next = blend.video.cpu_for(CpuUse::Canvas, &mut self.canvas_misses);
+                let next = next.map(|next| (layout, &next[..]));
+                let shown = Some((layout, &video[..]));
+                self.canvas.fade(shown, next, blend.weight_q8, &self.bands)
+            }
+            None => self.canvas.fit(layout, video, &self.bands),
         }
+    }
+
+    /// #279 P2: how many GPU pictures the canvas could not fit (the tests'
+    /// view).
+    #[cfg(test)]
+    pub(crate) fn canvas_misses(&self) -> u64 {
+        self.canvas_misses.count()
     }
 
     /// #223: the canvas's studio black — the standby picture
@@ -697,7 +716,8 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// canvas picture (no fitted scratch, no second pass), a missing side the
     /// canvas's studio black, in the sender's row bands into a pooled buffer.
     fn paint_mix(&mut self, mix: &MixJob) -> SharedFrame {
-        let (from, to) = (fade_side(&mix.from), fade_side(&mix.to));
+        let misses = &mut self.canvas_misses;
+        let (from, to) = (fade_side(&mix.from, misses), fade_side(&mix.to, misses));
         let fitted = [from, to]
             .into_iter()
             .flatten()

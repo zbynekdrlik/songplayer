@@ -30,6 +30,7 @@ use sp_decoder::{DecodedAudioFrame, DecodedVideoFrame, DecoderError, SplitSynced
 use crate::playback::early_end::EarlyEnd;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::pacer::PacedFrame;
+use crate::playback::picture::{CpuMisses, CpuUse, Picture};
 use crate::playback::pipeline::real_seek_ms;
 use crate::playback::preview::preview_stream::DecodeTaps;
 
@@ -45,7 +46,7 @@ struct Held {
     width: u32,
     height: u32,
     stride: u32,
-    video: SharedFrame,
+    video: Picture,
 }
 
 impl Held {
@@ -76,6 +77,9 @@ pub struct DecodeProducer {
     /// #277: the video ended long before its own duration (since the start
     /// or the last seek): the song failed.
     early: Option<EarlyEnd>,
+    /// #279 P2: held steps whose GPU picture the preview taps could not
+    /// take (their audio still offered).
+    preview_misses: CpuMisses,
 }
 
 impl DecodeProducer {
@@ -88,6 +92,7 @@ impl DecodeProducer {
             epoch: 0,
             held: None,
             early: None,
+            preview_misses: CpuMisses::default(),
         }
     }
 
@@ -100,6 +105,11 @@ impl DecodeProducer {
     /// or the last seek: the song is a failure, not over.
     pub fn early_end(&self) -> Option<EarlyEnd> {
         self.early
+    }
+
+    /// #279 P2: the held steps whose GPU picture the preview taps missed.
+    pub fn preview_misses(&self) -> u64 {
+        self.preview_misses.count()
     }
 
     /// The next item for the queue, offered to the preview taps on the way
@@ -142,7 +152,15 @@ impl DecodeProducer {
         let Some((ms, audio)) = decoder.next_held()? else {
             return Ok(None);
         };
-        taps.offer_picture(held.width, held.height, held.stride, &held.video, &audio);
+        // #279 P2: a held GPU picture gives the taps no picture (P3b), only
+        // its audio.
+        match held
+            .video
+            .cpu_for(CpuUse::Preview, &mut self.preview_misses)
+        {
+            Some(nv12) => taps.offer_picture(held.width, held.height, held.stride, nv12, &audio),
+            None => taps.offer_audio(&audio),
+        }
         self.current_ms = ms;
         let frame = PacedFrame {
             pts_ns: pts_ns(ms, self.pts_offset_ms),
@@ -232,7 +250,7 @@ pub fn to_paced_frame(
         // every downstream hop (pacer repeat, handoff, submit holdover, a held
         // step) is an `Arc` bump of this allocation, recycled to the frame pool
         // on last drop.
-        video: SharedFrame::new(video.data),
+        video: Picture::Cpu(SharedFrame::new(video.data)),
         audio: paced_audio(audio, pts_offset_ms),
     }
 }

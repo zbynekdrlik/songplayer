@@ -14,6 +14,7 @@
 
 use super::*;
 use crate::playback::frame_buf::SharedFrame;
+use crate::playback::picture::Picture;
 use crate::playback::wallclock::{SettableClock, WallClock};
 use sp_ndi::AudioFrame;
 use std::cell::Cell;
@@ -39,7 +40,7 @@ fn song_frame(pts_100ns: i64, start: i64, len: i64) -> PacedFrame {
         width: 4,
         height: 2,
         stride: 4,
-        video: SharedFrame::new(vec![0u8; 12]),
+        video: SharedFrame::new(vec![0u8; 12]).into(),
         audio: vec![AudioFrame {
             data: (start..start + len)
                 .flat_map(|s| [enc(s), -enc(s)])
@@ -89,11 +90,11 @@ fn anchored() -> (Pacer, SettableClock) {
     (pacer, clk)
 }
 
-fn black_frame() -> SharedFrame {
-    SharedFrame::new(vec![16u8; 12])
+fn black_frame() -> Picture {
+    Picture::Cpu(SharedFrame::new(vec![16u8; 12]))
 }
 
-fn black(video: &SharedFrame) -> StandbyBlack<'_> {
+fn black(video: &Picture) -> StandbyBlack<'_> {
     StandbyBlack {
         width: 4,
         height: 2,

@@ -27,9 +27,9 @@ use std::collections::VecDeque;
 
 use sp_ndi::AudioFrame;
 
-use crate::playback::frame_buf::SharedFrame;
 use crate::playback::ndi_health::PacingStats;
 use crate::playback::pacer::{FrameBlend, PacedFrame};
+use crate::playback::picture::Picture;
 
 /// Handoff depth (grid slots the submit thread may fall behind before a
 /// coalesce). Box test 5: median submit 25 ms < the 33.3 ms slot, p99 ~90 ms
@@ -60,10 +60,11 @@ pub struct SubmitJob {
     pub width: u32,
     pub height: u32,
     pub stride: u32,
-    /// The NV12 frame, shared by `Arc` — Arc-cloned from the paced frame at the
-    /// handoff (no pixel copy, #203 2b), moved on to the program bus and, when
-    /// the source owns the boundary, into `SP-program`'s async holdover.
-    pub video: SharedFrame,
+    /// The picture, shared by `Arc` — Arc-cloned from the paced frame at the
+    /// handoff (no pixel copy, #203 2b), moved on to the program bus, MAX and
+    /// (a CPU picture) `SP-program`'s canvas. #279 P2: a ring frame
+    /// (`Picture::Gpu`) is drawn by MAX in place; the canvas shows black.
+    pub video: Picture,
     /// The boundary's audio chunk (0 or 1 frame of exactly
     /// `samples_per_boundary` samples, #148).
     pub audio: Vec<AudioFrame>,

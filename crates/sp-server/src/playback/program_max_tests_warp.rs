@@ -130,7 +130,7 @@ fn source(width: u32, height: u32, seed: u32, stamp: i64) -> SubmitJob {
         width,
         height,
         stride,
-        video: SharedFrame::new(data),
+        video: SharedFrame::new(data).into(),
         audio: vec![AudioFrame {
             data: vec![0.0; 3200],
             channels: 2,
@@ -152,7 +152,7 @@ fn nv12(job: &SubmitJob) -> Side<'_> {
         width: job.width,
         height: job.height,
         stride: job.stride,
-        data: &job.video,
+        data: job.video.expect_cpu(),
     })
 }
 

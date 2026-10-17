@@ -24,7 +24,7 @@ use super::*;
 use crate::playback::fleet_shift::FleetShift;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::paced_output::{
-    BoundaryOut, ConsumerStep, HandoffSink, PacedConsumer, PacedFeed, Picture, SharedHandoff,
+    BoundaryOut, ConsumerStep, FillPicture, HandoffSink, PacedConsumer, PacedFeed, SharedHandoff,
 };
 use crate::playback::pacer::{PacedFrame, PacedSink, Pacer, ServiceOutcome, plan_sleep_100ns};
 use crate::playback::program_output::BoundaryTicker;
@@ -48,7 +48,7 @@ fn frame(j: i64) -> PacedFrame {
         width: 4,
         height: 2,
         stride: 4,
-        video: SharedFrame::new(vec![0u8; 12]),
+        video: SharedFrame::new(vec![0u8; 12]).into(),
         audio: vec![AudioFrame {
             data: vec![0.25; 3200],
             channels: 2,
@@ -97,11 +97,11 @@ fn run(step_100ns: i64) -> Outcome {
     let clk = VirtualClock::new(0);
     let fleet = Arc::new(FleetShift::default());
     let wall = || WallClock::with_fleet(Box::new(clk.clone()), fleet.clone());
-    let black = Picture {
+    let black = FillPicture {
         width: 4,
         height: 2,
         stride: 4,
-        video: SharedFrame::new(vec![16u8; 12]),
+        video: SharedFrame::new(vec![16u8; 12]).into(),
     };
     let mut consumer = PacedConsumer::new(Discard, SRC, wall(), black);
     let mut pacer = Pacer::with_wallclock(30, true, wall());
