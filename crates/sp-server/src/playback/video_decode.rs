@@ -185,7 +185,10 @@ pub struct VideoDecodeStatus {
     /// Opens asked for in `Hardware` mode (a file that then opened nowhere
     /// counts here and in none of the counts below).
     pub hw_requested: u64,
-    /// Of those, the ones whose first picture came out of the GPU decoder.
+    /// Of those, the ones whose first picture came out of the GPU decoder
+    /// (#282: a file opened scaled to the cap counts in neither this nor
+    /// `mf_software`; its decoder is not visible behind the video
+    /// processor).
     pub gpu_decodes: u64,
     /// Of those, the ones on the GPU path that Media Foundation's decoder
     /// decoded in software (no decoder on the GPU for the stream).

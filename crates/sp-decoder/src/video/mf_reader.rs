@@ -90,7 +90,8 @@ pub struct MediaFoundationVideoReader {
     /// open (`None` unscaled, or when the chain could not be read).
     decoder_out: Option<DecoderOutput>,
     /// #282: the decode cap the reader was opened with (a software reopen
-    /// keeps it, so a song's picture size never changes mid-song).
+    /// keeps it, so the picture size stays the same unless only one of the
+    /// two opens is refused).
     max_height: Option<u32>,
     /// What the caller asked for.
     mode: DecodeMode,
