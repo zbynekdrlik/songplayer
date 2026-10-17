@@ -145,19 +145,28 @@ rounds 1–2):
   rate, putting a periodic repeated picture on the wall. The reader reports
   the processor type's rate, else the native type's
   (`hw_decode::scaled_frame_rate`), never the 29.97 guess for a scaled open.
-- **Never a dead song, never a wrong picture.** Each of these is a refusal:
+- **Never a dead song, no green strip.** Each of these is a refusal:
   - the negotiated type is not EXACTLY the requested size
     (`hw_decode::scale_took`), on the D3D path too. Behind the processor
     the output type is ours and the picture fills it, so a padded type
     would be picture the readback cuts off;
-  - the decoder hands the processor a padded picture without the native
-    display aperture (`hw_decode::padding_reaches_processor`, the green
-    strip). The decoder's output type is read from the reader's chain
+  - the decoder's padding could reach the processor
+    (`hw_decode::scaled_open_safe`, the green strip; review round 3). The
+    decoder's output type is read from the reader's chain at open
     (`IMFSourceReaderEx::GetTransformForStream` → the
     `MFT_CATEGORY_VIDEO_DECODER` → `GetOutputCurrentType(0)`: its
-    `MF_MT_FRAME_SIZE` and `MF_MT_MINIMUM_DISPLAY_APERTURE`). A chain that
-    cannot be read is let through with a WARN (`the decoder's output type
-    could not be read`);
+    `MF_MT_FRAME_SIZE` and `MF_MT_MINIMUM_DISPLAY_APERTURE`):
+    - padding seen at open without exactly the native aperture refuses;
+    - on the D3D path NVDEC may learn its padded size only at the first
+      frame, AFTER this check (a VP9 / AV1 sample entry carries no frame
+      header). So there a stream that is not whole 16-pixel blocks
+      (3840×1606, 2560×1350) is scaled only when the decoder already shows
+      the native aperture at open, and an unreadable chain refuses it.
+      Whole blocks (3840×2160, 2560×1440, 4096×2160) cannot be padded, so
+      the 16:9 majority always keeps the lever;
+    - in software Media Foundation's decoders hand over the stream's own
+      size, so only the padding seen at open refuses, and an unreadable
+      chain is let through with a WARN naming the file;
   - Media Foundation refuses the attribute or the type.
 
   A refusal logs WARN `mf_reader: the scaled open was refused; this file
@@ -246,11 +255,12 @@ rounds 1–2):
     decoder's padding. `GET /api/v1/program` `max.upload_mb_s` should drop
     from ~298 to about a quarter.
   - A widescreen 4K song whose rows are not a multiple of 16 (3840×1606:
-    NVDEC pads to 1616):
-    - if the decoder's padded type carries the aperture, it plays scaled;
-      check MAX's / the wall's bottom rows for a green line;
-    - if it carries none, it is refused (WARN, `scale_refusals`) and plays
-      at 4K as before.
+    NVDEC pads to 1616): it is scaled only if the decoder showed the native
+    aperture at open (the INFO's `decoder`), else refused (WARN,
+    `scale_refusals`) and played at 4K as before. When it plays scaled,
+    always look at MAX's / the wall's bottom rows for a green line (the
+    check runs at open, the decoder's type can change at the first
+    frame).
 
     The exact fix if such songs must scale too (review round 1): ONE
     reader with `IMFSourceReaderEx::AddTransformForStream`, inserting a
