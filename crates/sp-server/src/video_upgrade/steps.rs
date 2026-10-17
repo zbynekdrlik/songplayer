@@ -184,14 +184,16 @@ impl Steps for Real {
 
 /// [`super::facts_of`] through Media Foundation, opened in `mode` on a
 /// decode thread (COM's STA rule: the thread that opens a reader decodes
-/// and drops it).
+/// and drops it). With no decode cap (#282): the facts are the FILE's, so a
+/// 4K file never reads as the cap's size (the worker would download it
+/// again).
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)] // the real reader; the facts are `facts_of`, tested
 async fn facts_on_decode_thread(path: PathBuf, mode: DecodeMode) -> Result<VideoFacts, String> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     crate::playback::decode_thread::spawn_decode_thread("video-upgrade".to_string(), move || {
         let facts = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let mut reader = sp_decoder::MediaFoundationVideoReader::open_with(&path, mode)
+            let mut reader = sp_decoder::MediaFoundationVideoReader::open_with(&path, mode, None)
                 .map_err(|e| format!("the open: {e}"))?;
             super::facts_of(&mut reader)
         }))
@@ -218,7 +220,7 @@ async fn codec_on_decode_thread(path: PathBuf, mode: DecodeMode) -> Result<Strin
     let (tx, rx) = tokio::sync::oneshot::channel();
     crate::playback::decode_thread::spawn_decode_thread("video-repair".to_string(), move || {
         let codec = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let reader = sp_decoder::MediaFoundationVideoReader::open_with(&path, mode)
+            let reader = sp_decoder::MediaFoundationVideoReader::open_with(&path, mode, None)
                 .map_err(|e| format!("the open: {e}"))?;
             reader.codec().ok_or_else(|| "no codec".to_string())
         }))

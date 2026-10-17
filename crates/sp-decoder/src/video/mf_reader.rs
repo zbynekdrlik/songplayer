@@ -100,24 +100,29 @@ struct Opened {
 }
 
 impl MediaFoundationVideoReader {
-    /// Open `path` in software (`open_with(path, DecodeMode::Software)`).
+    /// Open `path` in software with no decode cap
+    /// (`open_with(path, DecodeMode::Software, None)`).
     #[cfg_attr(test, mutants::skip)]
     pub fn open(path: &Path) -> Result<Self, DecoderError> {
-        Self::open_with(path, DecodeMode::Software)
+        Self::open_with(path, DecodeMode::Software, None)
     }
 
     /// Open `path` in `mode` (#223 S3b). A `Hardware` open that cannot set up
     /// the D3D path opens the file in software (WARN, [`Self::hw_fallback`]);
     /// only a file that does not open in software either is an error.
     #[cfg_attr(test, mutants::skip)]
-    pub fn open_with(path: &Path, mode: DecodeMode) -> Result<Self, DecoderError> {
+    pub fn open_with(
+        path: &Path,
+        mode: DecodeMode,
+        max_height: Option<u32>,
+    ) -> Result<Self, DecoderError> {
         com_startup()?;
         match mode {
             DecodeMode::Software => {
-                let opened = Self::create(path, None)?;
+                let opened = Self::create(path, None, max_height)?;
                 Ok(Self::from_opened(path, mode, opened, None))
             }
-            DecodeMode::Hardware => Self::open_hardware(path, HwDevice::Picked),
+            DecodeMode::Hardware => Self::open_hardware(path, HwDevice::Picked, max_height),
         }
     }
 
@@ -130,13 +135,17 @@ impl MediaFoundationVideoReader {
     #[cfg_attr(test, mutants::skip)]
     pub fn open_hardware_on_warp(path: &Path) -> Result<Self, DecoderError> {
         com_startup()?;
-        Self::open_hardware(path, HwDevice::Warp)
+        Self::open_hardware(path, HwDevice::Warp, None)
     }
 
-    fn open_hardware(path: &Path, device: HwDevice) -> Result<Self, DecoderError> {
+    fn open_hardware(
+        path: &Path,
+        device: HwDevice,
+        max_height: Option<u32>,
+    ) -> Result<Self, DecoderError> {
         hw_counters().requested();
         let attempt = HwSession::new(device).and_then(|session| {
-            let opened = Self::create(path, Some(&session))
+            let opened = Self::create(path, Some(&session), max_height)
                 .map_err(|e| format!("the source reader refused the D3D11 device: {e}"))?;
             Ok((opened, session))
         });
@@ -166,7 +175,7 @@ impl MediaFoundationVideoReader {
                     fallback = %fallback.describe(),
                     "mf_reader: hardware decode did not open; this file decodes in software"
                 );
-                let opened = Self::create(path, None)?;
+                let opened = Self::create(path, None, max_height)?;
                 hw_counters().fell_back(&fallback);
                 let mut reader = Self::from_opened(path, DecodeMode::Hardware, opened, None);
                 reader.fallback = Some(fallback);
@@ -200,7 +209,11 @@ impl MediaFoundationVideoReader {
     /// A source reader on `path` with NV12 output, on `hw`'s device when
     /// given (the D3D path), else in software (no device: the reader before
     /// #223 S3b, unchanged).
-    fn create(path: &Path, hw: Option<&HwSession>) -> Result<Opened, DecoderError> {
+    fn create(
+        path: &Path,
+        hw: Option<&HwSession>,
+        _max_height: Option<u32>,
+    ) -> Result<Opened, DecoderError> {
         let wide_path: Vec<u16> = path
             .as_os_str()
             .encode_wide()
@@ -582,7 +595,7 @@ impl MediaFoundationVideoReader {
             fallback = %fallback.describe(),
             "mf_reader: a decode error on the D3D11 path; this file goes on in software"
         );
-        let opened = Self::create(&self.path, None)?;
+        let opened = Self::create(&self.path, None, None)?;
         hw_counters().fell_back(&fallback);
         self.fallback = Some(fallback);
         self.reader = opened.reader;

@@ -191,7 +191,7 @@ fn assert_reported(reader: &MediaFoundationVideoReader, what: &str) {
 fn hardware_mode_opens_the_fixture_and_decodes_what_software_decodes() {
     let _alone = counters_alone();
     let before = hw_counters().snapshot().requested;
-    let mut reader = MediaFoundationVideoReader::open_with(&fixture(), DecodeMode::Hardware)
+    let mut reader = MediaFoundationVideoReader::open_with(&fixture(), DecodeMode::Hardware, None)
         .expect("a Hardware open never fails on a file software opens");
     assert_eq!(hw_counters().snapshot().requested, before + 1, "counted");
     let pictures = decode_all(&mut reader, "hardware (picked adapter)");

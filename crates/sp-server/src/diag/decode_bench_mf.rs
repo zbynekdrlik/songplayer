@@ -2,7 +2,9 @@
 //!
 //! It opens the sample with `sp_decoder::MediaFoundationVideoReader` on this
 //! thread (COM's STA rule: the thread that opens a reader decodes and drops
-//! it), in the request's mode (#223 S3b: `"hw": true` = `Hardware`), reads
+//! it), in the request's mode (#223 S3b: `"hw": true` = `Hardware`) and
+//! under the decode cap in force (#282, `max_resolution`: what playback
+//! runs; set it back to automatic to measure a 4K sample at 4K), reads
 //! the stream's facts, runs [`measure`] unpaced, reads the path the pictures
 //! really came out of, and logs one line at the start and one at the end (a
 //! WARN when the decoder failed). The
@@ -30,6 +32,7 @@ pub(crate) fn bench_file(
 ) -> BenchReport {
     let thread_priority = Some(current_thread_priority());
     let bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    let max_height = crate::playback::video_decode::global().max_height();
     // Logged BEFORE the open, so a run that wedges inside it (a 409 that
     // never clears) still names its file in the log.
     info!(
@@ -38,6 +41,7 @@ pub(crate) fn bench_file(
         max_wall_s = max_wall.as_secs(),
         thread_priority = thread_priority.unwrap_or_default(),
         hw = mode == DecodeMode::Hardware,
+        max_height,
         "decode-bench: start"
     );
     let requested = DecodeFacts {
@@ -45,7 +49,7 @@ pub(crate) fn bench_file(
         ..DecodeFacts::default()
     };
     let opening = Instant::now();
-    let opened = MediaFoundationVideoReader::open_with(path, mode);
+    let opened = MediaFoundationVideoReader::open_with(path, mode, Some(max_height));
     let open_ms = u64::try_from(opening.elapsed().as_millis()).unwrap_or(u64::MAX);
     let mut reader = match opened {
         Ok(reader) => reader,
