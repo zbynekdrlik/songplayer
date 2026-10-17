@@ -57,8 +57,14 @@ layout: every control gets a class by how often it is used). Design record:
     or `visibilitychange` that finds it seen. Focus is required as well:
     WebView2 keeps its controller visible in a hidden Tauri window (`wry`
     `SetIsVisible(attributes.visible)`), so `document.hidden` alone may
-    read false there, and a window never shown is never focused (not yet
-    observed on a box). Clicks need no gate (only a person clicks);
+    read false there. And the window is created UNFOCUSED
+    (`tauri.conf.json` `"focus": false`): with Tauri's default `focus:
+    true`, wry calls `controller.MoveFocus(…PROGRAMMATIC)` when it creates
+    the webview, inside the hidden window, so the page could read focused.
+    The tray's "Open", a click on the tray icon and a second launch call
+    `show()` + `set_focus()`, whose `focus` brings the owed view in. Not
+    yet observed on a box: a restart must leave the `/` page row as it was.
+    Clicks need no gate (only a person clicks);
   - the buffer goes out every 10 s when not empty (`gloo_net` POST, JSON),
     at once when it holds 200, and by `navigator.sendBeacon` (a string,
     so `text/plain`) on `visibilitychange` → hidden;
@@ -112,6 +118,13 @@ layout: every control gets a class by how often it is used). Design record:
   timer, no `Effect`).
 - SongPlayer's own hidden app window records no page view until it is
   shown and focused (above).
+- Before a walk of the dashboard on a box in a person's browser (the
+  owner's path: real Chrome through the `win-*` tools, where
+  `navigator.webdriver` is false), set the key in that browser profile
+  first (`localStorage.setItem("sp_no_usage", "1")` on the dashboard's
+  origin): such a walk would otherwise be counted as operator use. The one
+  deliberate "a real session is counted" check after a deploy is the
+  exception.
 
 ## Tests
 
@@ -129,21 +142,28 @@ layout: every control gets a class by how often it is used). Design record:
 - Distinct days in a test: put every stamp of one day within the first
   milliseconds after 12:00:00.000 UTC (`(now / DAY - 3) * DAY + 12 h + k`).
   Time zones are whole quarter hours off UTC, so no local midnight falls
-  inside such a block and `localtime` gives the same days in every zone. A
-  spread of hours around noon does NOT hold (UTC+10, −11:15 split it).
+  inside such a block and `localtime` gives the same days at every fixed
+  offset (a DST change on one of those days could still move one: Norfolk
+  in April). A spread of hours around noon does NOT hold (UTC+10, −11:15
+  split it).
 - Mock E2E `e2e/ui-usage.spec.ts`: the positive tests first make the page
   read as a person's browser (`addInitScript` defining
   `navigator.webdriver` false); Playwright emulates focus, so every page
   reads visible and focused. A hidden page is faked by redefining
   `document.visibilityState` / `hidden` and dispatching `visibilitychange`;
   the unseen app window by also overriding `document.hasFocus` from the
-  load (`spSeen`). The beacon test hides the page well inside the first
+  load (`spSeen`), and a visible page with no focus by overriding only
+  `hasFocus` and dispatching only `window`'s `focus` (`spFocus`: the path
+  the app window takes when WebView2 reads it visible; a listener on
+  `document` would never hear it). The beacon test hides the page well inside the first
   10 s (the timer has sent nothing yet); the full-flow test compares the
   events of all posts together (a slow run may split them between the
   timer and the beacon). The exclusion test runs a person's page beside
   the webdriver and `sp_no_usage` pages as its control: hiding sends what
   a log holds at once, so only the person's session arrives — no wait for
-  the 10 s flush. The mock records each post with its content type (`GET
+  the 10 s flush. The `sp_no_usage` page needs a context of its OWN: pages
+  of one context share their origin's localStorage, so its key would also
+  silence the control. The mock records each post with its content type (`GET
   /__mock/ui-usage`, reset `POST /__mock/ui-usage-reset`) and answers the
   summary from them (`on_air` always 0: the mock has no program source;
   rows ordered by code point like SQLite). Against an OLD dist (no usage

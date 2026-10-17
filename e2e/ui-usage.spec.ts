@@ -180,13 +180,16 @@ test("a page being hidden hands what waits to sendBeacon", async ({ page, reques
 test("an automated session and a browser with sp_no_usage send nothing", async ({
   page,
   context,
+  browser,
   request,
 }) => {
   // `page` keeps Playwright's own navigator.webdriver === true; `marked`
-  // reads as a person's browser but carries the sp_no_usage key; `person`
-  // is the control: the same session, recorded.
+  // reads as a person's browser but carries the sp_no_usage key, in a
+  // context of its own (pages of one context share their localStorage);
+  // `person` is the control: the same session, recorded.
   watchConsole(page);
-  const marked = await context.newPage();
+  const markedContext = await browser.newContext({ baseURL: test.info().project.use.baseURL });
+  const marked = await markedContext.newPage();
   watchConsole(marked);
   await asAPerson(marked);
   await marked.addInitScript(() => {
@@ -217,7 +220,7 @@ test("an automated session and a browser with sp_no_usage send nothing", async (
   await expect.poll(() => recorded(request), { timeout: 5000 }).toEqual(once);
   await page.waitForTimeout(1000);
   expect(await recorded(request), "only the person's session").toEqual(once);
-  await marked.close();
+  await markedContext.close();
   await person.close();
 });
 
@@ -254,6 +257,44 @@ test("a page the operator cannot see records its view only once it can be seen",
   // Shown (the tray), then hidden: the owed view, once.
   await setSeen(true);
   await setSeen(false);
+  await expect.poll(async () => (await posts(request)).length, { timeout: 5000 }).toBe(1);
+  expect(await recorded(request)).toEqual([{ page: "/", control: "", kind: "page" }]);
+});
+
+test("a visible page with no focus owes its view until the window is focused", async ({
+  page,
+  request,
+}) => {
+  // WebView2 may keep a hidden app window's page "visible": there only the
+  // window's `focus` (the tray's show + set_focus) can bring the view in.
+  watchConsole(page);
+  await asAPerson(page);
+  await page.addInitScript(() => {
+    let focused = false;
+    document.hasFocus = () => focused;
+    (window as unknown as { spFocus: () => void }).spFocus = () => {
+      focused = true;
+      window.dispatchEvent(new Event("focus"));
+    };
+  });
+  await page.goto("/");
+  await expect(page.getByTestId("health-bar")).toBeVisible({ timeout: 10000 });
+  // Never focused: hiding it sends nothing (a view recorded at the load
+  // would go out now).
+  await hide(page);
+  await page.waitForTimeout(1000);
+  expect(await posts(request), "no view while unfocused").toEqual([]);
+  // Visible again, still unfocused: nothing; then the window's focus.
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
+    document.dispatchEvent(new Event("visibilitychange"));
+    (window as unknown as { spFocus: () => void }).spFocus();
+  });
+  await hide(page);
   await expect.poll(async () => (await posts(request)).length, { timeout: 5000 }).toBe(1);
   expect(await recorded(request)).toEqual([{ page: "/", control: "", kind: "page" }]);
 });

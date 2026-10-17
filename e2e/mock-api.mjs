@@ -1686,8 +1686,9 @@ app.post("/__mock/background-hold-reset", (_req, res) => {
 // (`sp_core::ui_usage`): `POST /api/v1/ui-usage` reads the body as text
 // whatever its content type (a `navigator.sendBeacon` string arrives as
 // text/plain), takes at most 200 events, page and control at most 120
-// characters, kind click|change|submit|page, else a 400 with the fixed text
-// and nothing kept; a kept batch is a 204. Each kept POST is recorded with
+// characters, kind click|change|submit|page, no negative stamp, else a 400
+// with the fixed text and nothing kept; a kept batch is a 204, each stamp
+// capped at the clock. Each kept POST is recorded with
 // its content type for the specs (`GET /__mock/ui-usage` → `{posts:
 // [{content_type, events}]}`, cleared by `POST /__mock/ui-usage-reset`).
 // `GET /api/v1/ui-usage/summary?days=N` (1..=400, default 400) answers the
@@ -1699,11 +1700,13 @@ const UI_USAGE_MAX_CHARS = 120;
 const UI_USAGE_DAY_MS = 86_400_000;
 const UI_USAGE_REFUSAL =
   'a usage batch is {"events": [{"ts_ms", "page", "control", "kind"}]}: at most 200 events, ' +
-  "page and control at most 120 characters each, kind click, change, submit or page";
+  "ts_ms not negative, page and control at most 120 characters each, kind click, change, " +
+  "submit or page";
 const UI_USAGE_DAYS_REFUSAL = "days must be a whole number from 1 to 400";
 let uiUsagePosts = [];
 
-// The batch's events as the server keeps them, or null when it refuses.
+// The batch's events as the server keeps them (each stamp capped at the
+// clock: a use cannot come after its arrival), or null when it refuses.
 function uiUsageEvents(body) {
   let batch = body;
   if (typeof body === "string") {
@@ -1717,12 +1720,13 @@ function uiUsageEvents(body) {
   if (batch.events.length > UI_USAGE_MAX_EVENTS) return null;
   const events = [];
   for (const e of batch.events) {
-    if (!e || !Number.isInteger(e.ts_ms)) return null;
+    if (!e || !Number.isInteger(e.ts_ms) || e.ts_ms < 0) return null;
     if (typeof e.page !== "string" || typeof e.control !== "string") return null;
     if (!UI_USAGE_KINDS.includes(e.kind)) return null;
     if ([...e.page].length > UI_USAGE_MAX_CHARS) return null;
     if ([...e.control].length > UI_USAGE_MAX_CHARS) return null;
-    events.push({ ts_ms: e.ts_ms, page: e.page, control: e.control, kind: e.kind });
+    const ts_ms = Math.min(e.ts_ms, Date.now());
+    events.push({ ts_ms, page: e.page, control: e.control, kind: e.kind });
   }
   return events;
 }

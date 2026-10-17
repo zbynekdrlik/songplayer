@@ -179,8 +179,9 @@ async fn a_batch_out_of_bounds_is_refused_whole_and_nothing_is_written() {
 /// before the first selection, not the NDI input, not Blank. Every stamp
 /// of one day sits in the first milliseconds after 12:00:00.000 UTC: time
 /// zones are whole quarter hours off UTC, so no local midnight falls
-/// inside such a block, and the days are the same in any zone the test
-/// runs in (`localtime`).
+/// inside such a block, and the days are the same at every fixed offset
+/// the test runs at (`localtime`; a DST change on one of these days could
+/// still move one).
 #[tokio::test]
 async fn the_summary_counts_uses_days_and_playlist_on_air_per_control() {
     let state = test_state().await;
