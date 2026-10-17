@@ -19,6 +19,7 @@ pub mod hash;
 pub mod hasher;
 pub mod kind;
 pub mod lan;
+pub mod leftovers; // #261: the records of a video no row has any more go, daily
 pub mod lyrics;
 pub mod queued;
 pub mod repair;

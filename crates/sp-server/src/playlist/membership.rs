@@ -80,6 +80,11 @@ pub fn names(members: &[Member]) -> String {
 /// would leave it with nothing to play. The writes hold
 /// `cache::SONG_FILES`, as the retention does from its last read of a row
 /// to its deletion, so a song brought back is never deleted at that moment.
+///
+/// #261: a fetch of an INACTIVE playlist (a manual sync; the periodic and
+/// the startup syncs take active ones only) records nothing (one WARN): its
+/// upsert would clear the marks its deactivation set, and those songs would
+/// never go (`db::models_membership::deactivate`).
 pub async fn record_fetch(
     pool: &SqlitePool,
     playlist_id: i64,
@@ -94,6 +99,13 @@ pub async fn record_fetch(
         return Ok(SyncReport::default());
     }
     let _files = crate::downloader::cache::SONG_FILES.lock().await;
+    if !models_membership::playlist_active(pool, playlist_id).await? {
+        warn!(
+            playlist_id,
+            "playlist sync: the playlist is inactive - nothing is recorded"
+        );
+        return Ok(SyncReport::default());
+    }
     let rows = models_membership::members(pool, playlist_id).await?;
     let fetched: Vec<&str> = entries.iter().map(|e| e.id.as_str()).collect();
     let changes = diff(&rows, &fetched);
@@ -124,3 +136,7 @@ mod tests_play;
 #[cfg(test)]
 #[path = "membership_tests_queues.rs"]
 mod tests_queues;
+
+#[cfg(test)]
+#[path = "membership_tests_inactive.rs"]
+mod tests_inactive;

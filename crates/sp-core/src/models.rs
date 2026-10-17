@@ -136,16 +136,6 @@ pub struct ResolumeHost {
     pub created_at: Option<String>,
 }
 
-/// Maps a playlist to a specific Resolume clip slot.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ResolumeClipMapping {
-    pub id: i64,
-    pub resolume_host_id: i64,
-    pub playlist_id: i64,
-    pub layer: u32,
-    pub column: u32,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

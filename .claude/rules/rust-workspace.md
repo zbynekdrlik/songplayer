@@ -318,6 +318,11 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   takes `&mut T`, even to an `impl Fn(&mut T)`, is flagged under `-D
   warnings`. Write a typed binding instead: `let t: &mut T = &mut guard;
   f(t)`. It compiles in every call shape and leaves nothing for the lint.
+  The same for a sqlx `Transaction` handed to an own fn that takes
+  `&mut SqliteConnection` (#261, caught in review before CI): write
+  `compact(&mut tx, …)`, never `compact(&mut *tx, …)`; keep `&mut *tx` /
+  `&mut *conn` only where sqlx's GENERIC `Executor` takes it
+  (`.execute(&mut *tx)`), where no auto-deref happens.
 - **`clippy::field_reassign_with_default` on a test fixture** (#221 lane 3,
   CI Lint run 37399017815). `let mut s = Fake::default();` followed by
   `s.field = …;` is linted under `-D warnings` (`--all-targets` covers

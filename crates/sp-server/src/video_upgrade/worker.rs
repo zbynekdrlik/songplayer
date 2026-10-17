@@ -140,8 +140,9 @@ pub(crate) fn global() -> Arc<Mutex<WorkerState>> {
 
 /// The next song to check at `cap` (module doc): downloaded, its check NULL
 /// or under the cap, a `busy` one [`BUSY_RETRY_MS`] and a `failed: …` one
-/// [`FAILED_RETRY_MS`] after it; songs of active playlists first, then the
-/// lowest row id; never the test item.
+/// [`FAILED_RETRY_MS`] after it; only songs of active playlists (#261: a
+/// deactivated playlist's songs wait for #260's retention), the lowest row
+/// id first; never the test item.
 pub(crate) async fn next_song(
     pool: &SqlitePool,
     cap: u32,
@@ -155,8 +156,8 @@ pub(crate) async fn next_song(
                 OR (v.video_upgrade_state = 'busy' AND v.video_upgrade_at <= ?) \
                 OR (v.video_upgrade_state LIKE 'failed:%' AND v.video_upgrade_at <= ?) \
                 OR (v.video_upgrade_state != 'busy' AND v.video_upgrade_state NOT LIKE 'failed:%')) \
-           AND v.{} \
-         GROUP BY v.youtube_id ORDER BY MAX(p.is_active) DESC, MIN(v.id) LIMIT 1",
+           AND p.is_active = 1 AND v.{} \
+         GROUP BY v.youtube_id ORDER BY MIN(v.id) LIMIT 1",
         crate::db::queue_row!()
     );
     sqlx::query_scalar(&sql)
@@ -308,9 +309,10 @@ pub(crate) async fn counts(pool: &SqlitePool, cap: u32) -> Result<Counts, sqlx::
            COUNT(*) FILTER (WHERE state = 'rolled_back') AS rolled_back \
          FROM (SELECT youtube_id, MAX(video_upgrade_cap) AS cap, \
                       MAX(video_upgrade_state) AS state \
-               FROM videos WHERE normalized = 1 AND file_path IS NOT NULL AND {} \
+               FROM videos WHERE normalized = 1 AND file_path IS NOT NULL AND {} AND {} \
                GROUP BY youtube_id)",
-        crate::db::queue_row!()
+        crate::db::queue_row!(),
+        crate::db::active_playlist!()
     );
     sqlx::query_as(&sql)
         .bind(i64::from(cap))

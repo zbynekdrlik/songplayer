@@ -148,6 +148,8 @@ fn job_sk(job: &str) -> &str {
         "video_upgrade" => "vylepšenie videí na 4K",
         "retention" => "mazanie odobratých skladieb",
         "ui_usage_prune" => "mazanie starého záznamu používania",
+        "play_history" => "mazanie starej histórie prehrávania",
+        "peer_leftovers" => "mazanie záznamov výmeny bez skladby",
         other => other,
     }
 }

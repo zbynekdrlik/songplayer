@@ -129,13 +129,14 @@ fn the_worker_state_is_one_per_process() {
 
 // ---- next_song / download_due / counts ---------------------------------------
 
-/// Playlists 1 (active), 2 (inactive) and 3 (the test item's).
+/// Playlists 1 (active), 2 (inactive), 3 (the test item's) and 4 (active).
 async fn catalog() -> SqlitePool {
     let pool = crate::db::create_memory_pool().await.unwrap();
     crate::db::run_migrations(&pool).await.unwrap();
     sqlx::query(
         "INSERT INTO playlists (id, name, youtube_url, is_active, kind) VALUES \
-         (1, 'a', 'u1', 1, 'youtube'), (2, 'b', 'u2', 0, 'youtube'), (3, 't', 'u3', 1, 'test')",
+         (1, 'a', 'u1', 1, 'youtube'), (2, 'b', 'u2', 0, 'youtube'), (3, 't', 'u3', 1, 'test'), \
+         (4, 'd', 'u4', 1, 'youtube')",
     )
     .execute(&pool)
     .await
@@ -253,7 +254,7 @@ async fn a_refused_song_is_checked_again_only_at_a_higher_cap() {
 }
 
 #[tokio::test]
-async fn active_playlists_come_first_then_the_lowest_row() {
+async fn only_active_playlists_and_the_lowest_row_first() {
     let pool = catalog().await;
     song(&pool, 1, 2, "inactiveaaa", NEVER).await;
     song(&pool, 5, 1, "activebbbbb", NEVER).await;
@@ -292,7 +293,8 @@ async fn a_download_is_due_for_a_new_song_of_an_active_playlist() {
     assert!(download_due(&pool).await.unwrap());
 }
 
-/// One count per YouTube id (two rows of one video count once).
+/// One count per YouTube id (two rows of one video, in two active
+/// playlists, count once; #261: an inactive playlist's rows not at all).
 #[tokio::test]
 async fn the_counts_are_per_video() {
     let pool = catalog().await;
@@ -307,7 +309,7 @@ async fn the_counts_are_per_video() {
     song(
         &pool,
         2,
-        2,
+        4,
         "aaaaaaaaaaa",
         (Some(2160), Some("upgraded"), Some(T)),
     )
