@@ -270,16 +270,29 @@ fn path_column(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-/// A `videos` row records `path` as its video or its audio: the file is a
-/// song's, never debris to delete (#136: rows of one video share files by
-/// name, so a name one attempt writes can be the file another row plays).
-/// A caller that deletes on `false` holds [`SONG_FILES`] from this read to
-/// the delete, so no rename or record lands between them (the startup
-/// self-heal needs no lock: it runs before any renamer is started).
+/// The `videos` columns that record a song's files (#261: the video, the
+/// audio, both stems and the dub). `recorded_by_a_row` and the daily cache
+/// sweep (`cache_sweep::row_facts`) read exactly these.
+pub const RECORDING_COLUMNS: [&str; 5] = [
+    "file_path",
+    "audio_file_path",
+    "vocals_file_path",
+    "instrumental_file_path",
+    "dub_file_path",
+];
+
+/// A `videos` row records `path` in one of its [`RECORDING_COLUMNS`]: the
+/// file is a song's, never debris to delete (#136: rows of one video share
+/// files by name, so a name one attempt writes can be the file another row
+/// plays). A caller that deletes on `false` holds [`SONG_FILES`] from this
+/// read to the delete, so no rename or record lands between them (the
+/// startup self-heal needs no lock: it runs before any renamer is started).
 pub async fn recorded_by_a_row(pool: &sqlx::SqlitePool, path: &Path) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM videos WHERE file_path = ?1 OR audio_file_path = ?1)",
-    )
+    let any_column = RECORDING_COLUMNS.map(|column| format!("{column} = ?1"));
+    sqlx::query_scalar(&format!(
+        "SELECT EXISTS(SELECT 1 FROM videos WHERE {})",
+        any_column.join(" OR ")
+    ))
     .bind(path_column(path))
     .fetch_one(pool)
     .await

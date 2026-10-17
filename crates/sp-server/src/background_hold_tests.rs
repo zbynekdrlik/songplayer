@@ -90,6 +90,7 @@ fn every_job_has_its_stable_name() {
         (Job::UiUsagePrune, "ui_usage_prune"),
         (Job::PlayHistory, "play_history"),
         (Job::PeerLeftovers, "peer_leftovers"),
+        (Job::CacheSweep, "cache_sweep"),
     ];
     for (job, name) in names {
         assert_eq!(job.as_str(), name);
