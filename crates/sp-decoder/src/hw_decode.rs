@@ -586,10 +586,14 @@ pub fn decoder_path_visible(on_d3d: bool, scaled: bool) -> bool {
 /// with none keeps that guess, as before #282.
 pub fn scaled_frame_rate(
     negotiated: Option<u64>,
-    _native: Option<u64>,
-    _scaled: bool,
+    native: Option<u64>,
+    scaled: bool,
 ) -> Option<u64> {
-    negotiated
+    match (negotiated, scaled) {
+        (Some(rate), _) => Some(rate),
+        (None, true) => native,
+        (None, false) => None,
+    }
 }
 
 /// #282: a display aperture (`MF_MT_MINIMUM_DISPLAY_APERTURE`, an
@@ -610,7 +614,7 @@ pub fn video_area(blob: &[u8]) -> Option<VideoArea> {
     let b: &[u8; 16] = blob.try_into().ok()?;
     Some(VideoArea {
         x: i16::from_le_bytes([b[2], b[3]]),
-        y: i16::from_le_bytes([b[4], b[5]]),
+        y: i16::from_le_bytes([b[6], b[7]]),
         width: i32::from_le_bytes([b[8], b[9], b[10], b[11]]),
         height: i32::from_le_bytes([b[12], b[13], b[14], b[15]]),
     })
@@ -625,11 +629,18 @@ pub fn video_area(blob: &[u8]) -> Option<VideoArea> {
 /// origin; otherwise the scaled open is refused (the file plays at its own
 /// size, the readback cutting the padding as before).
 pub fn padding_reaches_processor(
-    _decoded: (u32, u32),
-    _aperture: Option<VideoArea>,
-    _native: (u32, u32),
+    decoded: (u32, u32),
+    aperture: Option<VideoArea>,
+    native: (u32, u32),
 ) -> bool {
-    false
+    let padded = decoded.0 > native.0 || decoded.1 > native.1;
+    let cropped = aperture.is_some_and(|area| {
+        area.x == 0
+            && area.y == 0
+            && i64::from(area.width) == i64::from(native.0)
+            && i64::from(area.height) == i64::from(native.1)
+    });
+    padded && !cropped
 }
 
 /// `a` and `b`'s greatest common divisor (`a` when `b` is 0).
