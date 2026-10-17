@@ -102,8 +102,12 @@ impl DecodePath {
     /// fall back to software behind the video processor (a GPU with no
     /// decoder for the codec); the box's bench timings tell it. Unscaled,
     /// [`DecodePath::of_picture`].
-    pub fn of_surface(surface_bind_flags: u32, _scaled: bool) -> Self {
-        DecodePath::of_picture(Some(surface_bind_flags))
+    pub fn of_surface(surface_bind_flags: u32, scaled: bool) -> Self {
+        if scaled {
+            DecodePath::Hardware
+        } else {
+            DecodePath::of_picture(Some(surface_bind_flags))
+        }
     }
 
     /// `"hardware"` / `"software"` (the decode bench's `decode_path`).
@@ -483,12 +487,12 @@ pub fn mapped_from_scanline0(start: usize, scanline0: usize, len: usize) -> Opti
 
 /// The box's aspect, width per height: 16:9.
 const BOX_ASPECT_W: u64 = 16;
-const BOX_ASPECT_H: u64 = 8;
+const BOX_ASPECT_H: u64 = 9;
 
 /// On the D3D11 path a decoder or video processor may pad the current
 /// type's frame size (NVDEC pads to 16 rows); the readback cuts up to 15
 /// padded rows or columns ([`visible_size`]).
-const D3D_PAD_SLACK: u32 = 1;
+const D3D_PAD_SLACK: u32 = 16;
 
 /// The box of the decode cap `cap` (rows): `cap` × 16/9 wide and `cap`
 /// tall, each side rounded down to even (an odd cap set through the API
@@ -548,7 +552,7 @@ pub fn visible_reference(
     native: Option<(u32, u32)>,
     scaled: Option<(u32, u32)>,
 ) -> Option<(u32, u32)> {
-    native.or(scaled)
+    scaled.or(native)
 }
 
 /// Whether Media Foundation took a scaled open: the type it negotiated is
@@ -634,7 +638,7 @@ impl HwCounters {
     /// #282: Media Foundation refused a scaled open (the file opened at its
     /// own size).
     pub fn scale_refused(&self) {
-        self.scaled_opens.fetch_add(1, Ordering::Relaxed);
+        self.scale_refusals.fetch_add(1, Ordering::Relaxed);
     }
 
     /// A `Hardware` open was asked for (counted before the open).
