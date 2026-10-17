@@ -155,3 +155,17 @@ def test_the_workflow_steps_stay_ascii():
         assert (
             ps_ascii.violations(workflow.read_text(encoding="utf-8")) == []
         ), workflow.name
+
+
+def test_pps_deploy_skips_the_delivery_for_a_build_older_than_the_script():
+    """A dispatch of an older build on purpose (a rollback: #251, PP back to
+    0.82.0 before an event, run 39010164786) checks out a tree with no
+    runner-autostart.ps1. The step must say so and go on, the auto-start
+    left as the last deploy delivered it, never fail the rollback."""
+    lines = _job(_PP, "deploy-pp")
+    step = _index(lines, "- name: Deliver the runner's auto-start")
+    call = _index(lines, _CALL)
+    guard = "\n".join(lines[step:call])
+    assert "Test-Path" in guard, "the step must look for the script first"
+    assert "exit 0" in guard, "a build without the script must not fail the deploy"
+    assert "::warning::" in guard, "the skip must be visible in the run"
