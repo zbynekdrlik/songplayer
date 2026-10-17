@@ -103,6 +103,7 @@ mod gate;
 pub use gate::{LogGate, LogLine, MAX_LOG_EVERY_100NS, elapsed_100ns};
 #[path = "program_max_ndi.rs"]
 mod ndi;
+pub use ndi::PassLine;
 
 /// How long the thread waits before it builds again after a refused sender,
 /// a failed build or a second lost device in a row ("a few seconds", the
@@ -189,8 +190,9 @@ pub struct Lines {
     pub fhd: Option<LogLine>,
     /// #279 P1b: the compositor's for NDI alone (`None` while MAX is wanted).
     pub ndi: Option<LogLine>,
-    /// #279 P1b: the UYVY pass's enable (`program_max_ndi.rs`).
-    pub ndi_enable: Option<LogLine>,
+    /// #279 P1b: the UYVY pass's own (`program_max_ndi.rs`): its state and
+    /// the boundaries held back.
+    pub ndi_pass: Option<(PassLine, u64)>,
 }
 
 /// The `program-max` thread's state: the GPU objects it built, the picture
@@ -256,8 +258,8 @@ struct Went {
     /// #279 P1b: the compose for NDI alone (MAX not wanted): built and
     /// composed, or why not (`None`: nothing to say, `ndi_report`).
     ndi: Option<Result<(), Skip>>,
-    /// The line the UYVY pass's enable logged (`ndi_pass`).
-    ndi_enable: Option<LogLine>,
+    /// The line the UYVY pass's log wrote (`ndi_pass`).
+    ndi_pass: Option<(PassLine, u64)>,
 }
 
 impl<'a, G: MaxGpu> MaxWorker<'a, G> {
@@ -364,12 +366,12 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         let fhd = went.fhd.and_then(|went| self.finish_fhd(went, job, now));
         let ndi = went.ndi.and_then(|went| self.finish_ndi(went, job, now));
         self.list.boundary(now, self.out);
-        let ndi_enable = went.ndi_enable;
+        let ndi_pass = went.ndi_pass;
         Lines {
             max,
             fhd,
             ndi,
-            ndi_enable,
+            ndi_pass,
         }
     }
 
@@ -481,7 +483,7 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
                 max: wants.max.then_some(Err(Skip::Unsupported)),
                 fhd: None,
                 ndi: None,
-                ndi_enable: None,
+                ndi_pass: None,
             };
         }
         if let Err(skip) = self.build_device(now) {
@@ -491,10 +493,10 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
                 ndi: ndi::ndi_report(wants, Some(Err(skip.clone()))),
                 max: wants.max.then_some(Err(skip)),
                 fhd,
-                ndi_enable: None,
+                ndi_pass: None,
             };
         }
-        let ndi_enable = self.ndi_pass(wants.ndi, now);
+        let ndi_pass = self.ndi_pass(wants.ndi, now);
         let max_built = wants.max.then(|| self.build(Which::Max, now));
         let max_ok = matches!(max_built, Some(Ok(())));
         // #239: MAX goes first, whole. An FHD sender still to build (a
@@ -544,7 +546,7 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
             max,
             fhd,
             ndi,
-            ndi_enable,
+            ndi_pass,
         }
     }
 

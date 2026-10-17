@@ -279,7 +279,8 @@ fn a_switch_to_the_gpu_holds_one_boundary_and_back_sends_the_held_pair_first() {
 /// stays late NDI stays on the canvas (no flapping back for one boundary),
 /// and once it is on time again it goes back to the GPU only after 30
 /// on-time readbacks in a row. A picture that did not come then repeats
-/// the last read-back one (only the setting's switch forgets it): never a
+/// the boundary before's readback, which the gate took on the returning
+/// boundary (every canvas boundary forgets the last picture): never a
 /// black frame.
 #[test]
 fn a_readback_that_is_always_late_falls_back_and_stays_on_the_canvas() {
@@ -554,8 +555,52 @@ fn a_switch_to_the_canvas_times_both_submits() {
     );
 }
 
+/// The setting's switch to the canvas lets the feed's pictures go after
+/// the held pair's flush (review round 4): nothing will take them, and the
+/// thread lets them go only while it holds a compositor.
+#[test]
+fn the_setting_s_switch_lets_the_feed_s_pictures_go() {
+    let mut rig = rig(NdiSource::Gpu);
+    rig.max.ndi.push(at(0), uyvy(1));
+    rig.out.submit(source(0, 0.25));
+    rig.max.ndi.push(at(1), uyvy(2));
+    rig.max.ndi.push(at(2), uyvy(3));
+    rig.max.set_ndi_source(NdiSource::Cpu);
+    rig.out.submit(source(1, 0.25));
+    assert_eq!(
+        rig.backend.video_timecodes(),
+        [at(0), at(1)],
+        "b0 flushed with its picture, b1 on the canvas"
+    );
+    assert!(rig.max.ndi.take(at(2)).is_none(), "the feed let it go");
+}
+
+/// Every canvas boundary forgets the last read-back picture: after a
+/// fallback nothing holds it (review round 4), so its 4 MB go back to the
+/// frame pool. A size class no other test uses.
+#[test]
+fn a_fallback_to_the_canvas_lets_the_last_picture_go() {
+    const CAP: usize = 2_311_219;
+    let mut rig = rig(NdiSource::Gpu);
+    rig.max.ndi.push(at(0), SharedFrame::new(vec![1; CAP]));
+    rig.out.submit(source(0, 0.25));
+    rig.out.submit(source(1, 0.25));
+    let before = sp_decoder::frame_pool::pool_len(CAP);
+    rig.out.submit(source(31, 0.25));
+    assert_eq!(
+        rig.backend.last_async_video_fourcc(),
+        Some(FourCCVideoType::NV12),
+        "the stale fallback: b1 out first, then b31 on the canvas"
+    );
+    assert_eq!(
+        sp_decoder::frame_pool::pool_len(CAP),
+        before + 1,
+        "nothing holds the last picture any more"
+    );
+}
+
 /// The setting's switch to the canvas ends a fallback's count: a later
-/// flip back to `gpu` goes to the GPU at the first fresh picture, as the
+/// flip back to `gpu` goes to the GPU once the newest picture is fresh, as the
 /// first switch does.
 #[test]
 fn the_setting_s_canvas_ends_a_fallback_and_its_flip_back_is_at_once() {

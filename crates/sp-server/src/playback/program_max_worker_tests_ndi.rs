@@ -8,6 +8,7 @@
 //! sender repeats).
 //! Wired via `#[cfg(test)] #[path = "program_max_worker_tests_ndi.rs"] mod tests_ndi;`.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use sp_core::config::NdiSource;
@@ -16,7 +17,7 @@ use sp_gpu::{GpuError, MAX_TARGET};
 use super::tests::{
     Drawn, FakeGpu, UYVY_US, device_lost, fake_uyvy, not_registered, pic, picture, plain,
 };
-use super::{LogLine, MAX_LOG_EVERY_100NS, MAX_RETRY_BACKOFF, MaxWorker};
+use super::{LogLine, MAX_LOG_EVERY_100NS, MAX_RETRY_BACKOFF, MaxWorker, PassLine};
 use crate::playback::ndi_feed::{UYVY_BLACK_PAIR, uyvy_len};
 use crate::playback::program_max::{MaxJob, MaxOut};
 
@@ -279,10 +280,10 @@ fn with_max_off_a_failing_compositor_is_logged_for_ndi() {
     assert_eq!(lines.ndi, None, "MAX's line names it");
 }
 
-/// The enable's log follows every boundary while NDI is wanted (review
-/// round 3): the retry after the backoff lands inside the log's window, so
-/// that recovery is said after the window, and a later failing spell with
-/// the same error is WARNed again (never stuck on the old failure).
+/// The pass's log follows every boundary (review rounds 3-4): the retry
+/// after the backoff lands inside the log's window, so that recovery is
+/// said after the window, and a later failing spell with the same error
+/// is WARNed again (never stuck on the old failure).
 #[test]
 fn a_quick_recovery_of_the_enable_is_said_after_the_window_and_a_new_failure_warned() {
     let max = ndi_on(true);
@@ -291,17 +292,18 @@ fn a_quick_recovery_of_the_enable_is_said_after_the_window_and_a_new_failure_war
     let mut worker = MaxWorker::new(&max, gpu.clone());
     let a = picture(4, 2);
     let t0 = Instant::now();
+    let failing = PassLine::Failing(Arc::from(gpu_refusal().to_string()));
     let lines = worker.serve_lines(&plain(1, &a), t0, t0);
-    assert_eq!(lines.ndi_enable, Some(LogLine::Failing { held_back: 0 }));
+    assert_eq!(lines.ndi_pass, Some((failing.clone(), 0)));
     let retry = t0 + MAX_RETRY_BACKOFF;
     let lines = worker.serve_lines(&plain(2, &a), retry, retry);
-    assert_eq!(lines.ndi_enable, None, "on again inside the window: held");
+    assert_eq!(lines.ndi_pass, None, "on again inside the window: held");
     let window = Duration::from_nanos(MAX_LOG_EVERY_100NS as u64 * 100);
     let after = t0 + window;
     let lines = worker.serve_lines(&plain(3, &a), after, after);
     assert_eq!(
-        lines.ndi_enable,
-        Some(LogLine::Recovered { held_back: 1 }),
+        lines.ndi_pass,
+        Some((PassLine::On, 1)),
         "said by the first boundary after the window"
     );
     // The device lost and rebuilt, and the enable refused again.
@@ -312,10 +314,38 @@ fn a_quick_recovery_of_the_enable_is_said_after_the_window_and_a_new_failure_war
     let lines = worker.serve_lines(&plain(5, &a), later, later);
     assert_eq!(gpu.log().compositors_built, 2, "rebuilt at once");
     assert_eq!(
-        lines.ndi_enable,
-        Some(LogLine::Failing { held_back: 0 }),
+        lines.ndi_pass,
+        Some((failing, 0)),
         "the new failing spell is WARNed"
     );
+}
+
+/// The pass has ONE log (review round 4): its first enable says "on", a
+/// pass rebuilt with the device says nothing new, and NDI's switch to the
+/// canvas says "off", once. No line is written outside it.
+#[test]
+fn the_pass_log_says_on_and_off_once_and_nothing_for_a_rebuilt_pass() {
+    let max = ndi_on(true);
+    let gpu = FakeGpu::default();
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    let a = picture(4, 2);
+    let t0 = Instant::now();
+    let lines = worker.serve_lines(&plain(1, &a), t0, t0);
+    assert_eq!(lines.ndi_pass, Some((PassLine::On, 0)), "the first enable");
+    let window = Duration::from_nanos(MAX_LOG_EVERY_100NS as u64 * 100);
+    let t1 = t0 + window;
+    gpu.script().compose.push_back(device_lost());
+    let lines = worker.serve_lines(&plain(2, &a), t1, t1);
+    assert_eq!(lines.ndi_pass, None, "still on until the loss");
+    let lines = worker.serve_lines(&plain(3, &a), t1, t1);
+    assert_eq!(gpu.log().uyvy_enabled, 2, "rebuilt and enabled again");
+    assert_eq!(lines.ndi_pass, None, "on again: nothing new to say");
+    max.set_ndi_source(NdiSource::Cpu);
+    let t2 = t1 + window;
+    let lines = worker.serve_lines(&plain(4, &a), t2, t2);
+    assert_eq!(lines.ndi_pass, Some((PassLine::Off, 0)), "off");
+    let lines = worker.serve_lines(&plain(5, &a), t2, t2);
+    assert_eq!(lines.ndi_pass, None, "said once");
 }
 
 /// MAX off and the pass refused: nothing wants a compose (no output can go

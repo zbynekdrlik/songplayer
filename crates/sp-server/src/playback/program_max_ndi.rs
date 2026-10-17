@@ -27,6 +27,7 @@
 //!   one WARN when composes stop, one INFO when they come back, through a
 //!   `LogGate`), never lost behind MAX's `off`.
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use sp_gpu::{FHD_TARGET, TargetId};
@@ -40,6 +41,18 @@ use crate::playback::frame_buf::SharedFrame;
 use crate::playback::ndi_feed::{BlackUyvy, uyvy_len};
 use crate::playback::program_max::{MaxJob, MaxOut, Wants};
 use crate::playback::stat_window::WarnLimiter;
+
+/// What the UYVY pass's log says of it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum PassLine {
+    /// NDI comes from the canvas: no pass (also the start).
+    #[default]
+    Off,
+    /// NDI's picture is read back.
+    On,
+    /// The enable failed, and why; it is tried again after each backoff.
+    Failing(Arc<str>),
+}
 
 /// The worker's NDI readback state.
 #[derive(Debug, Default)]
@@ -77,7 +90,7 @@ impl<G: MaxGpu> MaxWorker<'_, G> {
     /// `wanted`, off otherwise (a backoff forgotten). Nothing without a
     /// compositor. Returns the line the enable's log wrote: it is observed
     /// at every boundary while NDI is wanted.
-    pub(super) fn ndi_pass(&mut self, wanted: bool, now: Instant) -> Option<LogLine> {
+    pub(super) fn ndi_pass(&mut self, wanted: bool, now: Instant) -> Option<(PassLine, u64)> {
         let compositor = self.device.compositor.as_mut()?;
         if !wanted {
             if self.ndi.on {
@@ -107,7 +120,13 @@ impl<G: MaxGpu> MaxWorker<'_, G> {
         let failing = self.ndi.enable_failing.as_deref();
         let line = self.ndi.enable_log.observe(at, failing);
         log_enable_line(line.as_ref(), failing);
-        line
+        match line? {
+            LogLine::Failing { held_back } => {
+                let why = Arc::from(failing.unwrap_or_default());
+                Some((PassLine::Failing(why), held_back))
+            }
+            LogLine::Recovered { held_back } => Some((PassLine::On, held_back)),
+        }
     }
 }
 
