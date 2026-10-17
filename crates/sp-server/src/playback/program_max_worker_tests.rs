@@ -622,6 +622,7 @@ fn a_refusal_is_a_taken_or_unregistered_name_only() {
 #[test]
 fn the_first_job_builds_both_on_the_thread_then_composes_and_sends() {
     let max = MaxOut::new();
+    max.set_enabled(true);
     let gpu = FakeGpu::default();
     let mut worker = MaxWorker::new(&max, gpu.clone());
     assert!(!worker.holds_gpu(), "nothing built before a job");
@@ -651,6 +652,7 @@ fn the_first_job_builds_both_on_the_thread_then_composes_and_sends() {
 #[test]
 fn a_second_lost_device_before_a_boundary_went_out_waits_the_backoff() {
     let max = MaxOut::new();
+    max.set_enabled(true);
     let gpu = FakeGpu::default();
     gpu.script().compose.push_back(device_lost());
     gpu.script().compose.push_back(device_lost());
@@ -679,6 +681,7 @@ fn a_second_lost_device_before_a_boundary_went_out_waits_the_backoff() {
 #[test]
 fn a_lost_device_after_a_sent_boundary_rebuilds_at_once_again() {
     let max = MaxOut::new();
+    max.set_enabled(true);
     let gpu = FakeGpu::default();
     let mut worker = MaxWorker::new(&max, gpu.clone());
     let t0 = Instant::now();
@@ -732,6 +735,7 @@ fn a_device_lost_at_compose_drops_both_and_rebuilds_on_the_next_job() {
 #[test]
 fn a_device_lost_at_send_drops_both_too() {
     let max = MaxOut::new();
+    max.set_enabled(true);
     let gpu = FakeGpu::default();
     gpu.script().send.push_back(device_lost());
     let mut worker = MaxWorker::new(&max, gpu.clone());
@@ -783,6 +787,7 @@ fn a_refused_sender_is_dropped_and_a_new_one_waits_the_backoff() {
 #[test]
 fn a_name_taken_at_create_waits_the_backoff_too() {
     let max = MaxOut::new();
+    max.set_enabled(true);
     let gpu = FakeGpu::default();
     gpu.script().sender.push_back(GpuError::SpoutNameTaken {
         name: "SP-program-MAX".into(),
@@ -833,6 +838,7 @@ fn a_failed_build_is_retried_after_the_backoff_not_on_every_job() {
 #[test]
 fn a_device_lost_while_building_the_sender_drops_the_compositor_and_waits() {
     let max = MaxOut::new();
+    max.set_enabled(true);
     let gpu = FakeGpu::default();
     gpu.script().sender.push_back(device_lost());
     let mut worker = MaxWorker::new(&max, gpu.clone());
@@ -850,6 +856,7 @@ fn a_device_lost_while_building_the_sender_drops_the_compositor_and_waits() {
 #[test]
 fn a_refused_picture_or_a_lost_spout_frame_costs_one_boundary_only() {
     let max = MaxOut::new();
+    max.set_enabled(true);
     let gpu = FakeGpu::default();
     gpu.script()
         .compose

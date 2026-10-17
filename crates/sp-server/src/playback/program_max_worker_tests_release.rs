@@ -15,6 +15,7 @@ use crate::playback::program_max::{MAX_NOT_RUNNING, MaxJob, MaxOut};
 #[test]
 fn release_drops_the_sender_then_the_compositor_and_forgets_the_backoff() {
     let max = MaxOut::new();
+    max.set_enabled(true);
     let gpu = FakeGpu::default();
     gpu.script().send.push_back(not_registered());
     let mut worker = MaxWorker::new(&max, gpu.clone());
@@ -47,6 +48,7 @@ fn release_drops_the_sender_then_the_compositor_and_forgets_the_backoff() {
 #[test]
 fn a_release_forgets_the_pictures_it_held() {
     let max = MaxOut::new();
+    max.set_enabled(true);
     let gpu = FakeGpu::default();
     let mut worker = MaxWorker::new(&max, gpu.clone());
     let a = picture(4, 2);
@@ -72,6 +74,7 @@ fn off_windows_the_production_gpu_is_unsupported() {
         Err(sp_gpu::GpuError::Unsupported)
     ));
     let max = MaxOut::new();
+    max.set_enabled(true);
     let mut worker = MaxWorker::new(&max, SpoutGpu);
     worker.serve(&MaxJob::Black { stamp_100ns: 1 }, Instant::now());
     let status = max.status();

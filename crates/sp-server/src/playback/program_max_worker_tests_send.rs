@@ -33,6 +33,7 @@ fn job(stamp: i64) -> MaxJob {
 #[test]
 fn the_worker_composes_at_once_and_sends_at_the_due_instant() {
     let max = MaxOut::new();
+    max.set_enabled(true);
     let gpu = FakeGpu::default();
     let offered = Instant::now();
     let (mut clock, list) = FakeClock::at(offered + 4 * MS);
@@ -73,6 +74,7 @@ fn the_worker_composes_at_once_and_sends_at_the_due_instant() {
 #[test]
 fn a_compose_that_ran_past_the_due_instant_is_sent_at_once_and_counted_late() {
     let max = MaxOut::new();
+    max.set_enabled(true);
     let gpu = FakeGpu::default();
     let offered = Instant::now();
     let (clock, list) = FakeClock::at(offered + 20 * MS);
@@ -137,6 +139,7 @@ impl VblankSource for FakeVblank {
 #[test]
 fn on_a_refresh_grid_the_worker_sends_in_its_slot_at_the_phase_setting() {
     let max = MaxOut::new();
+    max.set_enabled(true);
     max.set_vblank_phase_us(5_000);
     let gpu = FakeGpu::default();
     let offered = Instant::now();
@@ -178,6 +181,7 @@ fn on_a_refresh_grid_the_worker_sends_in_its_slot_at_the_phase_setting() {
 #[test]
 fn the_worker_publishes_its_grid_for_the_video_quiet_window() {
     let max = MaxOut::new();
+    max.set_enabled(true);
     let offered = Instant::now();
     let grid = VblankGrid {
         at: offered - MS,
@@ -195,6 +199,7 @@ fn the_worker_publishes_its_grid_for_the_video_quiet_window() {
     assert!(max.video.status(offered + 4 * MS).grid);
 
     let max = MaxOut::new();
+    max.set_enabled(true);
     let (clock, _list) = FakeClock::at(offered + 4 * MS);
     let mut worker = MaxWorker::new(&max, FakeGpu::default())
         .with_clock(Box::new(clock))
@@ -251,6 +256,7 @@ fn snapshots(at_wait: &Snapshots) -> Vec<(usize, u32)> {
 #[test]
 fn on_a_grid_the_compose_waits_for_its_phase_never_runs_at_the_offer() {
     let max = MaxOut::new();
+    max.set_enabled(true);
     let gpu = FakeGpu::default();
     let offered = Instant::now();
     let now = offered + 4 * MS;
@@ -282,6 +288,7 @@ fn on_a_grid_the_compose_waits_for_its_phase_never_runs_at_the_offer() {
 #[test]
 fn a_job_taken_after_its_compose_instant_composes_at_once_and_counts_it() {
     let max = MaxOut::new();
+    max.set_enabled(true);
     let gpu = FakeGpu::default();
     let offered = Instant::now();
     let now = offered + 14 * MS;
@@ -312,6 +319,7 @@ fn a_job_taken_after_its_compose_instant_composes_at_once_and_counts_it() {
 #[test]
 fn off_the_grid_the_compose_runs_at_once() {
     let max = MaxOut::new();
+    max.set_enabled(true);
     let gpu = FakeGpu::default();
     let offered = Instant::now();
     let (mut clock, list) = FakeClock::at(offered + 4 * MS);
@@ -355,6 +363,7 @@ fn the_compose_lands_on_its_phase_whatever_the_offers_phase() {
     let at = Instant::now();
     for offset_us in [0u64, 5_500, 11_100] {
         let max = MaxOut::new();
+        max.set_enabled(true);
         max.set_vblank_phase_us(19_000);
         let gpu = FakeGpu::default();
         let offered = at + period * 10 + Duration::from_micros(offset_us);
@@ -389,6 +398,7 @@ fn the_compose_lands_on_its_phase_whatever_the_offers_phase() {
 #[test]
 fn an_unmeasured_refresh_sends_at_the_constant_lead() {
     let max = MaxOut::new();
+    max.set_enabled(true);
     let gpu = FakeGpu::default();
     let offered = Instant::now();
     let (clock, list) = FakeClock::at(offered + 4 * MS);
@@ -464,6 +474,7 @@ impl VblankSource for MovingVblank {
 #[test]
 fn the_paced_output_is_named_as_it_moves() {
     let max = MaxOut::new();
+    max.set_enabled(true);
     let gpu = FakeGpu::default();
     let name = Arc::new(Mutex::new(r"\\.\DISPLAY5 3840x2160".to_string()));
     let offered = Instant::now();

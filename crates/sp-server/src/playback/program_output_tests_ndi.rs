@@ -199,8 +199,12 @@ fn a_missing_picture_repeats_the_last_one_and_the_black_before_any() {
     );
 }
 
+/// #279 ROZHODNUTÉ 6232669201 item 1: a switch back to the canvas never
+/// drops an audio block. The pair held from the GPU goes out FIRST (its
+/// readback, else the last picture, else the black: a repeat), then the
+/// boundary on the canvas: two submits, contiguous stamps.
 #[test]
-fn a_switch_to_the_gpu_holds_one_boundary_and_back_skips_one() {
+fn a_switch_to_the_gpu_holds_one_boundary_and_back_sends_the_held_pair_first() {
     let mut rig = rig(NdiSource::Cpu);
     rig.out.submit(source(0, 0.25));
     assert_eq!(sends(&rig), [AUDIO, NV12], "b0 on the canvas");
@@ -211,15 +215,27 @@ fn a_switch_to_the_gpu_holds_one_boundary_and_back_skips_one() {
     rig.out.submit(source(1, 0.25));
     assert_eq!(sends(&rig).len(), 2, "b1 held: nothing sent");
     rig.max.ndi.push(at(1), p1.clone());
-    rig.out.submit(source(2, 0.25));
+    rig.out.submit(source(2, 0.5));
     assert!(wire(&rig).ptr_eq(&p1), "b1 from the GPU");
 
+    // Back on the canvas: b2, held, goes out first (its picture never
+    // came: b1's again, a repeat), then b3 on the canvas.
     rig.max.set_ndi_source(NdiSource::Cpu);
-    rig.out.submit(source(3, 0.25));
+    rig.out.submit(source(3, 0.75));
     assert_eq!(
-        rig.backend.last_async_video_fourcc(),
-        Some(FourCCVideoType::NV12),
-        "b3 on the canvas"
+        sends(&rig),
+        [AUDIO, NV12, AUDIO, UYVY, AUDIO, UYVY, AUDIO, NV12],
+        "b0 canvas, b1 + b2 from the GPU, b3 canvas"
+    );
+    assert_eq!(
+        rig.backend.audio_timecodes(),
+        [at(0) + 77, at(1) + 77, at(2) + 77, at(3) + 77],
+        "every boundary's audio block went out once, b2's included"
+    );
+    assert_eq!(
+        interleaved(&rig.backend.last_audio_planar()),
+        samples(0.75, 1e-5),
+        "b3's own block last"
     );
     let status = rig.max.ndi_status();
     assert_eq!(
@@ -227,15 +243,16 @@ fn a_switch_to_the_gpu_holds_one_boundary_and_back_skips_one() {
             status.source,
             status.fourcc,
             status.delay_slots,
-            status.switches
+            status.switches,
+            status.repeats
         ),
-        ("cpu", "NV12", 0, 2),
+        ("cpu", "NV12", 0, 2, 1),
         "{status:?}"
     );
 
-    // Back to the GPU: b4 is held (b2, dropped at the switch, never goes
-    // out), and b4's picture never came: the black, not b1's picture from
-    // before the switch.
+    // Back to the GPU (the setting's flip: at once): b4 is held, and b4's
+    // picture never came: the black, not b1's picture from before the
+    // setting's switch.
     rig.max.set_ndi_source(NdiSource::Gpu);
     rig.out.submit(source(4, 0.25));
     rig.out.submit(source(5, 0.25));
@@ -245,21 +262,24 @@ fn a_switch_to_the_gpu_holds_one_boundary_and_back_skips_one() {
     );
     assert_eq!(
         rig.backend.video_timecodes(),
-        [at(0), at(1), at(3), at(4)],
-        "b2 skipped, b4 one late"
+        [at(0), at(1), at(2), at(3), at(4)],
+        "contiguous, b4 one late"
     );
     let status = rig.max.ndi_status();
-    assert_eq!((status.switches, status.repeats), (3, 1), "{status:?}");
+    assert_eq!((status.switches, status.repeats), (3, 2), "{status:?}");
 }
 
 /// A readback that only ever arrives after its boundary went out (every
 /// picture late): the feed keeps nothing fresh, so 31 slots after the last
 /// picture it kept NDI falls back to the canvas, never repeating one
-/// picture for good. Back on the GPU after that automatic fallback, a
-/// picture that did not come repeats the last read-back one (only the
-/// setting's switch forgets it): never a black frame.
+/// picture for good. #279 ROZHODNUTÉ 6232669201 item 3: while the readback
+/// stays late NDI stays on the canvas (no flapping back for one boundary),
+/// and once it is on time again it goes back to the GPU only after 30
+/// on-time readbacks in a row. A picture that did not come then repeats
+/// the last read-back one (only the setting's switch forgets it): never a
+/// black frame.
 #[test]
-fn a_readback_that_is_always_late_falls_back_to_the_canvas() {
+fn a_readback_that_is_always_late_falls_back_and_stays_on_the_canvas() {
     let mut rig = rig(NdiSource::Gpu);
     let p0 = uyvy(1);
     rig.max.ndi.push(at(0), p0.clone());
@@ -289,24 +309,61 @@ fn a_readback_that_is_always_late_falls_back_to_the_canvas() {
             status.readback_late,
             status.switches
         ),
-        ("cpu", 29, 29, 2),
+        ("cpu", 30, 29, 2),
+        "b30, held, went out first (b0's picture again): {status:?}"
+    );
+    // Still late: NDI stays on the canvas, it never flaps back.
+    for k in 32..=71 {
+        rig.out.submit(source(k, 0.25));
+        rig.max.ndi.push(at(k - 1), uyvy(2));
+        assert_eq!(
+            rig.backend.last_async_video_fourcc(),
+            Some(FourCCVideoType::NV12),
+            "boundary {k}: the late readback never brings NDI back"
+        );
+    }
+    let status = rig.max.ndi_status();
+    assert_eq!(
+        (status.switches, status.readback_late),
+        (2, 69),
         "{status:?}"
     );
-    // A picture on time again: back to the GPU (b32 held), and b32's own
-    // picture did not come.
-    rig.max.ndi.push(at(31), uyvy(3));
-    rig.out.submit(source(32, 0.25));
-    rig.out.submit(source(33, 0.25));
+    // On time again: the canvas until 30 in a row came.
+    for k in 72..=100 {
+        rig.max.ndi.push(at(k - 1), uyvy(3));
+        rig.out.submit(source(k, 0.25));
+        assert_eq!(
+            rig.backend.last_async_video_fourcc(),
+            Some(FourCCVideoType::NV12),
+            "boundary {k}: {} on-time readbacks in a row",
+            k - 71
+        );
+    }
+    let p100 = uyvy(4);
+    rig.max.ndi.push(at(100), p100.clone());
+    rig.out.submit(source(101, 0.25));
+    assert_eq!(
+        rig.backend.video_timecodes().last(),
+        Some(&at(100)),
+        "the 30th on-time readback: back on the GPU, b101 held"
+    );
+    assert_eq!(rig.max.ndi_status().switches, 3);
+    // b101's own picture did not come: the last read-back one, b100's.
+    rig.out.submit(source(102, 0.25));
     assert_eq!(
         rig.backend.last_async_video_fourcc(),
         Some(FourCCVideoType::UYVY)
     );
     assert!(
-        wire(&rig).ptr_eq(&p0),
+        wire(&rig).ptr_eq(&p100),
         "the last read-back picture, not the black"
     );
     let status = rig.max.ndi_status();
-    assert_eq!((status.switches, status.repeats), (3, 30), "{status:?}");
+    assert_eq!(
+        (status.source, status.switches, status.repeats),
+        ("gpu", 3, 31),
+        "{status:?}"
+    );
 }
 
 #[test]
@@ -325,19 +382,96 @@ fn a_stale_readback_falls_back_to_the_canvas() {
         Some(FourCCVideoType::UYVY)
     );
     assert!(wire(&rig).ptr_eq(&p0), "b1 repeats b0's picture");
-    // ...31 slots after it, the canvas: b30, held, is dropped.
+    // ...31 slots after it, the canvas: b30, held, goes out first (b0's
+    // picture again, a repeat), then b31 on the canvas.
     rig.out.submit(source(31, 0.25));
     assert_eq!(
         rig.backend.last_async_video_fourcc(),
         Some(FourCCVideoType::NV12)
     );
-    assert_eq!(rig.backend.video_timecodes(), [at(0), at(1), at(31)]);
+    assert_eq!(
+        rig.backend.video_timecodes(),
+        [at(0), at(1), at(30), at(31)]
+    );
+    assert_eq!(
+        rig.backend.audio_timecodes(),
+        [at(0) + 77, at(1) + 77, at(30) + 77, at(31) + 77],
+        "no audio block lost at the fallback"
+    );
     let status = rig.max.ndi_status();
     assert_eq!(
         (status.source, status.switches, status.repeats),
-        ("cpu", 2, 1),
+        ("cpu", 2, 2),
         "{status:?}"
     );
+}
+
+/// #279 ROZHODNUTÉ 6232669201 item 3: after an automatic fallback the
+/// on-time readbacks are counted in a row, so a late (or missing) one in
+/// the run starts the count again.
+#[test]
+fn after_a_fallback_a_missing_readback_starts_the_count_again() {
+    let mut rig = rig(NdiSource::Gpu);
+    rig.max.ndi.push(at(0), uyvy(1));
+    rig.out.submit(source(0, 0.25));
+    rig.out.submit(source(1, 0.25));
+    rig.out.submit(source(32, 0.25));
+    assert_eq!(
+        rig.backend.last_async_video_fourcc(),
+        Some(FourCCVideoType::NV12),
+        "32 slots after b0's picture: the canvas"
+    );
+    for k in 33..=61 {
+        rig.max.ndi.push(at(k - 1), uyvy(2));
+        rig.out.submit(source(k, 0.25));
+    }
+    // b61's picture never comes: 29 in a row, then the count starts again.
+    rig.out.submit(source(62, 0.25));
+    for k in 63..=91 {
+        rig.max.ndi.push(at(k - 1), uyvy(2));
+        rig.out.submit(source(k, 0.25));
+        assert_eq!(
+            rig.backend.last_async_video_fourcc(),
+            Some(FourCCVideoType::NV12),
+            "boundary {k}: {} in a row since the missing one",
+            k - 62
+        );
+    }
+    assert_eq!(rig.max.ndi_status().switches, 2);
+    rig.max.ndi.push(at(91), uyvy(2));
+    rig.out.submit(source(92, 0.25));
+    assert_eq!(
+        rig.backend.video_timecodes().last(),
+        Some(&at(91)),
+        "30 in a row: back on the GPU, b92 held"
+    );
+    let status = rig.max.ndi_status();
+    assert_eq!((status.source, status.switches), ("gpu", 3), "{status:?}");
+}
+
+/// The setting's switch to the canvas ends a fallback's count: a later
+/// flip back to `gpu` goes to the GPU at the first fresh picture, as the
+/// first switch does.
+#[test]
+fn the_setting_s_canvas_ends_a_fallback_and_its_flip_back_is_at_once() {
+    let mut rig = rig(NdiSource::Gpu);
+    rig.max.ndi.push(at(0), uyvy(1));
+    rig.out.submit(source(0, 0.25));
+    rig.out.submit(source(1, 0.25));
+    rig.out.submit(source(32, 0.25));
+    assert_eq!(rig.max.ndi_status().switches, 2, "the stale fallback");
+    rig.max.set_ndi_source(NdiSource::Cpu);
+    rig.out.submit(source(33, 0.25));
+    rig.max.set_ndi_source(NdiSource::Gpu);
+    rig.max.ndi.push(at(33), uyvy(2));
+    rig.out.submit(source(34, 0.25));
+    assert_eq!(
+        rig.backend.video_timecodes().last(),
+        Some(&at(33)),
+        "b34 held: on the GPU at once"
+    );
+    let status = rig.max.ndi_status();
+    assert_eq!((status.source, status.switches), ("gpu", 3), "{status:?}");
 }
 
 /// A fade boundary from the GPU: its audio crossfaded as on the canvas,

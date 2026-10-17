@@ -212,6 +212,7 @@ fn serve_waits_after_the_vban_hand_off_and_before_the_ndi_submit() {
         .expect("mock sender");
     let vban = Arc::new(VbanOut::new());
     let max = Arc::new(MaxOut::new());
+    max.set_enabled(true);
     let v = Instant::now();
     max.video.publish_grid(Some(grid_through(v)), v);
     let log = Arc::new(Mutex::new(Vec::new()));

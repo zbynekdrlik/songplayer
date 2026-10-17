@@ -374,6 +374,68 @@ fn an_ndi_readback_proves_the_device_and_a_failed_one_does_not() {
     assert_eq!(max.ndi.newest_stamp(), Some(5));
 }
 
+/// A job served when nothing wants the compositor any more (MAX off and
+/// NDI on the canvas: a setting changed after the thread took it) builds
+/// nothing and composes nothing. MAX's 4K target and its `SP-program-MAX`
+/// Spout sender never appear for one stray boundary while MAX is off; the
+/// thread's next step releases the GPU.
+#[test]
+fn a_job_served_when_nothing_wants_the_compositor_builds_nothing() {
+    let a = picture(4, 2);
+    let t0 = Instant::now();
+    let max = MaxOut::new();
+    let gpu = FakeGpu::default();
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    let lines = worker.serve_lines(&plain(1, &a), t0, t0);
+    assert_eq!((lines.max, lines.fhd, lines.ndi), (None, None, None));
+    let log = gpu.log();
+    assert_eq!(
+        (
+            log.compositors_built,
+            log.senders_built,
+            log.composes,
+            log.sent
+        ),
+        (0, 0, 0, 0),
+        "MAX off, NDI on the canvas: nothing is built"
+    );
+    drop(log);
+    assert!(!worker.holds_gpu());
+
+    // NDI from the GPU with MAX off, then NDI back on the canvas while a
+    // job is in flight.
+    let max = ndi_on(false);
+    let gpu = FakeGpu::default();
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    worker.serve(&plain(1, &a), t0);
+    max.set_ndi_source(NdiSource::Cpu);
+    worker.serve(&plain(2, &a), t0);
+    let log = gpu.log();
+    assert!(log.targets_added.is_empty(), "no MAX target");
+    assert_eq!(
+        (log.senders_built, log.sent, log.composes),
+        (0, 0, 1),
+        "boundary 1 composed for NDI alone, boundary 2 not at all"
+    );
+    drop(log);
+    assert_eq!(max.status().submitted, 0, "nothing sent as MAX");
+}
+
+/// A release (nothing wants the compositor, a quiesce, the thread's end)
+/// lets the read-back pictures go: nothing takes them any more, and no
+/// 4 MB buffer stays out of `frame_pool` until NDI is on the GPU again.
+#[test]
+fn a_release_lets_the_read_back_pictures_go() {
+    let max = ndi_on(false);
+    let gpu = FakeGpu::default();
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    worker.serve(&plain(1, &picture(4, 2)), Instant::now());
+    assert_eq!(max.ndi.newest_stamp(), Some(1));
+    worker.release();
+    assert!(max.ndi.take(1).is_none(), "the feed let it go");
+    assert_eq!(max.ndi.newest_stamp(), Some(1), "its freshness stays");
+}
+
 /// A job the hand-off coalesced never reaches the thread: its boundary is
 /// never read back, and the `SP-program` sender repeats over the gap.
 #[test]
