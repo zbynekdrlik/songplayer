@@ -129,6 +129,7 @@ fn every_job_has_its_slovak_name() {
         ("ui_usage_prune", "mazanie starého záznamu používania"),
         ("play_history", "mazanie starej histórie prehrávania"),
         ("peer_leftovers", "mazanie záznamov výmeny bez skladby"),
+        ("cache_sweep", "čistenie cache"),
     ];
     for (job, sk) in names {
         assert_eq!(job_sk(job), sk);

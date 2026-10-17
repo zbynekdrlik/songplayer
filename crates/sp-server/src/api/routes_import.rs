@@ -5,7 +5,7 @@
 //! `routes.rs`. Extracting the body here NET-REDUCES `routes.rs`.
 
 use axum::http::StatusCode;
-use sqlx::Row;
+use sqlx::SqlitePool;
 
 use crate::AppState;
 use crate::api::routes::ImportVideoResp;
@@ -65,23 +65,54 @@ pub(crate) async fn import_video_core(
         Err(e) => return Err((StatusCode::BAD_REQUEST, format!("yt-dlp failed: {e}"))),
     };
 
-    let row = sqlx::query(
-        "INSERT INTO videos (playlist_id, youtube_id, title, duration_ms, normalized) \
-         VALUES (?, ?, ?, ?, 0) \
-         ON CONFLICT(playlist_id, youtube_id) DO UPDATE SET title = excluded.title \
-         RETURNING id",
+    let video_id = upsert_imported(
+        &state.pool,
+        playlist_id,
+        &meta.youtube_id,
+        &meta.title,
+        meta.duration_ms.map(|ms| ms as i64),
     )
-    .bind(playlist_id)
-    .bind(&meta.youtube_id)
-    .bind(&meta.title)
-    .bind(meta.duration_ms.map(|ms| ms as i64))
-    .fetch_one(&state.pool)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(ImportVideoResp {
-        video_id: row.get(0),
+        video_id,
         youtube_id: meta.youtube_id,
         title: meta.title,
     })
 }
+
+/// The import's row in `playlist_id` (`normalized = 0`, the download
+/// worker's next pick; an existing row only takes the title and keeps its
+/// mark). The row's id. The DB half of [`import_video_core`], apart from its
+/// yt-dlp fetch so a test can drive it.
+///
+/// #261: a NEW row of an inactive playlist is marked like the playlist's
+/// other songs: `removed_at` = its `deactivated_at` (NULL while active, and
+/// for the test item's playlist), the very mark its reactivation clears
+/// (`models_membership::reactivate`). One statement, so it reads the
+/// playlist as an activation's transaction left it.
+pub(crate) async fn upsert_imported(
+    pool: &SqlitePool,
+    playlist_id: i64,
+    youtube_id: &str,
+    title: &str,
+    duration_ms: Option<i64>,
+) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(
+        "INSERT INTO videos (playlist_id, youtube_id, title, duration_ms, normalized, removed_at) \
+         VALUES (?1, ?2, ?3, ?4, 0, (SELECT deactivated_at FROM playlists WHERE id = ?1)) \
+         ON CONFLICT(playlist_id, youtube_id) DO UPDATE SET title = excluded.title \
+         RETURNING id",
+    )
+    .bind(playlist_id)
+    .bind(youtube_id)
+    .bind(title)
+    .bind(duration_ms)
+    .fetch_one(pool)
+    .await
+}
+
+#[cfg(test)]
+#[path = "routes_import_tests.rs"]
+mod tests;

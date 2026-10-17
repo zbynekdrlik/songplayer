@@ -150,6 +150,7 @@ fn job_sk(job: &str) -> &str {
         "ui_usage_prune" => "mazanie starého záznamu používania",
         "play_history" => "mazanie starej histórie prehrávania",
         "peer_leftovers" => "mazanie záznamov výmeny bez skladby",
+        "cache_sweep" => "čistenie cache",
         other => other,
     }
 }

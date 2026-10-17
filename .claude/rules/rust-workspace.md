@@ -552,6 +552,14 @@ the platform string — round-trip the result through `std::env::split_paths` an
 check `parts[0] == tools_dir`, which holds on both separators. Same rule for any
 `MAIN_SEPARATOR` / line-ending / drive-letter / temp-path assumption in a test.
 
+**A file's time or size read through `read_dir` can lag on NTFS** (#261 lane 2
+review round 3). On Windows `DirEntry::metadata` comes from the directory
+index (`FindNextFileW`), which NTFS updates lazily, e.g. for a file still open.
+Production code that decides on a file's age reads `std::fs::symlink_metadata`
+of its path (its own record, no link followed: `data_size::walk_exact`,
+`cache_sweep::list_into`), and a test that pins a time read through a listing
+holds it only `if cfg!(unix)` (`data_size_tests.rs`).
+
 **A WARP (runner) premise is proven in CI before a test rests on it** (#223 S3b:
 Microsoft's page reads as if WARP takes `D3D11_CREATE_DEVICE_VIDEO_SUPPORT`,
 `windows-latest` refuses it at 11.x, three tests failed on correct code;
@@ -1212,6 +1220,7 @@ above your `old_string` anchor before an Edit that adds a sibling `mod`.
 - A test that runs its OWN copy of the handler's UPDATE ("mirror the handler's SQL") can never fail on a change to the handler. #144 deleted two of these: `reprocess_video_ids_sets_manual_priority` and `reprocess_all_stale_only_flags_stale_rows`.
 - A test for a DELETED route stays useful as a regression guard. `router(state, None)` has no SPA fallback (that needs a `dist_dir`), so a removed path answers 404. Assert the harmful effect is absent FIRST, so the RED fails for the right reason, and the 404 last.
 - **Use the route's REAL method, read from `api/mod.rs`, never from a ticket's wording** (#225 unit 2). axum answers 405 for an unrouted method before the handler runs. The playlist update is `PUT /api/v1/playlists/{id}`; the ticket called it "the PATCH", and five tests sent PATCH. On the no-compile box they were "RED" for the wrong reason and could never pass. Two fresh-context review rounds missed it; the third found it by reading the route table. Before writing a router test, `grep` the path in `api/mod.rs`.
+- **The test pool has ONE connection** (`db::create_memory_pool`, `max_connections(1)`; `test_state` uses it). A helper that holds it (`pool.acquire()`, an open transaction) while it, or the code it calls, runs another query on the pool waits out sqlx's 30 s acquire timeout and panics (#261 lane 2 review round 1: three import tests failed on the RED AND the GREEN tree, for the wrong reason). Change state through the real route (`PUT /api/v1/playlists/{id}` `{"is_active": …}`, `routes_import_tests.rs::set_active`), or run each query on `&pool` directly.
 
 ## A cross-crate test-only helper must be `#[doc(hidden)] pub`, NOT `#[cfg(test)]` (#203 2b)
 

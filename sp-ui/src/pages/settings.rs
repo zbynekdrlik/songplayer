@@ -4,7 +4,9 @@ use leptos::prelude::*;
 use std::collections::HashMap;
 
 use crate::api;
-use crate::components::{audio_outputs, resolume_hosts, settings_form, ui_usage_line};
+use crate::components::{
+    audio_outputs, data_size_line, resolume_hosts, settings_form, ui_usage_line,
+};
 use crate::store::DashboardStore;
 
 #[component]
@@ -37,6 +39,7 @@ pub fn SettingsPage() -> impl IntoView {
             <resolume_hosts::ResolumeHosts />
             <hr />
             <ui_usage_line::UiUsageLine />
+            <data_size_line::DataSizeLine />
         </div>
     }
 }

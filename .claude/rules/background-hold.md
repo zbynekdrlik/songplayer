@@ -47,7 +47,8 @@ already runs finishes ("blokne ďalšie spracovanie").
   (`break`), `lib.rs`'s sync consumer (drops the request; the 10 min periodic
   sync re-enqueues), the daily yt-dlp update (skips the tick), the #260
   retention (`Job::Retention`, its pass retried an hour later), #261's
-  daily bounds (`Job::PlayHistory`, `Job::PeerLeftovers`, the same timer),
+  daily bounds (`Job::PlayHistory`, `Job::PeerLeftovers`, and lane 2's
+  cache sweep `Job::CacheSweep` "čistenie cache", the same timer),
   and the peer
   exchange through `Exchange::transfers_paused` (= `peer_transfers_paused` OR
   the hold: no fetch, 503 on every peer route, no hashing). A NEW background

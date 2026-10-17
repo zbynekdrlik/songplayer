@@ -61,6 +61,9 @@ pub enum Job {
     PlayHistory,
     /// #261: the exchange's records of a video no row has any more go.
     PeerLeftovers,
+    /// #261: the cache's files no row needs any more go, and the data dir
+    /// is measured.
+    CacheSweep,
 }
 
 impl Job {
@@ -81,6 +84,7 @@ impl Job {
             Self::UiUsagePrune => "ui_usage_prune",
             Self::PlayHistory => "play_history",
             Self::PeerLeftovers => "peer_leftovers",
+            Self::CacheSweep => "cache_sweep",
         }
     }
 }
