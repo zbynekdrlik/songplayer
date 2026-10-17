@@ -15,7 +15,9 @@
 //! path's layout (`stride` = one chroma row, `height` luma rows, then
 //! ⌈height/2⌉ UV rows), so the rest of the pipeline cannot tell the paths
 //! apart. The texture's bind flags say whether the picture came out of the
-//! GPU decoder (`hw_decode::DecodePath::of_picture`: `D3D11_BIND_DECODER`).
+//! GPU decoder (`hw_decode::DecodePath::of_picture`: `D3D11_BIND_DECODER`);
+//! a picture of a file opened scaled (#282) lies in the video processor's
+//! texture and counts as the GPU's (`DecodePath::of_surface`).
 //!
 //! `read_texture_as_decoded_sample` (doc-hidden) runs this readback on a
 //! texture the caller made, wrapped the way a decoder wraps its output: the
@@ -41,7 +43,8 @@ pub struct DxgiPicture {
     pub data: Vec<u8>,
     /// Their row stride.
     pub stride: u32,
-    /// Whether the texture was a decoder's output (`D3D11_BIND_DECODER`).
+    /// Whether the texture was a decoder's output (`D3D11_BIND_DECODER`),
+    /// or the video processor's of a scaled open (#282).
     pub path: DecodePath,
 }
 
@@ -72,9 +75,15 @@ impl DxgiSurface {
     }
 
     /// Copy the `width`×`height` picture out of the surface into a
-    /// `frame_pool` buffer, and say where it came from.
-    pub(super) fn read(&self, width: u32, height: u32) -> Result<DxgiPicture, DecoderError> {
-        read_picture(&self.buffer, &self.dxgi, width, height)
+    /// `frame_pool` buffer, and say where it came from (`scaled`: the file
+    /// was opened scaled to the decode cap, #282).
+    pub(super) fn read(
+        &self,
+        width: u32,
+        height: u32,
+        scaled: bool,
+    ) -> Result<DxgiPicture, DecoderError> {
+        read_picture(&self.buffer, &self.dxgi, width, height, scaled)
     }
 }
 
@@ -112,6 +121,7 @@ fn read_picture(
     dxgi: &IMFDXGIBuffer,
     width: u32,
     height: u32,
+    scaled: bool,
 ) -> Result<DxgiPicture, DecoderError> {
     let desc = surface_desc(dxgi)?;
     let two_d: IMF2DBuffer2 = buffer
@@ -158,7 +168,7 @@ fn read_picture(
     Ok(DxgiPicture {
         data: picture,
         stride: copy.stride,
-        path: DecodePath::of_picture(Some(desc.BindFlags)),
+        path: DecodePath::of_surface(desc.BindFlags, scaled),
     })
 }
 
@@ -183,5 +193,5 @@ pub fn read_texture_as_decoded_sample(
     let surface = DxgiSurface::of(&sample)?.ok_or_else(|| {
         DecoderError::BufferLock("the wrapped texture is not a DXGI surface".into())
     })?;
-    surface.read(width, height)
+    surface.read(width, height, false)
 }
