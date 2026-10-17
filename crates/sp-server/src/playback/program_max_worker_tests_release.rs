@@ -26,7 +26,7 @@ fn release_drops_the_sender_then_the_compositor_and_forgets_the_backoff() {
         worker.holds_gpu(),
         "a compositor without a sender is still held"
     );
-    worker.release();
+    worker.release(Instant::now());
     assert!(!worker.holds_gpu());
     assert_eq!(gpu.log().drops, ["sender", "compositor"]);
     worker.serve(&MaxJob::Black { stamp_100ns: 2 }, t0);
@@ -37,7 +37,7 @@ fn release_drops_the_sender_then_the_compositor_and_forgets_the_backoff() {
         "switched back on: built at once, the backoff is forgotten"
     );
     drop(log);
-    worker.release();
+    worker.release(Instant::now());
     assert_eq!(
         gpu.log().drops,
         ["sender", "compositor", "sender", "compositor"],
@@ -54,7 +54,7 @@ fn a_release_forgets_the_pictures_it_held() {
     let a = picture(4, 2);
     let t0 = Instant::now();
     worker.serve(&plain(1, &a), t0);
-    worker.release();
+    worker.release(Instant::now());
     worker.serve(&plain(2, &a), t0);
     assert_eq!(
         gpu.log().drawn,

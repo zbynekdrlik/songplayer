@@ -620,7 +620,7 @@ fn release_drops_both_senders_then_the_compositor() {
     worker.serve(&black(1), Instant::now());
     worker.serve(&black(2), Instant::now());
     assert_eq!(max.fhd_listed(), Some(FAKE_LISTED), "both went out");
-    worker.release();
+    worker.release(Instant::now());
     assert!(!worker.holds_gpu());
     assert_eq!(gpu.log().drops, ["sender", "fhd sender", "compositor"]);
     assert_eq!(max.fhd_listed(), None, "released: listed nowhere");

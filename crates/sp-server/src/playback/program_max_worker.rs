@@ -853,7 +853,7 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     /// thread stops: drop both senders (Spout unregisters the names), then
     /// the compositor, and forget every backoff; NDI's read-back pictures
     /// go too (nothing takes them, no 4 MB buffer stays pinned).
-    pub fn release(&mut self) {
+    pub fn release(&mut self, _now: Instant) {
         if self.holds_gpu() {
             info!("program max: the Spout senders and the compositor are released");
         }
@@ -872,7 +872,7 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     /// quiesce holds, so no Spout call runs and the kill can never leave a
     /// Spout lock abandoned.
     pub fn quiesce(&mut self) {
-        self.release();
+        self.release(Instant::now());
         self.list.stop(self.out);
         self.out.record_quiesced();
         info!("program max: quiesced - no Spout call while the quiesce holds");
@@ -953,13 +953,13 @@ pub fn run_max_loop<G: MaxGpu>(
             MaxNext::Job(job, offered) => {
                 worker.serve_offered(&job, offered, Instant::now());
             }
-            MaxNext::Release => worker.release(),
+            MaxNext::Release => worker.release(Instant::now()),
             MaxNext::Quiesce => worker.quiesce(),
             MaxNext::Resume => worker.resume(),
             MaxNext::Stop => break,
         }
     }
-    worker.release();
+    worker.release(Instant::now());
     info!("program max: stopped");
 }
 

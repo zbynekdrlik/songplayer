@@ -555,9 +555,11 @@ fn a_switch_to_the_canvas_times_both_submits() {
     );
 }
 
-/// The setting's switch to the canvas lets the feed's pictures go after
-/// the held pair's flush (review round 4): nothing will take them, and the
-/// thread lets them go only while it holds a compositor.
+/// Under the setting's canvas this output lets the feed's pictures go,
+/// AFTER the held pair's flush took its own (review rounds 4-5: the flush
+/// first, so it repeats nothing), and at every such boundary, not only the
+/// switch: the `program-max` thread no longer lets them go, and it can
+/// push one more picture after the switch (it read the setting late).
 #[test]
 fn the_setting_s_switch_lets_the_feed_s_pictures_go() {
     let mut rig = rig(NdiSource::Gpu);
@@ -572,7 +574,19 @@ fn the_setting_s_switch_lets_the_feed_s_pictures_go() {
         [at(0), at(1)],
         "b0 flushed with its picture, b1 on the canvas"
     );
+    assert_eq!(
+        rig.max.ndi_status().repeats,
+        0,
+        "the flush took b0's picture before the feed let it go"
+    );
     assert!(rig.max.ndi.take(at(2)).is_none(), "the feed let it go");
+    // The thread read the setting late: one more picture after the switch.
+    rig.max.ndi.push(at(3), uyvy(4));
+    rig.out.submit(source(2, 0.25));
+    assert!(
+        rig.max.ndi.take(at(3)).is_none(),
+        "the next canvas boundary let it go too"
+    );
 }
 
 /// Every canvas boundary forgets the last read-back picture: after a

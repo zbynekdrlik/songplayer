@@ -3,9 +3,11 @@
 //! target while NDI comes from the GPU, its readback pushed into the feed
 //! after the compose and BEFORE MAX's send, a Black boundary's cached black
 //! (nothing mapped), MAX off composing the FHD target alone, the pass off
-//! with NDI, a failed enable's backoff, and what a failed readback, a lost
+//! with NDI, a failed enable's backoff, a device lost at the enable, the
+//! pass's log (a release says off), and what a failed readback, a lost
 //! device or a coalesced job leave in the feed (nothing: the `SP-program`
-//! sender repeats).
+//! sender repeats). The thread never lets the feed's pictures go: the
+//! sender does (review round 5).
 //! Wired via `#[cfg(test)] #[path = "program_max_worker_tests_ndi.rs"] mod tests_ndi;`.
 
 use std::sync::Arc;
@@ -207,8 +209,8 @@ fn ndi_back_on_the_canvas_disables_the_pass() {
     drop(log);
     assert_eq!(
         taken(&max, 1),
-        None,
-        "the pass went off: the feed let its pictures go"
+        Some(fake_uyvy(1)),
+        "the pass went off, the picture stays: the SP-program sender lets it go (review round 5)"
     );
     assert_eq!(taken(&max, 2), None, "boundary 2 was not read back");
     assert_eq!(taken(&max, 3), Some(fake_uyvy(3)));
@@ -491,18 +493,81 @@ fn a_job_served_when_nothing_wants_the_compositor_builds_nothing() {
 }
 
 /// A release (nothing wants the compositor, a quiesce, the thread's end)
-/// lets the read-back pictures go: nothing takes them any more, and no
-/// 4 MB buffer stays out of `frame_pool` until NDI is on the GPU again.
+/// leaves the read-back pictures in the feed (review round 5 F1): the
+/// `SP-program` sender may still flush its held pair with the newest one,
+/// and it lets them go itself once NDI is on the canvas.
 #[test]
-fn a_release_lets_the_read_back_pictures_go() {
+fn a_release_leaves_the_read_back_pictures_to_the_sender() {
     let max = ndi_on(false);
     let gpu = FakeGpu::default();
     let mut worker = MaxWorker::new(&max, gpu.clone());
     worker.serve(&plain(1, &picture(4, 2)), Instant::now());
     assert_eq!(max.ndi.newest_stamp(), Some(1));
-    worker.release();
-    assert!(max.ndi.take(1).is_none(), "the feed let it go");
-    assert_eq!(max.ndi.newest_stamp(), Some(1), "its freshness stays");
+    worker.release(Instant::now());
+    assert_eq!(gpu.log().drops, ["compositor"], "released");
+    assert_eq!(taken(&max, 1), Some(fake_uyvy(1)), "the picture stays");
+}
+
+/// Review round 5 F2: with MAX off nothing composes once NDI is on the
+/// canvas (`serve_lines` returns before the pass), so the thread's release
+/// is where the pass's log says "off"; NDI back on the GPU is then news.
+#[test]
+fn with_max_off_the_release_says_the_pass_is_off() {
+    let max = ndi_on(false);
+    let gpu = FakeGpu::default();
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    let a = picture(4, 2);
+    let t0 = Instant::now();
+    let window = Duration::from_nanos(MAX_LOG_EVERY_100NS as u64 * 100);
+    let lines = worker.serve_lines(&plain(1, &a), t0, t0);
+    assert_eq!(lines.ndi_pass, Some((PassLine::On, 0)));
+    max.set_ndi_source(NdiSource::Cpu);
+    let t1 = t0 + window;
+    let lines = worker.serve_lines(&plain(2, &a), t1, t1);
+    assert_eq!(lines.ndi_pass, None, "nothing wants the compositor");
+    worker.release(t1);
+    max.set_ndi_source(NdiSource::Gpu);
+    let t2 = t1 + window;
+    let lines = worker.serve_lines(&plain(3, &a), t2, t2);
+    assert_eq!(
+        lines.ndi_pass,
+        Some((PassLine::On, 0)),
+        "the release said off, so on again is said"
+    );
+}
+
+/// Review round 5 B5-1: with MAX off nothing composes before the pass is
+/// on, so a device lost at the pass's enable is lost right there, like one
+/// lost while building: the compositor goes, and after the backoff a new
+/// one is built, its pass enabled and read back. (The removed compositor
+/// used to be kept, its enable failing every backoff for good.)
+#[test]
+fn with_max_off_a_device_lost_at_the_pass_s_enable_is_rebuilt_after_the_backoff() {
+    let max = ndi_on(false);
+    let gpu = FakeGpu::default();
+    gpu.script().enable_uyvy.push_back(device_lost());
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    let a = picture(4, 2);
+    let t0 = Instant::now();
+    let lines = worker.serve_lines(&plain(1, &a), t0, t0);
+    let log = gpu.log();
+    assert_eq!(log.drops, ["compositor"], "lost at the enable");
+    assert_eq!(log.composes, 0);
+    drop(log);
+    assert_eq!(lines.ndi, Some(LogLine::Failing { held_back: 0 }));
+    assert_eq!(max.status().device_resets, 1);
+    let early = t0 + MAX_RETRY_BACKOFF - Duration::from_millis(1);
+    worker.serve(&plain(2, &a), early);
+    assert_eq!(gpu.log().compositors_built, 1, "the backoff runs");
+    worker.serve(&plain(3, &a), t0 + MAX_RETRY_BACKOFF);
+    let log = gpu.log();
+    assert_eq!(
+        (log.compositors_built, log.uyvy_enabled),
+        (2, 1),
+        "rebuilt, the pass on"
+    );
+    drop(log);
+    assert_eq!(taken(&max, 3), Some(fake_uyvy(1)), "read back");
 }
 
 /// A job the hand-off coalesced never reaches the thread: its boundary is

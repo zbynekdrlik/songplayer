@@ -960,6 +960,9 @@ mod tests_max;
 #[path = "program_output_tests_ndi.rs"]
 mod tests_ndi;
 #[cfg(test)]
+#[path = "program_output_tests_ndi_switch.rs"]
+mod tests_ndi_switch;
+#[cfg(test)]
 #[path = "program_output_tests_order.rs"]
 mod tests_order;
 #[cfg(test)]
