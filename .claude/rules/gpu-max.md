@@ -9,6 +9,8 @@ paths:
   - "crates/sp-server/src/playback/program_output_ndi*.rs"
   - "crates/sp-server/src/playback/program_output_tests_ndi*.rs"
   - "crates/sp-server/src/api/program_tests_ndi.rs"
+  - "crates/sp-server/src/playback/picture*.rs"
+  - "crates/sp-server/src/playback/pacer_tests_gpu.rs"
   - "src-tauri/resources/THIRD-PARTY-NOTICES.txt"
   - "e2e/post-deploy-max.spec.ts"
   - "e2e/max-gate*.ts"
@@ -29,7 +31,9 @@ step 2: from a SECOND TARGET of the same compositor (one device, one upload
 of each picture, both targets drawn at the compose phase). #279 P1b: the
 FHD program is that compositor's PRIMARY target and MAX's the ADDED one, and
 the FHD target also feeds NDI `SP-program` (a UYVY readback, one slot late:
-"NDI `SP-program` from the GPU readback" below).
+"NDI `SP-program` from the GPU readback" below). #279 P2: the picture
+ring, `GpuFrame` and a composition's ring-frame sides ("The picture ring"
+below).
 
 ## What one boundary draws (`composition.rs`)
 
@@ -1861,6 +1865,113 @@ The colour (P1a review round 1): NV12 limited → full-range BGRA (clipped)
 → limited UYVY, about ±1 code against the canvas; sub-black and
 super-white clip. The A/V and colour gates must expect it.
 
+## The picture ring, `GpuFrame` and `Side::Gpu` (#279 P2)
+
+Design: #279 comment 6237269720; plan
+`docs/superpowers/plans/2026-10-16-gpu-video-path.md` §5.3, §5.4, §9 P2.
+Each playlist will decode on its own producer device and copy every
+picture into one slot of its pipeline's RING: an NV12 texture shared with
+the compositor's device by an NT handle and a keyed mutex (the P0 probe
+proved it). The picture then travels as a `GpuFrame` and MAX samples the
+slot in place: no readback, no upload. P2 builds the ring and the
+plumbing; NOTHING writes a ring in production until P3a (no runtime
+behaviour change).
+
+- **The decisions are pure (`ring_state.rs`, Linux-tested, gated):**
+  - slots: `RING_CAPACITY` = 20 (the decode queue's 12 + 8); a slot is in
+    use while a frame refers to it, written again only once free;
+  - size classes (`SizeClass::of`: the format and the picture's sides
+    rounded up to even): at most `MAX_SIZE_CLASSES` = 2 kept, the most
+    recently written first; a free slot of a class no longer kept is
+    emptied at once, an in-use one at its last drop; with no empty slot a
+    write takes a free slot of the other class;
+  - `RingState::take` → `Reuse {slot, alloc_gen, key}` / `Create {slot,
+    alloc_gen}` / `Full` / `Dead`; `release(slot, alloc_gen)` →
+    `Freed` / `Dropped` / `Stale` (a slot made again is another
+    allocation: a stale drop changes nothing);
+  - keys: a new texture's mutex holds `KEY_PRODUCER` (0), every release
+    leaves `KEY_CONSUMER` (1) (`producer_key(written)`); the writer
+    acquires the last key (`PRODUCER_ACQUIRE_MS`), the compositor key 1
+    with 0 ms (`CONSUMER_ACQUIRE_MS`: never blocks);
+  - `Acquired::of(raw HRESULT)` (the `windows` crate reads 0x102 / 0x80 as
+    `Ok`, P0) and `kills_ring` (abandoned or failed kill the ring; busy
+    only misses one draw);
+  - `copy_box(visible, surface)`: the even box inside the surface (a
+    decoder's 16-row padded texture), none for an empty picture or a side
+    over 16384;
+  - `wait_left` (the write's bound) and `OpenedKeys` (the compositor opens
+    a slot once per `SlotKey {ring, slot, alloc_gen}`, closes an older
+    allocation of the same slot the moment the new one is drawn, at most
+    `OPENED_MAX` = 64 open, the least recently drawn closed first).
+- **`ring.rs`: the shared state and the frames.** `RingCore` = the state
+  under a poison-tolerant `Mutex` + a `Condvar` a drop notifies; a write
+  waits while every slot is in use (`wait_timeout_while(!has_room)`,
+  `RING_WAIT` = 100 ms, counted `waits`), then `GpuError::RingFull
+  {waited_ms}` (counted `full`); a dead ring is `RingDead` and wakes its
+  waiter. `hand_over` marks the slot written and makes the
+  `GpuFrame(Arc<FrameInner>)`: a process-wide id (never reused: MAX's
+  label), the picture's size, its slot texture's even size, `key()`, a
+  doc-hidden `shared_handle()`; the LAST clone's drop frees the slot;
+  `keep` (Windows: the NT handle) lives exactly as long. `FakeRing`
+  (doc-hidden, every platform) takes and frees slots exactly like the real
+  ring, its handle `4·(slot + 1)`: sp-server's tests use it.
+- **`win/ring.rs` `PictureRing` (glue, out of the gate):**
+  `copy_from(source, subresource, visible)` refuses a source that is not
+  NV12 (`RingSourceFormat`) or has no copy box (`RingPicture`), takes a
+  slot, makes its texture when told (`BIND_SHADER_RESOURCE`,
+  `MISC_SHARED_NTHANDLE | MISC_SHARED_KEYEDMUTEX`, `CreateSharedHandle`),
+  acquires the producer key (the raw HRESULT through the vtable),
+  `CopySubresourceRegion`s the even box (a texture-array slice works),
+  `Flush`es, `ReleaseSync(1)`, hands over. An abandoned or failed acquire
+  kills the ring; a failed write gives the slot back.
+- **The compositor (`win/sides.rs` `RingSlots`, glue).** Each compose:
+  every ring slot of `Composition::frames()` (each slot once, a fade's two
+  sides of one slot too) opened ONCE on its device (`OpenSharedResource1`,
+  R8 + R8G8 views, `gpu_opens`), acquired with key 1 / 0 ms and counted by
+  the pure `ComposeStats::count_gpu_side`: held = drawn (`gpu_sides`), busy
+  = black this boundary (`km_acquire_timeouts`), abandoned / failed / an
+  open that failed = black, `abandoned`, the ring killed; released after
+  the GPU wait. A lost device propagates `DeviceLost`. Only
+  `Composition::uploads()` (the CPU sides) are uploaded; residency ids are
+  the CPU labels only.
+- **`Side { Cpu(Nv12Picture), Gpu(&GpuFrame) }`** is a layer's picture
+  (`Composition::Picture(Side)`, `Fade {from, to}`). `quad::uv_in_texture`
+  scales a layer's uv by picture / texture size, so an odd picture never
+  samples its even slot's extra column or row (the identity for an
+  uploaded picture). `reference.rs` reads `None` for a ring layer: model
+  the CPU picture written into the slot.
+- **sp-server: `playback/picture.rs`.** `Picture { Cpu(SharedFrame),
+  Gpu(GpuFrame) }` is the `video` of `PacedFrame`, `SubmitJob`,
+  `FrameBlend`, `MaxPicture`, the producer's `Held`, the pre-roll's
+  `StandbyBlack` / `FillFrame`, `Standby::Black` and the paced consumer's
+  `FillPicture`; every hop clones it by `Arc`, `ptr_eq` is an identity per
+  kind (never across kinds). `MaxPicture::side(id)` = an upload or the
+  frame itself; `PictureIds` labels a ring frame by `GpuFrame::id` and
+  spends no counter id on it (only CPU pictures are held by allocation).
+  The CPU-only consumers read through `Picture::cpu_for(CpuUse, &mut
+  CpuMisses)`: `SP-program`'s canvas shows black (a blend partner's side
+  black), a held step's preview tap gets no picture but its audio
+  (`DecodeTaps::offer_audio`); each miss is counted per consumer and its
+  first one WARNed, never a panic (`ProgramOutput::canvas_misses` is the
+  tests' view, `DecodeProducer::preview_misses`). The standby blacks stay
+  CPU. Tests read CPU bytes through the test-only `Picture::expect_cpu`.
+- Not on the API yet: `ComposeStats::{gpu_sides, gpu_opens,
+  km_acquire_timeouts, abandoned}` and `RingStats` (P3a's telemetry).
+- **Tests.** sp-gpu: `ring_state_tests.rs`, `ring_tests.rs` (a write
+  waits for a drop, threads with a safe-direction window), the `Side` /
+  `uv_in_texture` / reference / `count_gpu_side` pins, and WARP
+  `tests/ring.rs`: a slot written on one device drawn on another within
+  S1a's reference, opened once and uploading nothing; slice 2 of a
+  4-slice 640×368 array; a fade of an upload and a slot, and of two
+  slots; a slot held by a third device drawn black and counted, then
+  drawn; a full ring's `RingFull` then a reuse; the refusals; an odd
+  picture's even texture. sp-server (`FakeRing`): `picture_tests.rs`,
+  `pacer_tests_gpu.rs` (emit / repeat / blend / frozen / seek hold carry
+  the same frame, every slot free after), the consumer's fill, the bus,
+  `ProgramOutput`'s MAX offer and canvas miss, `PictureIds` and the
+  worker (`program_max_worker_tests_gpu.rs`), a held ring frame's
+  preview.
+
 ## HLSL at runtime
 
 `compose.hlsl` (`include_str!`) is compiled by `D3DCompile`
@@ -1889,7 +2000,10 @@ build step, and WARP and the RTX run the same source. A compile error is
   `feature_step`, `pixel_step`, `content_step`, `probe_picture`, `Vram`)
   and #279 P1a's `uyvy` (the conversion rows and their constant buffer,
   the pair model and the reference, the size rule, the map error, the
-  staging ring).
+  staging ring), #279 P2's `ring_state` (the ring's slots, classes,
+  keys, acquire answers, waits and open slots), `ring` (its shared state,
+  the frames, `FakeRing`) and `stats::count_gpu_side`; `win/ring.rs` and
+  `win/sides.rs` only call D3D11.
   Keep
   it that way: logic added inside `win/` is untested by the gate.
   `win/vblank.rs` only calls DXGI / Win32 (`EnumOutputs`, `GetDesc`, which
