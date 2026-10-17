@@ -4,17 +4,25 @@
 //!
 //! - While `program_ndi_source` = `gpu` (`Wants::ndi`) P1a's UYVY pass is
 //!   enabled on the compositor's PRIMARY target, the FHD program
-//!   ([`MaxWorker::ndi_pass`]); otherwise it is disabled, so the CPU mode
+//!   (`MaxWorker::ndi_pass`); otherwise it is disabled, so the CPU mode
 //!   pays no readback. A failed enable is tried again only after
-//!   [`MAX_RETRY_BACKOFF`] (it makes textures and compiles a shader); a lost
-//!   device is left to the compose's own check. The pass has ONE log, a
-//!   `StateLog` of its state ([`PassLine`]: off, on, failing), observed at
-//!   every boundary the thread has a compositor: one INFO when it goes on
-//!   or off, one WARN per failing spell, a change inside the log's window
-//!   said after it, as the state is then, and no line outside it (review
-//!   rounds 3-4: an enable log observed only at an attempt stayed on an
-//!   old failure, and a line written at every enable and disable could
-//!   contradict it).
+//!   [`MAX_RETRY_BACKOFF`] (it makes textures and compiles a shader). A
+//!   device lost at the enable is lost there, like one lost while building
+//!   ([`MaxWorker::device_ready`], review round 5 B5-1: with MAX off
+//!   nothing else composes to find it, and the removed compositor was
+//!   kept, its enable failing every backoff for good).
+//! - The pass has ONE log, a `StateLog` of its state ([`PassLine`]: off,
+//!   on, failing), observed at every boundary that holds a compositor and
+//!   at each release (review round 5 F2: with MAX off nothing observed it
+//!   after NDI's switch to the canvas, and its last line stayed "on"): one
+//!   INFO when it goes on or off, one WARN per failing spell, a change
+//!   inside the log's window said after it, as the state is then, and no
+//!   line outside it (review rounds 3-4). Like `LogGate`, it can stay one
+//!   change behind: a release inside the window, or a pass gone with the
+//!   device while the rebuild waits its backoff (nothing observes it then).
+//! - The thread never lets the feed's pictures go: the `SP-program` sender
+//!   does, after the held pair's flush (review round 5 F1: the thread
+//!   usually saw the setting first, and the held pair repeated a picture).
 //! - After each compose, at the compose instant and BEFORE the Spout sends
 //!   (a 67 ms Spout lock wait never delays NDI), [`read_back`] maps the
 //!   staging copy (`read_uyvy`, never a wait) into a `frame_pool` buffer
@@ -32,7 +40,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use sp_gpu::{FHD_TARGET, TargetId};
+use sp_gpu::{FHD_TARGET, GpuError, TargetId};
 use tracing::{info, warn};
 
 use super::{
@@ -72,7 +80,8 @@ fn pass_line(wanted: bool, on: bool, failing: Option<&Arc<str>>) -> PassLine {
 pub(super) struct NdiPass {
     /// The UYVY pass is enabled on the compositor (it goes with it).
     pub(super) on: bool,
-    /// No enable before this instant (a failed one waits the backoff).
+    /// No enable before this instant (a failed one waits the backoff);
+    /// read only while the pass is not on, and forgotten with it.
     retry_at: Option<Instant>,
     /// The constant UYVY black a Black boundary pushes, built once.
     black: BlackUyvy,
@@ -82,8 +91,10 @@ pub(super) struct NdiPass {
     /// log: they outlive a compositor, like MAX's.
     failing: Option<String>,
     log: LogGate,
-    /// Why the pass could not be enabled (`None`: it was, or nothing
-    /// tried), and the pass's ONE log: they outlive a compositor.
+    /// Why the last enable failed (`None`: none failed yet): read only while
+    /// the pass is wanted and not on, which is right after a failed enable
+    /// or during its backoff, so it is never an older spell's error; it and
+    /// the pass's ONE log outlive a compositor.
     enable_failing: Option<Arc<str>>,
     pass_log: StateLog<PassLine>,
 }
@@ -97,33 +108,77 @@ impl NdiPass {
 }
 
 impl<G: MaxGpu> MaxWorker<'_, G> {
+    /// The compositor built (`build_device`) and its UYVY pass as NDI
+    /// `wanted`s it (`ndi_pass`): a device lost at the pass's enable fails
+    /// the build (review round 5 B5-1), so the boundary goes on as after a
+    /// failed build. Returns the pass log's line too (none when the build
+    /// failed: nothing observes the pass then).
+    pub(super) fn device_ready(
+        &mut self,
+        wanted: bool,
+        now: Instant,
+    ) -> (Result<(), Skip>, Option<(PassLine, u64)>) {
+        if let Err(skip) = self.build_device(now) {
+            return (Err(skip), None);
+        }
+        let (lost, line) = self.ndi_pass(wanted, now);
+        match lost {
+            Some(error) => (Err(Skip::Failed(error)), line),
+            None => (Ok(()), line),
+        }
+    }
+
     /// The UYVY pass on the compositor's primary (FHD) target while NDI is
     /// `wanted`, off otherwise (a backoff forgotten). Nothing without a
-    /// compositor. Returns the line the pass's log wrote (its state and
-    /// the boundaries held back): the log is observed at every boundary.
-    pub(super) fn ndi_pass(&mut self, wanted: bool, now: Instant) -> Option<(PassLine, u64)> {
-        let compositor = self.device.compositor.as_mut()?;
+    /// compositor. The feed is left alone: the `SP-program` sender lets its
+    /// pictures go (review round 5 F1). A device lost at the enable is lost
+    /// here, as while building (`lose_device`: the compositor goes, the
+    /// rebuild waits the backoff). Returns that loss and the line the
+    /// pass's log wrote (its state and the boundaries held back): the log
+    /// is observed at every boundary that holds a compositor.
+    fn ndi_pass(
+        &mut self,
+        wanted: bool,
+        now: Instant,
+    ) -> (Option<GpuError>, Option<(PassLine, u64)>) {
+        let Some(compositor) = self.device.compositor.as_mut() else {
+            return (None, None);
+        };
+        let mut lost = None;
         if !wanted {
             if self.ndi.on {
                 compositor.disable_uyvy();
             }
             self.ndi.forget();
-            // Nothing takes them any more: no 4 MB buffer stays pinned.
-            self.out.ndi.clear();
         } else if !self.ndi.on && self.ndi.retry_at.is_none_or(|retry| now >= retry) {
             match compositor.enable_uyvy(TargetId::PRIMARY) {
-                Ok(()) => {
-                    self.ndi.on = true;
-                    self.ndi.retry_at = None;
-                    self.ndi.enable_failing = None;
-                }
+                Ok(()) => self.ndi.on = true,
                 Err(error) => {
                     self.ndi.retry_at = Some(now + MAX_RETRY_BACKOFF);
                     self.ndi.enable_failing = Some(Arc::from(error.to_string()));
+                    lost = error.is_device_lost().then_some(error);
                 }
             }
         }
         let state = pass_line(wanted, self.ndi.on, self.ndi.enable_failing.as_ref());
+        let line = self.say_pass(state, now);
+        if lost.is_some() {
+            self.lose_device(now, true);
+        }
+        (lost, line)
+    }
+
+    /// The thread let the GPU go (`release`): the pass went with the
+    /// compositor, and its log says "off" (review round 5 F2: with MAX off
+    /// nothing observed it after NDI's switch to the canvas, and its last
+    /// line stayed "on").
+    pub(super) fn pass_released(&mut self, now: Instant) {
+        self.say_pass(PassLine::Off, now);
+    }
+
+    /// The pass's log at `now`: `state`'s line when one is due (its
+    /// `StateLog`), written and returned with the boundaries held back.
+    fn say_pass(&mut self, state: PassLine, now: Instant) -> Option<(PassLine, u64)> {
         let at = elapsed_100ns(self.started, now);
         let held_back = self
             .ndi

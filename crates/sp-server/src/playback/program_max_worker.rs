@@ -486,17 +486,17 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
                 ndi_pass: None,
             };
         }
-        if let Err(skip) = self.build_device(now) {
+        let (built, ndi_pass) = self.device_ready(wants.ndi, now);
+        if let Err(skip) = built {
             let unsupported = matches!(skip, Skip::Unsupported);
             let fhd = (wants.fhd && !unsupported).then(|| Err(skip.clone()));
             return Went {
                 ndi: ndi::ndi_report(wants, Some(Err(skip.clone()))),
                 max: wants.max.then_some(Err(skip)),
                 fhd,
-                ndi_pass: None,
+                ndi_pass,
             };
         }
-        let ndi_pass = self.ndi_pass(wants.ndi, now);
         let max_built = wants.max.then(|| self.build(Which::Max, now));
         let max_ok = matches!(max_built, Some(Ok(())));
         // #239: MAX goes first, whole. An FHD sender still to build (a
@@ -851,13 +851,14 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
 
     /// Nothing wants the compositor (MAX off and NDI on the CPU), or the
     /// thread stops: drop both senders (Spout unregisters the names), then
-    /// the compositor, and forget every backoff; NDI's read-back pictures
-    /// go too (nothing takes them, no 4 MB buffer stays pinned).
-    pub fn release(&mut self, _now: Instant) {
+    /// the compositor, and forget every backoff; the UYVY pass's log says
+    /// off at `now`. NDI's read-back pictures are the `SP-program` sender's
+    /// to let go (#279 P1b review round 5: it may still flush the held pair).
+    pub fn release(&mut self, now: Instant) {
         if self.holds_gpu() {
             info!("program max: the Spout senders and the compositor are released");
         }
-        self.out.ndi.clear();
+        self.pass_released(now);
         self.drop_gpu();
         self.device.retry_at = None;
         self.max.retry_at = None;

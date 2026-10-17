@@ -11,8 +11,8 @@
 //!   the ones it held back for the next WARN to report;
 //! - [`StateLog`] (#279 P1b review round 3): a state's changes for the
 //!   log, through a `WarnLimiter`, a change held back said after the
-//!   window as the state is then (the `program-max` thread's `LogGate`
-//!   and NDI `SP-program`'s switch lines).
+//!   window as the state is then (the `program-max` thread's `LogGate`,
+//!   its UYVY pass's log, and NDI `SP-program`'s switch lines).
 
 /// A sample with a "worst of two": each figure's max.
 pub trait Worst: Copy + Default {

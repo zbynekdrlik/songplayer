@@ -42,8 +42,15 @@
 //!   on-time take, or `take_on_time` at the switch), so a picture missing
 //!   right after it repeats that boundary, the black only when the
 //!   boundary before was not read back (review round 3: a first entry used
-//!   to send the black). The setting's switch to the canvas lets the
-//!   feed's pictures go after the held pair's flush (review round 4).
+//!   to send the black) — or was let go by a canvas boundary between, a
+//!   gpu → cpu → gpu flip within one boundary, which the 5 s settings poll
+//!   never makes.
+//! - The feed: this output ALONE lets its pictures go, at every canvas
+//!   boundary under the setting, after the held pair's flush took its
+//!   picture (review rounds 4-5). The `program-max` thread used to let
+//!   them go too, and usually saw the setting's switch first: the held
+//!   pair then repeated the picture before (round 5 F1). A picture the
+//!   thread pushes after the switch goes at the next such boundary.
 //!
 //! So picture and audio move together, the stamps are b − 1's exactly as
 //! the canvas would have stamped them, and the delay is a constant slot
@@ -183,10 +190,12 @@ impl<B: NdiBackend> ProgramOutput<B> {
                     .take()
                     .map(|held| (now(), self.send_held(held)));
                 self.ndi.last = None;
-                // Nothing takes the feed's pictures any more (the thread
-                // lets them go too, but only while it holds a compositor).
-                if switched
-                    && why == CpuWhy::Setting
+                // Nothing takes the feed's pictures under the setting: this
+                // output alone lets them go, after the flush took its
+                // picture, at every such boundary (review round 5 F1: the
+                // thread usually saw the setting first and let the held
+                // pair's picture go; one it pushes late goes next time).
+                if why == CpuWhy::Setting
                     && let Some(max) = &self.max
                 {
                     max.ndi.clear();

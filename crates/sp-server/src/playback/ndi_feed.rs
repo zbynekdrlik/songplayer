@@ -136,8 +136,8 @@ impl FeedCore {
         picture
     }
 
-    /// The pictures go (the pass is off: nothing will take them); the
-    /// counters and the freshness stay.
+    /// The pictures go (NDI is on the canvas by the setting: nothing will
+    /// take them); the counters and the freshness stay.
     pub fn clear(&mut self) {
         self.pictures.clear();
     }
@@ -348,8 +348,11 @@ impl NdiFeed {
         self.lock().core.take(stamp_100ns)
     }
 
-    /// The `program-max` thread, its UYVY pass off: let the pictures go
-    /// (`FeedCore::clear`), so no 4 MB buffer stays out of `frame_pool`.
+    /// The `program-output` thread, on the canvas by the setting, after the
+    /// held pair's flush: let the pictures go (`FeedCore::clear`), so no
+    /// 4 MB buffer stays out of `frame_pool`. Only that thread clears
+    /// (#279 P1b review round 5): only it knows the held pair took its
+    /// picture.
     pub fn clear(&self) {
         self.lock().core.clear();
     }
