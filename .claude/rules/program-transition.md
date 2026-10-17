@@ -619,6 +619,10 @@ stale `program_follow_obs` row in a box's settings table is never read.
 - Pins were derived with scratch Python models of `ProgramCore` and the
   weight / blend math (rust-workspace.md, no-compile box). Re-derive them with
   your own model when the Rust changes.
+- A blend pin at weight 128 cannot tell the sides apart (`f·128 + t·128` is
+  symmetric): a call site that swapped `from` / `to` passes it. Pin at an
+  uneven weight and note the swapped value (#279 P2:
+  `program_output_tests_max.rs`, weight 64 → 72 / 100, swapped 35 / 119).
 - The settings task's effect is proven by the spec it puts on the bus
   (`spec_becomes`, bounded at 20 s), never by a sleep; its start is proven
   with a poll that never comes round again (`NO_POLL`), so only the
