@@ -7,8 +7,9 @@
 //! also checked that each listed mutant fails one of these tests.
 
 use super::{
-    D3D11_BIND_DECODER, DecodePath, decode_box, decoder_path_visible, scale_took,
-    scaled_pixel_aspect, scaled_size, visible_reference,
+    D3D11_BIND_DECODER, DecodePath, VideoArea, decode_box, decoder_path_visible,
+    padding_reaches_processor, scale_took, scaled_frame_rate, scaled_pixel_aspect, scaled_size,
+    video_area, visible_reference,
 };
 
 /// One cap's box: (cap, (width, height)).
@@ -265,4 +266,99 @@ fn a_scaled_pictures_surface_is_the_gpus_whatever_its_bind_flags() {
     );
     assert_eq!(DecodePath::of_surface(0x28, false), DecodePath::Software);
     assert_eq!(DecodePath::of_surface(0, false), DecodePath::Software);
+}
+
+/// Review round 2: a scaled open sets no rate of its own (that could start
+/// the processor's frame-rate conversion); a processor type without one
+/// reports the native rate, never the 29.97 guess.
+#[test]
+fn a_scaled_reader_reports_the_negotiated_rate_else_the_native_one() {
+    // 30000/1001 and 25/1, packed as Media Foundation packs them.
+    let ntsc = (30_000_u64 << 32) | 1_001;
+    let pal = (25_u64 << 32) | 1;
+    assert_eq!(scaled_frame_rate(Some(pal), Some(ntsc), true), Some(pal));
+    assert_eq!(scaled_frame_rate(Some(pal), None, false), Some(pal));
+    assert_eq!(scaled_frame_rate(None, Some(ntsc), true), Some(ntsc));
+    assert_eq!(
+        scaled_frame_rate(None, Some(ntsc), false),
+        None,
+        "unscaled: the 29.97 guess, as before"
+    );
+    assert_eq!(scaled_frame_rate(None, None, true), None);
+}
+
+#[test]
+fn an_mf_video_area_is_read_from_its_blob() {
+    // OffsetX {fract 0x8000, value 2}, OffsetY {fract 0, value -3},
+    // SIZE {3840, 1606}, little-endian.
+    let blob: [u8; 16] = [
+        0x00, 0x80, 0x02, 0x00, 0x00, 0x00, 0xfd, 0xff, 0x00, 0x0f, 0x00, 0x00, 0x46, 0x06, 0x00,
+        0x00,
+    ];
+    assert_eq!(
+        video_area(&blob),
+        Some(VideoArea {
+            x: 2,
+            y: -3,
+            width: 3840,
+            height: 1606,
+        })
+    );
+    assert_eq!(video_area(&blob[..15]), None, "too short");
+    assert_eq!(video_area(&[0; 17]), None, "too long");
+}
+
+/// Review round 2 (#223's green strip): NVDEC pads its output to 16 rows;
+/// the video processor crops it only by the decoder's display aperture, so
+/// a padded type without that aperture would scale green rows into the
+/// picture: the scaled open is refused.
+#[test]
+fn a_padded_decoder_picture_is_scaled_only_with_its_aperture() {
+    let native = (3840, 1606);
+    let exact = VideoArea {
+        x: 0,
+        y: 0,
+        width: 3840,
+        height: 1606,
+    };
+    // Not padded: nothing to crop.
+    assert!(!padding_reaches_processor((3840, 1606), None, native));
+    assert!(!padding_reaches_processor((3840, 1600), None, native));
+    assert!(!padding_reaches_processor(
+        (3840, 1606),
+        Some(VideoArea {
+            x: 2,
+            y: 2,
+            width: 100,
+            height: 100,
+        }),
+        native
+    ));
+    // Padded rows or columns, no aperture: refused.
+    assert!(padding_reaches_processor((3840, 1616), None, native));
+    assert!(padding_reaches_processor((3856, 1606), None, native));
+    // Padded with the exact aperture: the processor crops it.
+    assert!(!padding_reaches_processor(
+        (3840, 1616),
+        Some(exact),
+        native
+    ));
+    // Any other aperture: refused.
+    for wrong in [
+        VideoArea { x: 2, ..exact },
+        VideoArea { y: 2, ..exact },
+        VideoArea {
+            width: 3830,
+            ..exact
+        },
+        VideoArea {
+            height: 1600,
+            ..exact
+        },
+    ] {
+        assert!(
+            padding_reaches_processor((3840, 1616), Some(wrong), native),
+            "{wrong:?}"
+        );
+    }
 }

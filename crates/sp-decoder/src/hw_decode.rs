@@ -97,11 +97,11 @@ impl DecodePath {
     /// (`scaled`, #282) lies in the texture of Media Foundation's video
     /// processor, which scaled it on the GPU after the decoder: that texture
     /// carries no `D3D11_BIND_DECODER`, so the decoder's own path cannot be
-    /// read from it, and the picture counts as `Hardware` (the GPU decoded
-    /// and scaled it). The one case this misses is the decoder MFT's own
-    /// fall back to software behind the video processor (a GPU with no
-    /// decoder for the codec); the box's bench timings tell it. Unscaled,
-    /// [`DecodePath::of_picture`].
+    /// read from it, and the picture counts as `Hardware`: it lies on the
+    /// GPU, which scaled it. Whether the GPU also DECODED it is not visible
+    /// behind the processor (a decoder MFT's own fall back to software, a
+    /// GPU with no decoder for the codec); the box's bench timings tell it.
+    /// Unscaled, [`DecodePath::of_picture`].
     pub fn of_surface(surface_bind_flags: u32, scaled: bool) -> Self {
         if scaled {
             DecodePath::Hardware
@@ -578,6 +578,60 @@ pub fn decoder_path_visible(on_d3d: bool, scaled: bool) -> bool {
     on_d3d && !scaled
 }
 
+/// #282: the frame rate a reader reports: the negotiated type's. A scaled
+/// open's output type carries no rate of ours (setting one could start the
+/// video processor's frame-rate conversion when the decoder reports
+/// another), so when the processor's type has none either, the native
+/// type's rate is reported instead of the 29.97 guess. An unscaled open
+/// with none keeps that guess, as before #282.
+pub fn scaled_frame_rate(
+    negotiated: Option<u64>,
+    _native: Option<u64>,
+    _scaled: bool,
+) -> Option<u64> {
+    negotiated
+}
+
+/// #282: a display aperture (`MF_MT_MINIMUM_DISPLAY_APERTURE`, an
+/// `MFVideoArea`): the picture's whole-pixel offset and size inside a
+/// decoded frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VideoArea {
+    pub x: i16,
+    pub y: i16,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// #282: an `MFVideoArea` from its 16-byte blob (little-endian:
+/// `OffsetX {fract: u16, value: i16}`, `OffsetY`, then `SIZE {cx, cy}` as
+/// two `i32`); `None` for any other length.
+pub fn video_area(blob: &[u8]) -> Option<VideoArea> {
+    let b: &[u8; 16] = blob.try_into().ok()?;
+    Some(VideoArea {
+        x: i16::from_le_bytes([b[2], b[3]]),
+        y: i16::from_le_bytes([b[4], b[5]]),
+        width: i32::from_le_bytes([b[8], b[9], b[10], b[11]]),
+        height: i32::from_le_bytes([b[12], b[13], b[14], b[15]]),
+    })
+}
+
+/// #282 (review round 2): whether a scaled open would scale the decoder's
+/// padding into the picture. NVDEC pads its output type to 16 rows (a
+/// 3840×1606 stream decodes as 3840×1616, #223's green strip); the video
+/// processor behind it crops the padding only by the decoder type's
+/// display aperture. So a `decoded` type larger than the `native` picture
+/// is safe only with an aperture of exactly the native picture at the
+/// origin; otherwise the scaled open is refused (the file plays at its own
+/// size, the readback cutting the padding as before).
+pub fn padding_reaches_processor(
+    _decoded: (u32, u32),
+    _aperture: Option<VideoArea>,
+    _native: (u32, u32),
+) -> bool {
+    false
+}
+
 /// `a` and `b`'s greatest common divisor (`a` when `b` is 0).
 fn gcd(mut a: u128, mut b: u128) -> u128 {
     for _ in 0..EUCLID_MAX_STEPS {
@@ -652,9 +706,11 @@ pub struct HwDecodeStats {
     /// decode error on the D3D path counts again).
     pub scaled_opens: u64,
     /// #282: scaled opens Media Foundation refused (or negotiated at
-    /// another size, [`scale_took`]); each of those readers opened that file
-    /// at its own size (a refused D3D11 open that then fell back to software
-    /// may open it scaled there, counted in `scaled_opens`).
+    /// another size, [`scale_took`], or with the decoder's padding in reach
+    /// of the processor, [`padding_reaches_processor`]); each of those
+    /// readers then opens that file at its own size, when it opens at all
+    /// (a refused D3D11 open that then fell back to software may open it
+    /// scaled there, counted in `scaled_opens`).
     pub scale_refusals: u64,
 }
 
