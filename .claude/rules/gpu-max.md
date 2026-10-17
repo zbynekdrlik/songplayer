@@ -2001,8 +2001,8 @@ behaviour change).
 - **Tests.** sp-gpu: `ring_state_tests.rs`, `ring_tests.rs` (a write
   waits for a drop, threads with a safe-direction window), the `Side` /
   `uv_in_texture` / reference / `count_slot` pins, and WARP
-  `tests/ring.rs` (its NV12 sources shader-resource bound, the texture
-  P0 proved on WARP): a slot written on one device drawn on another
+  `tests/ring.rs` (its NV12 sources shader-resource bound and made with
+  initial data, the two NV12 textures P0 made on WARP, in one): a slot written on one device drawn on another
   within S1a's reference, opened once and uploading nothing; slice 2 of
   a 4-slice 640×368 array (an NV12 ARRAY with initial data and a boxed
   copy out of a slice are WARP premises P0 did not prove: a refusal

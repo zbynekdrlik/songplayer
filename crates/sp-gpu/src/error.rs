@@ -137,7 +137,9 @@ pub enum GpuError {
     RingSourceFormat { format: u32 },
     /// #279 P2: a copy out of a subresource the source does not have
     /// (`ring_state::missing_subresource`): Direct3D would drop it silently.
-    #[error("the picture ring cannot copy subresource {subresource}: the source has {count}")]
+    #[error(
+        "the picture ring cannot copy subresource {subresource}: the source has {count} subresources"
+    )]
     RingSubresource { subresource: u32, count: u32 },
 }
 

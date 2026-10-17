@@ -80,8 +80,9 @@ fn warp_device() -> ID3D11Device {
 /// size), as a decoder hands its pictures over: an array of
 /// `slices.len()` slices, each made with its bytes (NV12 initial data: the
 /// UV plane after ALL the luma rows, `width × height`). Shader-resource
-/// bound, the NV12 texture P0's probe proved on WARP (a decoder's own
-/// surfaces are decoder-bound, which WARP cannot make).
+/// bound and made with initial data: the two NV12 textures P0's probe made
+/// on WARP, in one (a decoder's own surfaces are decoder-bound, which WARP
+/// cannot make).
 fn texture(
     device: &ID3D11Device,
     format: DXGI_FORMAT,
