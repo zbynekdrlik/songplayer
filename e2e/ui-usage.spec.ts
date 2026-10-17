@@ -103,7 +103,7 @@ test("a person's clicks, change and submit arrive as exactly those events, page 
   const saved = page.waitForRequest(
     (req) => req.method() === "PATCH" && /\/api\/v1\/settings$/.test(req.url()),
   );
-  await page.getByRole("button", { name: "Uložiť nastavenia" }).click();
+  await page.getByRole("button", { name: "Uložiť nastavenia", exact: true }).click();
   await saved;
   await page.getByTestId("nav-dashboard").click();
   await expect(page.getByTestId("nav-dashboard")).toHaveClass(/active/);

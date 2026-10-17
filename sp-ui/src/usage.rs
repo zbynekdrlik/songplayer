@@ -164,6 +164,6 @@ fn send_beacon() {
     if let Some(window) = web_sys::window() {
         let _ = window
             .navigator()
-            .send_beacon_with_opt_str(ui_usage::INGEST_PATH, Some(&body));
+            .send_beacon_with_opt_str(ui_usage::INGEST_PATH, Some(body.as_str()));
     }
 }
