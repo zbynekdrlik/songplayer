@@ -23,6 +23,7 @@ pub mod routes_status; // #221 L4b: /api/v1/status's program fields from SongPla
 pub mod settings; // #229: GET/PATCH /api/v1/settings (secrets masked)
 pub mod stems;
 pub mod test_item; // #228: /api/v1/test-item (camera-box's measurement clip as the test item)
+pub mod ui_usage; // #256: POST /api/v1/ui-usage + GET /api/v1/ui-usage/summary (the usage log)
 pub mod video_upgrade; // #223 S11: POST /api/v1/video-upgrade (one song's in-place upgrade)
 pub mod videos;
 pub mod websocket;
@@ -149,6 +150,15 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         )
         // #259: the LED wall report (Arena's own output setup vs the box)
         .route("/api/v1/wall", axum::routing::get(routes_status::wall))
+        // #256: the dashboard's usage log (its batches, and their summary)
+        .route(
+            "/api/v1/ui-usage",
+            axum::routing::post(ui_usage::post_ui_usage),
+        )
+        .route(
+            "/api/v1/ui-usage/summary",
+            axum::routing::get(ui_usage::get_ui_usage_summary),
+        )
         // #136: run each metadata provider of the production chain on one video
         .route(
             "/api/v1/metadata/probe",
