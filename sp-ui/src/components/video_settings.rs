@@ -1,6 +1,7 @@
-//! #223 S13: Nastavenia "Video: sťahovanie a 4K" — the download cap
-//! (`max_resolution`), GPU decoding (`video_hw_decode`) and the in-place 4K
-//! upgrade (`video_upgrade_enabled`). The settings form owns the three
+//! #223 S13: Nastavenia "Video: sťahovanie a 4K" — the resolution cap
+//! (`max_resolution`: the download's and, since #282, the decode's too),
+//! GPU decoding (`video_hw_decode`) and the in-place 4K upgrade
+//! (`video_upgrade_enabled`). The settings form owns the three
 //! signals and saves them with its own Save, each only when changed
 //! (`sp_core::config::*_to_send`). The upgrade's progress
 //! (`GET /api/v1/video-upgrade`) is read once when the section shows.

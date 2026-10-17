@@ -476,14 +476,16 @@ pub fn mapped_from_scanline0(start: usize, scanline0: usize, len: usize) -> Opti
 // The decode cap (#282)
 // ---------------------------------------------------------------------------
 //
-// A temporary lever until #279 (the GPU-resident path): the setting
-// `max_resolution` (the download cap) also caps DECODE. A picture larger
-// than the cap's 16:9 box is opened scaled: Media Foundation's video
-// processor (`MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING` + the NV12
-// output type's `MF_MT_FRAME_SIZE`) scales it at decode, on the GPU on the
-// D3D11 path, so the readback, the frame pool, the MAX upload and the
-// canvas all carry the smaller picture. A picture inside the box opens
-// exactly as before.
+// The setting `max_resolution` caps download AND decode: the operator's
+// switch per site (the owner's ruling on #282: a permanent switch, set
+// lower while 4K is a problem, e.g. until #279's GPU-resident path). A
+// picture larger than the cap's 16:9 box is opened scaled: Media
+// Foundation's video processor
+// (`MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING` + the NV12 output
+// type's `MF_MT_FRAME_SIZE`) scales it at decode, on the GPU on the D3D11
+// path, so the readback, the frame pool, the MAX upload and the canvas all
+// carry the smaller picture. A picture inside the box opens exactly as
+// before.
 
 /// The box's aspect, width per height: 16:9.
 const BOX_ASPECT_W: u64 = 16;
@@ -657,16 +659,21 @@ const DECODER_BLOCK: u32 = 16;
 /// reader's chain could not be read).
 ///
 /// - The decoder's padding in reach of the processor
-///   ([`padding_reaches_processor`]): refused.
+///   ([`padding_reaches_processor`]): refused, on either path and for any
+///   size (whole 16-pixel blocks included).
 /// - On the D3D11 path the decoder may only learn its padded size at the
 ///   first frame, after this check (a VP9 / AV1 sample entry carries no
 ///   frame header), so a stream whose size is not whole 16-pixel blocks is
-///   scaled only when the decoder has already shown the native aperture;
-///   one in whole blocks (3840×2160, 2560×1440, 4096×2160) cannot be
-///   padded.
-/// - In software Media Foundation's decoders hand over the stream's own
-///   size (the CI fixture: 160×120 coded 160×128), so only the padding seen
-///   at open refuses.
+///   scaled only when the decoder has already shown the native aperture.
+///   NVDEC's 16-row padding cannot reach a stream of whole blocks
+///   (3840×2160, 2560×1440, 4096×2160).
+/// - In software only the padding seen at open refuses, and an unreadable
+///   chain goes on. What is proven of the software decoders: on CI's
+///   runner Microsoft's H.264 decoder showed the stream's own size at open
+///   with no aperture (160×120 for the fixture coded 160×128, CI run
+///   39040435639); the VP9 / AV1 software decoders, and any decoder's type
+///   after its first frame, are not proven here. The reader logs the
+///   decoder's output again at the first scaled picture (one INFO).
 ///
 /// A refusal plays the file at its own size: never a green strip.
 pub fn scaled_open_safe(
@@ -758,12 +765,13 @@ pub struct HwDecodeStats {
     /// Foundation scaled at decode, in any mode (a software reopen after a
     /// decode error on the D3D path counts again).
     pub scaled_opens: u64,
-    /// #282: scaled opens Media Foundation refused (or negotiated at
-    /// another size, [`scale_took`], or with the decoder's padding in reach
-    /// of the processor, [`padding_reaches_processor`]); each of those
-    /// readers then opens that file at its own size, when it opens at all
-    /// (a refused D3D11 open that then fell back to software may open it
-    /// scaled there, counted in `scaled_opens`).
+    /// #282: scaled opens Media Foundation refused, negotiated at another
+    /// size ([`scale_took`]), or that [`scaled_open_safe`] refused (the
+    /// decoder's padding in reach of the processor, or on the D3D11 path a
+    /// stream that is not whole 16-pixel blocks with no native aperture
+    /// shown); each of those readers then opens that file at its own size,
+    /// when it opens at all (a refused D3D11 open that then fell back to
+    /// software may open it scaled there, counted in `scaled_opens`).
     pub scale_refusals: u64,
 }
 

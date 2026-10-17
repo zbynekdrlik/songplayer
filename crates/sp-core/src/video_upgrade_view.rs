@@ -1,6 +1,8 @@
 //! #223 S13: what Nastavenia "Video: sťahovanie a 4K" shows of the in-place
-//! upgrade (`GET /api/v1/video-upgrade`) and of the download cap, in Slovak.
-//! Shared by sp-ui and its tests; WASM-safe.
+//! upgrade (`GET /api/v1/video-upgrade`) and of `max_resolution`, in
+//! Slovak. `max_resolution` caps the download and, since #282, the decode
+//! too (a taller cached video plays scaled down to it). Shared by sp-ui
+//! and its tests; WASM-safe.
 
 use serde::Deserialize;
 

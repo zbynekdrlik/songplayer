@@ -163,8 +163,9 @@ Logs: INFO `video upgrade: start` and `video upgrade: done`, or a WARN
     set through the API shows as "N (vlastné)", never as automatic. #282:
     its label is "Najvyššie rozlíšenie (sťahovanie aj prehrávanie)" and the
     hint `settings-max-resolution-hint` says a taller video is scaled at
-    playback, from the next song, without a restart (the owner: "musí byť
-    spôsob to zmeniť" per site when 4K is a problem);
+    playback, from the next song, without a restart (the owner, verbatim,
+    17.10.2026: "musi byt sposob to zmenit", a switch per site when 4K is
+    a problem; ROZHODNUTÉ on #282);
   - `settings-video-hw-decode` → `video_hw_decode`;
   - `settings-video-upgrade` → `video_upgrade_enabled`.
 - Each control is sent only when it differs from what the page loaded
