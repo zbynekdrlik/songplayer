@@ -475,7 +475,10 @@ DELETED names.
   play_history WHERE played_at >= datetime('now', ?)`. The recency window is the
   `settings` key **`stems_recent_days` (default 7)**, read like
   `stem_worker_enabled` and parsed by the pure `recent_days_from` (default 7 on
-  absent/non-integer, clamped to ≥ 0). `queue_position` (the panel's "vo fronte
+  absent/non-integer, clamped to ≥ 0; #261: `play_history` keeps 30 days
+  outside a rotation, so a setting over 30 sees at most 30 days of a custom
+  playlist's plays). Every tier takes only rows of ACTIVE playlists (#261,
+  `db::active_playlist!` in `STEM_ELIGIBLE_PRED`). `queue_position` (the panel's "vo fronte
   (N.)") gains the SAME tier rank (`(tier ASC, stem_manual_priority DESC, id
   ASC)`) via the inlined `tier_case_sql` CASE, so the chip stays truthful; the
   legacy 2-arg `models_stems::queue_position` delegates to it with empty tiers

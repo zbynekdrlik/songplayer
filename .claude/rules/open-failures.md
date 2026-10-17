@@ -69,6 +69,10 @@ the review finding on the selection: 6028419694.
   `failure_backoff::pick_pool`: unplayed minus avoid; else a restart (history
   cleared) from all minus avoid; only when every song is avoided, the old
   pick. Custom playlists (by position) and Loop ignore it.
+- "Unplayed" = not played ON this playlist since its rotation began (#261:
+  a play on ytlive's set list is no play of the song's home playlist), and
+  the daily `playlist::history_bound` keeps one row per playlist and song,
+  never a youtube / dabing playlist's rotation row (`playlist-membership.md`).
 - Residual: on a box fault, once every unplayed song has failed, the restart
   branch clears the play history one time (the alternative, a pick without a
   clear, would let one bad file fail every other song).

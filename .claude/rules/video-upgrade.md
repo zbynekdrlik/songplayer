@@ -104,7 +104,8 @@ Logs: INFO `video upgrade: start` and `video upgrade: done`, or a WARN
   `video_upgrade_cap` is NULL or under the live cap:
   - a `busy` one only 10 min after its `video_upgrade_at`, a `failed: …`
     one only after 6 h;
-  - active playlists first, then the lowest row;
+  - only songs of active playlists (#261: `p.is_active = 1`, and the
+    status counts too: `db::active_playlist!`), the lowest row first;
   - never the test item.
 - **Run:** S11's `run`, its yt-dlp at BELOW_NORMAL (ffmpeg inherits the
   class).
