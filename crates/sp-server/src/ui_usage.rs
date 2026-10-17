@@ -22,6 +22,11 @@ use crate::db::models_ui_usage;
 /// At most this many rows per DELETE statement.
 pub const PRUNE_BATCH: i64 = 5_000;
 
+/// At most this many statements per pass (5 million rows of
+/// [`PRUNE_BATCH`]: far more than a node records in a day); what is left
+/// goes the next day. A structural bound: no statement count can spin.
+const MAX_STATEMENTS: u32 = 1_000;
+
 /// The first pass, after the start.
 const FIRST_PASS_AFTER: Duration = Duration::from_secs(300);
 
@@ -44,19 +49,20 @@ pub fn next_wait(held: bool) -> Duration {
 }
 
 /// One pass at `now_ms`: every row older than [`cutoff_ms`] deleted,
-/// `batch` rows per statement, until a statement finds none. The number
-/// deleted.
+/// `batch` rows per statement, until a statement finds none (at most
+/// [`MAX_STATEMENTS`]). The number deleted.
 pub async fn prune_with(pool: &SqlitePool, now_ms: i64, batch: i64) -> Result<u64, sqlx::Error> {
     let cutoff = cutoff_ms(now_ms);
     let mut deleted = 0;
-    loop {
+    for _ in 0..MAX_STATEMENTS {
         let done = models_ui_usage::prune_older(pool, cutoff, batch).await?;
         if done == 0 {
-            return Ok(deleted);
+            break;
         }
         deleted += done;
         tokio::task::yield_now().await;
     }
+    Ok(deleted)
 }
 
 /// One pass at `now_ms` in statements of [`PRUNE_BATCH`] rows.
