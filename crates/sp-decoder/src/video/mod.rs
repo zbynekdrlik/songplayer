@@ -9,6 +9,7 @@
 mod dxgi_frame;
 mod hw_session;
 pub mod mf_reader;
+mod mf_scaled; // #282: the scaled open's output type and decoder check
 
 #[doc(hidden)]
 pub use dxgi_frame::{DxgiPicture, read_texture_as_decoded_sample};

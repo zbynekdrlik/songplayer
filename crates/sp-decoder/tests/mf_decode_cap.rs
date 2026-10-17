@@ -168,12 +168,15 @@ fn open_scaled(
     let after = hw_counters().snapshot();
     let _ = writeln!(
         std::io::stderr(),
-        "mf_decode_cap: cap {cap}: {}x{} at {:?} (known {}), duration {} ms, scaled opens +{}, refusals +{}",
+        "mf_decode_cap: cap {cap}: {}x{} at {:?} (known {}), duration {} ms, scaled from {:?}, \
+         decoder output {:?}, scaled opens +{}, refusals +{}",
         reader.width(),
         reader.height(),
         reader.frame_rate(),
         reader.frame_rate_known(),
         reader.duration_ms(),
+        reader.scaled_from(),
+        reader.scaled_decoder_output(),
         after.scaled_opens - before.scaled_opens,
         after.scale_refusals - before.scale_refusals
     );
@@ -188,9 +191,16 @@ fn open_scaled(
     );
     assert_eq!((reader.width(), reader.height()), size, "cap {cap}");
     assert_eq!(
-        reader.frame_rate(),
-        plain.frame_rate(),
-        "cap {cap}: the stream's own rate, no conversion"
+        reader.scaled_from(),
+        Some((160, 120)),
+        "cap {cap}: the reader says it scaled the stream's own size"
+    );
+    // The same rate, compared as a ratio (30/1 and 60/2 are one rate).
+    let (scaled_rate, plain_rate) = (reader.frame_rate(), plain.frame_rate());
+    assert_eq!(
+        u64::from(scaled_rate.0) * u64::from(plain_rate.1),
+        u64::from(plain_rate.0) * u64::from(scaled_rate.1),
+        "cap {cap}: the stream's own rate, {scaled_rate:?} vs {plain_rate:?}"
     );
     assert!(reader.frame_rate_known(), "cap {cap}: not the 29.97 guess");
     reader
@@ -249,6 +259,14 @@ fn an_inexact_ratio_fills_the_whole_frame() {
     let mut reader = open_scaled(50, (66, 50), &plain_reader);
     let scaled = decode_all(&mut reader, "scaled at 66x50");
     assert_eq!(scaled.len(), plain.len());
+    // 66 is 2 mod 4: where a stride the type does not state would shear.
+    let _ = writeln!(
+        std::io::stderr(),
+        "mf_decode_cap: cap 50: first picture {}x{} stride {}",
+        scaled[0].width,
+        scaled[0].height,
+        scaled[0].stride
+    );
     for (i, (s, p)) in scaled.iter().zip(&plain).enumerate() {
         assert_eq!(s.timestamp_ms, p.timestamp_ms, "picture {i}: its time");
         assert_eq!((s.width, s.height), (66, 50), "picture {i}");
@@ -274,6 +292,7 @@ fn a_cap_at_or_above_the_picture_changes_nothing() {
             MediaFoundationVideoReader::open_with(&fixture(), DecodeMode::Software, Some(cap))
                 .expect("open");
         assert_eq!((reader.width(), reader.height()), (160, 120), "cap {cap}");
+        assert_eq!(reader.scaled_from(), None, "cap {cap}: not scaled");
         let pictures = decode_all(&mut reader, "capped, inside the box");
         assert_eq!(pictures.len(), plain.len(), "cap {cap}");
         for (i, (c, p)) in pictures.iter().zip(&plain).enumerate() {
@@ -309,6 +328,7 @@ fn a_refused_scaled_open_plays_the_file_at_its_own_size() {
     assert_eq!(after.scale_refusals, before.scale_refusals + 1, "counted");
     assert_eq!(after.scaled_opens, before.scaled_opens, "not scaled");
     assert_eq!((reader.width(), reader.height()), (160, 120));
+    assert_eq!(reader.scaled_from(), None, "a refused open is not scaled");
     let pictures = decode_all(&mut reader, "refused, unscaled");
     assert_eq!(pictures.len(), plain.len());
     for (i, (c, p)) in pictures.iter().zip(&plain).enumerate() {

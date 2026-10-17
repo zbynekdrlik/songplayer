@@ -46,6 +46,7 @@ pub(crate) fn bench_file(
     );
     let requested = DecodeFacts {
         mode,
+        max_height: Some(max_height),
         ..DecodeFacts::default()
     };
     let opening = Instant::now();
@@ -78,6 +79,7 @@ pub(crate) fn bench_file(
         path_changes: reader.path_changes(),
         adapter: reader.hw_adapter().map(str::to_string),
         fallback: reader.hw_fallback().map(|f| f.describe()),
+        scaled_from: reader.scaled_from(),
         ..requested
     };
     // The reader is dropped on the thread that opened it (COM STA).

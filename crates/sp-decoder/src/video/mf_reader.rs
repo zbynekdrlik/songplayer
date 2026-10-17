@@ -22,26 +22,24 @@
 //! `hw_decode::scaled_size`, so Media Foundation's video processor scales
 //! each picture at decode (on the GPU on the D3D path). The first reader
 //! is made exactly as before and only read for the stream's own size; a
-//! file inside the box keeps it, with no other call. The scaled output
-//! type also carries the native frame rate (no rate conversion, the
-//! stream's own rate reported) and the pixel aspect that keeps the native
-//! display aspect exactly (`hw_decode::scaled_pixel_aspect`: no
-//! letterboxed edge). A scaled open Media Foundation refuses (or
-//! negotiates at another size, `hw_decode::scale_took`) opens unscaled,
-//! with a WARN: never a dead song. A scaled picture lies in the video
-//! processor's texture, so it tells nothing of the decoder's own path
+//! file inside the box keeps it, with no other call. What the scaled
+//! output type carries, and the native facts it keeps, is `mf_scaled.rs`.
+//! A scaled open Media Foundation refuses, negotiates at another size
+//! (`hw_decode::scale_took`), or whose decoder hands the processor a padded
+//! picture with no display aperture (`hw_decode::padding_reaches_processor`,
+//! the green strip) opens unscaled, with a WARN: never a dead song, never a
+//! wrong picture. A scaled picture lies in the video processor's texture,
+//! so it tells nothing of the decoder's own path
 //! (`hw_decode::decoder_path_visible`).
 
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use tracing::{debug, info, warn};
 
 use windows::Win32::Media::MediaFoundation::{
     IMFAttributes, IMFMediaBuffer, IMFMediaType, IMFSample, IMFSourceReader, MF_API_VERSION,
-    MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE,
-    MF_MT_PIXEL_ASPECT_RATIO, MF_MT_SUBTYPE, MF_PD_DURATION,
+    MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_PD_DURATION,
     MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, MF_SOURCE_READER_D3D_MANAGER,
     MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, MF_SOURCE_READER_FIRST_VIDEO_STREAM,
     MF_SOURCE_READER_MEDIASOURCE, MF_SOURCE_READERF_ENDOFSTREAM, MFCreateAttributes,
@@ -53,34 +51,19 @@ use windows::core::PCWSTR;
 
 use super::dxgi_frame::DxgiSurface;
 use super::hw_session::{HwDevice, HwSession};
+use super::mf_scaled::{
+    self, DecoderOutput, ScaledType, frame_rate_of, known_frame_size, native_media_type,
+};
 use crate::error::DecoderError;
 use crate::hw_decode::{
     DecodeMode, DecodePath, FallbackGate, FallbackStage, HwFallback, OnDecodeError, PathNote,
-    PathTracker, Resume, decoder_path_visible, hw_counters, scale_took, scaled_pixel_aspect,
-    scaled_size, visible_reference, visible_size,
+    PathTracker, Resume, VideoArea, decoder_path_visible, hw_counters, padding_reaches_processor,
+    scale_took, scaled_frame_rate, scaled_size, visible_reference, visible_size,
 };
 use crate::stream::{MediaStream, VideoStream};
 use crate::types::{DecodedVideoFrame, PixelFormat};
 
-const VIDEO_STREAM: u32 = MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32;
-
-/// #282: a test's refusal of the next scaled open
-/// ([`MediaFoundationVideoReader::refuse_next_scaled_open_for_test`]).
-static REFUSE_NEXT_SCALED_OPEN: AtomicBool = AtomicBool::new(false);
-
-/// #282: the NV12 output type of a scaled open.
-#[derive(Debug, Clone, Copy)]
-struct ScaledType {
-    /// `hw_decode::scaled_size`.
-    size: (u32, u32),
-    /// The native type's `MF_MT_FRAME_RATE` (packed), when it has one: the
-    /// video processor then converts no rate, and the reader reports the
-    /// stream's own (never the 29.97 fallback).
-    frame_rate: Option<u64>,
-    /// `hw_decode::scaled_pixel_aspect`: the native display aspect, kept
-    /// exactly.
-    pixel_aspect: Option<(u32, u32)>,
-}
+pub(super) const VIDEO_STREAM: u32 = MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32;
 
 /// Video-only Media Foundation source reader.
 pub struct MediaFoundationVideoReader {
@@ -100,8 +83,12 @@ pub struct MediaFoundationVideoReader {
     /// `MF_MT_FRAME_SIZE`), or the requested size of a scaled open (#282,
     /// `hw_decode::visible_reference`).
     reference: Option<(u32, u32)>,
-    /// #282: the file was opened scaled to the decode cap.
-    scaled: bool,
+    /// #282: the stream's own size when the file was opened scaled to the
+    /// decode cap.
+    scaled_from: Option<(u32, u32)>,
+    /// #282: what the decoder hands the video processor, read at a scaled
+    /// open (`None` unscaled, or when the chain could not be read).
+    decoder_out: Option<DecoderOutput>,
     /// #282: the decode cap the reader was opened with (a software reopen
     /// keeps it, so a song's picture size never changes mid-song).
     max_height: Option<u32>,
@@ -141,7 +128,8 @@ struct Opened {
     frame_rate_den: u32,
     frame_rate_known: bool,
     reference: Option<(u32, u32)>,
-    scaled: bool,
+    scaled_from: Option<(u32, u32)>,
+    decoder_out: Option<DecoderOutput>,
 }
 
 impl MediaFoundationVideoReader {
@@ -258,7 +246,8 @@ impl MediaFoundationVideoReader {
             frame_rate_den: opened.frame_rate_den,
             frame_rate_known: opened.frame_rate_known,
             reference: opened.reference,
-            scaled: opened.scaled,
+            scaled_from: opened.scaled_from,
+            decoder_out: opened.decoder_out,
             max_height,
             mode,
             hw,
@@ -297,16 +286,8 @@ impl MediaFoundationVideoReader {
             .and_then(|(size, cap)| scaled_size(size, cap).map(|to| (size, to)));
         if let Some((from, to)) = scale {
             let on = if hw.is_some() { "D3D11" } else { "software" };
-            let shape = ScaledType {
-                size: to,
-                frame_rate: native_type.as_ref().and_then(frame_rate_of),
-                pixel_aspect: scaled_pixel_aspect(
-                    from,
-                    native_type.as_ref().and_then(pixel_aspect_of),
-                    to,
-                ),
-            };
-            match Self::open_scaled(&wide_path, hw, native, &shape) {
+            let shape = ScaledType::new(native_type.as_ref(), from, to);
+            match Self::open_scaled(&wide_path, hw, &shape) {
                 Ok(opened) => {
                     hw_counters().scaled_open();
                     info!(
@@ -314,6 +295,7 @@ impl MediaFoundationVideoReader {
                         from = %format!("{}x{}", from.0, from.1),
                         to = %format!("{}x{}", to.0, to.1),
                         pixel_aspect = ?shape.pixel_aspect,
+                        decoder = ?opened.decoder_out,
                         path = on,
                         "mf_reader: opened scaled to the decode cap (#282); the decoder's own path is not visible behind the video processor"
                     );
@@ -336,20 +318,39 @@ impl MediaFoundationVideoReader {
     }
 
     /// #282: a second source reader on the file, with Media Foundation's
-    /// video processor, negotiated at `shape`.
+    /// video processor, negotiated at `shape`. Refused when the decoder in
+    /// its chain hands the processor a padded picture with no display
+    /// aperture: the processor would scale the padding rows (green) into
+    /// the picture. A chain that cannot be read is let through, with a
+    /// WARN (the picture then relies on the decoder's aperture).
     fn open_scaled(
         wide_path: &[u16],
         hw: Option<&HwSession>,
-        native: Option<(u32, u32)>,
         shape: &ScaledType,
     ) -> Result<Opened, DecoderError> {
-        if REFUSE_NEXT_SCALED_OPEN.swap(false, Ordering::SeqCst) {
+        if mf_scaled::refused_by_test() {
             return Err(DecoderError::NoStream(
                 "video: a scaled open refused by a test".into(),
             ));
         }
         let reader = Self::source_reader(wide_path, hw, true)?;
-        Self::configure(reader, hw, native, Some(shape))
+        let mut opened = Self::configure(reader, hw, Some(shape.from), Some(shape))?;
+        opened.decoder_out = mf_scaled::decoder_output(&opened.reader);
+        match opened.decoder_out {
+            Some(out) if padding_reaches_processor(out.size, out.aperture, shape.from) => {
+                return Err(DecoderError::NoStream(format!(
+                    "video: the decoder hands the video processor {}x{} with aperture {:?} for a \
+                     {}x{} stream; its padding would be scaled into the picture",
+                    out.size.0, out.size.1, out.aperture, shape.from.0, shape.from.1
+                )));
+            }
+            Some(_) => {}
+            None => warn!(
+                "mf_reader: the decoder's output type could not be read; the scaled picture \
+                 relies on its display aperture"
+            ),
+        }
+        Ok(opened)
     }
 
     /// Make the next scaled open in this process fail as a refusal by Media
@@ -358,7 +359,22 @@ impl MediaFoundationVideoReader {
     /// scaled type there). For tests, not production.
     #[doc(hidden)]
     pub fn refuse_next_scaled_open_for_test() {
-        REFUSE_NEXT_SCALED_OPEN.store(true, Ordering::SeqCst);
+        mf_scaled::refuse_next();
+    }
+
+    /// #282: the stream's own size when this file was opened scaled to the
+    /// decode cap (the reader's `width` / `height` are then the scaled
+    /// size); `None` at its own size.
+    pub fn scaled_from(&self) -> Option<(u32, u32)> {
+        self.scaled_from
+    }
+
+    /// #282: what the decoder handed the video processor at a scaled open:
+    /// its output type's size and display aperture. For tests and the box
+    /// check, not production.
+    #[doc(hidden)]
+    pub fn scaled_decoder_output(&self) -> Option<((u32, u32), Option<VideoArea>)> {
+        self.decoder_out.map(|out| (out.size, out.aperture))
     }
 
     /// A source reader on the NUL-terminated `wide_path`, with hardware
@@ -443,15 +459,18 @@ impl MediaFoundationVideoReader {
             Some(_) => visible_size(decoded, reference),
             None => decoded,
         };
-        let (frame_rate_num, frame_rate_den, frame_rate_known) = unsafe {
-            match negotiated_video.GetUINT64(&MF_MT_FRAME_RATE) {
-                Ok(packed) => ((packed >> 32) as u32, packed as u32, true),
-                Err(e) => {
-                    tracing::warn!(
-                        "MF_MT_FRAME_RATE unavailable: {e}; falling back to 30000/1001 (29.97 fps)"
-                    );
-                    (30000, 1001, false)
-                }
+        let rate = scaled_frame_rate(
+            frame_rate_of(&negotiated_video),
+            scaled.and_then(|shape| shape.native_rate),
+            requested.is_some(),
+        );
+        let (frame_rate_num, frame_rate_den, frame_rate_known) = match rate {
+            Some(packed) => ((packed >> 32) as u32, packed as u32, true),
+            None => {
+                tracing::warn!(
+                    "MF_MT_FRAME_RATE unavailable; falling back to 30000/1001 (29.97 fps)"
+                );
+                (30000, 1001, false)
             }
         };
 
@@ -473,7 +492,8 @@ impl MediaFoundationVideoReader {
             frame_rate_den,
             frame_rate_known,
             reference,
-            scaled: requested.is_some(),
+            scaled_from: None,
+            decoder_out: None,
         })
     }
 
@@ -538,9 +558,9 @@ impl MediaFoundationVideoReader {
         self.gate.arm();
     }
 
-    /// The NV12 output type; at `scaled`'s size, frame rate and pixel
-    /// aspect when given (#282: the video processor scales to it), else at
-    /// the stream's own size.
+    /// The NV12 output type; `scaled`'s when given (#282: the video
+    /// processor scales to it, `ScaledType::apply`), else at the stream's
+    /// own size.
     fn make_video_output_type(scaled: Option<&ScaledType>) -> Result<IMFMediaType, DecoderError> {
         let media_type: IMFMediaType =
             unsafe { MFCreateMediaType().map_err(|e| DecoderError::NoStream(e.to_string()))? };
@@ -551,30 +571,9 @@ impl MediaFoundationVideoReader {
             media_type
                 .SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_NV12)
                 .map_err(|e| DecoderError::NoStream(e.to_string()))?;
-            if let Some(shape) = scaled {
-                let (width, height) = shape.size;
-                media_type
-                    .SetUINT64(
-                        &MF_MT_FRAME_SIZE,
-                        (u64::from(width) << 32) | u64::from(height),
-                    )
-                    .map_err(|e| DecoderError::NoStream(format!("MF_MT_FRAME_SIZE: {e}")))?;
-                if let Some(rate) = shape.frame_rate {
-                    media_type
-                        .SetUINT64(&MF_MT_FRAME_RATE, rate)
-                        .map_err(|e| DecoderError::NoStream(format!("MF_MT_FRAME_RATE: {e}")))?;
-                }
-                if let Some((x, y)) = shape.pixel_aspect {
-                    media_type
-                        .SetUINT64(
-                            &MF_MT_PIXEL_ASPECT_RATIO,
-                            (u64::from(x) << 32) | u64::from(y),
-                        )
-                        .map_err(|e| {
-                            DecoderError::NoStream(format!("MF_MT_PIXEL_ASPECT_RATIO: {e}"))
-                        })?;
-                }
-            }
+        }
+        if let Some(shape) = scaled {
+            shape.apply(&media_type)?;
         }
         Ok(media_type)
     }
@@ -722,7 +721,7 @@ impl MediaFoundationVideoReader {
                         .map_err(|e| DecoderError::ReadSample(e.to_string()))?
                 };
                 let (width, height) = visible_size(frame_size(&media_type), self.reference);
-                let picture = surface.read(width, height, self.scaled)?;
+                let picture = surface.read(width, height, self.scaled_from.is_some())?;
                 (picture.data, width, height, picture.stride, picture.path)
             }
             None => {
@@ -755,7 +754,7 @@ impl MediaFoundationVideoReader {
     /// D3D path, and any later change of path on it, is counted and logged,
     /// so a silent software decode is seen.
     fn observe(&mut self, path: DecodePath) {
-        let visible = decoder_path_visible(self.hw.is_some(), self.scaled);
+        let visible = decoder_path_visible(self.hw.is_some(), self.scaled_from.is_some());
         let note = self.paths.observe(path, visible);
         let file = self.path.display();
         let adapter = self.adapter.as_deref().unwrap_or("?");
@@ -810,7 +809,8 @@ impl MediaFoundationVideoReader {
         self.width = opened.width;
         self.height = opened.height;
         self.reference = opened.reference;
-        self.scaled = opened.scaled;
+        self.scaled_from = opened.scaled_from;
+        self.decoder_out = opened.decoder_out;
         self.duration_ms = self.duration_ms.max(opened.duration_ms);
         if let Some(position_ms) = self.resume.reopen() {
             self.set_position(position_ms)?;
@@ -882,31 +882,8 @@ pub(super) fn com_startup() -> Result<(), DecoderError> {
     Ok(())
 }
 
-/// The native (compressed) media type, `None` when MF does not answer.
-fn native_media_type(reader: &IMFSourceReader) -> Option<IMFMediaType> {
-    unsafe { reader.GetNativeMediaType(VIDEO_STREAM, 0) }.ok()
-}
-
-/// The stream's own size: the native type's `MF_MT_FRAME_SIZE`, `None`
-/// when it reports none.
-fn known_frame_size(native: &IMFMediaType) -> Option<(u32, u32)> {
-    let size = frame_size(native);
-    (size != (0, 0)).then_some(size)
-}
-
-/// #282: a media type's `MF_MT_FRAME_RATE` (packed), when it has one.
-fn frame_rate_of(media_type: &IMFMediaType) -> Option<u64> {
-    unsafe { media_type.GetUINT64(&MF_MT_FRAME_RATE) }.ok()
-}
-
-/// #282: a media type's `MF_MT_PIXEL_ASPECT_RATIO`, when it has one.
-fn pixel_aspect_of(media_type: &IMFMediaType) -> Option<(u32, u32)> {
-    let packed = unsafe { media_type.GetUINT64(&MF_MT_PIXEL_ASPECT_RATIO) }.ok()?;
-    Some(((packed >> 32) as u32, packed as u32))
-}
-
 /// A media type's `MF_MT_FRAME_SIZE` (0×0 when it has none).
-fn frame_size(media_type: &IMFMediaType) -> (u32, u32) {
+pub(super) fn frame_size(media_type: &IMFMediaType) -> (u32, u32) {
     let size = unsafe { media_type.GetUINT64(&MF_MT_FRAME_SIZE) }.unwrap_or(0);
     ((size >> 32) as u32, size as u32)
 }
