@@ -619,13 +619,14 @@ pub struct PlaylistItem {
 }
 
 /// Append a video to a custom playlist's set list. Returns the assigned
-/// position. Errors if `(playlist_id, video_id)` already exists.
+/// position. Errors if `(playlist_id, video_id)` already exists. `BEGIN
+/// IMMEDIATE` (#261): it reads before it writes (`models_set_list`).
 pub async fn append_playlist_item(
     pool: &SqlitePool,
     playlist_id: i64,
     video_id: i64,
 ) -> Result<i64, sqlx::Error> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let next_pos: i64 = sqlx::query_scalar(
         "SELECT COALESCE(MAX(position) + 1, 0) FROM playlist_items WHERE playlist_id = ?",
     )

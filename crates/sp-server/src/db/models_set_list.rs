@@ -73,8 +73,12 @@ pub(crate) async fn compact(
 /// items go by the foreign keys' cascades) and number every OTHER custom
 /// playlist that held one of its songs again ([`compact`]), in one
 /// transaction. `false` (nothing written) when there is no such playlist.
+/// `BEGIN IMMEDIATE`: the transaction reads before it writes, and in WAL a
+/// deferred one whose snapshot another connection's commit made stale fails
+/// its first write at once (no busy wait); an immediate one waits the busy
+/// timeout for the write lock up front.
 pub async fn delete_playlist(pool: &SqlitePool, playlist_id: i64) -> Result<bool, sqlx::Error> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let holders: Vec<i64> = sqlx::query_scalar(
         "SELECT DISTINCT i.playlist_id FROM playlist_items i JOIN videos v ON v.id = i.video_id \
          WHERE v.playlist_id = ?1 AND i.playlist_id != ?1 ORDER BY i.playlist_id",

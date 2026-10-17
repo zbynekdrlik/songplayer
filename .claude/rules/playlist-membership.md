@@ -180,7 +180,15 @@ archiv!". Design: #261 comment 6228880917; the lane's notes: the
   - So an inactive playlist's songs are deleted a year later by the
     retention below, with their files (a set list's item never), and
     `GET /api/v1/playlists/{id}/videos` of an inactive playlist lists
-    nothing (its rows are marked).
+    nothing (its rows are marked). Known, harmless: a video IMPORTED into
+    a playlist while it is inactive (`POST /api/v1/videos/import` with its
+    id, the Dabing import) is a new unmarked row until the playlist's next
+    deactivation; nothing downloads it while the playlist stays inactive
+    (`DOWNLOAD_DUE`'s `p.is_active = 1`). The import core shells out to
+    yt-dlp and has no test seam, so it is left as it is.
+  - A transaction that reads before it writes (`delete_playlist`,
+    `append_playlist_item`) begins `IMMEDIATE`: in WAL a deferred one whose
+    snapshot went stale fails its first write at once, with no busy wait.
 - **An inactive playlist's sync records nothing** (`record_fetch`, one WARN
   `playlist sync: the playlist is inactive - nothing is recorded`): a
   manual `POST /playlists/{id}/sync` would clear the deactivation's marks
