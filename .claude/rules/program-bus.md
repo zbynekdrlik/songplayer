@@ -342,8 +342,11 @@ side does (`program_output_ndi.rs`, an impl split of `ProgramOutput`;
   to the GPU takes the boundary before's readback as the last picture,
   so a picture missing right after it repeats that boundary (the black
   only when the boundary before was not read back); every canvas boundary
-  forgets it, and the setting's switch to the canvas lets the feed's
-  pictures go after the held pair's flush.
+  forgets it. The feed's pictures are let go by THIS side alone (review
+  round 5): at every canvas boundary under the setting, after the held
+  pair's flush took its picture. The `program-max` thread never clears
+  the feed: it usually reads the setting's switch first, and its clear
+  made the held pair repeat the picture before.
 - **From the canvas**: `submit_video`, stamped b, exactly as before.
 - **From the GPU**: the pair HELD at b − 1 goes out with `feed.take(b −
   1)` (its limited audio moved in, the standby silence for a standby
@@ -359,7 +362,10 @@ side does (`program_output_ndi.rs`, an impl split of `ProgramOutput`;
   picture, else the black: a repeat), then b on the canvas — two submits,
   contiguous stamps. Logged once, rate-limited (a
   `stat_window::StateLog` of the source: a change held back is said after
-  the window, as the source is then), counted (`ndi.switches`).
+  the window, as the source is then), counted (`ndi.switches`). An
+  automatic fallback is a WARN with its reason, the way back to the GPU
+  and the setting's switch an INFO (ROZHODNUTÉ 6233825414;
+  `program_output_tests_ndi_switch.rs`).
 - `health.timing.submit_us` is the NDI submit alone from the GPU (both
   submits at a switch to the canvas); the trace's `wire_100ns` names the
   stamp NDI got (b − 1's; b's own at a switch to the GPU, where nothing

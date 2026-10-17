@@ -1565,6 +1565,19 @@ nothing on air (default `cpu`).
   while NDI is wanted, disabled otherwise (the canvas mode pays no
   readback). A failed enable is tried again only after
   `MAX_RETRY_BACKOFF` (it makes textures and compiles a shader).
+- **A device lost at the pass's enable is lost there** (review round 5
+  B5-1): `ndi_pass` calls `lose_device(now, true)` (the compositor goes,
+  `device_resets` +1, the rebuild waits the backoff), and
+  `MaxWorker::device_ready` (= `build_device` + `ndi_pass`, the first step
+  of `attempt`) fails the boundary as after a failed build: MAX's build
+  never runs on the gone compositor, which would arm a spurious MAX
+  backoff. Before, with MAX off nothing composed until the pass was on,
+  so nothing reached the compose's own device check: the removed
+  compositor was kept and its enable failed every 3 s, NDI on the canvas
+  for good. With MAX on the compose caught it. Lesson: catch a device
+  loss at EVERY device call that can return it, not only on the path one
+  consumer (MAX's compose) happens to run
+  (`with_max_off_a_device_lost_at_the_pass_s_enable_is_rebuilt_after_the_backoff`).
 - The pass has ONE log: a `StateLog<PassLine>` of its state (`pass_line`:
   `Off` while NDI is not wanted, `On` while the pass is enabled, else
   `Failing(why)` with the last enable error, an `Arc<str>` so a failing
@@ -1578,11 +1591,30 @@ nothing on air (default `cpu`).
   never WARNed; and INFO lines written at every enable and disable,
   outside the gate, could leave the log's last line contradicting the
   pass ("on" while it failed) and flooded it under device churn.
+  Round 5 F2: every release (`release(now)`: nothing wants the
+  compositor, a quiesce, the thread's end) observes `Off` too
+  (`pass_released`, the one `say_pass`): with MAX off `serve_lines`
+  returns before the pass once NDI is on the canvas, so the log's last
+  line stayed "on" (`with_max_off_the_release_says_the_pass_is_off`).
+  Like `LogGate` it can stay one change behind: a release inside the
+  5 s window, or a pass gone with the device while the rebuild waits its
+  backoff (nothing observes it then).
   The pass goes with the compositor (`NdiPass::forget` in `drop_gpu`): a
-  rebuilt compositor enables it again. The pass switched off, and every
-  release (nothing wants the compositor, a quiesce, the thread's end),
-  let the feed's pictures go (`NdiFeed::clear`): nothing takes them, so
-  no 4 MB buffer stays out of `frame_pool` (round 2 + resume lane).
+  rebuilt compositor enables it again.
+- **The thread never lets the feed's pictures go** (review round 5 F1):
+  neither when its pass goes off nor at a release. It usually reads the
+  setting's switch to the canvas BEFORE the `SP-program` sender serves
+  the next boundary (with MAX off the switch wakes it at once to
+  release), so its clear took the held pair's picture and the flush
+  repeated the one before: review A's timing model put it at 99.6 % of
+  switches with MAX off, ~34 % with MAX on. The sender alone clears
+  (the delay line below). Lesson: when two threads share a hand-off and
+  a state change ends it, ONE side owns the cleanup, the consumer, which
+  alone knows when it no longer needs the last item; a producer-side
+  clear races the consumer's last take whichever thread reads the
+  change first (`program_output_tests_ndi_switch.rs`: the worker on the
+  fake GPU and the sender on one hand-off, the thread first, MAX on and
+  off).
 - After each compose, at the compose instant and BEFORE the Spout sends
   (a 67 ms Spout lock wait never delays NDI): `read_back` maps the newest
   staging copy (`read_uyvy`, never a wait) into a `frame_pool` buffer of
@@ -1676,10 +1708,17 @@ nothing on air (default `cpu`).
   the canvas: two submits back to back, contiguous stamps. The lane's
   first cut dropped the held pair, which lost b − 1's limited 33 ms block
   on `SP-program` (cg OBS, the stream) at every setting flip and every
-  automatic fallback; VBAN / FOH never lost it. At the setting's switch
-  the feed's pictures go right after that flush (`NdiFeed::clear`):
-  nothing takes them, and the thread lets them go only while it holds a
-  compositor (review round 4).
+  automatic fallback; VBAN / FOH never lost it.
+- **The feed's pictures are let go by the sender alone** (review rounds
+  4-5): at EVERY canvas boundary under the setting (`CpuWhy::Setting`),
+  right after the held pair's flush took its picture (`NdiFeed::clear`;
+  pinned with `repeats == 0` in
+  `the_setting_s_switch_lets_the_feed_s_pictures_go`). Every boundary,
+  not only the switch: the thread can push one more picture after the
+  switch (it read the setting late), and nothing else would let it go.
+  An automatic fallback does not clear: the gate takes the boundary
+  before's picture at every canvas boundary, and every older one goes
+  with it.
 - The last picture (what a missing one repeats): every boundary on the
   canvas forgets it (after the held pair's flush; no 4 MB picture stays
   pinned while NDI is on the canvas). A switch to the GPU takes the
@@ -1687,7 +1726,9 @@ nothing on air (default `cpu`).
   fallback the gate already took it at that boundary), so a picture
   missing right after any switch to the GPU repeats the boundary before,
   the black only when the boundary before was not read back (an older
-  picture the take dropped is not kept). Review round 3: a first entry
+  picture the take dropped is not kept), or was let go by a canvas
+  boundary between (a gpu → cpu → gpu flip within one boundary, which the
+  5 s settings poll never makes; review round 5 B5-4). Review round 3: a first entry
   sent the black there, and round 2's "an automatic fallback keeps it"
   had no effect left once the gate's takes set it before every return.
 - The lines (a `stat_window::StateLog<NdiSource>`, pure, the same
@@ -1698,8 +1739,11 @@ nothing on air (default `cpu`).
   change held back is said by the first boundary after the window, as the
   source is then (`held_back`), so the log never ends on a source NDI
   left. An INFO to the GPU or for the setting; a WARN for an automatic
-  fallback (`reason`, `on_time_needed`). Every switch is counted in
-  `ndi.switches` all the same; the setting flip is one.
+  fallback (`reason`, `on_time_needed`): ROZHODNUTÉ 6233825414 (the
+  fallback is a fault the operator should see), pinned by a log capture
+  (`the_fallback_is_a_warn_and_the_way_back_an_info`, its lines spaced
+  past the 5 s window). Every switch is counted in `ndi.switches` all the
+  same; the setting flip is one.
 - `health.timing.submit_us` is the NDI submit alone from the GPU (at a
   switch to the canvas, the held pair's submit and b's canvas picture).
   The trace's `wire_100ns` is the wire stamp of the stamp NDI got
@@ -1748,13 +1792,17 @@ before the setting's switch forgets the last picture — read inside a
 later submit through `HookedNdi`, whose hook sees the mock —, the switch's
 `submit_start`, the feed let go at the setting's switch, the last picture
 back in the frame pool after a fallback),
-`program_output_tests_order.rs` (VBAN before any NDI call from the GPU;
-`HookedNdi`), `program_max_tests_ndi.rs` (the queue's rules, the
-setting), `program_max_worker_tests_ndi.rs` (the fake's `order`: the
-readback after the compose and before MAX's send, Black, MAX off, the
-pass off, the enable's backoff, the pass log's on / off / failing lines
-and a quick recovery, a failed readback, a lost device, `lost_unsent`, a
-coalesce's gap, a job with nothing wanted, the release's feed),
+`program_output_tests_ndi_switch.rs` (round 5: the worker on the fake
+GPU and the sender on ONE hand-off, the thread reading the setting's
+switch first, MAX on and off — no repeat; the switch lines' levels by a
+log capture), `program_output_tests_order.rs` (VBAN before any NDI call
+from the GPU; `HookedNdi`), `program_max_tests_ndi.rs` (the queue's
+rules, the setting), `program_max_worker_tests_ndi.rs` (the fake's
+`order`: the readback after the compose and before MAX's send, Black,
+MAX off, the pass off, the enable's backoff, a device lost at the
+enable, the pass log's on / off / failing lines, a quick recovery and
+the release's "off", a failed readback, a lost device, `lost_unsent`, a
+coalesce's gap, a job with nothing wanted, the feed left to the sender),
 `stat_window_tests.rs` (`StateLog`),
 `api/program_tests_ndi.rs`,
 `program_burn_tests_uyvy.rs`, sp-ndi's FourCC tests, and the WARP proof
@@ -1769,17 +1817,17 @@ above.
    `shallow_depth` +1 expected and stable.
 3. The delay's measurement (ROZHODNUTÉ 6232669201 item 2: the one-slot
    delay stays, and only a measured miss justifies a bounded wait or a
-   2-slot delay): `ndi.repeats` / `readback_late` against
-   `health.timing.ready_late_us_*` over a whole ~45 min drift cycle,
-   binned by offer phase. In `cpu` mode nothing reads back and nothing is
-   taken, so both counters stay 0: the read CANNOT run before the flip as
-   the decision words it (design question on #279, comment 6233264693:
-   measure with NDI on the GPU, the fallback as the safety net, or a
-   `shadow` value). Then flip SNV to `gpu`: an NDI receiver reads
-   1920×1080 UYVY; `ndi.repeats`
-   and `readback_late` +0 over 10 min of songs and fades; the A/V gate
-   (`post-deploy-av-sync.spec.ts`), `max-gate` and cg OBS's `genlock-fifo
-   audit` hold.
+   2-slot delay; ROZHODNUTÉ 6233825414: NO `shadow` value). In `cpu`
+   mode nothing reads back and nothing is taken, so `ndi.repeats` /
+   `readback_late` stay 0: they say nothing before the flip. So the box
+   check flips SNV to `program_ndi_source=gpu` for its measurement
+   window, outside events, with the automatic fallback and its
+   30-readback hysteresis as the safety net, and reads `ndi.repeats` /
+   `readback_late` against `health.timing.ready_late_us_*` over a whole
+   ~45 min drift cycle, binned by offer phase. In it: an NDI receiver
+   reads 1920×1080 UYVY; `ndi.repeats` and `readback_late` +0 over songs
+   and fades; the A/V gate (`post-deploy-av-sync.spec.ts`), `max-gate`
+   and cg OBS's `genlock-fifo audit` hold. A miss flips it back to `cpu`.
 4. The plan's §7 A/B: `program_ndi_source` gpu vs cpu, ≥ 46 one-minute
    blocks, binned by offer phase.
 
