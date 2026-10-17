@@ -1736,6 +1736,16 @@ app.post("/api/v1/ui-usage", express.text({ type: () => true }), (req, res) => {
   uiUsagePosts.push({ content_type: req.get("content-type") || "", events });
   res.status(204).end();
 });
+// A body sent as JSON that is no JSON fails in the global express.json()
+// before the route: answer it as the server does (the fixed text), never
+// express's HTML page.
+app.use("/api/v1/ui-usage", (err, _req, res, next) => {
+  if (!err) {
+    next();
+    return;
+  }
+  res.status(400).type("text/plain").send(UI_USAGE_REFUSAL);
+});
 app.get("/api/v1/ui-usage/summary", (req, res) => {
   let days = 400;
   if (req.query.days !== undefined) {
@@ -1770,11 +1780,10 @@ app.get("/api/v1/ui-usage/summary", (req, res) => {
       groups.set(key, g);
     }
   }
+  // SQLite's own text order (by code point), never the locale's.
+  const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
   const order = (a, b) =>
-    b.count - a.count ||
-    a.page.localeCompare(b.page) ||
-    a.control.localeCompare(b.control) ||
-    a.kind.localeCompare(b.kind);
+    b.count - a.count || cmp(a.page, b.page) || cmp(a.control, b.control) || cmp(a.kind, b.kind);
   const rows = [...groups.values()].sort(order).map((g) => ({
     page: g.page,
     control: g.control,

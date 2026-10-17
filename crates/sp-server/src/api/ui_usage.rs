@@ -4,12 +4,15 @@
 //!   (`sp_core::ui_usage::parse_batch`: a typed, bounded body, never
 //!   through `serde_json::Value`). The body is read as bytes whatever its
 //!   content type: `navigator.sendBeacon` sends its string as `text/plain`,
-//!   which axum's `Json` would refuse. Each row gets the program's source
-//!   when the batch arrived. A batch that is not taken is a 400 with a
-//!   fixed text and nothing written; a stored one is a 204.
-//! - `GET /api/v1/ui-usage/summary?days=N` (1..=400, default 400): per
-//!   page, control and kind the count, the distinct days used, the first
-//!   and last use and the uses while a playlist was on air
+//!   which axum's `Json` would refuse. Each stamp is capped at the
+//!   server's clock (a use cannot come after its arrival) and each row
+//!   gets the program's source when the batch arrived. A batch that is not
+//!   taken is a 400 with a fixed text and nothing written; a stored one is
+//!   a 204.
+//! - `GET /api/v1/ui-usage/summary?days=N` (1..=400, default 400): over
+//!   the last N days up to now, per page, control and kind the count, the
+//!   distinct days used, the first and last use and the uses while a
+//!   playlist was on air
 //!   (`sp_core::ui_usage::UsageSummary`); a `days` out of range is a 400
 //!   with a fixed text.
 
@@ -27,7 +30,8 @@ use crate::db::models_ui_usage;
 
 /// `POST /api/v1/ui-usage`.
 pub async fn post_ui_usage(State(state): State<AppState>, body: Bytes) -> Response {
-    let batch = match parse_batch(&body) {
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let batch = match parse_batch(&body, now_ms) {
         Ok(batch) => batch,
         Err(refusal) => {
             warn!(
@@ -72,7 +76,8 @@ pub async fn get_ui_usage_summary(
         Err(refusal) => return (StatusCode::BAD_REQUEST, refusal).into_response(),
     };
     let now_ms = chrono::Utc::now().timestamp_millis();
-    match models_ui_usage::summary_rows(&state.pool, window_start(now_ms, days)).await {
+    let from_ms = window_start(now_ms, days);
+    match models_ui_usage::summary_rows(&state.pool, from_ms, now_ms).await {
         Ok(rows) => Json(UsageSummary::from_rows(now_ms, days, rows)).into_response(),
         Err(e) => {
             warn!(%e, "ui usage: the summary could not be read");

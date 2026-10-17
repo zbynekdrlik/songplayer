@@ -1,11 +1,11 @@
 //! #256: the usage log's pure rules: the wire and its bounds, the client's
-//! rules (exclusion, a control's name, the batch buffer), the summary and
-//! Nastavenia's line.
+//! rules (exclusion, a control's name, the batch buffer, which page views
+//! count), the summary and Nastavenia's line.
 
 use super::{
-    BATCH_REFUSAL, DAYS_REFUSAL, MAX_EVENTS, UsageBatch, UsageBuffer, UsageEvent, UsageKind,
-    UsageRow, UsageSummary, check_batch, clip, control_name, excluded, parse_batch, parse_days,
-    settings_line, span_days, window_start,
+    BATCH_REFUSAL, DAYS_REFUSAL, MAX_EVENTS, PageViews, UsageBatch, UsageBuffer, UsageEvent,
+    UsageKind, UsageRow, UsageSummary, check_batch, clip, control_name, excluded, parse_batch,
+    parse_days, settings_line, span_days, window_start,
 };
 
 const DAY: i64 = 86_400_000;
@@ -106,6 +106,7 @@ fn an_automated_or_marked_browser_records_nothing() {
 fn a_batch_of_200_events_of_120_characters_is_taken() {
     let mut events = vec![event(1, &"c".repeat(120)); MAX_EVENTS];
     events[0].page = "é".repeat(120);
+    events[1].ts_ms = 0;
     assert_eq!(events.len(), 200);
     assert_eq!(check_batch(&UsageBatch { events }), Ok(()));
     assert_eq!(check_batch(&UsageBatch { events: Vec::new() }), Ok(()));
@@ -132,13 +133,34 @@ fn a_batch_over_its_bounds_is_refused_whole() {
         }),
         Err(BATCH_REFUSAL)
     );
+    let mut before_1970 = vec![event(1, "x"); 3];
+    before_1970[0].ts_ms = -1;
+    assert_eq!(
+        check_batch(&UsageBatch {
+            events: before_1970
+        }),
+        Err(BATCH_REFUSAL)
+    );
+}
+
+#[test]
+fn a_stamp_after_its_arrival_is_capped_at_the_servers_clock() {
+    let body = format!(
+        r#"{{"events":[{{"ts_ms":{},"page":"/","control":"a","kind":"click"}},{{"ts_ms":{},"page":"/","control":"b","kind":"click"}},{{"ts_ms":{},"page":"/","control":"c","kind":"click"}}]}}"#,
+        NOW + DAY,
+        NOW - HOUR,
+        NOW
+    );
+    let batch = parse_batch(body.as_bytes(), NOW).unwrap();
+    let stamps: Vec<i64> = batch.events.iter().map(|e| e.ts_ms).collect();
+    assert_eq!(stamps, [NOW, NOW - HOUR, NOW]);
 }
 
 #[test]
 fn a_body_is_read_typed_whatever_else_it_carries() {
     let body = br#"{"events":[{"ts_ms":7,"page":"/live","control":"nav-live","kind":"click"}],"extra":{"a":[1,{"b":2}]}}"#;
     assert_eq!(
-        parse_batch(body),
+        parse_batch(body, NOW),
         Ok(UsageBatch {
             events: vec![UsageEvent {
                 ts_ms: 7,
@@ -164,7 +186,7 @@ fn a_body_that_is_no_batch_is_refused() {
     ];
     for body in bodies {
         assert_eq!(
-            parse_batch(body),
+            parse_batch(body, NOW),
             Err(BATCH_REFUSAL),
             "{}",
             String::from_utf8_lossy(body)
@@ -175,7 +197,7 @@ fn a_body_that_is_no_batch_is_refused() {
         "p".repeat(121)
     );
     assert_eq!(
-        parse_batch(long.as_bytes()),
+        parse_batch(long.as_bytes(), NOW),
         Err(BATCH_REFUSAL),
         "checked too"
     );
@@ -320,4 +342,18 @@ fn nastavenia_says_how_many_events_over_how_many_days() {
     for (events, first_ms, line) in table {
         assert_eq!(settings_line(&summary(events, first_ms)), line);
     }
+}
+
+#[test]
+fn a_page_view_counts_only_once_the_page_can_be_seen() {
+    let mut views = PageViews::default();
+    assert!(views.changed(true), "a page shown in sight counts at once");
+    assert!(!views.came_into_view(true), "nothing owed");
+    assert!(!views.changed(false), "the app's hidden window: not yet");
+    assert!(!views.came_into_view(false), "still not seen");
+    assert!(views.came_into_view(true), "seen: the owed view counts");
+    assert!(!views.came_into_view(true), "once");
+    assert!(!views.changed(false));
+    assert!(views.changed(true), "a change in sight counts at once");
+    assert!(!views.came_into_view(true), "and owes nothing");
 }

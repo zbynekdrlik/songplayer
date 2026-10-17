@@ -11,11 +11,12 @@
  *   a `days` out of range is refused with its fixed text.
  * - This spec's own browser session, an automated one
  *   (`navigator.webdriver`, which Playwright sets), adds NOTHING: it
- *   switches Prehľad → Texty → Prehľad `ROUNDS` times, hides the page (the
- *   `sendBeacon` path) and waits past the 10 s flush. Had the log recorded
- *   it, each of its three rows (the two tab clicks and the Texty page
- *   view) would have grown by `ROUNDS`; an operator's own use of the box
- *   meanwhile adds fewer (`ui-usage-gate.ts::recordedSession`).
+ *   switches Prehľad → Texty → Prehľad `ROUNDS` times, then hides the page:
+ *   a log installed in it would hand everything it recorded to
+ *   `sendBeacon` at once. Had the log recorded it, each of its three rows
+ *   (the two tab clicks and the Texty page view) would have grown by
+ *   `ROUNDS`; an operator's own use of the box meanwhile adds fewer
+ *   (`ui-usage-gate.ts::recordedSession`).
  * - Nastavenia's line reads the summary ("Záznam používania: …", never
  *   "načítavam" or "nedostupný").
  *
@@ -35,8 +36,8 @@ import {
 /** Tab round trips the session makes. */
 const ROUNDS = 4;
 
-/** The dashboard's flush period (`sp_core::ui_usage::FLUSH_EVERY_MS`). */
-const FLUSH_MS = 10_000;
+/** How long a beacon sent at the hide may take to be stored. */
+const BEACON_SETTLE_MS = 3_000;
 
 /** The rows this session would make if it were recorded. */
 const SESSION_ROWS: RowKey[] = [
@@ -101,9 +102,9 @@ test.describe("the dashboard's usage log post-deploy verification (#256)", () =>
       await page.getByTestId("nav-dashboard").click();
       await expect(page.getByTestId("nav-dashboard")).toHaveClass(/active/);
     }
+    // A log installed in this session would send everything it holds now.
     await hide(page);
-    // Past the flush: a log installed in this session would have sent by now.
-    await page.waitForTimeout(FLUSH_MS + 2_000);
+    await page.waitForTimeout(BEACON_SETTLE_MS);
 
     const after = await summary(request);
     console.log(`[#256 usage] ${after.events} events in the last day, ${after.rows.length} rows`);

@@ -7,6 +7,7 @@ pub mod audio_faults; // #257: every audio path's faults, persisted (the ledger)
 pub mod audio_host; // #233: every ASIO output runs in the sp-audio-host process (spawns nothing)
 pub mod background_hold; // #230: a sp-90s press holds the background jobs
 pub mod dabing;
+pub mod daily_pass; // the daily pass's timer (#260 retention, #256 usage-log prune)
 pub mod db;
 pub mod diag; // #223 S0: /api/v1/diag/* measurement benches
 pub mod downloader;

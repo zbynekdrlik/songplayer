@@ -6,6 +6,11 @@
 //! - An event names its page (the router's path), its control (the nearest
 //!   `data-testid`, else `<tag>`), its kind and `Date.now()`
 //!   (`sp_core::ui_usage::control_name`, `UsageEvent::new`).
+//! - A page view counts only for a page the operator can see, visible and
+//!   focused (`sp_core::ui_usage::PageViews`): SongPlayer's own app window
+//!   loads the dashboard at every start and stays hidden until the tray
+//!   shows it. A view shown while it cannot be seen is recorded once it
+//!   can (`focus`, `visibilitychange`).
 //! - The events wait in a buffer (`sp_core::ui_usage::UsageBuffer`) and go
 //!   to `POST /api/v1/ui-usage` every 10 s when there are any, at once when
 //!   200 are waiting, and by `navigator.sendBeacon` when the page is hidden
@@ -14,8 +19,9 @@
 //!   which every Playwright run sets, the post-deploy specs on the boxes
 //!   among them) or in a browser with the `sp_no_usage` localStorage key;
 //!   both are read once, here.
-//! - A send that fails is dropped: the log is statistics, and the operator
-//!   never sees an error for it (this module writes no console line).
+//! - A send that fails is dropped: the log is statistics. This module logs
+//!   nothing and shows nothing (the browser itself may log a failed
+//!   request, e.g. while SongPlayer restarts).
 //!
 //! The rules are pure and tested in `sp_core::ui_usage` (sp-ui has no unit
 //! tests); this module only wires the browser. Installed once by `App`,
@@ -25,7 +31,7 @@
 use std::cell::RefCell;
 
 use leptos::prelude::*;
-use sp_core::ui_usage::{self, UsageBatch, UsageBuffer, UsageEvent, UsageKind};
+use sp_core::ui_usage::{self, PageViews, UsageBatch, UsageBuffer, UsageEvent, UsageKind};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::prelude::*;
@@ -45,6 +51,8 @@ extern "C" {
 thread_local! {
     /// The events not sent yet.
     static BUFFER: RefCell<UsageBuffer> = RefCell::new(UsageBuffer::default());
+    /// The page view owed while the page could not be seen.
+    static VIEWS: RefCell<PageViews> = RefCell::new(PageViews::default());
 }
 
 /// Install the usage log (once, from `App`). `page` is the router's page.
@@ -52,7 +60,10 @@ pub fn install(page: RwSignal<Page>) {
     if ui_usage::excluded(webdriver(), no_usage_key().as_deref()) {
         return;
     }
-    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Some(document) = window.document() else {
         return;
     };
     for kind in [UsageKind::Click, UsageKind::Change, UsageKind::Submit] {
@@ -70,11 +81,10 @@ pub fn install(page: RwSignal<Page>) {
         listener.forget();
     }
     let on_visibility = Closure::wrap(Box::new(move |_ev: web_sys::Event| {
-        let hidden = web_sys::window()
-            .and_then(|w| w.document())
-            .is_some_and(|d| d.hidden());
-        if hidden {
+        if page_hidden() {
             send_beacon();
+        } else {
+            record_owed_view(page);
         }
     }) as Box<dyn FnMut(web_sys::Event)>);
     let _ = document.add_event_listener_with_callback(
@@ -82,18 +92,18 @@ pub fn install(page: RwSignal<Page>) {
         on_visibility.as_ref().unchecked_ref(),
     );
     on_visibility.forget();
+    let on_focus = Closure::wrap(Box::new(move |_ev: web_sys::Event| {
+        record_owed_view(page);
+    }) as Box<dyn FnMut(web_sys::Event)>);
+    let _ = window.add_event_listener_with_callback("focus", on_focus.as_ref().unchecked_ref());
+    on_focus.forget();
     gloo_timers::callback::Interval::new(ui_usage::FLUSH_EVERY_MS, send_buffered).forget();
-    // One `page` event per route change; the first run records the page the
-    // load opened. A tab clicked while already shown changes nothing.
+    // One `page` event per route change; the first run is the page the load
+    // opened. A tab clicked while already shown changes nothing.
     Effect::new(move |previous: Option<Page>| -> Page {
         let shown = page.get();
-        if previous != Some(shown) {
-            record(UsageEvent::new(
-                now_ms(),
-                shown.as_path(),
-                "",
-                UsageKind::Page,
-            ));
+        if previous != Some(shown) && VIEWS.with(|views| views.borrow_mut().changed(seen())) {
+            record(page_view(shown));
         }
         shown
     });
@@ -107,6 +117,32 @@ fn no_usage_key() -> Option<String> {
 
 fn now_ms() -> i64 {
     date_now() as i64
+}
+
+fn page_hidden() -> bool {
+    web_sys::window()
+        .and_then(|w| w.document())
+        .is_some_and(|d| d.hidden())
+}
+
+/// Whether the operator can see the page now: visible and focused.
+fn seen() -> bool {
+    web_sys::window()
+        .and_then(|w| w.document())
+        .is_some_and(|d| !d.hidden() && d.has_focus().unwrap_or(false))
+}
+
+fn page_view(page: Page) -> UsageEvent {
+    UsageEvent::new(now_ms(), page.as_path(), "", UsageKind::Page)
+}
+
+/// The page may have come into view: record the view it owes, if any.
+fn record_owed_view(page: RwSignal<Page>) {
+    if VIEWS.with(|views| views.borrow_mut().came_into_view(seen()))
+        && let Some(shown) = page.try_get_untracked()
+    {
+        record(page_view(shown));
+    }
 }
 
 /// Record a `kind` event on the element `ev` reached.

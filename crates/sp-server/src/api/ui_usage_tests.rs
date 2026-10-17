@@ -4,12 +4,13 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use sp_core::config::{PROGRAM_BLANK_ID, PROGRAM_INPUT_ID};
-use sp_core::ui_usage::{BATCH_REFUSAL, DAYS_REFUSAL};
+use sp_core::ui_usage::{BATCH_REFUSAL, DAYS_REFUSAL, UsageEvent, UsageKind};
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 
 use crate::AppState;
 use crate::api::routes::tests::{app, test_state};
+use crate::db::models_ui_usage;
 
 const DAY: i64 = 86_400_000;
 const HOUR: i64 = 3_600_000;
@@ -154,6 +155,7 @@ async fn a_batch_out_of_bounds_is_refused_whole_and_nothing_is_written() {
         batch(&[(1, "/", "x", "click"), (2, long.as_str(), "x", "click")]),
         batch(&[(1, "/", long.as_str(), "click")]),
         batch(&[(1, "/", "x", "hover")]),
+        batch(&[(1, "/", "x", "click"), (-1, "/", "x", "click")]),
         "not json".to_string(),
         r#"{"events":[{"ts_ms":1,"page":"/","kind":"click"}]}"#.to_string(),
         "{}".to_string(),
@@ -174,26 +176,24 @@ async fn a_batch_out_of_bounds_is_refused_whole_and_nothing_is_written() {
 
 /// Per control on its page: the count, the distinct days with a use, the
 /// first and the last use and the uses while a PLAYLIST was on air — not
-/// before the first selection, not the NDI input, not Blank. The stamps
-/// sit around noon UTC, so their days are the same in any time zone the
-/// test runs in (`localtime`).
+/// before the first selection, not the NDI input, not Blank. Every stamp
+/// of one day sits in the first milliseconds after 12:00:00.000 UTC: time
+/// zones are whole quarter hours off UTC, so no local midnight falls
+/// inside such a block, and the days are the same in any zone the test
+/// runs in (`localtime`).
 #[tokio::test]
 async fn the_summary_counts_uses_days_and_playlist_on_air_per_control() {
     let state = test_state().await;
     let now = chrono::Utc::now().timestamp_millis();
     let base = (now / DAY - 3) * DAY + 12 * HOUR;
     // Nothing selected yet.
-    store(
-        &state,
-        batch(&[(base - HOUR, "/live", "nav-lyrics", "click")]),
-    )
-    .await;
+    store(&state, batch(&[(base, "/live", "nav-lyrics", "click")])).await;
     state.program_bus.select_initial(7, Some("sp-fast"));
     store(
         &state,
         batch(&[
-            (base, "/live", "nav-lyrics", "click"),
-            (base + 30 * 60_000, "/live", "nav-lyrics", "click"),
+            (base + 1, "/live", "nav-lyrics", "click"),
+            (base + 2, "/live", "nav-lyrics", "click"),
             (base + DAY, "/live", "nav-lyrics", "click"),
             (base + 2 * DAY, "/lyrics", "", "page"),
         ]),
@@ -202,13 +202,13 @@ async fn the_summary_counts_uses_days_and_playlist_on_air_per_control() {
     state.program_bus.select_initial(PROGRAM_INPUT_ID, None);
     store(
         &state,
-        batch(&[(base + 2 * DAY + HOUR, "/live", "nav-lyrics", "click")]),
+        batch(&[(base + 2 * DAY + 1, "/live", "nav-lyrics", "click")]),
     )
     .await;
     state.program_bus.select_initial(PROGRAM_BLANK_ID, None);
     store(
         &state,
-        batch(&[(base + 2 * DAY + 2 * HOUR, "/live", "nav-lyrics", "click")]),
+        batch(&[(base + 2 * DAY + 2, "/live", "nav-lyrics", "click")]),
     )
     .await;
 
@@ -218,14 +218,14 @@ async fn the_summary_counts_uses_days_and_playlist_on_air_per_control() {
     assert_eq!(answer["days"], 30);
     assert_eq!(answer["from_ms"], answered_now - 30 * DAY);
     assert_eq!(answer["events"], 7);
-    assert_eq!(answer["first_ms"], base - HOUR);
+    assert_eq!(answer["first_ms"], base);
     assert_eq!(
         answer["rows"],
         serde_json::json!([
             {
                 "page": "/live", "control": "nav-lyrics", "kind": "click",
                 "count": 6, "days_used": 3,
-                "first_ms": base - HOUR, "last_ms": base + 2 * DAY + 2 * HOUR,
+                "first_ms": base, "last_ms": base + 2 * DAY + 2,
                 "on_air": 3
             },
             {
@@ -260,6 +260,55 @@ async fn the_summary_reads_only_its_window_and_by_default_all_400_days() {
     assert_eq!(all["events"], 3, "{all}");
     assert_eq!(all["rows"][0]["control"], "nav-live", "most used first");
     assert_eq!(all["rows"][1]["control"], "nav-settings");
+}
+
+/// A use cannot come after its arrival: a stamp ahead of the server's
+/// clock (a browser clock running ahead, or a made-up one years ahead) is
+/// stored at the server's clock, so it sits in no window it does not
+/// belong to and the prune reaches it.
+#[tokio::test]
+async fn a_stamp_ahead_of_the_server_is_stored_at_its_clock() {
+    let state = test_state().await;
+    let before = chrono::Utc::now().timestamp_millis();
+    store(
+        &state,
+        batch(&[
+            (9_000_000_000_000_000, "/", "nav-live", "click"),
+            (before - HOUR, "/", "nav-settings", "click"),
+        ]),
+    )
+    .await;
+    let after = chrono::Utc::now().timestamp_millis();
+    let kept = rows(&state.pool).await;
+    assert_eq!(kept.len(), 2);
+    assert_eq!(
+        kept[0],
+        stored(before - HOUR, "/", "nav-settings", "click", None)
+    );
+    let capped = kept[1].0;
+    assert!(
+        (before..=after).contains(&capped),
+        "{capped} not in {before}..={after}"
+    );
+    assert_eq!(kept[1].2, "nav-live");
+}
+
+/// The window ends at the server's clock: a row stamped later (stored
+/// before the server's clock was set back) is in no summary.
+#[tokio::test]
+async fn the_summary_window_ends_now() {
+    let state = test_state().await;
+    let now = chrono::Utc::now().timestamp_millis();
+    let events = [
+        UsageEvent::new(now + DAY, "/", "nav-live", UsageKind::Click),
+        UsageEvent::new(now - HOUR, "/", "nav-dabing", UsageKind::Click),
+    ];
+    models_ui_usage::insert_batch(&state.pool, &events, None)
+        .await
+        .unwrap();
+    let answer = summary(&state, "/api/v1/ui-usage/summary?days=1").await;
+    assert_eq!(answer["events"], 1, "{answer}");
+    assert_eq!(answer["rows"][0]["control"], "nav-dabing");
 }
 
 #[tokio::test]

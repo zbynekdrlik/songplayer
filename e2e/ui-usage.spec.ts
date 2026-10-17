@@ -5,12 +5,14 @@ import { test, expect, type APIRequestContext, type Page } from "@playwright/tes
 // change (sp-ui `usage.rs`), sent to `POST /api/v1/ui-usage` every 10 s and
 // by `navigator.sendBeacon` when the page is hidden. A real person's
 // clicks, change and submit arrive as exactly those events (page, control,
-// kind); an automated session (`navigator.webdriver`, which Playwright
-// sets) and a browser with the `sp_no_usage` localStorage key send
-// nothing; Nastavenia's line reads the summary. The positive tests make
-// the page look like a person's browser first (`asAPerson`). Runs against
-// the mock, which records every batch it took (`/__mock/ui-usage`). Zero
-// console errors is each test's last assertion.
+// kind); a page the operator cannot see (SongPlayer's own hidden app
+// window) owes its view until it can be seen; an automated session
+// (`navigator.webdriver`, which Playwright sets) and a browser with the
+// `sp_no_usage` localStorage key send nothing; Nastavenia's line reads the
+// summary. The positive tests make the page look like a person's browser
+// first (`asAPerson`). Runs against the mock, which records every batch it
+// took (`/__mock/ui-usage`). Zero console errors is each test's last
+// assertion.
 
 const ALLOWED_CONSOLE = [
   /WebSocket connection/, // WS reconnect messages are expected
@@ -92,6 +94,8 @@ test("a person's clicks, change and submit arrive as exactly those events, page 
   const startedAt = Date.now();
   await page.goto("/");
   await expect(page.getByTestId("health-bar")).toBeVisible({ timeout: 10000 });
+  // The tab already shown: its click is recorded, no page view.
+  await page.getByTestId("nav-dashboard").click();
   await page.getByTestId("nav-settings").click();
   await expect(page.getByTestId("settings-gemini-model")).toHaveValue("gemini-2.5-flash", {
     timeout: 10000,
@@ -111,6 +115,7 @@ test("a person's clicks, change and submit arrive as exactly those events, page 
 
   const expected = [
     { page: "/", control: "", kind: "page" },
+    { page: "/", control: "nav-dashboard", kind: "click" },
     { page: "/", control: "nav-settings", kind: "click" },
     { page: "/settings", control: "", kind: "page" },
     { page: "/settings", control: "<h1>", kind: "click" },
@@ -177,7 +182,9 @@ test("an automated session and a browser with sp_no_usage send nothing", async (
   context,
   request,
 }) => {
-  // `page` keeps Playwright's own navigator.webdriver === true.
+  // `page` keeps Playwright's own navigator.webdriver === true; `marked`
+  // reads as a person's browser but carries the sp_no_usage key; `person`
+  // is the control: the same session, recorded.
   watchConsole(page);
   const marked = await context.newPage();
   watchConsole(marked);
@@ -185,8 +192,11 @@ test("an automated session and a browser with sp_no_usage send nothing", async (
   await marked.addInitScript(() => {
     localStorage.setItem("sp_no_usage", "1");
   });
+  const person = await context.newPage();
+  watchConsole(person);
+  await asAPerson(person);
 
-  for (const p of [page, marked]) {
+  for (const p of [page, marked, person]) {
     await p.goto("/");
     await expect(p.getByTestId("health-bar")).toBeVisible({ timeout: 10000 });
     await p.getByTestId("nav-settings").click();
@@ -194,12 +204,58 @@ test("an automated session and a browser with sp_no_usage send nothing", async (
     await p.getByTestId("nav-dashboard").click();
     await expect(p.getByTestId("nav-dashboard")).toHaveClass(/active/);
   }
-  await hide(page);
-  await hide(marked);
-  // Past the 10 s flush: a log that was installed would have sent by now.
-  await page.waitForTimeout(FLUSH_MS + 1500);
-  expect(await posts(request)).toEqual([]);
+  // Hiding a page sends what its log holds at once (sendBeacon): the
+  // person's session arrives; the other two, had they a log, would too.
+  for (const p of [page, marked, person]) await hide(p);
+  const once = [
+    { page: "/", control: "", kind: "page" },
+    { page: "/", control: "nav-settings", kind: "click" },
+    { page: "/settings", control: "", kind: "page" },
+    { page: "/settings", control: "nav-dashboard", kind: "click" },
+    { page: "/", control: "", kind: "page" },
+  ];
+  await expect.poll(() => recorded(request), { timeout: 5000 }).toEqual(once);
+  await page.waitForTimeout(1000);
+  expect(await recorded(request), "only the person's session").toEqual(once);
   await marked.close();
+  await person.close();
+});
+
+test("a page the operator cannot see records its view only once it can be seen", async ({
+  page,
+  request,
+}) => {
+  // SongPlayer's own app window loads the dashboard hidden and unfocused
+  // at every start (until the tray shows it): its view must not count.
+  watchConsole(page);
+  await asAPerson(page);
+  await page.addInitScript(() => {
+    let seen = false;
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => (seen ? "visible" : "hidden"),
+    });
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => !seen });
+    document.hasFocus = () => seen;
+    (window as unknown as { spSeen: (value: boolean) => void }).spSeen = (value: boolean) => {
+      seen = value;
+      document.dispatchEvent(new Event("visibilitychange"));
+      if (value) window.dispatchEvent(new Event("focus"));
+    };
+  });
+  const setSeen = (value: boolean) =>
+    page.evaluate((v) => (window as unknown as { spSeen: (s: boolean) => void }).spSeen(v), value);
+  await page.goto("/");
+  await expect(page.getByTestId("health-bar")).toBeVisible({ timeout: 10000 });
+  // Hidden again: a view recorded at the load would go out now.
+  await setSeen(false);
+  await page.waitForTimeout(1000);
+  expect(await posts(request), "no view while unseen").toEqual([]);
+  // Shown (the tray), then hidden: the owed view, once.
+  await setSeen(true);
+  await setSeen(false);
+  await expect.poll(async () => (await posts(request)).length, { timeout: 5000 }).toBe(1);
+  expect(await recorded(request)).toEqual([{ page: "/", control: "", kind: "page" }]);
 });
 
 test("Nastavenia says how many events the log keeps, over how many days, and links the summary", async ({
@@ -234,6 +290,4 @@ test("Nastavenia says how many events the log keeps, over how many days, and lin
   const body = await summary.json();
   expect(body.events).toBe(3);
   expect(body.first_ms).toBe(now - 25 * HOUR);
-  // This session (webdriver) added nothing.
-  expect((await posts(request)).length).toBe(1);
 });

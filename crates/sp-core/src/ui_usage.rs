@@ -7,18 +7,21 @@
 //! - **The wire.** A batch `{"events": [{ts_ms, page, control, kind}]}`
 //!   ([`UsageBatch`]) is POSTed to [`INGEST_PATH`]. The server takes it
 //!   only through [`parse_batch`] (a typed parse, never through
-//!   `serde_json::Value`, then [`check_batch`]); anything else is refused
-//!   whole with [`BATCH_REFUSAL`].
+//!   `serde_json::Value`, then [`check_batch`], then every stamp capped at
+//!   the server's clock); anything else is refused whole with
+//!   [`BATCH_REFUSAL`].
 //! - **The client's rules.** sp-ui's `usage.rs` only wires the browser:
 //!   whether this browser records at all ([`excluded`]), the name of a
-//!   control ([`control_name`]), an event's bounds ([`UsageEvent::new`])
-//!   and the batch buffer ([`UsageBuffer`]).
+//!   control ([`control_name`]), an event's bounds ([`UsageEvent::new`]),
+//!   the batch buffer ([`UsageBuffer`]) and which page views count
+//!   ([`PageViews`]: only a page the operator can see).
 //! - **The summary.** [`SUMMARY_PATH`]`?days=N` ([`parse_days`]) answers a
 //!   [`UsageSummary`]; Nastavenia shows its [`settings_line`].
 
 use serde::{Deserialize, Serialize};
 
 use crate::audio_faults::counted;
+use crate::query_param::whole_count;
 
 /// Where the dashboard sends its batches (POST).
 pub const INGEST_PATH: &str = "/api/v1/ui-usage";
@@ -50,8 +53,8 @@ const DAY_MS: i64 = 86_400_000;
 
 /// The 400 text of a batch the server does not take (never the body sent).
 pub const BATCH_REFUSAL: &str = "a usage batch is {\"events\": [{\"ts_ms\", \"page\", \"control\", \
-     \"kind\"}]}: at most 200 events, page and control at most 120 characters each, kind \
-     click, change, submit or page";
+     \"kind\"}]}: at most 200 events, ts_ms not negative, page and control at most 120 \
+     characters each, kind click, change, submit or page";
 
 /// The 400 text of a `days` that is not 1..=400 (never the value sent).
 pub const DAYS_REFUSAL: &str = "days must be a whole number from 1 to 400";
@@ -126,9 +129,9 @@ fn too_long(text: &str) -> bool {
     text.chars().count() > MAX_TEXT_CHARS
 }
 
-/// Whether the server takes `batch`: at most [`MAX_EVENTS`] events, page
-/// and control at most [`MAX_TEXT_CHARS`] characters each (the kind is
-/// already one of the four, by its type).
+/// Whether the server takes `batch`: at most [`MAX_EVENTS`] events, no
+/// stamp before 1970, page and control at most [`MAX_TEXT_CHARS`]
+/// characters each (the kind is already one of the four, by its type).
 pub fn check_batch(batch: &UsageBatch) -> Result<(), &'static str> {
     if batch.events.len() > MAX_EVENTS {
         return Err(BATCH_REFUSAL);
@@ -136,19 +139,25 @@ pub fn check_batch(batch: &UsageBatch) -> Result<(), &'static str> {
     if batch
         .events
         .iter()
-        .any(|event| too_long(&event.page) || too_long(&event.control))
+        .any(|event| event.ts_ms < 0 || too_long(&event.page) || too_long(&event.control))
     {
         return Err(BATCH_REFUSAL);
     }
     Ok(())
 }
 
-/// The server's read of a POST body, whatever its content type (a
-/// `navigator.sendBeacon` string arrives as `text/plain`): the typed batch
-/// (serde_json skips an unknown field without building a `Value`), checked.
-pub fn parse_batch(body: &[u8]) -> Result<UsageBatch, &'static str> {
-    let batch: UsageBatch = serde_json::from_slice(body).map_err(|_| BATCH_REFUSAL)?;
+/// The server's read of a POST body at `now_ms`, whatever its content type
+/// (a `navigator.sendBeacon` string arrives as `text/plain`): the typed
+/// batch (serde_json skips an unknown field without building a `Value`),
+/// checked, each stamp capped at `now_ms`. A use cannot come after its
+/// arrival: a browser clock running ahead, or a made-up stamp years ahead,
+/// would otherwise sit in every summary window and never be pruned.
+pub fn parse_batch(body: &[u8], now_ms: i64) -> Result<UsageBatch, &'static str> {
+    let mut batch: UsageBatch = serde_json::from_slice(body).map_err(|_| BATCH_REFUSAL)?;
     check_batch(&batch)?;
+    for event in &mut batch.events {
+        event.ts_ms = event.ts_ms.min(now_ms);
+    }
     Ok(batch)
 }
 
@@ -199,19 +208,41 @@ impl UsageBuffer {
     }
 }
 
+/// Which page views are recorded: only a page the operator can SEE
+/// (visible and focused). SongPlayer's own app window loads the dashboard
+/// at every start and stays hidden and unfocused until the tray shows it:
+/// counting that load would add a made-up view of `/` per restart (each
+/// deploy). A page shown while it cannot be seen owes its view until it
+/// can (a `focus` or `visibilitychange`); a click needs no such gate (only
+/// a person clicks).
+#[derive(Debug, Default)]
+pub struct PageViews {
+    owed: bool,
+}
+
+impl PageViews {
+    /// The shown page changed (or the load opened it); `seen`: the
+    /// operator can see the page now. Whether to record its view now.
+    pub fn changed(&mut self, seen: bool) -> bool {
+        self.owed = !seen;
+        seen
+    }
+
+    /// The page may have come into view; `seen` as above. Whether the view
+    /// it owes is recorded now (once).
+    pub fn came_into_view(&mut self, seen: bool) -> bool {
+        let due = self.owed && seen;
+        if due {
+            self.owed = false;
+        }
+        due
+    }
+}
+
 /// The summary's window: `days` (1..=[`RETENTION_DAYS`], default all of
-/// it).
+/// it), by the one whole-count parse (`query_param::whole_count`).
 pub fn parse_days(raw: Option<&str>) -> Result<u32, &'static str> {
-    let Some(text) = raw else {
-        return Ok(RETENTION_DAYS);
-    };
-    let days = if text.bytes().all(|b| b.is_ascii_digit()) {
-        text.parse::<u32>().ok()
-    } else {
-        None
-    };
-    days.filter(|d| (1..=RETENTION_DAYS).contains(d))
-        .ok_or(DAYS_REFUSAL)
+    whole_count(raw, RETENTION_DAYS, RETENTION_DAYS).ok_or(DAYS_REFUSAL)
 }
 
 /// The first instant of a window of `days` ending at `now_ms`. The prune

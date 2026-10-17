@@ -38,20 +38,11 @@ pub const MAX_HOURS: u32 = 2160;
 pub const HOURS_REFUSAL: &str = "hours must be a whole number from 1 to 2160";
 const HOUR_MS: i64 = 3_600_000;
 
-/// The window asked for: `hours` (1..=2160, default 24).
+/// The window asked for: `hours` (1..=2160, default 24), by the one
+/// whole-count parse (`sp_core::query_param`, the usage summary's `days`
+/// too).
 pub fn parse_hours(raw: Option<&str>) -> Result<u32, &'static str> {
-    let Some(text) = raw else {
-        return Ok(DEFAULT_HOURS);
-    };
-    let digits = text.bytes().all(|b| b.is_ascii_digit());
-    let hours = if digits {
-        text.parse::<u32>().ok()
-    } else {
-        None
-    };
-    hours
-        .filter(|h| (1..=MAX_HOURS).contains(h))
-        .ok_or(HOURS_REFUSAL)
+    sp_core::query_param::whole_count(raw, DEFAULT_HOURS, MAX_HOURS).ok_or(HOURS_REFUSAL)
 }
 
 /// The window's first instant (UTC ms).

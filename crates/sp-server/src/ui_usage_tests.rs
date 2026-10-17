@@ -1,12 +1,10 @@
 //! #256: the usage log keeps 400 days; a pass deletes everything older,
 //! in bounded statements, oldest first.
 
-use std::time::Duration;
-
 use sp_core::ui_usage::{UsageEvent, UsageKind};
 use sqlx::SqlitePool;
 
-use super::{cutoff_ms, next_wait, prune, prune_with};
+use super::{cutoff_ms, prune, prune_with};
 use crate::db::models_ui_usage;
 
 const NOW: i64 = 1_800_000_000_000;
@@ -40,12 +38,6 @@ async fn kept(pool: &SqlitePool) -> Vec<i64> {
 #[test]
 fn the_log_keeps_400_days() {
     assert_eq!(cutoff_ms(NOW), NOW - 400 * DAY);
-}
-
-#[test]
-fn a_pass_a_day_and_an_hour_after_a_held_one() {
-    assert_eq!(next_wait(false), Duration::from_secs(86_400));
-    assert_eq!(next_wait(true), Duration::from_secs(3_600));
 }
 
 #[tokio::test]

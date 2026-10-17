@@ -35,26 +35,31 @@ pub async fn insert_batch(
 /// One summary row as SQLite answers it.
 type RowTuple = (String, String, String, i64, i64, i64, i64, i64);
 
-/// The window from `from_ms` on, one GROUP BY: per (page, control, kind)
+/// The window `from_ms..=to_ms`, one GROUP BY: per (page, control, kind)
 /// the count, the distinct days with a use by the node's local calendar
 /// (SQLite's `localtime`, the box's own time zone), the first and the last
 /// use, and the uses while a playlist was on air (a source that is neither
 /// none, the NDI input nor Blank: `program_on_air::wall_owner`'s rule).
 /// Most used first.
-pub async fn summary_rows(pool: &SqlitePool, from_ms: i64) -> Result<Vec<UsageRow>, sqlx::Error> {
+pub async fn summary_rows(
+    pool: &SqlitePool,
+    from_ms: i64,
+    to_ms: i64,
+) -> Result<Vec<UsageRow>, sqlx::Error> {
     let rows: Vec<RowTuple> = sqlx::query_as(
         "SELECT page, control, kind, COUNT(*), \
                 COUNT(DISTINCT date(ts_ms / 1000, 'unixepoch', 'localtime')), \
                 MIN(ts_ms), MAX(ts_ms), \
                 SUM(CASE WHEN on_air_source IS NOT NULL AND on_air_source NOT IN (?, ?) \
                     THEN 1 ELSE 0 END) \
-         FROM ui_usage WHERE ts_ms >= ? \
+         FROM ui_usage WHERE ts_ms >= ? AND ts_ms <= ? \
          GROUP BY page, control, kind \
          ORDER BY COUNT(*) DESC, page, control, kind",
     )
     .bind(PROGRAM_INPUT_ID)
     .bind(PROGRAM_BLANK_ID)
     .bind(from_ms)
+    .bind(to_ms)
     .fetch_all(pool)
     .await?;
     Ok(rows

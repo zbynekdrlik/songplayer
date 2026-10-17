@@ -29,6 +29,7 @@ pub mod player_view;
 pub mod preview_lag;
 pub mod prod_env; // #233: the production environment's problems, status and health segment
 pub mod program_refusal;
+pub mod query_param; // #256: the one whole-count query parse (hours, days)
 pub mod seek_model;
 pub mod status_chip;
 pub mod ui_usage; // #256: the dashboard's usage log (wire, client rules, summary, Nastavenia line)
