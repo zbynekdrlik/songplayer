@@ -172,7 +172,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
         self.ndi.source = pick.source();
         self.ndi.prev = Some(stamp_100ns);
         let (start, sent, repeated) = match pick {
-            NdiPick::Cpu(_) => {
+            NdiPick::Cpu(why) => {
                 // ROZHODNUTÉ 6232669201 item 1: the held pair goes out
                 // first (no audio block is ever lost), then b on the canvas.
                 let flushed = self
@@ -181,6 +181,14 @@ impl<B: NdiBackend> ProgramOutput<B> {
                     .take()
                     .map(|held| (now(), self.send_held(held)));
                 self.ndi.last = None;
+                // Nothing takes the feed's pictures any more (the thread
+                // lets them go too, but only while it holds a compositor).
+                if switched
+                    && why == CpuWhy::Setting
+                    && let Some(max) = &self.max
+                {
+                    max.ndi.clear();
+                }
                 let canvas_start = self.submit_video(pair, stamp_100ns, shown, now);
                 match flushed {
                     Some((start, repeated)) => (start, stamp_100ns, repeated),

@@ -2,17 +2,19 @@
 //! child module of `program_max_worker.rs`, for the 1000-line cap; it
 //! reads the worker's private state). Design: #279 comment 6218637444.
 //!
-//! - While `program_ndi_source` = `gpu` ([`MaxOut::ndi_wanted`]) P1a's
-//!   UYVY pass is enabled on the compositor's PRIMARY target, the FHD
-//!   program ([`MaxWorker::ndi_pass`]); otherwise it is disabled, so the
-//!   CPU mode pays no readback. A failed enable is tried again only after
+//! - While `program_ndi_source` = `gpu` (`Wants::ndi`) P1a's UYVY pass is
+//!   enabled on the compositor's PRIMARY target, the FHD program
+//!   ([`MaxWorker::ndi_pass`]); otherwise it is disabled, so the CPU mode
+//!   pays no readback. A failed enable is tried again only after
 //!   [`MAX_RETRY_BACKOFF`] (it makes textures and compiles a shader); a lost
-//!   device is left to the compose's own check. The enable's log (a
-//!   `LogGate`) follows every boundary while NDI is wanted: one WARN per
-//!   failing spell, one INFO when it is on again, a change inside the
-//!   log's window said after it (review round 3: observed only at an
-//!   attempt, a retry inside the window left it on the old failure for
-//!   good).
+//!   device is left to the compose's own check. The pass has ONE log, a
+//!   `StateLog` of its state ([`PassLine`]: off, on, failing), observed at
+//!   every boundary the thread has a compositor: one INFO when it goes on
+//!   or off, one WARN per failing spell, a change inside the log's window
+//!   said after it, as the state is then, and no line outside it (review
+//!   rounds 3-4: an enable log observed only at an attempt stayed on an
+//!   old failure, and a line written at every enable and disable could
+//!   contradict it).
 //! - After each compose, at the compose instant and BEFORE the Spout sends
 //!   (a 67 ms Spout lock wait never delays NDI), [`read_back`] maps the
 //!   staging copy (`read_uyvy`, never a wait) into a `frame_pool` buffer
@@ -40,9 +42,9 @@ use super::{
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::ndi_feed::{BlackUyvy, uyvy_len};
 use crate::playback::program_max::{MaxJob, MaxOut, Wants};
-use crate::playback::stat_window::WarnLimiter;
+use crate::playback::stat_window::{StateLog, WarnLimiter};
 
-/// What the UYVY pass's log says of it.
+/// What the UYVY pass's log says of it (`pass_line`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum PassLine {
     /// NDI comes from the canvas: no pass (also the start).
@@ -52,6 +54,17 @@ pub enum PassLine {
     On,
     /// The enable failed, and why; it is tried again after each backoff.
     Failing(Arc<str>),
+}
+
+/// The pass's state for its log (pure): off while NDI is not wanted, on
+/// while the pass is enabled, else failing with the last enable error (a
+/// pass wanted, not on and never refused is off: it is enabled at once).
+fn pass_line(wanted: bool, on: bool, failing: Option<&Arc<str>>) -> PassLine {
+    match (wanted, on, failing) {
+        (true, true, _) => PassLine::On,
+        (true, false, Some(why)) => PassLine::Failing(Arc::clone(why)),
+        _ => PassLine::Off,
+    }
 }
 
 /// The worker's NDI readback state.
@@ -70,11 +83,9 @@ pub(super) struct NdiPass {
     failing: Option<String>,
     log: LogGate,
     /// Why the pass could not be enabled (`None`: it was, or nothing
-    /// tried), and the enable's own log: a pass that keeps failing to
-    /// enable is said once (not at every retry), its recovery once. They
-    /// outlive a compositor.
-    enable_failing: Option<String>,
-    enable_log: LogGate,
+    /// tried), and the pass's ONE log: they outlive a compositor.
+    enable_failing: Option<Arc<str>>,
+    pass_log: StateLog<PassLine>,
 }
 
 impl NdiPass {
@@ -88,45 +99,38 @@ impl NdiPass {
 impl<G: MaxGpu> MaxWorker<'_, G> {
     /// The UYVY pass on the compositor's primary (FHD) target while NDI is
     /// `wanted`, off otherwise (a backoff forgotten). Nothing without a
-    /// compositor. Returns the line the enable's log wrote: it is observed
-    /// at every boundary while NDI is wanted.
+    /// compositor. Returns the line the pass's log wrote (its state and
+    /// the boundaries held back): the log is observed at every boundary.
     pub(super) fn ndi_pass(&mut self, wanted: bool, now: Instant) -> Option<(PassLine, u64)> {
         let compositor = self.device.compositor.as_mut()?;
         if !wanted {
             if self.ndi.on {
                 compositor.disable_uyvy();
-                info!("program max: NDI's UYVY readback is off");
             }
             self.ndi.forget();
             // Nothing takes them any more: no 4 MB buffer stays pinned.
             self.out.ndi.clear();
-            return None;
-        }
-        if !self.ndi.on && self.ndi.retry_at.is_none_or(|retry| now >= retry) {
+        } else if !self.ndi.on && self.ndi.retry_at.is_none_or(|retry| now >= retry) {
             match compositor.enable_uyvy(TargetId::PRIMARY) {
                 Ok(()) => {
                     self.ndi.on = true;
                     self.ndi.retry_at = None;
                     self.ndi.enable_failing = None;
-                    info!("program max: NDI's UYVY readback is on (SP-program from the GPU)");
                 }
                 Err(error) => {
                     self.ndi.retry_at = Some(now + MAX_RETRY_BACKOFF);
-                    self.ndi.enable_failing = Some(error.to_string());
+                    self.ndi.enable_failing = Some(Arc::from(error.to_string()));
                 }
             }
         }
+        let state = pass_line(wanted, self.ndi.on, self.ndi.enable_failing.as_ref());
         let at = elapsed_100ns(self.started, now);
-        let failing = self.ndi.enable_failing.as_deref();
-        let line = self.ndi.enable_log.observe(at, failing);
-        log_enable_line(line.as_ref(), failing);
-        match line? {
-            LogLine::Failing { held_back } => {
-                let why = Arc::from(failing.unwrap_or_default());
-                Some((PassLine::Failing(why), held_back))
-            }
-            LogLine::Recovered { held_back } => Some((PassLine::On, held_back)),
-        }
+        let held_back = self
+            .ndi
+            .pass_log
+            .observe(at, MAX_LOG_EVERY_100NS, state.clone())?;
+        log_pass_line(&state, held_back);
+        Some((state, held_back))
     }
 }
 
@@ -168,22 +172,21 @@ impl<G: MaxGpu> MaxWorker<'_, G> {
     }
 }
 
-/// The WARN of a UYVY pass that could not be enabled, once per failing
-/// spell, and the INFO when it is on again (`LogGate`'s decision, tested;
-/// logging only).
+/// The pass's line: an INFO when it goes on or off, a WARN when it
+/// fails (`StateLog`'s decision, tested; logging only).
 #[cfg_attr(test, mutants::skip)]
-fn log_enable_line(line: Option<&LogLine>, failing: Option<&str>) {
-    match line {
-        Some(LogLine::Failing { held_back }) => warn!(
-            error = failing.unwrap_or_default(),
-            held_back = *held_back,
+fn log_pass_line(state: &PassLine, held_back: u64) {
+    match state {
+        PassLine::Off => info!(held_back, "program max: NDI's UYVY readback is off"),
+        PassLine::On => info!(
+            held_back,
+            "program max: NDI's UYVY readback is on (SP-program from the GPU)"
+        ),
+        PassLine::Failing(why) => warn!(
+            error = %why,
+            held_back,
             "program max: NDI's UYVY pass could not be enabled - tried again after each backoff"
         ),
-        Some(LogLine::Recovered { held_back }) => info!(
-            held_back = *held_back,
-            "program max: NDI's UYVY pass is enabled again"
-        ),
-        None => {}
     }
 }
 
