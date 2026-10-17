@@ -729,7 +729,8 @@ wait for a peer that has the song", below).
   video that was there stays.
 - `Exchange::run_here` drops the parts of the job's needed kinds
   (`drop_job_parts`): a job that runs here (2 h bound, a fetch that kept
-  failing) leaves no orphaned part in `<cache>/peer/`.
+  failing) leaves no orphaned part in `<cache>/peer/`. #261: any part 7 days
+  unchanged goes with the daily cache sweep (`cache-sweep.md`).
 - The LOCAL download's "video rename failed" branch
   (`downloader/mod.rs::place_video`, the #229 follow-up lane) deletes the
   normalized audio only when no row records it (`cache::recorded_by_a_row`,

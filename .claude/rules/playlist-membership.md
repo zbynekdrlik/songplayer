@@ -119,11 +119,12 @@ once, kept a year, then deleted with its files.
      `peer_hashes` of the files it deleted;
   5. one INFO `playlist retention: deleted a song a year after it left its
      YouTube playlist` with `youtube_id`, `title`, `removed` and `kept`.
-- Not deleted (known, small; #261's lane 2, the files, is to sweep them):
-  the video's `{yt}_lyrics.json`, its g35t
-  transcript caches and a dub's `<base>_dub_events.jsonl` (per YouTube id
-  or not in the song's set); a video-upgrade `.prev` is the upgrade
-  retention's (an orphan `.prev` goes at its next sweep).
+- Not deleted HERE: the video's `{yt}_lyrics.json`, its g35t transcript
+  caches and a dub's `<base>_dub_events.jsonl` (per YouTube id or not in
+  the song's set); #261 lane 2's daily cache sweep deletes them 7 days
+  after their last write once no row of the video is left
+  (`cache-sweep.md`). A video-upgrade `.prev` is the upgrade retention's
+  (an orphan `.prev` goes at its next sweep).
 - Known limit: a NEW row of the same video downloading into the shared
   names at the very moment its marked sibling is deleted (a new playlist
   added the video that day) can lose the fresh file before the download
@@ -180,12 +181,13 @@ archiv!". Design: #261 comment 6228880917; the lane's notes: the
   - So an inactive playlist's songs are deleted a year later by the
     retention below, with their files (a set list's item never), and
     `GET /api/v1/playlists/{id}/videos` of an inactive playlist lists
-    nothing (its rows are marked). Known, harmless: a video IMPORTED into
-    a playlist while it is inactive (`POST /api/v1/videos/import` with its
-    id, the Dabing import) is a new unmarked row until the playlist's next
-    deactivation; nothing downloads it while the playlist stays inactive
-    (`DOWNLOAD_DUE`'s `p.is_active = 1`). The import core shells out to
-    yt-dlp and has no test seam, so it is left as it is.
+    nothing (its rows are marked). A video IMPORTED into a playlist while
+    it is inactive (`POST /api/v1/videos/import` with its id, the Dabing
+    import) is marked at its insert like the playlist's other songs (#261
+    lane 2, RED/GREEN: `routes_import::upsert_imported`, the import core's
+    DB half, gives a NEW row `removed_at` = the playlist's
+    `deactivated_at`, so the reactivation clears it; an existing row keeps
+    its mark; `routes_import_tests.rs`).
   - A transaction that reads before it writes (`delete_playlist`,
     `append_playlist_item`) begins `IMMEDIATE`: in WAL a deferred one whose
     snapshot went stale fails its first write at once, with no busy wait.

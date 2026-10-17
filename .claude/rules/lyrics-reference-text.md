@@ -41,7 +41,7 @@ paths:
 - The thresholds are MEASURED (#144 comment 5899043518):
   - complete texts: 0.64–0.977 coverage (0.64–0.97 against g35t transcripts), runs ≤ 20.6 s;
   - ★ rows whose wall held one line over other singing: runs ≥ 34.9 s.
-- To re-measure, use the gate's own transcripts: `{yt}_g35t_words.json` (kept) and `{yt}_g35t_words_used.json` (retired) in the box cache. The v20 WhisperX `{yt}_whisperx_track.json` files are a fallback. `eval/lyrics/reports/2026-09-12-raw/` has real g35t transcripts plus the eval gold texts.
+- To re-measure, use the gate's own transcripts: `{yt}_g35t_words.json` (kept) and `{yt}_g35t_words_used.json` (retired) in the box cache. The v20 WhisperX `{yt}_whisperx_track.json` files are deleted by #261's cache sweep (`cache-sweep.md`, a retired output, 7 days after its last write). `eval/lyrics/reports/2026-09-12-raw/` has real g35t transcripts plus the eval gold texts.
 - On the box, run a read-only Python script: write it to `%TEMP%` with the win-resolume MCP `FileWrite`, open the DB `file:...songplayer.db?mode=ro`, print only a compact table, then delete the script and its `__pycache__`.
 
 ## One transcript per song, one pass
@@ -105,7 +105,7 @@ Before it, no post-deploy check sent a Gemini 3.5 Transcribe request: a dead or 
 ## Texts
 
 - `parse_json3` gives ONE line per sung caption line. Each line keeps its event's own span, never divided by hand. No production code reads `CandidateText::line_timings`: mtl re-times the text.
-- The scraped-lyrics Claude cleanup (`CleanupMode::ScrapedLyrics`) KEEPS every repeat, because mtl times exactly the lines it is given. When its prompt semantics change, bump the cleanup cache names (`_cleaned_v3.json` today), or the reprocess reuses stale decisions.
+- The scraped-lyrics Claude cleanup (`CleanupMode::ScrapedLyrics`) KEEPS every repeat, because mtl times exactly the lines it is given. When its prompt semantics change, bump the cleanup cache names (`_cleaned_v3.json` today), or the reprocess reuses stale decisions; bump `cache_sweep_plan::CLEANED_VERSION` with them (a test reads both writers), so the daily cache sweep deletes the older caches and keeps the new ones.
 - Turn a fetched timed track or a scraped plain lyric into a candidate only through `text_candidate::{timed_candidate, cleaned_text_candidate}`. `gather.rs` and the title search share them, and `gather_uses_lyrics_ovh_primary_with_genius_fallback` reads both files. The override, description, lyrics.ovh and Spotify candidates are built directly.
 
 ## Reprocess: ONE per-song path, and no route blanks what the wall serves
