@@ -35,6 +35,20 @@ When you add a migration that changes settings/rows an earlier `mod_tests_vN`
 asserts, GREP the earlier test files for those keys and switch them to `apply_upto`
 in the SAME commit.
 
+## Check a migration or a query on the Tier-0 box: Python sqlite3 on the REAL schema (#261)
+
+No cargo test runs here, but every statement can run before the push: a
+~40-line scratch script reads `db/mod.rs`, takes each `const MIGRATION_VN:
+&str = "…";` body (regex, `re.S`) in the order of the `MIGRATIONS` list,
+splits it on `;` exactly as `run_migrations` does and executes it into
+`sqlite3.connect(":memory:")` with `PRAGMA foreign_keys = ON`. Then seed the
+test's own fixture, run the Rust SQL text (strip `\` line continuations
+from the literal) and assert the test's pins; `EXPLAIN QUERY PLAN` shows
+whether a new index is used, and a bench at the boxes' sizes shows how long
+a DELETE holds the write lock (#261 review round 1: a correlated scan per
+row held it for 10 s, past the pool's 5 s busy timeout). Keep the script in
+the scratchpad, never in the repo; a review dispatch reuses it.
+
 A version test pins its migration's place in the list as `assert!(latest >= N)`,
 never `assert_eq!(MIGRATIONS.last().unwrap().0, N)`: an exact pin fails the next
 lane's V(N+1) on correct code (#233 ruling 4's V32 shipped one; review round 15).
