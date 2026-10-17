@@ -939,3 +939,7 @@ mod tests_patch_metadata;
 #[path = "routes_tests_lyrics_fetch.rs"]
 #[cfg(test)]
 mod tests_lyrics_fetch;
+
+#[path = "routes_tests_retention.rs"]
+#[cfg(test)]
+mod tests_retention;
