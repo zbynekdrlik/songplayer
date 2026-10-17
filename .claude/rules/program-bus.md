@@ -21,6 +21,7 @@ paths:
   - "sp-ui/src/components/program_control.rs"
   - "e2e/program-control.spec.ts"
   - "crates/sp-core/src/program_refusal.rs"
+  - "crates/sp-server/src/playback/ndi_feed*.rs"
 ---
 
 # Program bus + NDI `SP-program` (#209, B1 of EPIC #174)
@@ -136,7 +137,9 @@ output of its own and feeds this bus alone (`pipeline-testability.md`).
   (`ProgramBus::record_timing` → `health.timing`, the rate-limited WARN of a
   VBAN hand-off after its block's first packet was due, over VBAN's send
   latency L, #210 part 2; `vban-out.md` "The program boundary's timing"). `ProgramOutput::submit` is only the tests' shorthand
-  (`#[cfg(test)]`, no clock, returns the stamp).
+  (`#[cfg(test)]`, no clock, returns the stamp). #279 P1b: the video side
+  is `submit_ndi` — the canvas (`submit_video`), or, from the GPU
+  readback, the delay line ("NDI from the GPU readback" below).
 - #251 step 4: right before `submit_video`, `serve` waits while the
   boundary lies in the quiet window after the PRIMARY display's vblank
   (`program_video_quiet.rs`: `video_start`, `VideoQuiet`, `wait_out` on the
@@ -210,7 +213,9 @@ included, is comment 5872871751).
   1920×1080, 3 110 400 B (the standby's own constant; the FHD tests use the
   same constructor). `ProgramOutput::new(sender, w, h)` takes any size: the
   unit tests use small canvases, so they stay fast.
-- **Every picture** `ProgramOutput::submit_video` sends is a canvas picture:
+- **Every picture** `ProgramOutput::submit_video` sends is a canvas picture
+  (#279 P1b: from the GPU readback NDI sends the compositor's FHD target
+  instead, UYVY, still 1920×1080; "NDI from the GPU readback" below):
   - a forwarded source pair's picture (a paced source's, the NDI input
     "OBS manuál"'s, a paced standby/fill pair's);
   - the program's standby black (the canvas black itself);
@@ -314,6 +319,57 @@ included, is comment 5872871751).
   wire picture's bytes are read through `FrameSubmitter::held_frame`, the
   async holdover the SDK still points at.
 
+## NDI from the GPU readback: the one-slot delay line (#279 P1b)
+
+Design: #279 comment 6218637444; the whole mechanism (the compositor's
+topology, the readback, the feed, the tests, the box gates) is in
+`gpu-max.md`, "NDI `SP-program` from the GPU readback". What the program
+side does (`program_output_ndi.rs`, an impl split of `ProgramOutput`;
+`ndi_feed.rs`, pure):
+
+- **The effective source, per boundary.** `submit_ndi` asks
+  `ndi_source_for(setting, feed newest, b)`: the GPU while
+  `program_ndi_source` = `gpu` AND the readback's newest picture KEPT (a
+  late one never counts) is at
+  most 30 grid slots (1 s) behind b, else the CPU canvas (`setting` /
+  `no_readback` / `stale`). Without a `MaxOut` (the unit tests' outputs)
+  it is always the canvas. A compositor that cannot run never freezes NDI.
+  After an automatic fallback the way back is gated (`ReturnGate`,
+  ROZHODNUTÉ 6232669201 item 3): each canvas boundary takes the boundary
+  before's readback as the GPU would, and only 30 on time in a row bring
+  NDI back (`CpuWhy::Settling` until then) — never a boundary-by-boundary
+  flap. The setting's flip to `gpu` is a first entry: at once. Any switch
+  to the GPU takes the boundary before's readback as the last picture,
+  so a picture missing right after it repeats that boundary (the black
+  only when the boundary before was not read back); every canvas boundary
+  forgets it, and the setting's switch to the canvas lets the feed's
+  pictures go after the held pair's flush.
+- **From the canvas**: `submit_video`, stamped b, exactly as before.
+- **From the GPU**: the pair HELD at b − 1 goes out with `feed.take(b −
+  1)` (its limited audio moved in, the standby silence for a standby
+  pair, its stamps and its item frame), and b is held. NDI is one slot
+  late, picture and audio together, the stamps unchanged: camera-box's
+  receivers latch a constant arrival lag. A missing picture repeats the
+  last one (`ndi.repeats`), the constant UYVY black before any; a picture
+  not whole UYVY for the canvas is never sent. VBAN and MAX still get b at
+  b (`program_output_tests_order.rs`: VBAN before any NDI call).
+- **A switch**: to the GPU, b is held and nothing goes to NDI (one missing
+  frame). Back to the canvas NO audio block is lost (ROZHODNUTÉ 6232669201
+  item 1): the held pair goes out first (its readback, else the last
+  picture, else the black: a repeat), then b on the canvas — two submits,
+  contiguous stamps. Logged once, rate-limited (a
+  `stat_window::StateLog` of the source: a change held back is said after
+  the window, as the source is then), counted (`ndi.switches`).
+- `health.timing.submit_us` is the NDI submit alone from the GPU (both
+  submits at a switch to the canvas); the trace's `wire_100ns` names the
+  stamp NDI got (b − 1's; b's own at a switch to the GPU, where nothing
+  went out, and at a switch to the canvas, where b − 1 went out just
+  before b; `TraceWriter::record_sent`).
+- `GET /api/v1/program` → `ndi {setting, source, delay_slots, fourcc,
+  repeats, readback_late, feed_coalesced, switches, readback_us_p99,
+  uyvy_us_p99}` (`api/program_tests_ndi.rs`); the mock serves the shape
+  with `source: "cpu"`.
+
 ## API + UI
 
 - `GET /api/v1/program` → `{ndi_name, source, previous, cut_boundary_100ns,
@@ -324,7 +380,8 @@ included, is comment 5872871751).
   audio_network_rate + outputs_problems (#233, `audio-outputs.md`; #210's
   top-level vban{…} moved into outputs[i].vban), input{…}
   (#212), remote{…} (#213), transition{…} (#215), max{…} (#223 S2,
-  `gpu-max.md`), cut_refused[{source, reason}] (#221, below)}`;
+  `gpu-max.md`), ndi{…} (#279 P1b, below), cut_refused[{source, reason}]
+  (#221, below)}`;
   `POST /api/v1/program/cut {"source": pid}` → 200 + that body, 404
   unknown playlist, 409 for a playlist that is inactive or whose scene
   catalog names no scene (#221 ROZHODNUTÉ 6022247729: every consumer takes

@@ -4,14 +4,19 @@
 //! picked adapter and its `SpoutSender`s). Moved out of
 //! `program_max_worker.rs` for the 1000-line cap (#251 step 2).
 //!
-//! #251 step 2: ONE compositor (one device) draws both outputs: MAX's
-//! primary 3840×2160 target and, while the FHD Spout sender runs, the
-//! `SP-program` target (`FHD_TARGET`, [`MaxCompositor::add_target`]). One
-//! compose uploads each picture once and draws every target; each target
-//! has its own Spout sender ([`MaxGpu::sender`] for MAX's,
-//! [`MaxGpu::fhd_sender`] for the FHD target).
+//! #251 step 2: ONE compositor (one device) draws every output. #279 P1b:
+//! its PRIMARY target is the FHD program (`FHD_TARGET`, 1920×1080, there
+//! for the compositor's life): the `SP-program` Spout sender's
+//! ([`MaxGpu::fhd_sender`]) and NDI's, read back as UYVY
+//! ([`MaxCompositor::read_uyvy`]); MAX's 3840×2160 target is ADDED while
+//! `program_max_enabled` ([`MaxCompositor::add_target`], `MAX_TARGET`), with
+//! its sender ([`MaxGpu::sender`]). One compose uploads each picture once
+//! and draws every target.
 
-use sp_gpu::{ComposeStats, Composition, GpuError, SpoutSendStats, Target, TargetId};
+use sp_gpu::{
+    ComposeStats, Composition, FHD_TARGET, GpuError, SPOUT_SENDER_NAME, SpoutSendStats, Target,
+    TargetId,
+};
 
 /// The compositor half of the GPU: draw one boundary into every target.
 pub trait MaxCompositor {
@@ -20,7 +25,7 @@ pub trait MaxCompositor {
     fn compose(&mut self, composition: &Composition<'_>) -> Result<ComposeStats, GpuError>;
     /// The adapter it runs on (the telemetry's `adapter`).
     fn adapter(&self) -> String;
-    /// #251 step 2: add a render target (the FHD program's `FHD_TARGET`),
+    /// #251 step 2: add a render target (#279 P1b: MAX's `MAX_TARGET`),
     /// drawn by every compose from the next one on.
     fn add_target(&mut self, target: Target) -> Result<TargetId, GpuError>;
     /// #251 step 2: draw the target `target` no more.
@@ -28,6 +33,14 @@ pub trait MaxCompositor {
     /// #251 step 2: the target `target`'s own part of the last compose's
     /// draw, µs (0 when it was not drawn).
     fn draw_us(&self, target: TargetId) -> u64;
+    /// #279 P1b: convert `target` to UYVY in every later compose (P1a's
+    /// pass), read back by [`read_uyvy`](Self::read_uyvy).
+    fn enable_uyvy(&mut self, target: TargetId) -> Result<(), GpuError>;
+    /// #279 P1b: stop the UYVY pass.
+    fn disable_uyvy(&mut self);
+    /// #279 P1b: the UYVY of the last compose into `out` (`Ok(false)`:
+    /// none since the pass was enabled; never a wait).
+    fn read_uyvy(&mut self, out: &mut Vec<u8>) -> Result<bool, GpuError>;
 }
 
 /// The Spout half: share a target as it is now.
@@ -40,13 +53,19 @@ pub trait MaxSender {
 }
 
 /// What builds the compositor and its senders, on the `program-max`
-/// thread: MAX's (of the primary target) and (#239) the `SP-program`
-/// sender's (#251 step 2: of the FHD target on the same compositor).
+/// thread: MAX's (#279 P1b: of the MAX target added to the compositor) and
+/// (#239) the `SP-program` sender's (of the compositor's primary, the FHD
+/// target).
 pub trait MaxGpu {
     type Compositor: MaxCompositor;
     type Sender: MaxSender;
     fn compositor(&mut self) -> Result<Self::Compositor, GpuError>;
-    fn sender(&mut self, compositor: &Self::Compositor) -> Result<Self::Sender, GpuError>;
+    /// The sender `SP-program-MAX` of the compositor's MAX target `target`.
+    fn sender(
+        &mut self,
+        compositor: &Self::Compositor,
+        target: TargetId,
+    ) -> Result<Self::Sender, GpuError>;
     /// #239: the sender `SP-program` of the compositor's FHD target `target`.
     fn fhd_sender(
         &mut self,
@@ -55,11 +74,11 @@ pub trait MaxGpu {
     ) -> Result<Self::Sender, GpuError>;
 }
 
-/// The production GPU: `sp_gpu::Compositor::new` (the largest hardware
-/// adapter, never WARP; #267: each picture fills the wall's width,
-/// `MAX_FIT`) and the sender `SP-program-MAX`; #239 / #251 step 2: the
-/// sender `SP-program` of the 1920×1080 target added to the same compositor
-/// (aspect-fitted like the NDI `SP-program`, `FHD_FIT`).
+/// The production GPU: `sp_gpu::Compositor::with_size` of `FHD_TARGET`
+/// (the largest hardware adapter, never WARP; aspect-fitted like the NDI
+/// `SP-program`, `FHD_FIT`), the sender `SP-program` of it (#239), and
+/// `SP-program-MAX` of the 3840×2160 target added to it (#267: each picture
+/// fills the wall's width, `MAX_FIT`).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SpoutGpu;
 
@@ -68,14 +87,18 @@ impl MaxGpu for SpoutGpu {
     type Sender = sp_gpu::SpoutSender;
 
     fn compositor(&mut self) -> Result<sp_gpu::Compositor, GpuError> {
-        sp_gpu::Compositor::new()
+        sp_gpu::Compositor::with_size(FHD_TARGET.width, FHD_TARGET.height, FHD_TARGET.fit)
     }
 
     /// `mutants::skip`: it needs a compositor, which off Windows (the
     /// mutation runner) cannot exist; the WARP test drives the real sender.
     #[cfg_attr(test, mutants::skip)]
-    fn sender(&mut self, compositor: &sp_gpu::Compositor) -> Result<sp_gpu::SpoutSender, GpuError> {
-        sp_gpu::SpoutSender::new(compositor)
+    fn sender(
+        &mut self,
+        compositor: &sp_gpu::Compositor,
+        target: TargetId,
+    ) -> Result<sp_gpu::SpoutSender, GpuError> {
+        sp_gpu::SpoutSender::for_target(compositor, target, SPOUT_SENDER_NAME)
     }
 
     /// `mutants::skip`: as `sender`.
@@ -119,6 +142,24 @@ impl MaxCompositor for sp_gpu::Compositor {
     #[cfg_attr(test, mutants::skip)]
     fn draw_us(&self, target: TargetId) -> u64 {
         sp_gpu::Compositor::draw_us(self, target).unwrap_or_default()
+    }
+
+    /// `mutants::skip`: as `compose`.
+    #[cfg_attr(test, mutants::skip)]
+    fn enable_uyvy(&mut self, target: TargetId) -> Result<(), GpuError> {
+        sp_gpu::Compositor::enable_uyvy(self, target)
+    }
+
+    /// `mutants::skip`: as `compose`.
+    #[cfg_attr(test, mutants::skip)]
+    fn disable_uyvy(&mut self) {
+        sp_gpu::Compositor::disable_uyvy(self);
+    }
+
+    /// `mutants::skip`: as `compose`.
+    #[cfg_attr(test, mutants::skip)]
+    fn read_uyvy(&mut self, out: &mut Vec<u8>) -> Result<bool, GpuError> {
+        sp_gpu::Compositor::read_uyvy(self, out)
     }
 }
 

@@ -125,6 +125,7 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             audio,
             video_tc_100ns,
             audio_tc_100ns,
+            PixelFormat::Nv12,
         );
     }
 
@@ -132,7 +133,8 @@ impl<B: NdiBackend> FrameSubmitter<B> {
     /// takes a [`SharedFrame`] whose `Arc` is MOVED straight into the async
     /// double-buffer holdover with NO pixel copy (#168 + #203). The send is by
     /// borrowed slice and the same handle becomes `prev_frame`, so the SDK's
-    /// pointer stays valid with zero copies.
+    /// pointer stays valid with zero copies. #279 P1b: `format` is the
+    /// picture's: NV12 from the CPU canvas, UYVY from the GPU readback.
     #[allow(clippy::too_many_arguments)]
     pub fn submit_frame_at_boundary_owned(
         &mut self,
@@ -143,6 +145,7 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         audio: &[AudioFrame],
         video_tc_100ns: i64,
         audio_tc_100ns: i64,
+        format: PixelFormat,
     ) {
         // #224 part 2: the ONE edge where the fleet labels go on. The video
         // stamp is an internal boundary b: on the wire it is b's boundary
@@ -172,7 +175,7 @@ impl<B: NdiBackend> FrameSubmitter<B> {
                 stride,
                 self.frame_rate_n,
                 self.frame_rate_d,
-                PixelFormat::Nv12,
+                format,
                 Some(video_tc_100ns),
                 &video[..],
             );
@@ -225,6 +228,7 @@ impl<B: NdiBackend> crate::playback::pacer::PacedSink for FrameSubmitter<B> {
             audio,
             video_tc_100ns,
             audio_tc_100ns,
+            PixelFormat::Nv12,
         );
     }
 
@@ -250,6 +254,7 @@ impl<B: NdiBackend> crate::playback::pacer::PacedSink for FrameSubmitter<B> {
             audio,
             video_tc_100ns,
             audio_tc_100ns,
+            PixelFormat::Nv12,
         );
     }
 }

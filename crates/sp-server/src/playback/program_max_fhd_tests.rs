@@ -40,7 +40,7 @@ fn the_fhd_sender_runs_only_with_max_and_its_own_setting_on() {
 fn a_new_max_has_the_fhd_sender_off_because_max_is_off() {
     let max = MaxOut::new();
     assert!(!max.fhd_enabled(), "off until the setting is applied");
-    assert!(!max.fhd_wanted());
+    assert!(!max.wants().fhd);
     let fhd = max.status().fhd;
     assert_eq!(
         (fhd.enabled, fhd.state.as_str(), fhd.reason),
@@ -66,7 +66,7 @@ fn max_off_turns_the_fhd_sender_off_whatever_its_setting() {
     assert!(max.set_fhd_enabled(true), "off → on is a change");
     assert!(!max.set_fhd_enabled(true), "on → on is not");
     assert!(max.fhd_enabled());
-    assert!(!max.fhd_wanted(), "MAX is still off");
+    assert!(!max.wants().fhd, "MAX is still off");
     let fhd = max.status().fhd;
     assert_eq!(
         (fhd.enabled, fhd.state.as_str(), fhd.reason),
@@ -75,13 +75,13 @@ fn max_off_turns_the_fhd_sender_off_whatever_its_setting() {
     );
 
     max.set_enabled(true);
-    assert!(max.fhd_wanted());
+    assert!(max.wants().fhd);
     let _consumer = max.attach();
     let fhd = max.status().fhd;
     assert_eq!((fhd.state.as_str(), fhd.reason), ("running", None));
 
     assert!(max.set_fhd_enabled(false), "on → off is a change");
-    assert!(!max.fhd_wanted());
+    assert!(!max.wants().fhd);
     let fhd = max.status().fhd;
     assert_eq!(
         (fhd.enabled, fhd.state.as_str(), fhd.reason),
@@ -266,7 +266,7 @@ async fn the_settings_task_applies_every_fhd_change() {
         Duration::from_millis(5),
     ));
     eventually("the default ON applied", || max.fhd_enabled()).await;
-    assert!(max.fhd_wanted(), "MAX's default ON too");
+    assert!(max.wants().fhd, "MAX's default ON too");
     set_setting(&pool, "program_spout_fhd_enabled", "false")
         .await
         .unwrap();
@@ -281,7 +281,7 @@ async fn the_settings_task_applies_every_fhd_change() {
         .unwrap();
     eventually("MAX off", || !max.enabled()).await;
     assert!(max.fhd_enabled(), "its own setting stays on");
-    assert!(!max.fhd_wanted(), "but it needs MAX");
+    assert!(!max.wants().fhd, "but it needs MAX");
     assert_eq!(max.status().fhd.reason, Some(FHD_OFF_MAX));
     shutdown.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(20), task)

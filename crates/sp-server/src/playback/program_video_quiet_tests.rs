@@ -5,6 +5,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use sp_core::config::NdiSource;
 use sp_core::genlock::{GENLOCK_GRID_FPS, floor_boundary_100ns};
 use sp_gpu::{VBLANK_STALE, VblankGrid};
 use sp_ndi::NdiSender;
@@ -211,6 +212,7 @@ fn serve_waits_after_the_vban_hand_off_and_before_the_ndi_submit() {
         .expect("mock sender");
     let vban = Arc::new(VbanOut::new());
     let max = Arc::new(MaxOut::new());
+    max.set_enabled(true);
     let v = Instant::now();
     max.video.publish_grid(Some(grid_through(v)), v);
     let log = Arc::new(Mutex::new(Vec::new()));
@@ -235,4 +237,39 @@ fn serve_waits_after_the_vban_hand_off_and_before_the_ndi_submit() {
     assert_eq!(ndi_sends, 0, "the NDI submit came after the wait");
     assert_eq!(backend.audio_timecodes().len(), 1, "then the NDI submit");
     assert_eq!(max.video.status(v).waits, 1);
+}
+
+/// #279 P1b: with MAX off and NDI from the GPU the compositor still paces
+/// (a fresh grid), but no Spout output goes out for Arena to read: the
+/// video side never waits. With MAX on it waits as before.
+#[test]
+fn with_max_off_the_video_side_never_waits_for_arena() {
+    let backend = Arc::new(MockNdiBackend::new());
+    let sender = NdiSender::new_with_clocking(backend.clone(), PROGRAM_NDI_NAME, false, false)
+        .expect("mock sender");
+    let vban = Arc::new(VbanOut::new());
+    let max = Arc::new(MaxOut::new());
+    max.set_ndi_source(NdiSource::Gpu);
+    let v = Instant::now();
+    max.video.publish_grid(Some(grid_through(v)), v);
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let clock = Recording {
+        now: v + us(5_000),
+        backend: backend.clone(),
+        vban: vban.clone(),
+        log: log.clone(),
+    };
+    let mut out = ProgramOutput::new(sender, 2, 2)
+        .with_vban(vban.clone())
+        .with_max(max.clone())
+        .with_video_clock(Box::new(clock));
+    let b0 = floor_boundary_100ns(17_900_000_000_000_000, GENLOCK_GRID_FPS);
+    out.submit(ProgramJob::Standby { stamp_100ns: b0 });
+    assert!(log.lock().unwrap().is_empty(), "MAX off: no wait");
+    assert_eq!(max.video.status(v).waits, 0);
+    max.set_enabled(true);
+    out.submit(ProgramJob::Standby {
+        stamp_100ns: b0 + 333_333,
+    });
+    assert_eq!(log.lock().unwrap().len(), 1, "MAX on: the wait");
 }

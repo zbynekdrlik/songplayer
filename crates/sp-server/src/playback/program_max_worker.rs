@@ -22,23 +22,25 @@
 //!   `program_max_compose_phase_ms`), so its GPU work never drifts into the
 //!   instants Arena renders and reads Spout in (off the grid: at once).
 //!
-//! #239 + #251 step 2: while the FHD Spout sender is wanted
-//! (`program_spout_fhd_enabled` and MAX on, `MaxOut::fhd_wanted`), each job
-//! also goes out as `SP-program`, the picture the NDI `SP-program` carries:
-//! the SAME compositor holds a second target (`FHD_TARGET`, 1920×1080, its
-//! own rule) and a second sender sends it. One compose at the compose
-//! instant uploads each picture ONCE and draws both targets; at the due
-//! instant MAX's send runs, then the FHD one's: plain copies, the GPU work
-//! all done at the quiet phase (the FHD side's second device and second
-//! upload, in Arena's window, carried a large part of the wall's residual
-//! jumps, #251 comment 6192123775). The FHD target is on the compositor only
-//! while its sender lives: switched off, refused or waiting out its
-//! backoff, nothing is drawn for it. MAX goes first, whole (#239): an FHD
-//! output still to build (its target, its Spout open) is built after MAX's
-//! send and drawn from the next compose, unless MAX's boundary is not drawn
-//! at all (then it is built first and goes out alone, at the due instant).
-//! A device the FHD side loses after MAX's boundary went out is MAX's too:
-//! the boundary stays sent, MAX's state and log name the loss.
+//! #239 + #251 step 2 + #279 P1b: ONE compositor draws every output. Its
+//! PRIMARY target is the FHD program (`FHD_TARGET`, 1920×1080), there for
+//! its life; MAX's 3840×2160 target is ADDED with MAX's sender while MAX is
+//! on (`MaxOut::enabled`) and taken off with it. While the FHD Spout
+//! sender is wanted (`program_spout_fhd_enabled` and MAX on,
+//! `Wants::fhd`) the sender `SP-program` sends the primary, the
+//! picture the NDI `SP-program` carries. One compose at the compose instant
+//! uploads each picture ONCE and draws every target; at the due instant
+//! MAX's send runs, then the FHD one's: plain copies, the GPU work all done
+//! at the quiet phase (#251 comment 6192123775). MAX goes first, whole
+//! (#239): an FHD sender still to build (its Spout open) is built after
+//! MAX's send and sends from the next boundary, unless MAX's boundary is not
+//! drawn at all (then it is built first and goes out alone, at the due
+//! instant). A device the FHD side loses after MAX's boundary went out is
+//! MAX's too: the boundary stays sent, MAX's state and log name the loss.
+//! #279 P1b: while NDI `SP-program` comes from the GPU (`Wants::ndi`)
+//! the primary is read back as UYVY after each compose, before the sends
+//! (`program_max_ndi.rs`); with MAX off the compositor keeps composing for
+//! NDI alone.
 //!
 //! Failures never panic the thread and never reach the program:
 //!
@@ -81,10 +83,10 @@
 
 use std::time::{Duration, Instant};
 
-use sp_gpu::{ComposeStats, FHD_TARGET, GpuError, SpoutSendStats, TargetId, VblankGrid};
+use sp_gpu::{ComposeStats, GpuError, MAX_TARGET, SpoutSendStats, TargetId, VblankGrid};
 use tracing::{info, warn};
 
-use crate::playback::program_max::{MaxJob, MaxNext, MaxOut};
+use crate::playback::program_max::{MaxJob, MaxNext, MaxOut, Wants};
 pub use crate::playback::program_max_gpu::{
     MaxCompositor, MaxGpu, MaxSender, SpoutGpu, is_refusal,
 };
@@ -96,62 +98,17 @@ use crate::playback::program_max_send::{
 use crate::playback::program_max_vblank::{
     Aligned, Due, VblankLog, VblankPacer, VblankSource, phase_after_vblank_us,
 };
-use crate::playback::stat_window::WarnLimiter;
+#[path = "program_max_log.rs"]
+mod gate;
+pub use gate::{LogGate, LogLine, MAX_LOG_EVERY_100NS, elapsed_100ns};
+#[path = "program_max_ndi.rs"]
+mod ndi;
+pub use ndi::PassLine;
 
 /// How long the thread waits before it builds again after a refused sender,
 /// a failed build or a second lost device in a row ("a few seconds", the
 /// S1b carry-over).
 pub const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(3);
-
-/// At most one log line of the thread's state (a failure WARN or a
-/// recovery INFO) per 5 s of its time (100 ns).
-pub const MAX_LOG_EVERY_100NS: i64 = 50_000_000;
-
-/// The thread's time at `now` since `since`, in 100 ns (the unit of
-/// `WarnLimiter`); 0 before `since`.
-pub fn elapsed_100ns(since: Instant, now: Instant) -> i64 {
-    let ns = now.saturating_duration_since(since).as_nanos();
-    i64::try_from(ns / 100).unwrap_or(i64::MAX)
-}
-
-/// The line the log writes for one boundary ([`LogGate::observe`]).
-#[derive(Debug, PartialEq, Eq)]
-pub enum LogLine {
-    /// Boundaries do not go out (a WARN with the reason).
-    Failing { held_back: u64 },
-    /// Boundaries go out again (an INFO).
-    Recovered { held_back: u64 },
-}
-
-/// What the log last said about the thread, and its rate limit. Pure: the
-/// worker logs the line it returns.
-#[derive(Debug, Default)]
-pub struct LogGate {
-    limiter: WarnLimiter,
-    /// What the log last said: `None` = boundaries go out (also the start),
-    /// `Some(why)` = they do not, because of `why`.
-    logged: Option<String>,
-}
-
-impl LogGate {
-    /// The state after a boundary at `at_100ns` (`failing` = why boundaries
-    /// do not go out, `None` = they do). A line when the state differs from
-    /// what the log last said, at most one per [`MAX_LOG_EVERY_100NS`]; a
-    /// difference held back is written by the first boundary after the
-    /// window, as the state is then (`held_back` = the boundaries held
-    /// back since the last line).
-    pub fn observe(&mut self, at_100ns: i64, failing: Option<&str>) -> Option<LogLine> {
-        if self.logged.as_deref() == failing {
-            return None;
-        }
-        let held_back = self.limiter.admit(at_100ns, MAX_LOG_EVERY_100NS)?;
-        self.logged = failing.map(str::to_owned);
-        Some(match failing {
-            Some(_) => LogLine::Failing { held_back },
-            None => LogLine::Recovered { held_back },
-        })
-    }
-}
 
 /// Why an output's boundary did not go out.
 #[derive(Clone, Debug)]
@@ -187,21 +144,21 @@ const NO_SENDER: GpuError = GpuError::NoObject {
 /// The thread's outputs (#239).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Which {
-    /// `SP-program-MAX`, 3840×2160: the compositor's primary target.
+    /// `SP-program-MAX`, 3840×2160: the target added for it (#279 P1b).
     Max,
-    /// `SP-program`, 1920×1080: the target added for it (#251 step 2).
+    /// `SP-program`, 1920×1080: the compositor's primary target.
     Fhd,
 }
 
-/// One output's sender and its backoff: MAX's, of the compositor's primary
-/// target, or (#239) the `SP-program` one, of the FHD target (#251 step 2:
-/// added to the same compositor with its sender, removed with it).
+/// One output's sender and its backoff: MAX's, of the target added to the
+/// compositor with it (#279 P1b: removed with it), or (#239) the
+/// `SP-program` one, of the compositor's primary (FHD) target.
 struct Output<S> {
     sender: Option<S>,
-    /// The FHD output's target on the compositor (`None` for MAX's: the
+    /// MAX's target on the compositor (`None` for the FHD output's: the
     /// primary, the compositor's for its life).
     target: Option<TargetId>,
-    /// No new sender (FHD: target and sender) before this instant.
+    /// No new sender (MAX: target and sender) before this instant.
     retry_at: Option<Instant>,
 }
 
@@ -225,12 +182,17 @@ struct Device<C> {
 }
 
 /// The log lines one boundary wrote ([`MaxWorker::serve_lines`]).
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct Lines {
     /// `SP-program-MAX`'s.
     pub max: Option<LogLine>,
     /// #239: the FHD sender's (`None` too while it is not wanted).
     pub fhd: Option<LogLine>,
+    /// #279 P1b: the compositor's for NDI alone (`None` while MAX is wanted).
+    pub ndi: Option<LogLine>,
+    /// #279 P1b: the UYVY pass's own (`program_max_ndi.rs`): its state and
+    /// the boundaries held back.
+    pub ndi_pass: Option<(PassLine, u64)>,
 }
 
 /// The `program-max` thread's state: the GPU objects it built, the picture
@@ -240,10 +202,13 @@ pub struct MaxWorker<'a, G: MaxGpu> {
     gpu: G,
     // Dropped in declaration order: both senders before the compositor
     // (they hold references into its device and its targets).
+    /// MAX's sender and its target (#279 P1b), only while wanted.
     max: Output<G::Sender>,
-    /// #239: the `SP-program` sender and its target, only while wanted.
+    /// #239: the `SP-program` sender, only while wanted.
     fhd: Output<G::Sender>,
     device: Device<G::Compositor>,
+    /// #279 P1b: NDI's readback (`program_max_ndi.rs`).
+    ndi: ndi::NdiPass,
     ids: PictureIds,
     /// The GPU said `Unsupported`: never build again.
     unsupported: bool,
@@ -284,11 +249,17 @@ struct Composed {
     composing: (Instant, bool),
 }
 
-/// What one job did on each output: MAX's boundary, and the FHD sender's
-/// (`None` while it is not wanted, or the platform is unsupported).
+/// What one job did on each output: MAX's boundary (`None` while it is not
+/// wanted, #279 P1b), and the FHD sender's (`None` while it is not wanted,
+/// or the platform is unsupported).
 struct Went {
-    max: Result<Sent, Skip>,
+    max: Option<Result<Sent, Skip>>,
     fhd: Option<Result<FhdSent, Skip>>,
+    /// #279 P1b: the compose for NDI alone (MAX not wanted): built and
+    /// composed, or why not (`None`: nothing to say, `ndi_report`).
+    ndi: Option<Result<(), Skip>>,
+    /// The line the UYVY pass's log wrote (`ndi_pass`).
+    ndi_pass: Option<(PassLine, u64)>,
 }
 
 impl<'a, G: MaxGpu> MaxWorker<'a, G> {
@@ -303,6 +274,7 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
                 retry_at: None,
                 lost_unsent: false,
             },
+            ndi: ndi::NdiPass::default(),
             ids: PictureIds::default(),
             unsupported: false,
             failing: None,
@@ -363,26 +335,44 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     }
 
     /// Compose and send one boundary the program offered at `offered`, at
-    /// `now`, on MAX and (#239) on the FHD sender while it is wanted; report
-    /// each and log what changed on each ([`LogGate`]); returns the lines
-    /// logged. An FHD sender no longer wanted is dropped first, with its
-    /// target.
+    /// `now`, on MAX while it is wanted and (#239) on the FHD sender while
+    /// it is wanted, and (#279 P1b) read it back for NDI while that is
+    /// wanted; report each and log what changed on each ([`LogGate`]);
+    /// returns the lines logged. An output no longer wanted is dropped first
+    /// (MAX's with its target).
     pub fn serve_lines(&mut self, job: &MaxJob, offered: Instant, now: Instant) -> Lines {
-        let fhd_wanted = self.out.fhd_wanted();
-        if !fhd_wanted && (self.fhd.target.is_some() || self.fhd.retry_at.is_some()) {
+        let wants = self.out.wants();
+        if !wants.fhd && (self.fhd.sender.is_some() || self.fhd.retry_at.is_some()) {
             self.release_fhd();
         }
-        let went = self.attempt(job, offered, now, fhd_wanted);
+        if !wants.max && (self.max.sender.is_some() || self.max.retry_at.is_some()) {
+            self.release_max();
+        }
+        if !wants.any() {
+            // Taken just before a setting left nothing wanting the
+            // compositor: nothing built for it, the next step releases.
+            return Lines::default();
+        }
+        let went = self.attempt(job, offered, now, wants);
         // #251 step 2: the device the FHD side lost after MAX's boundary went
         // out (its send, or its build after MAX's send) was MAX's too.
         let lost = match (&went.max, &went.fhd) {
-            (Ok(_), Some(fhd)) => device_lost(fhd),
+            (Some(Ok(_)), Some(fhd)) => device_lost(fhd),
             _ => None,
         };
-        let max = self.finish_max(went.max, lost, job, now);
+        let max = went
+            .max
+            .and_then(|went| self.finish_max(went, lost, job, now));
         let fhd = went.fhd.and_then(|went| self.finish_fhd(went, job, now));
+        let ndi = went.ndi.and_then(|went| self.finish_ndi(went, job, now));
         self.list.boundary(now, self.out);
-        Lines { max, fhd }
+        let ndi_pass = went.ndi_pass;
+        Lines {
+            max,
+            fhd,
+            ndi,
+            ndi_pass,
+        }
     }
 
     /// Report MAX's boundary and log what changed; returns the line it
@@ -407,11 +397,8 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
                 }
             }
             Err(Skip::Backoff) => self.out.record_skipped(),
-            Err(Skip::Unsupported) => {
-                self.unsupported = true;
-                self.out.record_unsupported();
-                return None;
-            }
+            // The build recorded it (`build_device`).
+            Err(Skip::Unsupported) => return None,
             Err(Skip::Failed(error)) => {
                 let why = error.to_string();
                 self.out.record_failed(&why);
@@ -481,57 +468,67 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         line
     }
 
-    /// Build what is missing, each unless its backoff runs (the compositor,
-    /// MAX's sender; while wanted the FHD target and its sender, after MAX's
-    /// send unless MAX's boundary is not drawn), then, when an output can go
-    /// out: pace `job` FIRST, compose it into every target at its compose
-    /// instant (#251, [`draw`](Self::draw): one upload of each picture) and
-    /// send it when it is due, MAX's first, then the FHD one's right after
-    /// (alone, at the due instant). A lost device fails both outputs with it.
-    fn attempt(&mut self, job: &MaxJob, offered: Instant, now: Instant, fhd_wanted: bool) -> Went {
+    /// Build what is missing, each unless its backoff runs (the compositor;
+    /// while wanted MAX's target and sender, NDI's pass, and the FHD sender,
+    /// after MAX's send unless MAX's boundary is not drawn), then, when an
+    /// output can go out or NDI's pass is on: pace `job` FIRST, compose it
+    /// into every target at its compose instant (#251, [`draw`](Self::draw):
+    /// one upload of each picture; #279 P1b: NDI's readback right after it)
+    /// and send it when it is due, MAX's first, then the FHD one's right
+    /// after (alone, at the due instant). A lost device fails both outputs
+    /// with it.
+    fn attempt(&mut self, job: &MaxJob, offered: Instant, now: Instant, wants: Wants) -> Went {
         if self.unsupported {
             return Went {
-                max: Err(Skip::Unsupported),
+                max: wants.max.then_some(Err(Skip::Unsupported)),
                 fhd: None,
+                ndi: None,
+                ndi_pass: None,
             };
         }
         if let Err(skip) = self.build_device(now) {
-            let fhd = (fhd_wanted && !matches!(skip, Skip::Unsupported)).then(|| Err(skip.clone()));
+            let unsupported = matches!(skip, Skip::Unsupported);
+            let fhd = (wants.fhd && !unsupported).then(|| Err(skip.clone()));
             return Went {
-                max: Err(skip),
+                ndi: ndi::ndi_report(wants, Some(Err(skip.clone()))),
+                max: wants.max.then_some(Err(skip)),
                 fhd,
+                ndi_pass: None,
             };
         }
-        let max_built = self.build(Which::Max, now);
-        // #239: MAX goes first, whole. An FHD output still to build (a
-        // target, a Spout open) is built AFTER MAX's send and drawn from
-        // the next compose, so its cost never delays this boundary's MAX
-        // (an open longer than the wait to the next compose instant makes
-        // that compose late: `compose_late`); only when MAX's boundary is
-        // not drawn at all (its build failed, lost the device or waits a
+        let ndi_pass = self.ndi_pass(wants.ndi, now);
+        let max_built = wants.max.then(|| self.build(Which::Max, now));
+        let max_ok = matches!(max_built, Some(Ok(())));
+        // #239: MAX goes first, whole. An FHD sender still to build (a
+        // Spout open) is built AFTER MAX's send and sends from the next
+        // boundary, so its cost never delays this boundary's MAX (an open
+        // longer than the wait to the next compose instant makes that
+        // compose late: `compose_late`); only when MAX's boundary is not
+        // drawn at all (its build failed, lost the device or waits a
         // backoff) is it built first.
-        let fhd_first = fhd_wanted && (max_built.is_err() || self.fhd.sender.is_some());
-        let fhd_built = fhd_first.then(|| match device_lost(&max_built) {
+        let fhd_first = wants.fhd && (!max_ok || self.fhd.sender.is_some());
+        let fhd_built = fhd_first.then(|| match max_built.as_ref().and_then(device_lost) {
             Some(error) => Err(Skip::Failed(error)),
             None => self.build(Which::Fhd, now),
         });
         // A device lost while building the FHD output is the device's: MAX
         // fails with it too, and nothing is drawn.
         let max_built = match fhd_built.as_ref().and_then(device_lost) {
-            Some(error) => Err(Skip::Failed(error)),
+            Some(error) => max_built.map(|_| Err(Skip::Failed(error))),
             None => max_built,
         };
+        let max_ok = matches!(max_built, Some(Ok(())));
         let fhd_ready = matches!(fhd_built, Some(Ok(())));
         // The pictures are labelled, paced and drawn only for a boundary
-        // that can go out on some output.
-        let composed = (max_built.is_ok() || fhd_ready).then(|| self.draw(job, offered, now));
-        let max = match (max_built, &composed) {
+        // that can go out on some output, or that NDI reads back.
+        let composed = (max_ok || fhd_ready || self.ndi.on).then(|| self.draw(job, offered, now));
+        let max = max_built.map(|built| match (built, &composed) {
             (Err(skip), _) => Err(skip),
             (Ok(()), Some(Ok(drawn))) => self.send_max(drawn, offered, now),
             (Ok(()), Some(Err(skip))) => Err(skip.clone()),
             (Ok(()), None) => Err(Skip::Failed(NO_COMPOSITOR)),
-        };
-        let lost = device_lost(&max);
+        });
+        let lost = max.as_ref().and_then(device_lost);
         let fhd = match fhd_built {
             Some(built) => Some(match (built, &composed, lost) {
                 (Err(skip), _, _) => Err(skip),
@@ -540,16 +537,23 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
                 (Ok(()), Some(Err(skip)), None) => Err(skip.clone()),
                 (Ok(()), None, None) => Err(Skip::Failed(NO_COMPOSITOR)),
             }),
-            None if fhd_wanted => self.build_fhd_after(lost, now),
+            None if wants.fhd => self.build_fhd_after(lost, now),
             None => None,
         };
-        Went { max, fhd }
+        let drawn = composed.map(|drawn| drawn.map(|_| ()));
+        let ndi = ndi::ndi_report(wants, drawn);
+        Went {
+            max,
+            fhd,
+            ndi,
+            ndi_pass,
+        }
     }
 
-    /// #239: MAX went first: build the FHD output now (its target and its
-    /// sender), drawn from the next compose. A built output reports nothing
-    /// for this boundary (its target was not drawn); a failure, a backoff or
-    /// the device MAX's boundary lost is reported as usual.
+    /// #239: MAX went first: build the FHD sender now, sending from the next
+    /// boundary. A built output reports nothing for this boundary (it was
+    /// not sent); a failure, a backoff or the device MAX's boundary lost is
+    /// reported as usual.
     fn build_fhd_after(
         &mut self,
         lost: Option<GpuError>,
@@ -563,7 +567,7 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
 
     /// Build the compositor unless it is there or its backoff runs (it
     /// records its adapter). A failed build waits the backoff; a lost device
-    /// while building waits it too.
+    /// while building waits it too; `Unsupported` is final (recorded once).
     fn build_device(&mut self, now: Instant) -> Result<(), Skip> {
         if self.device.compositor.is_some() {
             return Ok(());
@@ -577,7 +581,11 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
                 self.device.compositor = Some(built);
                 Ok(())
             }
-            Err(GpuError::Unsupported) => Err(Skip::Unsupported),
+            Err(GpuError::Unsupported) => {
+                self.unsupported = true;
+                self.out.record_unsupported();
+                Err(Skip::Unsupported)
+            }
             Err(error) => {
                 if error.is_device_lost() {
                     self.lose_device(now, true);
@@ -589,8 +597,8 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         }
     }
 
-    /// Make `which`'s sender (the FHD one's target first) unless it is
-    /// there or its backoff runs; a failure is recovered from at once
+    /// Make `which`'s sender (MAX's target first) unless it is there or its
+    /// backoff runs; a failure is recovered from at once
     /// ([`output_failed`](Self::output_failed)).
     fn build(&mut self, which: Which, now: Instant) -> Result<(), Skip> {
         let output = self.output(which);
@@ -610,22 +618,22 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         })
     }
 
-    /// MAX's sender, of the compositor's primary target.
+    /// #279 P1b: MAX's target on the compositor (unless it holds it
+    /// already), then the sender `SP-program-MAX` of it.
     fn make_max(&mut self) -> Result<(), GpuError> {
-        let compositor = self.device.compositor.as_ref().ok_or(NO_COMPOSITOR)?;
-        self.max.sender = Some(self.gpu.sender(compositor)?);
+        let compositor = self.device.compositor.as_mut().ok_or(NO_COMPOSITOR)?;
+        let target = match self.max.target {
+            Some(target) => target,
+            None => *self.max.target.insert(compositor.add_target(MAX_TARGET)?),
+        };
+        self.max.sender = Some(self.gpu.sender(compositor, target)?);
         Ok(())
     }
 
-    /// #251 step 2: the FHD target on the compositor (unless it holds it
-    /// already), then the sender `SP-program` of it.
+    /// The sender `SP-program` of the compositor's primary (FHD) target.
     fn make_fhd(&mut self) -> Result<(), GpuError> {
-        let compositor = self.device.compositor.as_mut().ok_or(NO_COMPOSITOR)?;
-        let target = match self.fhd.target {
-            Some(target) => target,
-            None => *self.fhd.target.insert(compositor.add_target(FHD_TARGET)?),
-        };
-        self.fhd.sender = Some(self.gpu.fhd_sender(compositor, target)?);
+        let compositor = self.device.compositor.as_ref().ok_or(NO_COMPOSITOR)?;
+        self.fhd.sender = Some(self.gpu.fhd_sender(compositor, TargetId::PRIMARY)?);
         Ok(())
     }
 
@@ -638,8 +646,8 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
 
     /// After `which`'s build (`building`) or send failed with `error`: a lost
     /// device drops everything ([`lose_device`](Self::lose_device)); a
-    /// refused sender, or a failed build, drops the output's sender (the FHD
-    /// one's target with it) and waits [`MAX_RETRY_BACKOFF`] before its next
+    /// refused sender, or a failed build, drops the output's sender (MAX's
+    /// target with it) and waits [`MAX_RETRY_BACKOFF`] before its next
     /// build; anything else (one lost frame) costs this boundary only.
     fn output_failed(&mut self, which: Which, error: &GpuError, now: Instant, building: bool) {
         if error.is_device_lost() {
@@ -653,7 +661,7 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         let retry_at = Some(now + MAX_RETRY_BACKOFF);
         match which {
             Which::Max => {
-                self.max.sender = None;
+                self.drop_max();
                 self.max.retry_at = retry_at;
                 if refused {
                     self.out.record_sender_backoff();
@@ -685,31 +693,39 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     }
 
     /// Drop MAX's sender, then the FHD one (Spout unregisters the names),
-    /// then the compositor with every target.
+    /// then the compositor with every target (and NDI's pass, #279 P1b).
     fn drop_gpu(&mut self) {
         self.max.sender = None;
         self.fhd.sender = None;
-        self.fhd.target = None;
+        self.max.target = None;
+        self.ndi.forget();
         self.device.compositor = None;
         self.out.record_fhd_listed(None);
     }
 
-    /// #251 step 2: drop the FHD sender (Spout unregisters `SP-program`),
+    /// #279 P1b: drop MAX's sender (Spout unregisters `SP-program-MAX`),
     /// then take its target off the compositor: nothing is drawn for it.
-    fn drop_fhd(&mut self) {
-        self.fhd.sender = None;
+    fn drop_max(&mut self) {
+        self.max.sender = None;
         if let (Some(target), Some(compositor)) =
-            (self.fhd.target.take(), self.device.compositor.as_mut())
+            (self.max.target.take(), self.device.compositor.as_mut())
         {
             compositor.remove_target(target);
         }
+    }
+
+    /// Drop the FHD sender (Spout unregisters `SP-program`); its target,
+    /// the primary, stays.
+    fn drop_fhd(&mut self) {
+        self.fhd.sender = None;
         self.out.record_fhd_listed(None);
     }
 
     /// Label `job`'s pictures, pace it, wait for its compose instant (#251)
-    /// and compose it into every target the compositor holds (MAX's and,
-    /// while its sender lives, the FHD one): each picture uploaded once. A
-    /// lost device drops everything.
+    /// and compose it into every target the compositor holds (the FHD
+    /// primary and, while its sender lives, MAX's): each picture uploaded
+    /// once; #279 P1b: then, while NDI's pass is on, read it back for NDI
+    /// (before any send). A lost device drops everything.
     fn draw(&mut self, job: &MaxJob, offered: Instant, now: Instant) -> Result<Composed, Skip> {
         let composition = self.ids.composition(job);
         let paced = self.pace(offered);
@@ -722,7 +738,22 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
                 // #279 P0: what crossed to the GPU, whatever the sends do.
                 let (bytes, pictures) = (compose.upload_bytes, compose.uploads);
                 self.out.record_uploads(now, bytes, pictures);
-                let fhd_draw_us = self.fhd.target.map_or(0, |t| compositor.draw_us(t));
+                let fhd_draw_us = compositor.draw_us(TargetId::PRIMARY);
+                let at = elapsed_100ns(self.started, now);
+                let read = self.ndi.on
+                    && ndi::read_back(
+                        &mut self.ndi,
+                        self.out,
+                        compositor,
+                        job,
+                        compose.uyvy_us,
+                        at,
+                    );
+                if read {
+                    // NDI's picture came: the device works (a later loss
+                    // rebuilds at once).
+                    self.device.lost_unsent = false;
+                }
                 Ok(Composed {
                     compose,
                     fhd_draw_us,
@@ -818,12 +849,15 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         Ok((drawn.fhd_draw_us, send))
     }
 
-    /// MAX is off, or the thread stops: drop both senders (Spout unregisters
-    /// the names), then the compositor, and forget every backoff.
+    /// Nothing wants the compositor (MAX off and NDI on the CPU), or the
+    /// thread stops: drop both senders (Spout unregisters the names), then
+    /// the compositor, and forget every backoff; NDI's read-back pictures
+    /// go too (nothing takes them, no 4 MB buffer stays pinned).
     pub fn release(&mut self) {
         if self.holds_gpu() {
             info!("program max: the Spout senders and the compositor are released");
         }
+        self.out.ndi.clear();
         self.drop_gpu();
         self.device.retry_at = None;
         self.max.retry_at = None;
@@ -854,17 +888,26 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         );
     }
 
-    /// #239: drop the FHD sender and its target (Spout unregisters
-    /// `SP-program`, nothing is drawn for it) and forget its backoff: it was
-    /// switched off, or MAX is off.
+    /// #239: drop the FHD sender (Spout unregisters `SP-program`) and forget
+    /// its backoff: it was switched off, or MAX is off.
     fn release_fhd(&mut self) {
-        if self.fhd.target.is_some() {
-            info!(
-                "program max: the SP-program Spout sender is released, its target no longer drawn"
-            );
+        if self.fhd.sender.is_some() {
+            info!("program max: the SP-program Spout sender is released");
         }
         self.drop_fhd();
         self.fhd.retry_at = None;
+    }
+
+    /// #279 P1b: MAX is off while NDI keeps the compositor: drop MAX's
+    /// sender and its target (nothing is drawn for it), forget its backoff.
+    fn release_max(&mut self) {
+        if self.max.sender.is_some() {
+            info!(
+                "program max: the SP-program-MAX Spout sender is released, its target no longer drawn"
+            );
+        }
+        self.drop_max();
+        self.max.retry_at = None;
     }
 }
 
@@ -888,8 +931,9 @@ fn log_vblank(log: Option<VblankLog>, source: &dyn VblankSource) {
 /// The `program-max` thread: take each job from `out` and serve it on
 /// `gpu`, each sent at its due instant on the real clock ([`SpinClock`]) —
 /// on `vblank`'s refresh grid when one is given —, release the GPU while
-/// MAX is off, quiesce and resume (#243 follow-up), exit on stop; `list`
-/// = Spout's sender list to watch ([`MaxWorker::with_list`]).
+/// nothing wants it (MAX off, NDI on the CPU), quiesce and resume (#243
+/// follow-up), exit on stop; `list` = Spout's sender list to watch
+/// ([`MaxWorker::with_list`]).
 pub fn run_max_loop<G: MaxGpu>(
     out: &MaxOut,
     gpu: G,
@@ -942,3 +986,11 @@ mod tests_log;
 #[cfg(test)]
 #[path = "program_max_worker_tests_upload.rs"]
 mod tests_upload;
+
+#[cfg(test)]
+#[path = "program_max_worker_tests_release.rs"]
+mod tests_release;
+
+#[cfg(test)]
+#[path = "program_max_worker_tests_ndi.rs"]
+mod tests_ndi;

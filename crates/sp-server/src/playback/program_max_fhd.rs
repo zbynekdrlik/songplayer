@@ -38,7 +38,7 @@ pub const FHD_OFF_SETTING: &str = "setting_off";
 
 /// Why the FHD sender does not run, or `None` when both switches let it:
 /// MAX off first (it needs MAX's thread, whatever its own setting says),
-/// then its own setting. The one rule the worker ([`MaxOut::fhd_wanted`])
+/// then its own setting. The one rule the worker (`Wants::fhd`, [`MaxOut::wants`])
 /// and the telemetry share.
 pub fn fhd_off_reason(fhd_setting: bool, max_enabled: bool) -> Option<&'static str> {
     if !max_enabled {
@@ -134,13 +134,6 @@ impl MaxOut {
     /// The setting `program_spout_fhd_enabled`, as last applied.
     pub fn fhd_enabled(&self) -> bool {
         self.lock_queue().fhd_enabled
-    }
-
-    /// Whether the thread runs the FHD sender: its setting on AND MAX on
-    /// ([`fhd_off_reason`]).
-    pub fn fhd_wanted(&self) -> bool {
-        let queue = self.lock_queue();
-        fhd_off_reason(queue.fhd_enabled, queue.enabled).is_none()
     }
 
     /// The thread attached (`Running`) or ended (not running): the FHD
