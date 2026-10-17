@@ -76,7 +76,7 @@ pub fn waiting_sk(waiting: &str) -> &str {
     }
 }
 
-/// The label of a "Najvyššie rozlíšenie sťahovania" choice
+/// The label of a "Najvyššie rozlíšenie (sťahovanie aj prehrávanie)" choice
 /// (`config::MAX_RESOLUTION_CHOICES`, or a value set through the API).
 pub fn cap_label(choice: &str) -> String {
     match choice {

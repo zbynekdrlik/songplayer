@@ -103,7 +103,8 @@ rounds 1–2):
   scaled on the CPU.
 
 - **One knob.** `max_resolution` (Nastavenia "Najvyššie rozlíšenie
-  sťahovania") caps decode through the download's own rule
+  (sťahovanie aj prehrávanie)", with the hint `settings-max-resolution-hint`:
+  the owner's per-site switch when 4K is a problem) caps decode through the download's own rule
   `downloader::format::max_resolution(raw, hw_decode)`: automatic = 2160
   with hardware decode, else 1440; a number clamped to 480..=2160. The 5 s
   settings task (`video_decode.rs`) applies it with `video_hw_decode`
