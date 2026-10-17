@@ -18,6 +18,24 @@ established split patterns:
   seam needs. worker.rs stays under the cap this way.
 - **Test split:** move a `#[cfg(test)] mod` out to `<file>_tests.rs` and include
   it via `#[path = "<file>_tests.rs"] #[cfg(test)] mod tests;`.
+- **Child impl split, no field opened** (#282 follow-up,
+  `sp-decoder/src/video/mf_reader_scaled.rs`): declare the sibling file as a
+  CHILD of the big file (`#[path = "x_part.rs"] mod part;` inside `x.rs`; the
+  path resolves next to `x.rs`). A child module reaches the parent's PRIVATE
+  fields, fns and types, so the moved `impl <Type>` block needs no
+  `pub(crate)` field. A method the parent calls is `pub(super)` there; a
+  `pub fn` stays public API.
+
+## A function that starts returning a GUARD: move its callers in the same commit (#282 follow-up)
+
+`refuse_next_scaled_open_for_test()` went from `()` to a drop guard
+(`ScaledOpenRefusal`, `#[must_use]`) in the feat commit, while its test
+caller still called it as a statement until the test commit. In between,
+the guard dropped at once and disarmed the hook, so that commit's own
+test failed (and warned `unused_must_use`): a `git bisect` stop that is
+red on correct code. When a return type gains Drop semantics, rewrite
+every caller (`let guard = …; … drop(guard);`) in the SAME commit. Grep
+the callers across `crates/` (tests included) with the Grep tool first.
 
 ## A wider `let` binding in a file AT the 1000-line cap can push it over via rustfmt (#198 item 8)
 

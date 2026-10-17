@@ -6,9 +6,9 @@
 //! processor's scale is proven on the box only. What runs here is the same
 //! open — a first source reader read for the stream's own size, then a
 //! second one with `MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING` and
-//! the NV12 output type's `MF_MT_FRAME_SIZE` (+ the pixel aspect that keeps
-//! the display aspect and the native colour description; no frame rate) —
-//! with Media Foundation's video processor scaling on the CPU.
+//! the NV12 output type's `MF_MT_FRAME_SIZE` (+ the picture's pixel aspect
+//! and the native colour description; no frame rate) — with Media
+//! Foundation's video processor scaling on the CPU.
 //!
 //! The picture checks compare the scaled picture with the unscaled one by
 //! regions, with tolerances measured on this fixture (ffmpeg's bilinear,
@@ -29,12 +29,36 @@
 //! Every test that changes or reads the process-wide `hw_counters()` (or
 //! arms the refusal hook) holds `COUNTERS`, so a counter's change is that
 //! test's own and is pinned exactly.
+//!
+//! #282 follow-up: each scaled open writes what it read of Media
+//! Foundation to stderr (past libtest's capture, so every CI log shows the
+//! runner's facts): the transform chain, the decoder's output at the open
+//! and at the first picture, the native geometric aperture, the colour
+//! descriptions and the negotiated pixel aspect. It then asserts the chain
+//! is the decoder followed by another transform (the video processor), the
+//! decoder's output was read and, where the native type states a colour
+//! value, the negotiated scaled type states no other (a stated, unequal
+//! value would suggest a conversion). Whether `GetCurrentMediaType` keeps
+//! the matrix and range that were set is not proven (Wine's Windows-run
+//! `test_source_reader_aspect_ratio` shows the reader dropping an ARGB32
+//! output's pixel aspect), so an unstated value passes. The fixture has no
+//! colour description (no VUI signal type, no `colr` box), so on it this
+//! is most likely vacuous until a CI log shows a stated `native_colour`.
+//!
+//! The tests that decode from the first picture also assert the decoder's
+//! output was read again there. Two runner premises, each proven only once
+//! its first CI run passes, sit in their own tests, so a runner that
+//! disagrees fails there alone:
+//! `a_scaled_open_lists_the_video_processor_in_its_chain` (the processor's
+//! category) and `the_first_picture_shows_no_decoder_padding_in_reach`
+//! (the decoder's crop shown as `MF_MT_MINIMUM_DISPLAY_APERTURE`).
 
 #![cfg(windows)]
 
 use std::io::Write;
 use std::sync::{Mutex, MutexGuard};
 
+use sp_decoder::video::ChainStage;
 use sp_decoder::{
     DecodeMode, DecodedVideoFrame, MediaFoundationVideoReader, MediaStream, VideoStream,
     hw_counters,
@@ -158,8 +182,12 @@ fn unscaled() -> (MediaFoundationVideoReader, Vec<DecodedVideoFrame>) {
 }
 
 /// A capped reader's open, its facts against the unscaled reader's, and
-/// the counters' change; it writes what Media Foundation negotiated
-/// straight to stderr (past libtest's capture), so every CI log shows it.
+/// the counters' change; it writes what Media Foundation negotiated and
+/// what the scaled open read (`ScaledOpenFacts`) straight to stderr (past
+/// libtest's capture), so every CI log shows it, then asserts the chain is
+/// the decoder and a transform after it, the decoder's output was read,
+/// and, where the native type states a colour value, the negotiated type
+/// states no other.
 fn open_scaled(
     cap: u32,
     size: (u32, u32),
@@ -182,6 +210,11 @@ fn open_scaled(
         reader.scaled_decoder_output(),
         after.scaled_opens - before.scaled_opens,
         after.scale_refusals - before.scale_refusals
+    );
+    let facts = reader.scaled_open_facts().cloned();
+    let _ = writeln!(
+        std::io::stderr(),
+        "mf_decode_cap: cap {cap}: what the scaled open read: {facts:?}"
     );
     assert_eq!(
         after.scale_refusals, before.scale_refusals,
@@ -206,7 +239,130 @@ fn open_scaled(
         "cap {cap}: the stream's own rate, {scaled_rate:?} vs {plain_rate:?}"
     );
     assert!(reader.frame_rate_known(), "cap {cap}: not the 29.97 guess");
+    let facts = facts.unwrap_or_else(|| panic!("cap {cap}: a scaled open keeps its facts"));
+    // The decoder at index 0 (Microsoft) and a transform after it: the
+    // processor the reader inserts (Wine's conformance tests, run against
+    // Windows, read it at index 1). Its category is pinned in its own test.
+    assert!(
+        facts.chain.first() == Some(&ChainStage::Decoder)
+            && facts
+                .chain
+                .get(1)
+                .is_some_and(|stage| !matches!(stage, ChainStage::Error(_))),
+        "cap {cap}: the decoder, then the video processor: {:?}",
+        facts.chain
+    );
+    // `ScaledType::apply` puts each colour value the native type states on
+    // the scaled type. Whether the reader's current type keeps it is not
+    // proven (it drops an output pixel aspect), so only a STATED, unequal
+    // value fails: that would be a colour conversion.
+    let out = facts.out_colour;
+    if let Some(matrix) = facts.native_colour.matrix {
+        let stated = out.and_then(|c| c.matrix);
+        assert!(
+            stated.is_none_or(|m| m == matrix),
+            "cap {cap}: the scaled type states the YUV matrix {stated:?}, the native {matrix}"
+        );
+    }
+    if let Some(range) = facts.native_colour.range {
+        let stated = out.and_then(|c| c.range);
+        assert!(
+            stated.is_none_or(|r| r == range),
+            "cap {cap}: the scaled type states the nominal range {stated:?}, the native {range}"
+        );
+    }
+    assert!(
+        reader.scaled_decoder_output().is_some(),
+        "cap {cap}: the decoder's output was read at the open: {:?}",
+        facts.decoder
+    );
+    assert_eq!(
+        facts.decoder_at_first_picture, None,
+        "cap {cap}: the decoder's output is read again only at the first picture"
+    );
     reader
+}
+
+/// #282 follow-up: after a scaled reader's first picture, the decoder's
+/// output was read again, once; written to stderr (the CI log's fact for
+/// the software decoder after its first frame).
+fn assert_reread_at_first_picture(reader: &MediaFoundationVideoReader, what: &str) {
+    let facts = reader
+        .scaled_open_facts()
+        .unwrap_or_else(|| panic!("{what}: a scaled reader keeps its facts"));
+    let _ = writeln!(
+        std::io::stderr(),
+        "mf_decode_cap: {what}: the decoder's output at the open {:?}, at the first picture {:?}",
+        facts.decoder,
+        facts.decoder_at_first_picture
+    );
+    assert!(
+        matches!(facts.decoder_at_first_picture, Some(Ok(_))),
+        "{what}: the decoder's output was read again at the first picture: {:?}",
+        facts.decoder_at_first_picture
+    );
+    assert!(
+        facts.first_picture_padding_in_reach.is_some(),
+        "{what}: the padding check ran with the re-read"
+    );
+}
+
+/// The pictures handed over after the reader decoded 60 (past 1 900 ms)
+/// and then sought BACK to the middle, with the seek's target. The
+/// fixture's one keyframe is at 0, so a real seek hands over a picture at
+/// or before the target; a seek that did nothing would hand over the 61st
+/// picture (~2 000 ms).
+fn after_a_seek(
+    reader: &mut MediaFoundationVideoReader,
+    what: &str,
+) -> (u64, Vec<DecodedVideoFrame>) {
+    for i in 0..60 {
+        reader
+            .next_frame()
+            .unwrap_or_else(|e| panic!("{what}: decode {i}: {e}"))
+            .unwrap_or_else(|| panic!("{what}: picture {i}"));
+    }
+    let target = reader.duration_ms() / 2;
+    reader
+        .seek(target)
+        .unwrap_or_else(|e| panic!("{what}: seek to {target} ms: {e}"));
+    let mut rest = Vec::new();
+    while let Some(frame) = reader
+        .next_frame()
+        .unwrap_or_else(|e| panic!("{what}: decode {} after the seek: {e}", rest.len()))
+    {
+        rest.push(frame);
+    }
+    assert!(!rest.is_empty(), "{what}: pictures after the seek");
+    assert!(
+        rest[0].timestamp_ms <= target,
+        "{what}: the seek moved back to {target} ms or before, got {} ms",
+        rest[0].timestamp_ms
+    );
+    (target, rest)
+}
+
+/// Every `scaled` picture is 80×60 (stride 80) and matches the `plain`
+/// picture at the same place by regions (the module doc's tolerances).
+fn assert_scaled_like(scaled: &[DecodedVideoFrame], plain: &[DecodedVideoFrame], what: &str) {
+    assert_eq!(scaled.len(), plain.len(), "{what}: one picture each");
+    for (i, (s, p)) in scaled.iter().zip(plain).enumerate() {
+        assert_eq!(
+            s.timestamp_ms, p.timestamp_ms,
+            "{what}, picture {i}: its time"
+        );
+        assert_eq!(
+            (s.width, s.height, s.stride),
+            (80, 60, 80),
+            "{what}, picture {i}: the scaled size"
+        );
+        let _ = visible(s, 80, 60);
+        let grid_diff = worst(&grid(s, 80, 60), &grid(p, W, H));
+        assert!(
+            grid_diff < 6.0,
+            "{what}, picture {i}: a 4x4 luma block off by {grid_diff:.1}"
+        );
+    }
 }
 
 /// A cap of 60 rows: the box is 106×60 (60 × 16/9 = 106.7 → 106), the
@@ -218,6 +374,7 @@ fn a_cap_smaller_than_the_picture_hands_every_picture_over_scaled() {
     let (plain_reader, plain) = unscaled();
     let mut reader = open_scaled(60, (80, 60), &plain_reader);
     let scaled = decode_all(&mut reader, "scaled");
+    assert_reread_at_first_picture(&reader, "cap 60");
     assert_eq!(
         scaled.len(),
         plain.len(),
@@ -254,13 +411,17 @@ fn a_cap_smaller_than_the_picture_hands_every_picture_over_scaled() {
 
 /// A cap of 50 rows: the box is 88×50, the picture is decoded at 66×50, a
 /// fraction of a pixel off the native aspect (pixel aspect 100:99): the
-/// picture must still fill the frame (no letterboxed edge).
+/// picture must still fill the frame (no letterboxed edge). This proves
+/// the fill on the software path, not which attribute fills it (the ratio
+/// and the frame size agree here); the stderr line names the negotiated
+/// ratio (`out_pixel_aspect`).
 #[test]
 fn an_inexact_ratio_fills_the_whole_frame() {
     let _alone = counters_alone();
     let (plain_reader, plain) = unscaled();
     let mut reader = open_scaled(50, (66, 50), &plain_reader);
     let scaled = decode_all(&mut reader, "scaled at 66x50");
+    assert_reread_at_first_picture(&reader, "cap 50");
     assert_eq!(scaled.len(), plain.len());
     // 66 is 2 mod 4: where a stride the type does not state would shear.
     let _ = writeln!(
@@ -296,6 +457,10 @@ fn a_cap_at_or_above_the_picture_changes_nothing() {
                 .expect("open");
         assert_eq!((reader.width(), reader.height()), (160, 120), "cap {cap}");
         assert_eq!(reader.scaled_from(), None, "cap {cap}: not scaled");
+        assert!(
+            reader.scaled_open_facts().is_none(),
+            "cap {cap}: no scaled open, no facts"
+        );
         let pictures = decode_all(&mut reader, "capped, inside the box");
         assert_eq!(pictures.len(), plain.len(), "cap {cap}");
         for (i, (c, p)) in pictures.iter().zip(&plain).enumerate() {
@@ -323,15 +488,20 @@ fn a_refused_scaled_open_plays_the_file_at_its_own_size() {
     let _alone = counters_alone();
     let (_, plain) = unscaled();
     let before = hw_counters().snapshot();
-    MediaFoundationVideoReader::refuse_next_scaled_open_for_test();
+    let refusal = MediaFoundationVideoReader::refuse_next_scaled_open_for_test();
     let mut reader =
         MediaFoundationVideoReader::open_with(&fixture(), DecodeMode::Software, Some(60))
             .expect("a refused scaled open still opens the file");
+    drop(refusal);
     let after = hw_counters().snapshot();
     assert_eq!(after.scale_refusals, before.scale_refusals + 1, "counted");
     assert_eq!(after.scaled_opens, before.scaled_opens, "not scaled");
     assert_eq!((reader.width(), reader.height()), (160, 120));
     assert_eq!(reader.scaled_from(), None, "a refused open is not scaled");
+    assert!(
+        reader.scaled_open_facts().is_none(),
+        "a refused open has no facts"
+    );
     let pictures = decode_all(&mut reader, "refused, unscaled");
     assert_eq!(pictures.len(), plain.len());
     for (i, (c, p)) in pictures.iter().zip(&plain).enumerate() {
@@ -345,4 +515,139 @@ fn a_refused_scaled_open_plays_the_file_at_its_own_size() {
             "picture {i}: the same bytes as an uncapped reader"
         );
     }
+}
+
+/// #282 follow-up: the transform the source reader inserts after the
+/// decoder for a scaled open is listed in `MFT_CATEGORY_VIDEO_PROCESSOR`
+/// (Microsoft: the reader looks for its processor in that category; Wine's
+/// reader reports that category for it). Its own test, so a runner that
+/// reports another category fails here alone; the chain is in the CI log.
+#[test]
+fn a_scaled_open_lists_the_video_processor_in_its_chain() {
+    let _alone = counters_alone();
+    let (plain_reader, _) = unscaled();
+    let reader = open_scaled(60, (80, 60), &plain_reader);
+    let facts = reader.scaled_open_facts().expect("scaled facts");
+    assert!(
+        facts.has_video_processor(),
+        "a video processor in the chain: {:?}",
+        facts.chain
+    );
+}
+
+/// #282 follow-up: at the first picture the decoder's padding does not
+/// reach the processor (`first_picture_padding_in_reach` `Some(false)`).
+/// The fixture's pictures fill the frame (the edge bands of the tests
+/// above), so this pins that the check reads the stream's own size
+/// (160x120), never the scaled one (80x60: "padded" on every file). Its
+/// premise, that the decoder shows its crop (coded 160x128) as
+/// `MF_MT_MINIMUM_DISPLAY_APERTURE` (Wine's H.264 decoder tests, run
+/// against Windows) or shows no padding at all, is proven only once its
+/// first CI run passes; a runner that shows the crop another way fails
+/// here alone.
+#[test]
+fn the_first_picture_shows_no_decoder_padding_in_reach() {
+    let _alone = counters_alone();
+    let (plain_reader, _) = unscaled();
+    let mut reader = open_scaled(60, (80, 60), &plain_reader);
+    reader
+        .next_frame()
+        .expect("decode the first picture")
+        .expect("a first picture");
+    assert_reread_at_first_picture(&reader, "the padding check");
+    let facts = reader.scaled_open_facts().expect("scaled facts");
+    assert_eq!(
+        facts.first_picture_padding_in_reach,
+        Some(false),
+        "no decoder padding in reach of the processor at the first picture: {:?}",
+        facts.decoder_at_first_picture
+    );
+}
+
+/// #282 follow-up: the refusal hook is disarmed when its guard drops, so a
+/// test that panics between arming it and its open (the unwind drops the
+/// guard) can never refuse a later test's scaled open.
+#[test]
+fn a_dropped_refusal_guard_refuses_no_later_scaled_open() {
+    let _alone = counters_alone();
+    let (plain_reader, _) = unscaled();
+    let refusal = MediaFoundationVideoReader::refuse_next_scaled_open_for_test();
+    drop(refusal);
+    // `open_scaled` asserts the open was scaled and nothing was refused.
+    let reader = open_scaled(60, (80, 60), &plain_reader);
+    assert_eq!(reader.scaled_from(), Some((160, 120)));
+}
+
+/// #282 follow-up: a seek on a scaled reader lands where the unscaled
+/// reader's lands, and every picture after it keeps the scaled size (the
+/// video processor follows the seek; nothing reopens).
+#[test]
+fn a_seek_on_a_scaled_reader_lands_and_keeps_the_scaled_size() {
+    let _alone = counters_alone();
+    let (plain_reader, _) = unscaled();
+    let mut scaled = open_scaled(60, (80, 60), &plain_reader);
+    let before = hw_counters().snapshot();
+    let (target, scaled_rest) = after_a_seek(&mut scaled, "scaled");
+    assert_reread_at_first_picture(&scaled, "the seek's reader");
+    let after = hw_counters().snapshot();
+    assert_eq!(
+        (after.scaled_opens, after.scale_refusals),
+        (before.scaled_opens, before.scale_refusals),
+        "a seek reopens nothing"
+    );
+    let mut plain = MediaFoundationVideoReader::open(&fixture()).expect("software open");
+    let (plain_target, plain_rest) = after_a_seek(&mut plain, "unscaled");
+    assert_eq!(target, plain_target, "the same target");
+    let _ = writeln!(
+        std::io::stderr(),
+        "mf_decode_cap: a seek to {target} ms: the first scaled picture at {} ms ({}x{}), \
+         the unscaled at {} ms, {} pictures after it",
+        scaled_rest[0].timestamp_ms,
+        scaled_rest[0].width,
+        scaled_rest[0].height,
+        plain_rest[0].timestamp_ms,
+        scaled_rest.len()
+    );
+    assert_scaled_like(&scaled_rest, &plain_rest, "after the seek");
+    assert_eq!(scaled.scaled_from(), Some((160, 120)), "still scaled");
+}
+
+/// #282: a software reopen after a decode error keeps the decode cap: the
+/// rest of the song comes scaled too (a second scaled open, counted, whose
+/// decoder output is read again at its first picture), with no picture lost
+/// or handed over twice. CI injects the decode error (the D3D path's own
+/// cannot be reached, `mf_hw_decode.rs`).
+#[test]
+fn a_reopen_after_a_decode_error_keeps_the_decode_cap() {
+    let _alone = counters_alone();
+    let (plain_reader, plain) = unscaled();
+    let mut reader = open_scaled(60, (80, 60), &plain_reader);
+    let mut got = Vec::new();
+    for i in 0..10 {
+        got.push(
+            reader
+                .next_frame()
+                .unwrap_or_else(|e| panic!("decode {i}: {e}"))
+                .unwrap_or_else(|| panic!("picture {i}")),
+        );
+    }
+    let before = hw_counters().snapshot();
+    reader.fail_next_read_for_test();
+    // The fixture's one keyframe is at 0: the reopen decodes pictures 0..=9
+    // again and must drop them.
+    got.extend(decode_all(&mut reader, "after the reopen"));
+    let after = hw_counters().snapshot();
+    assert_eq!(
+        after.mid_stream_fallbacks,
+        before.mid_stream_fallbacks + 1,
+        "the injected error reopened the file"
+    );
+    assert_eq!(
+        (after.scaled_opens, after.scale_refusals),
+        (before.scaled_opens + 1, before.scale_refusals),
+        "the reopen opened scaled too"
+    );
+    assert_eq!(reader.scaled_from(), Some((160, 120)));
+    assert_reread_at_first_picture(&reader, "the reopen");
+    assert_scaled_like(&got, &plain, "across the reopen");
 }

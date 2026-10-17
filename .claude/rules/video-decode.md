@@ -87,8 +87,15 @@ frame period in software); the anchors and MF facts (comment 5990523303).
 Design: #282 comment 6233842555 (Approach 1); the lane's implementation
 note, comment 6233930202 (its "+15 rows on the D3D path" and "a scaled
 D3D picture counts as hardware" were superseded by review rounds 1–2,
-below). A TEMPORARY lever until #279 (the GPU-resident path): the wall's
+below). Asked as a lever until #279 (the GPU-resident path): the wall's
 jumps back follow the bytes SongPlayer moves (#251 comment 6232632646).
+The owner then made it a permanent switch per site (ROZHODNUTÉ on #282,
+17.10.2026: "musi byt sposob to zmenit"), so `max_resolution` caps
+download AND decode for good. SNV runs it at 1440 since 17.10.2026 15:09Z
+(the box A/B on #282: 10-15× fewer jumps back under NVENC, from two ABA
+rounds of 40 s takes on one AV1 song: a regression check, not a proof of a
+frame-exact path). The follow-up lane's design is #282 comment
+6241829405.
 
 **Automatic.** Setting `max_resolution` back to automatic restores
 3840×2160 with no code change, WITH hardware decode on (SNV, PP). The rule
@@ -119,27 +126,40 @@ rounds 1–2):
   3840×1606 → 1920×804; 4096×2160 at 2160 → 3840×2026. The cross products
   are u128 (no overflow at any `u32`).
 - **The open** (`video/mf_reader.rs::create`, the scaled half in
+  `video/mf_reader_scaled.rs` and the Media Foundation reads in
   `video/mf_scaled.rs`): the first source reader is made as before and only
   read for the native type (no output type set yet, so no decoder MFT is
   loaded). A scaled open makes a SECOND reader (`open_scaled` →
   `source_reader(.., advanced)`) with
   `MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING` = 1
   (`MF_READWRITE_DISABLE_CONVERTERS` must stay unset). Microsoft: the
-  source reader then inserts a video processor that matches the output
-  type's frame rate, frame size, interlace mode, pixel aspect and subtype.
+  source reader then inserts a video processor and "attempts to match" the
+  output type's frame rate, frame size, interlace mode, pixel aspect and
+  subtype (for the pixel aspect, see the next bullet).
   On the D3D path it is D3D11-aware and scales on the GPU before the
   readback, so the readback, the frame pool, MAX's upload and the canvas
   all carry the smaller picture. In software it scales on the CPU.
 - **The scaled output type** (`mf_scaled::ScaledType::apply`) carries:
   - `MF_MT_FRAME_SIZE` = the scaled size;
-  - `MF_MT_PIXEL_ASPECT_RATIO` = `hw_decode::scaled_pixel_aspect`. This
-    keeps the native display aspect exactly (3840×1606 → 1920×804 is
-    804:803), so a processor that keeps the aspect letterboxes no one-pixel
-    edge;
+  - `MF_MT_PIXEL_ASPECT_RATIO` = `hw_decode::scaled_pixel_aspect`, the
+    native display aspect kept exactly (3840×1606 → 1920×804 is 804:803).
+    Whether the reader keeps it is unproven for our NV12 output. Wine's
+    Windows-run `test_source_reader_aspect_ratio`
+    (`dlls/mfreadwrite/tests/mfplat.c`, "Aspect ratio in output type is
+    ignored") shows an ARGB32 output's ratio absent from the current type
+    (with no frame size the reader rescales by the INPUT's aspect; with
+    one, the frame size wins). CI's software 66×50 edge bands prove the
+    picture fills the frame, not which attribute fills it: 66×50 at 100:99
+    is the native 4:3, so either way the same picture comes out. The
+    negotiated ratio is printed by the CI log (`out_pixel_aspect`, the
+    software path) and by the box's open INFO (`pixel_aspect_out`, the
+    D3D11 path);
   - the native type's `MF_MT_YUV_MATRIX` and `MF_MT_VIDEO_NOMINAL_RANGE`
-    when it has them. The processor then converts no colour; a size-based
-    default, e.g. BT.601 for an SD output, would shift the hues the
-    compositor reads as BT.709.
+    when it has them, so that the processor need not convert colour. That
+    is the intent, unproven: Microsoft's matched attributes do not list
+    colour, and the box's hue check is the proof. A size-based default,
+    e.g. BT.601 for an SD output, would shift the hues the compositor
+    reads as BT.709.
 
   It carries NO frame rate (review round 2). A rate of ours could start
   the processor's frame-rate conversion when the decoder reports another
@@ -163,11 +183,20 @@ rounds 1–2):
       header). So there a stream that is not whole 16-pixel blocks
       (3840×1606, 2560×1350) is scaled only when the decoder already shows
       the native aperture at open, and an unreadable chain refuses it.
-      Whole blocks (3840×2160, 2560×1440, 4096×2160) cannot be padded, so
-      the 16:9 majority always keeps the lever;
-    - in software Media Foundation's decoders hand over the stream's own
-      size, so only the padding seen at open refuses, and an unreadable
-      chain is let through with a WARN naming the file;
+      NVDEC's 16-row padding cannot reach whole blocks (3840×2160,
+      2560×1440, 4096×2160), so the 16:9 majority keeps the lever UNLESS
+      the decoder shows padding at open without the native aperture: that
+      refuses on any size. Seen on SNV (17.10.2026, AV1 3840×2160, D3D11):
+      the decoder showed `3840×2160`, no aperture, at open;
+    - in software only the padding seen at open refuses, and an unreadable
+      chain is let through with a WARN naming the file (the same WARN
+      lets a D3D11 stream of whole blocks through; it names `path`). What
+      is PROVEN of the software decoders: CI run 39040435639 printed the
+      runner's H.264 software decoder (the line names no MFT) showing
+      `160×120`, no aperture, AT OPEN for the fixture coded 160×128. The
+      VP9 / AV1 software decoders and any decoder's type after its first
+      frame are not proven; the CI log's `at the first picture` line
+      (below) shows H.264's;
   - Media Foundation refuses the attribute or the type.
 
   A refusal logs WARN `mf_reader: the scaled open was refused; this file
@@ -177,10 +206,56 @@ rounds 1–2):
   readback takes the UV offset from the texture's height.
 - One INFO per scaled open: `mf_reader: opened scaled to the decode cap
   (#282); the decoder's own path is not visible behind the video
-  processor` (`from`, `to`, `pixel_aspect`, `decoder` = what the decoder
-  hands the processor, `path` D3D11 / software), `scaled_opens` +1. The
-  reader's `scaled_from()` is the stream's own size;
-  `scaled_decoder_output()` (doc-hidden) is the decoder's output.
+  processor`, `scaled_opens` +1. Its fields:
+  - `from`, `to`, `pixel_aspect`, `path` (D3D11 / software);
+  - `decoder`: what the decoder hands the processor, `Ok(DecoderOutput
+    {size, aperture, colour})` or why the chain could not be read;
+  - `chain`: the source reader's transforms in order (`Decoder`,
+    `VideoProcessor`, `Other(<category GUID>)`, or the `Error` that ended
+    the walk);
+  - `native_aperture`: the native type's `MF_MT_GEOMETRIC_APERTURE`;
+  - `colour_native` / `colour_out` / `colour_decoder`: the matrix and the
+    nominal range (`MF_MT_YUV_MATRIX`: 1 = BT.709, 2 = BT.601;
+    `MF_MT_VIDEO_NOMINAL_RANGE`: 1 = full, 2 = 16..235) of the native type
+    (put on the scaled type), the negotiated scaled type and the decoder's
+    output. Whether `colour_out` keeps each value the native type states
+    (ours, `ScaledType::apply`) is NOT proven: the reader may drop it as it
+    drops an ARGB32 output's pixel aspect (above). The CI test fails only
+    where the native type states a value and the scaled type states
+    another; the CI fixture most likely states none. Only two STATED,
+    unequal values of `colour_out` and `colour_decoder` suggest a
+    conversion; an unstated (`None`) side says nothing (the processor then
+    takes some default of its own: reasoned, not measured). The proof
+    stays the hue check against the uncapped song;
+  - `pixel_aspect_out`: the negotiated type's pixel aspect
+    (`out_pixel_aspect`; `None` = not stated, or Media Foundation did
+    not answer).
+
+- **The first scaled picture** (#282 follow-up): the decoder MFT found at
+  the open is kept and its output type read again ONCE there, then let go,
+  with no `GetTransformForStream` call mid-stream (Microsoft: drain the
+  reader before calling it). One INFO `mf_reader: the decoder's output at
+  the first scaled picture (#282)` with `at_open`, `at_first_picture` and
+  `padding_in_reach` (`hw_decode::padding_reaches_processor` on the new
+  type against the stream's own size; also in the facts,
+  `first_picture_padding_in_reach`). On the box, `padding_in_reach=true`
+  is where the green strip is expected (NVDEC padded after the open's
+  check; that the processor crops only by `MF_MT_MINIMUM_DISPLAY_APERTURE`
+  was reasoned in review, not measured): look at that file's bottom rows
+  on MAX.
+- The reader's `scaled_from()` is the stream's own size;
+  `scaled_decoder_output()` and `scaled_open_facts()` (doc-hidden,
+  `ScaledOpenFacts`, `video/mod.rs` re-exports it) are what the open read.
+- **Where the code lives:** the reader's scaled half (`open_scaled`, its
+  log lines, the first picture's re-read, the accessors) is the CHILD
+  module `video/mf_reader_scaled.rs` (`#[path = "mf_reader_scaled.rs"]
+  mod scaled;` inside `mf_reader.rs`, resolved next to it). As a child it
+  reaches the reader's private fields and `source_reader` / `configure`,
+  so `mf_reader.rs` (900 lines) stayed under the cap with no field made
+  `pub(super)`. The chain walk and the Media Foundation reads are
+  `mf_scaled.rs` (`read_chain`: every transform up to
+  `MF_E_INVALIDINDEX`, the first decoder's output; Microsoft: a decoder
+  sits at index 0).
 - **The reference size.** With scaling, `visible_size`'s reference is the
   REQUESTED size (`hw_decode::visible_reference`), never the native one
   (it never fits a scaled surface).
@@ -197,10 +272,15 @@ rounds 1–2):
   bench's timings (a scaled 4K hardware run far slower than ~20 ms a
   picture is not NVDEC).
 - **A mid-stream software reopen keeps the cap** (`max_height` on the
-  reader), so the picture size stays the same as long as both opens scale
-  alike. A reopen whose scaled open is refused, after a D3D11 open that
-  scaled, hands the rest of the song over at its own size: the canvas
-  fits any size. It counts in `scaled_opens` (or `scale_refusals`) again.
+  reader) but judges the scale afresh on the new decoder
+  (`scaled_open_safe`), so the size can change mid-song EITHER way: a
+  D3D11 open that scaled, then a refused reopen, goes on at the stream's
+  own size; a D3D11 open that was refused (not whole blocks, no aperture
+  shown), then a software reopen that scales, goes on at the scaled
+  size. The canvas fits any size. It counts in `scaled_opens` (or
+  `scale_refusals`) again, and the reopen's first picture re-reads its
+  own decoder. CI pins the software one: `tests/mf_decode_cap.rs`
+  `a_reopen_after_a_decode_error_keeps_the_decode_cap`.
 - **Which readers take the cap.** The paced producer and the decode bench
   (the cap in force, computed with the SETTING's `video_hw_decode`, not
   the bench request's `hw`: the bench measures what playback runs; set
@@ -233,12 +313,50 @@ rounds 1–2):
     fixture's mean (111.4) sits near that conversion's fixed point (113.3);
   - a cap of 50 (66×50, pixel aspect 100:99) must fill the frame: edge
     bands, tolerance 10, correct ≤ 7.2, a 1 px letterbox ≥ 25;
-  - caps of 120 and 2160 change nothing;
+  - caps of 120 and 2160 change nothing (no facts either);
   - an injected refusal (`refuse_next_scaled_open_for_test`, doc-hidden)
-    plays the file unscaled with `scale_refusals` +1.
+    plays the file unscaled with `scale_refusals` +1. The hook returns a
+    guard (`ScaledOpenRefusal`, `#[must_use]`) whose drop disarms it, so
+    a test that panics before its open never refuses a sibling's
+    (`a_dropped_refusal_guard_refuses_no_later_scaled_open`);
+  - a seek on a scaled reader (60 pictures, then back to the middle)
+    lands where the unscaled reader's lands, every picture after it
+    80×60, nothing reopened;
+  - an injected decode error on a scaled reader: the software reopen is
+    scaled too (`scaled_opens` +1), no picture lost or doubled.
 
   Each scaled open writes to stderr (the CI log) what MF negotiated and
-  what the decoder handed the processor.
+  its whole `ScaledOpenFacts`, and after the first picture the decoder's
+  output at the open and at the first picture. Every scaled open made
+  through the `open_scaled` helper asserts:
+  - the chain is the decoder at index 0 and a transform (not an `Error`)
+    after it;
+  - the decoder's output was read (`scaled_decoder_output()` Some);
+  - where the native type states a colour value, the negotiated type
+    states no other (the CI fixture most likely states none: no VUI
+    signal type, no `colr` box, so this is most likely vacuous there).
+
+  The tests that decode from the first picture (cap 60, cap 50, the
+  seek, the reopen's second open) also assert the re-read (`Some(Ok)`)
+  and that the padding check ran. Two runner premises sit in their own
+  tests, each proven only once its first CI run passes, so a runner that
+  disagrees fails there alone:
+  - `the_first_picture_shows_no_decoder_padding_in_reach` pins
+    `first_picture_padding_in_reach` `Some(false)`. The fixture fills its
+    frame, so this pins that the check reads the stream's own size. Its
+    premise: the decoder shows its crop as
+    `MF_MT_MINIMUM_DISPLAY_APERTURE`, or no padding at all (Wine's H.264
+    decoder tests);
+  - `a_scaled_open_lists_the_video_processor_in_its_chain` pins the
+    processor's CATEGORY. Evidence for the chain's shape: Microsoft (a
+    decoder at index 0) and Wine's conformance tests, which run against
+    Windows (`dlls/mfreadwrite/tests/mfplat.c`: "the video processor can
+    be accessed at index 1 with
+    MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING", index 2 =
+    `MF_E_INVALIDINDEX`; with no conversion needed, the decoder alone).
+    Neither proves the category on Windows (Wine's own reader reports
+    `MFT_CATEGORY_VIDEO_PROCESSOR`); if the test fails, the stderr line
+    before it names the chain.
 - **Box checks (CI cannot run the D3D path):**
   - PATCH `max_resolution` to 1080 and wait 5 s. Then run the decode
     bench with `"hw": true` on a 4K sample, for EACH 4K codec (VP9, AV1,
@@ -250,7 +368,14 @@ rounds 1–2):
       means frame-rate conversion: a repeated picture;
     - a mean well under the uncapped run's;
     - the log's `opened scaled to the decode cap` line says `path=D3D11`
-      and names the `decoder` output.
+      and names the `decoder` output, the `chain` (a `VideoProcessor`
+      after the `Decoder`), the colours (two stated, unequal values of
+      `colour_out` and `colour_decoder` suggest a conversion: check the
+      hues) and `pixel_aspect_out` (the D3D11 path's answer to whether the
+      reader keeps the output ratio); the `at the first scaled picture`
+      line says
+      `at_first_picture=Ok(…)` and `padding_in_reach=false` (a failed
+      re-read also prints `false`).
   - Play a 4K song: `status.video_decode.scaled_opens` +1 and
     `scale_refusals` +0. A refusal's WARN names the negotiated size or the
     decoder's padding. `GET /api/v1/program` `max.upload_mb_s` should drop
@@ -261,7 +386,8 @@ rounds 1–2):
     `scale_refusals`) and played at 4K as before. When it plays scaled,
     always look at MAX's / the wall's bottom rows for a green line (the
     check runs at open, the decoder's type can change at the first
-    frame).
+    frame; the `at the first scaled picture` INFO's
+    `padding_in_reach=true` is that case, by the model).
 
     The exact fix if such songs must scale too (review round 1): ONE
     reader with `IMFSourceReaderEx::AddTransformForStream`, inserting a
