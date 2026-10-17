@@ -24,6 +24,7 @@ use crate::error::GpuError;
 use crate::picture::MAX_PICTURE_SIDE;
 use crate::ring_state::{
     KEY_PRODUCER, RingFormat, RingState, SizeClass, SlotKey, SlotState, Take, copy_box,
+    hresult_text,
 };
 
 /// The number of the next ring made in this process (ring numbers name a
@@ -158,11 +159,10 @@ impl RingCore {
         let first = self.lock().kill();
         self.freed.notify_all();
         if first {
-            let hresult = hresult.map(|h| format!("{h:#010x}")).unwrap_or_default();
             warn!(
                 ring = self.id,
                 why,
-                hresult = %hresult,
+                hresult = %hresult_text(hresult),
                 "sp-gpu: a picture ring died: its pipeline decodes in software from here (#279)"
             );
         }
@@ -300,10 +300,10 @@ impl GpuFrame {
         Arc::ptr_eq(&self.0, &other.0)
     }
 
-    /// The compositor found the slot's producer device lost (its mutex
-    /// abandoned), or the slot failed on a healthy compositor
-    /// (`ring_state::slot_draw`): the ring dies, and its writer goes on in
-    /// software. `why` and the `hresult` that told it go into the ring's
+    /// The compositor found the slot's key abandoned (a device was lost
+    /// holding it: the producer's, or its own before its rebuild), or the
+    /// slot failed on a healthy compositor (`ring_state::slot_draw`): the
+    /// ring dies, and its writer goes on in software. `why` and the `hresult` that told it go into the ring's
     /// one WARN; whether this call killed it.
     pub fn kill_ring(&self, why: &'static str, hresult: Option<u32>) -> bool {
         self.0.core.kill(why, hresult)

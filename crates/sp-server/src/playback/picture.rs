@@ -143,6 +143,20 @@ pub enum CpuUse {
     Preview,
 }
 
+impl CpuUse {
+    /// What the consumer shows of a GPU picture, for its WARN.
+    pub fn shows(self) -> &'static str {
+        match self {
+            CpuUse::Canvas => {
+                "shown as black: the canvas never reads ring frames (#279 P3a precondition)"
+            }
+            CpuUse::Preview => {
+                "no picture offered, its audio kept (#279 P3b gives the preview its GPU path)"
+            }
+        }
+    }
+}
+
 /// A CPU consumer's misses: GPU pictures it could not read.
 #[derive(Debug)]
 pub struct CpuMisses {
@@ -176,10 +190,11 @@ impl CpuMisses {
         };
         warn!(
             ?consumer,
+            shows = consumer.shows(),
             frame = ?frame,
             held_back,
             total = self.count,
-            "a GPU picture reached a CPU-only consumer: shown as black (#279 P3a/P3b gives it its GPU path)"
+            "a GPU picture reached a CPU-only consumer"
         );
         true
     }

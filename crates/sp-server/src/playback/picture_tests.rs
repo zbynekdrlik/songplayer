@@ -92,6 +92,14 @@ fn a_consumer_s_misses_are_warned_at_most_once_a_minute() {
 }
 
 #[test]
+fn each_consumer_says_what_it_shows_of_a_gpu_picture() {
+    let (canvas, preview) = (CpuUse::Canvas.shows(), CpuUse::Preview.shows());
+    assert!(canvas.contains("black"), "{canvas}");
+    assert!(preview.contains("audio"), "{preview}");
+    assert_ne!(canvas, preview);
+}
+
+#[test]
 fn a_picture_prints_its_kind_and_size_never_its_pixels() {
     let ring = FakeRing::new(1);
     let cpu = format!("{:?}", Picture::Cpu(SharedFrame::new(vec![0u8; 42])));

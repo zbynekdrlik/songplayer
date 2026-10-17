@@ -8,8 +8,8 @@ use std::time::Duration;
 use super::{
     Acquired, KEY_CONSUMER, KEY_PRODUCER, MAX_SIZE_CLASSES, OPENED_IDLE_COMPOSES, OPENED_MAX,
     OpenedKeys, RING_CAPACITY, RING_WAIT, Release, RingFormat, RingState, SizeClass, SlotDraw,
-    SlotKey, SlotOpen, SlotState, Take, Touch, WRITER_ACQUIRE_MS, copy_box, make_texture,
-    producer_key, slot_draw, stale_texture, why_killed, writer_step,
+    SlotKey, SlotOpen, SlotState, Take, Touch, WRITER_ACQUIRE_MS, copy_box, hresult_text,
+    make_texture, producer_key, slot_draw, stale_texture, why_killed, writer_step,
 };
 
 /// A class of an even `width`×`height` (NV12).
@@ -111,6 +111,13 @@ fn an_acquire_is_read_from_its_raw_hresult() {
 }
 
 #[test]
+fn a_ring_s_death_names_its_hresult_in_hex() {
+    assert_eq!(hresult_text(Some(0x80)), "0x00000080");
+    assert_eq!(hresult_text(Some(0x887A_0005)), "0x887a0005");
+    assert_eq!(hresult_text(None), "", "none told it");
+}
+
+#[test]
 fn an_answer_names_the_hresult_it_was_read_from() {
     for hresult in [0, 0x102, 0x80, 0x887A_0005, 1] {
         assert_eq!(Acquired::of(hresult).hresult(), hresult);
@@ -169,7 +176,7 @@ fn the_compositor_draws_a_held_slot_a_busy_one_black_and_closes_a_dead_ring_s() 
     assert_eq!(
         not_asked(SlotOpen::Acquired(Acquired::Abandoned)),
         SlotDraw::KillRing,
-        "the producer's device was lost holding it"
+        "a device was lost holding its key"
     );
 }
 

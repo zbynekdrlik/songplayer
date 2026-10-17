@@ -58,8 +58,9 @@
 //!   texture once ([`SlotKey`]: ring, slot, allocation), keeps at most
 //!   [`OPENED_MAX`] open (the least recently drawn closed first), closes an
 //!   older texture of a slot the moment its new one is drawn, and closes a
-//!   slot no compose drew for [`OPENED_IDLE_COMPOSES`] (a pipeline cut off
-//!   program, a dead or a dropped ring: no VRAM stays pinned).
+//!   slot no compose drew for [`OPENED_IDLE_COMPOSES`]: the compositor keeps
+//!   no texture alive that its ring let go (a dead or a dropped ring, a
+//!   slot made again).
 
 use std::time::Duration;
 
@@ -188,6 +189,12 @@ impl Acquired {
     }
 }
 
+/// An HRESULT as a ring's death WARN names it (`0x887a0005`), empty when
+/// none told it.
+pub fn hresult_text(hresult: Option<u32>) -> String {
+    hresult.map(|h| format!("{h:#010x}")).unwrap_or_default()
+}
+
 /// What a writer does with its slot's acquire answer: write on a held key;
 /// anything else kills the ring, with why (a free slot's key is never the
 /// compositor's: busy is a broken protocol, abandoned a device lost
@@ -221,8 +228,9 @@ pub enum SlotDraw {
     Black,
     /// Its ring is dead: drawn black, the slot closed.
     Gone,
-    /// Drawn black and its ring killed: its producer's device was lost, or
-    /// the slot failed on a healthy compositor.
+    /// Drawn black and its ring killed: a device was lost holding its key
+    /// (the producer's, or the compositor's own before its rebuild), or the
+    /// slot failed on a healthy compositor.
     KillRing,
     /// The compositor's own device is gone: the compose fails
     /// ([`GpuError::DeviceLost`](crate::GpuError::DeviceLost)), the ring

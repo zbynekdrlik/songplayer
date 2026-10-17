@@ -113,10 +113,11 @@ pub enum GpuError {
     /// frame of every slot. A decode error: the reader's fallback takes it.
     #[error("the picture ring had no free slot within {waited_ms} ms")]
     RingFull { waited_ms: u64 },
-    /// #279 P2: the picture ring is dead: a device that used one of its
-    /// slots was lost (a keyed mutex abandoned) or an acquire failed. Its
-    /// pictures are drawn black; the reader goes on in software.
-    #[error("the picture ring is dead (a device using its slots was lost)")]
+    /// #279 P2: the picture ring is dead: a slot's key was abandoned or
+    /// held, or a slot's acquire, open or release failed (the ring's one
+    /// WARN names which). Its pictures are drawn black; the reader goes on
+    /// in software.
+    #[error("the picture ring is dead (see its WARN: a slot's key, acquire, open or release)")]
     RingDead,
     /// #279 P2: a picture the ring cannot take: empty, over 16384 on a
     /// side, or (its sides rounded up to even) not inside the surface it is

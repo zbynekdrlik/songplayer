@@ -376,10 +376,13 @@ impl Compositor {
     /// finished. #279 P2: a ring frame's side ([`Side::Gpu`]) is never
     /// uploaded: its slot is opened once on this device and held for the
     /// compose (acquired with key 1 and a 0 ms timeout before the draws,
-    /// released after the wait); a slot that is busy, abandoned, fails or
-    /// does not open is drawn black and counted
-    /// (`ComposeStats::km_acquire_timeouts` / `abandoned`). A
-    /// [`GpuError::DeviceLost`] means the compositor must be rebuilt.
+    /// released after the wait), decided by `ring_state::slot_draw`: a
+    /// busy slot, an abandoned one, a dead ring's and one that fails its
+    /// acquire or open on a healthy compositor are drawn black and counted
+    /// (`ComposeStats::km_acquire_timeouts` / `abandoned` /
+    /// `open_failures`); a failure while this device is removed fails the
+    /// compose. A [`GpuError::DeviceLost`] means the compositor must be
+    /// rebuilt.
     pub fn compose(&mut self, composition: &Composition<'_>) -> Result<ComposeStats, GpuError> {
         let pictures = composition.uploads();
         let planes = pictures

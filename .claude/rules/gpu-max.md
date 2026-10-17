@@ -1923,17 +1923,18 @@ behaviour change).
     slot closed the moment the new one is drawn, at most `OPENED_MAX` =
     40 = 2 × `RING_CAPACITY` open, the least recently drawn closed first,
     and `begin_compose` closes every slot no compose drew for
-    `OPENED_IDLE_COMPOSES` = 90: a ring cut off program, dead or dropped
-    pins no VRAM).
+    `OPENED_IDLE_COMPOSES` = 90: the compositor keeps no texture alive that
+    its ring let go — a dead or dropped ring, a slot made again; an
+    off-program ring's own textures stay its producer's).
 - **`ring.rs`: the shared state and the frames.** `RingCore` = the state
   under a poison-tolerant `Mutex` + a `Condvar` a drop notifies; a write
   waits while every slot is in use (`wait_timeout_while(!has_room)`,
   `RING_WAIT` = 100 ms, counted `waits`), then `GpuError::RingFull
   {waited_ms}` (counted `full`); a dead ring is `RingDead` and wakes its
   waiter; its first kill WARNs once with why and the HRESULT that told it
-  (`RingCore::kill`, from the writer or `GpuFrame::kill_ring`). `hand_over` marks the slot written and
-  makes the
-  `GpuFrame(Arc<FrameInner>)`: a process-wide id (never reused: MAX's
+  (`RingCore::kill`, from the writer or `GpuFrame::kill_ring`;
+  `ring_state::hresult_text`). `hand_over` marks the slot written and
+  makes the `GpuFrame(Arc<FrameInner>)`: a process-wide id (never reused: MAX's
   label), the picture's size, its slot texture's even size, `key()`, a
   doc-hidden `shared_handle()`; the LAST clone's drop frees the slot;
   `keep` (Windows: the NT handle) lives exactly as long. `FakeRing`

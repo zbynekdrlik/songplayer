@@ -133,7 +133,7 @@ fn a_ring_frame_goes_to_max_itself_and_the_canvas_counts_a_miss() {
     // `SP-program`'s CPU canvas cannot read it, so NDI sends the canvas
     // black and the miss is counted, never a panic, never a skipped
     // boundary. A CPU frame blended toward a ring frame shows its own side
-    // (the ring side black) and counts that miss too.
+    // faded toward black (the ring side) and counts that miss too.
     let backend = Arc::new(MockNdiBackend::new());
     let (vban, max) = (Arc::new(VbanOut::new()), taking());
     let mut out = output(&backend, &vban, &max);
@@ -164,10 +164,18 @@ fn a_ring_frame_goes_to_max_itself_and_the_canvas_counts_a_miss() {
             video: frame.clone().into(),
             weight_q8: 128,
         }),
-        ..source(4, at(1))
+        ..source(2, at(1))
     };
     out.submit(ProgramJob::Source(blended));
     assert_eq!(out.canvas_misses(), 2, "the blend's ring side");
+    // The 2x2 canvas picture (every byte 90) half way to the black:
+    // (90 * 128 + 16 * 128 + 128) >> 8 = 53, (90 * 128 + 128 * 128 + 128) >> 8 = 109.
+    let wire = out.wire_frame().map(|f| f[..].to_vec());
+    assert_eq!(
+        wire,
+        Some(vec![53, 53, 53, 53, 109, 109]),
+        "the CPU side faded toward the ring side's black"
+    );
     let MaxJob::Fade { to, .. } = next_job(&max) else {
         panic!("a blended boundary is a fade on MAX");
     };

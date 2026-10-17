@@ -39,9 +39,10 @@ pub struct ComposeStats {
     /// #279 P2: the ring slots whose keyed mutex another side still held
     /// (`WAIT_TIMEOUT` on the 0 ms acquire): drawn black this boundary.
     pub km_acquire_timeouts: u32,
-    /// #279 P2: the ring slots whose producer device was lost
-    /// (`WAIT_ABANDONED`) or whose acquire failed on a healthy compositor,
-    /// and the slots of a dead ring: drawn black, their ring dead.
+    /// #279 P2: the ring slots whose key a device was lost holding
+    /// (`WAIT_ABANDONED`: the producer's, or the compositor's own before its
+    /// rebuild) or whose acquire failed on a healthy compositor, and the
+    /// slots of a dead ring: drawn black, their ring dead.
     pub abandoned: u32,
     /// #279 P2: the ring slots that did not open on a healthy compositor:
     /// drawn black, their ring killed.
