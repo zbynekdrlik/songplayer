@@ -1,7 +1,8 @@
 //! #279 P1b: the NDI feed (depth, take and drop-older, late pictures, the
 //! coalesce, freshness), the per-boundary source rule (the 30-slot edge on
 //! both sides, a setting flip), the way back after a fallback
-//! (`ReturnGate`), the switch lines (`SwitchLog`) and the telemetry.
+//! (`ReturnGate`), the switch lines (a `StateLog` of the source) and the
+//! telemetry.
 //! Wired via `#[cfg(test)] #[path = "ndi_feed_tests.rs"] mod tests;`.
 
 use sp_core::config::NdiSource;
@@ -9,11 +10,12 @@ use sp_core::genlock::{GENLOCK_GRID_FPS, grid_boundary_100ns};
 
 use super::{
     BlackUyvy, CpuWhy, FeedCore, NDI_FEED_DEPTH, NDI_FEED_STALE_SLOTS, NDI_RETURN_ON_TIME,
-    NDI_SWITCH_LOG_EVERY_100NS, NdiFeed, NdiPick, Pushed, ReturnGate, SwitchLog, UYVY_BLACK_PAIR,
-    black_uyvy, delay_slots, fourcc, ndi_source_for, uyvy_len,
+    NDI_SWITCH_LOG_EVERY_100NS, NdiFeed, NdiPick, Pushed, ReturnGate, UYVY_BLACK_PAIR, black_uyvy,
+    delay_slots, fourcc, ndi_source_for, uyvy_len,
 };
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_max::MAX_STAT_WINDOW;
+use crate::playback::stat_window::StateLog;
 
 /// A grid index of 2026: 1.76e9 s · 30.
 const K0: i64 = 52_800_000_000;
@@ -245,43 +247,43 @@ fn a_late_readback_starts_the_gate_s_count_again() {
     );
 }
 
-/// A change of source is said once, at most once per 5 s of the timeline;
-/// one held back is said by the first boundary after the window, as the
-/// source is then, with the boundaries held back; a change that went back
-/// inside the window says nothing.
+/// NDI's switch lines (a `StateLog` of the source, as the `SP-program`
+/// sender keeps it): a change of source is said once, at most once per
+/// 5 s of the timeline; one held back is said by the first boundary after
+/// the window, as the source is then, with the boundaries held back; a
+/// change that went back inside the window says nothing.
 #[test]
 fn a_switch_is_said_once_and_one_held_back_after_the_window() {
     assert_eq!(NDI_SWITCH_LOG_EVERY_100NS, 50_000_000);
-    let (gpu, stale, settling) = (
-        NdiPick::Gpu,
-        NdiPick::Cpu(CpuWhy::Stale),
-        NdiPick::Cpu(CpuWhy::Settling),
-    );
-    let mut log = SwitchLog::default();
+    let every = NDI_SWITCH_LOG_EVERY_100NS;
+    let (gpu, cpu) = (NdiSource::Gpu, NdiSource::Cpu);
+    let mut log = StateLog::<NdiSource>::default();
     assert_eq!(
-        log.observe(b(0), NdiPick::Cpu(CpuWhy::Setting)),
+        log.observe(b(0), every, cpu),
         None,
         "the canvas at the start: nothing to say"
     );
-    assert_eq!(log.observe(b(1), gpu), Some((gpu, 0)));
-    assert_eq!(log.observe(b(2), gpu), None, "no change");
-    assert_eq!(log.observe(b(3), stale), None, "inside the window");
-    assert_eq!(log.observe(b(4), settling), None);
-    let after = b(1) + NDI_SWITCH_LOG_EVERY_100NS;
+    assert_eq!(log.observe(b(1), every, gpu), Some(0));
+    assert_eq!(log.observe(b(2), every, gpu), None, "no change");
+    assert_eq!(log.observe(b(3), every, cpu), None, "inside the window");
+    assert_eq!(log.observe(b(4), every, cpu), None);
+    let after = b(1) + every;
     assert_eq!(
-        log.observe(after, settling),
-        Some((settling, 2)),
+        log.observe(after, every, cpu),
+        Some(2),
         "the source as it is now, two boundaries held back"
     );
-    assert_eq!(log.observe(after + 1, gpu), None, "held back");
+    assert_eq!(*log.logged(), cpu);
+    assert_eq!(log.observe(after + 1, every, gpu), None, "held back");
     assert_eq!(
-        log.observe(after + 2, stale),
+        log.observe(after + 2, every, cpu),
         None,
         "back where the log is: nothing to say"
     );
-    let later = after + NDI_SWITCH_LOG_EVERY_100NS;
-    assert_eq!(log.observe(later, stale), None, "still where the log is");
-    assert_eq!(log.observe(later + 1, gpu), Some((gpu, 1)));
+    let later = after + every;
+    assert_eq!(log.observe(later, every, cpu), None, "still there");
+    assert_eq!(log.observe(later + 1, every, gpu), Some(1));
+    assert_eq!(*log.logged(), gpu);
 }
 
 #[test]

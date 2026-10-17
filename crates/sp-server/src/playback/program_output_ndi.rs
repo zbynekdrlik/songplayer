@@ -17,7 +17,7 @@
 //!   each boundary on the canvas takes the boundary before's readback as
 //!   the GPU would have, and only `NDI_RETURN_ON_TIME` on time in a row
 //!   bring NDI back, so it never flaps boundary by boundary. A change
-//!   either way is logged once, rate-limited (`SwitchLog`), and counted
+//!   either way is logged once, rate-limited (a `StateLog`), and counted
 //!   (`ndi.switches`).
 //! - From the CPU canvas: `submit_video`, as before (#223), stamped b.
 //! - From the GPU: the pair HELD at b − 1 goes out now, with its audio
@@ -62,10 +62,12 @@ use tracing::{info, warn};
 use super::{PROGRAM_STANDBY_H, PROGRAM_STANDBY_W, Pair, ProgramOutput};
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::ndi_feed::{
-    BlackUyvy, CpuWhy, NDI_RETURN_ON_TIME, NdiPick, ReturnGate, SwitchLog, ndi_source_for, uyvy_len,
+    BlackUyvy, CpuWhy, NDI_RETURN_ON_TIME, NDI_SWITCH_LOG_EVERY_100NS, NdiPick, ReturnGate,
+    ndi_source_for, uyvy_len,
 };
 use crate::playback::program_burn;
 use crate::playback::program_item::ItemFrame;
+use crate::playback::stat_window::StateLog;
 
 // The GPU reads back the compositor's primary target, the FHD program: the
 // size `SP-program`'s canvas always is (#223).
@@ -117,9 +119,9 @@ pub(super) struct NdiLine {
     last: Option<SharedFrame>,
     /// The constant UYVY black, sent before any picture came.
     black: BlackUyvy,
-    /// The switch lines, rate-limited (every switch is counted all the
-    /// same).
-    switch_log: SwitchLog,
+    /// What the switch lines last said of the source (the canvas at the
+    /// start), rate-limited; every switch is counted all the same.
+    switch_log: StateLog<NdiSource>,
     /// The way back to the GPU after an automatic fallback.
     rejoin: ReturnGate,
     /// The stamp of the boundary before (what the gate takes from the
@@ -160,7 +162,12 @@ impl<B: NdiBackend> ProgramOutput<B> {
             // already took it when it counted this boundary).
             self.take_on_time();
         }
-        log_switch(self.ndi.switch_log.observe(stamp_100ns, pick));
+        let every = NDI_SWITCH_LOG_EVERY_100NS;
+        let line = self
+            .ndi
+            .switch_log
+            .observe(stamp_100ns, every, pick.source());
+        log_switch(line.map(|held_back| (pick, held_back)));
         self.ndi.rejoin.after(previous, pick);
         self.ndi.source = pick.source();
         self.ndi.prev = Some(stamp_100ns);
@@ -299,11 +306,11 @@ impl<B: NdiBackend> ProgramOutput<B> {
     }
 }
 
-/// The one line of a change of NDI's source (`SwitchLog`'s line: the
-/// source NDI is on now, and the boundaries its rate limit held back
-/// before it). An automatic fallback is a WARN (NDI is degraded until the
+/// The one line of a change of NDI's source (the switch log's line: the
+/// pick NDI is on now, and the boundaries its rate limit held back before
+/// it). An automatic fallback is a WARN (NDI is degraded until the
 /// readback comes back on time); the setting's switch and the way back to
-/// the GPU are an INFO. The decisions are `SwitchLog`'s and the gate's,
+/// the GPU are an INFO. The decisions are `StateLog`'s and the gate's,
 /// tested; logging only.
 #[cfg_attr(test, mutants::skip)]
 fn log_switch(line: Option<(NdiPick, u64)>) {

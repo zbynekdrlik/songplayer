@@ -22,8 +22,10 @@
 //! - [`ReturnGate`] (pure, #279 ROZHODNUTÉ 6232669201 item 3): after an
 //!   automatic fallback to the canvas NDI goes back to the GPU only after
 //!   [`NDI_RETURN_ON_TIME`] on-time readbacks in a row, so a fallback never
-//!   flaps boundary by boundary. [`SwitchLog`] (pure) says each change of
-//!   source once, rate-limited, and never ends on a source NDI left.
+//!   flaps boundary by boundary. The switch lines are a
+//!   `stat_window::StateLog` of the source, rate-limited by
+//!   [`NDI_SWITCH_LOG_EVERY_100NS`]: the log never ends on a source NDI
+//!   left.
 //! - [`NdiFeed`] = the core + the NDI telemetry under ONE short lock per
 //!   call: nothing waits on the other thread. It is `MaxOut::ndi`, on
 //!   `ProgramBus::max()`; `GET /api/v1/program` serves [`NdiStatus`] as
@@ -38,7 +40,6 @@ use sp_core::genlock::{GENLOCK_GRID_FPS, grid_index_100ns};
 
 use crate::playback::frame_buf::{PerSize, SharedFrame};
 use crate::playback::program_max::Window;
-use crate::playback::stat_window::WarnLimiter;
 
 /// How many read-back pictures wait for the `program-output` thread; over
 /// it the oldest goes.
@@ -264,32 +265,6 @@ impl ReturnGate {
             NdiPick::Cpu(_) if previous == NdiSource::Gpu => Some(0),
             NdiPick::Cpu(_) => self.on_time,
         };
-    }
-}
-
-/// What the log last said of NDI's source, and its rate limit (pure; the
-/// `SP-program` sender writes the line it returns). A change of source is
-/// said at most once per [`NDI_SWITCH_LOG_EVERY_100NS`] of the timeline; a
-/// change held back is said by the first boundary after the window, as the
-/// source is then, so the log never ends on a source NDI left. Every
-/// switch is counted all the same (`ndi.switches`).
-#[derive(Debug, Default)]
-pub struct SwitchLog {
-    limiter: WarnLimiter,
-    /// The source the log last named (the canvas at the start).
-    logged: NdiSource,
-}
-
-impl SwitchLog {
-    /// The boundary at `at_100ns` comes from `pick`: the line to write
-    /// (with the boundaries held back since the last one), if any.
-    pub fn observe(&mut self, at_100ns: i64, pick: NdiPick) -> Option<(NdiPick, u64)> {
-        if pick.source() == self.logged {
-            return None;
-        }
-        let held_back = self.limiter.admit(at_100ns, NDI_SWITCH_LOG_EVERY_100NS)?;
-        self.logged = pick.source();
-        Some((pick, held_back))
     }
 }
 

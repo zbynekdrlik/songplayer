@@ -7,7 +7,7 @@
 
 use std::time::Instant;
 
-use crate::playback::stat_window::WarnLimiter;
+use crate::playback::stat_window::StateLog;
 
 /// At most one log line of the thread's state (a failure WARN or a
 /// recovery INFO) per 5 s of its time (100 ns).
@@ -29,14 +29,13 @@ pub enum LogLine {
     Recovered { held_back: u64 },
 }
 
-/// What the log last said about the thread, and its rate limit. Pure: the
-/// worker logs the line it returns.
+/// What the log last said about the thread, and its rate limit (a
+/// `StateLog`). Pure: the worker logs the line it returns.
 #[derive(Debug, Default)]
 pub struct LogGate {
-    limiter: WarnLimiter,
     /// What the log last said: `None` = boundaries go out (also the start),
     /// `Some(why)` = they do not, because of `why`.
-    logged: Option<String>,
+    log: StateLog<Option<String>>,
 }
 
 impl LogGate {
@@ -47,11 +46,11 @@ impl LogGate {
     /// window, as the state is then (`held_back` = the boundaries held
     /// back since the last line).
     pub fn observe(&mut self, at_100ns: i64, failing: Option<&str>) -> Option<LogLine> {
-        if self.logged.as_deref() == failing {
-            return None;
-        }
-        let held_back = self.limiter.admit(at_100ns, MAX_LOG_EVERY_100NS)?;
-        self.logged = failing.map(str::to_owned);
+        let differs = self.log.logged().as_deref() != failing;
+        let owned = || failing.map(str::to_owned);
+        let held_back = self
+            .log
+            .change(at_100ns, MAX_LOG_EVERY_100NS, differs, owned)?;
         Some(match failing {
             Some(_) => LogLine::Failing { held_back },
             None => LogLine::Recovered { held_back },
