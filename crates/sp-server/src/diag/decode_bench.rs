@@ -360,6 +360,12 @@ pub struct DecodeFacts {
     pub adapter: Option<String>,
     /// Why the file left the GPU path (`"open: …"` / `"mid-stream: …"`).
     pub fallback: Option<String>,
+    /// #282: the decode cap the run opened under (`max_resolution`'s rule,
+    /// the producer's).
+    pub max_height: Option<u32>,
+    /// #282: the stream's own size when the run decoded it scaled to the
+    /// cap (the report's `width` / `height` are then the scaled size).
+    pub scaled_from: Option<(u32, u32)>,
 }
 
 /// One run's answer.
@@ -411,6 +417,13 @@ pub struct BenchReport {
     pub adapter: Option<String>,
     /// Why the file left the GPU path, if it did.
     pub hw_fallback: Option<String>,
+    /// #282: the decode cap the run opened under (rows).
+    pub max_height: Option<u32>,
+    /// #282: the stream's own `[width, height]` when the run decoded it
+    /// scaled to the cap; `null` at its own size. A scaled run's
+    /// `decode_path` `"hardware"` says the picture lay on the GPU, not that
+    /// NVDEC decoded it: judge that by the timings.
+    pub scaled_from: Option<(u32, u32)>,
 }
 
 impl BenchReport {
@@ -450,6 +463,8 @@ impl BenchReport {
             adapter: None,
             hw_fallback: None,
             path_changes: 0,
+            max_height: None,
+            scaled_from: None,
         }
     }
 
@@ -465,6 +480,8 @@ impl BenchReport {
             adapter: decode.adapter.filter(|_| hardware),
             hw_fallback: decode.fallback,
             path_changes: decode.path_changes,
+            max_height: decode.max_height,
+            scaled_from: decode.scaled_from,
             ..self
         }
     }
@@ -498,6 +515,8 @@ impl BenchReport {
             adapter: None,
             hw_fallback: None,
             path_changes: 0,
+            max_height: None,
+            scaled_from: None,
         }
     }
 
@@ -526,7 +545,7 @@ impl BenchReport {
         };
         format!(
             "file={} {}x{} codec={} fps={fps} open_ms={} frames={} wall_ms={} ended={:?} \
-             mean_us={} p50_us={} p99_us={} max_us={} {budget}{}{error}",
+             mean_us={} p50_us={} p99_us={} max_us={} {budget}{}{}{error}",
             self.file,
             self.width,
             self.height,
@@ -540,7 +559,20 @@ impl BenchReport {
             self.decode_us.p99,
             self.decode_us.max,
             self.hw_summary(),
+            self.scaled_summary(),
         )
+    }
+
+    /// The end line's scaled part (#282), only for a run decoded scaled to
+    /// the cap, so an unscaled run's line is unchanged.
+    fn scaled_summary(&self) -> String {
+        match self.scaled_from {
+            Some((width, height)) => format!(
+                " scaled_from={width}x{height} max_height={}",
+                self.max_height.unwrap_or_default()
+            ),
+            None => String::new(),
+        }
     }
 
     /// The end line's hardware part (#223 S3b), only for a `"hw": true`

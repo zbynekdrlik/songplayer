@@ -229,7 +229,8 @@ pub fn video_upgrade_enabled(raw: Option<&str>) -> bool {
     raw.is_some_and(|v| v.trim() == "true")
 }
 
-/// #223 S13: what Nastavenia's "Najvyššie rozlíšenie sťahovania" offers;
+/// #223 S13: what Nastavenia's "Najvyššie rozlíšenie (sťahovanie aj
+/// prehrávanie)" offers (#282: the cap scales playback too);
 /// `""` = automatic (2160 with GPU decoding, else 1440).
 pub const MAX_RESOLUTION_CHOICES: [&str; 5] = ["", "2160", "1440", "1080", "720"];
 

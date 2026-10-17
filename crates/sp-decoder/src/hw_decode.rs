@@ -92,6 +92,24 @@ impl DecodePath {
         }
     }
 
+    /// The path of a picture handed over in a DXGI surface whose texture
+    /// carries `surface_bind_flags`. A file opened at the decode cap
+    /// (`scaled`, #282) lies in the texture of Media Foundation's video
+    /// processor, which scaled it on the GPU after the decoder: that texture
+    /// carries no `D3D11_BIND_DECODER`, so the decoder's own path cannot be
+    /// read from it, and the picture counts as `Hardware`: it lies on the
+    /// GPU, which scaled it. Whether the GPU also DECODED it is not visible
+    /// behind the processor (a decoder MFT's own fall back to software, a
+    /// GPU with no decoder for the codec); the box's bench timings tell it.
+    /// Unscaled, [`DecodePath::of_picture`].
+    pub fn of_surface(surface_bind_flags: u32, scaled: bool) -> Self {
+        if scaled {
+            DecodePath::Hardware
+        } else {
+            DecodePath::of_picture(Some(surface_bind_flags))
+        }
+    }
+
     /// `"hardware"` / `"software"` (the decode bench's `decode_path`).
     pub fn as_str(self) -> &'static str {
         match self {
@@ -454,15 +472,273 @@ pub fn mapped_from_scanline0(start: usize, scanline0: usize, len: usize) -> Opti
     len.checked_sub(offset)
 }
 
+// ---------------------------------------------------------------------------
+// The decode cap (#282)
+// ---------------------------------------------------------------------------
+//
+// A temporary lever until #279 (the GPU-resident path): the setting
+// `max_resolution` (the download cap) also caps DECODE. A picture larger
+// than the cap's 16:9 box is opened scaled: Media Foundation's video
+// processor (`MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING` + the NV12
+// output type's `MF_MT_FRAME_SIZE`) scales it at decode, on the GPU on the
+// D3D11 path, so the readback, the frame pool, the MAX upload and the
+// canvas all carry the smaller picture. A picture inside the box opens
+// exactly as before.
+
+/// The box's aspect, width per height: 16:9.
+const BOX_ASPECT_W: u64 = 16;
+const BOX_ASPECT_H: u64 = 9;
+
+/// Euclid's worst case on `u128` (consecutive Fibonacci numbers) is 185
+/// steps; the bound keeps a mutated step from looping forever.
+const EUCLID_MAX_STEPS: u32 = 200;
+
+/// The box of the decode cap `cap` (rows): `cap` × 16/9 wide and `cap`
+/// tall, each side rounded down to even (an odd cap set through the API
+/// would otherwise let the nearest-even rounding of [`scaled_size`] give a
+/// picture one row over the box). 1080 → 1920×1080, 1440 → 2560×1440,
+/// 2160 → 3840×2160, 480 → 852×480.
+pub fn decode_box(cap: u32) -> (u64, u64) {
+    let cap = u64::from(cap);
+    ((cap * BOX_ASPECT_W / BOX_ASPECT_H) & !1, cap & !1)
+}
+
+/// `num / den` rounded to the nearest even whole number, a tie (an odd
+/// whole number) upwards: 803 → 804, 802.9 → 802, 1919.2 → 1920.
+fn nearest_even(num: u128, den: u128) -> u128 {
+    (num + den) / (2 * den) * 2
+}
+
+/// The size a `native` picture is decoded at under the cap `cap`: scaled
+/// to fit inside [`decode_box`], its aspect kept (scaled by
+/// min(box width / width, box height / height); the side that binds takes
+/// the box's own size, the other is rounded to the nearest even), each side
+/// at least 2. `None` (decoded at its own size, exactly as before #282)
+/// for a picture already inside the box (never upscaled), a size not known
+/// (a side 0), or a cap under 2 rows (it caps nothing).
+///
+/// 3840×2160 at 1080 → 1920×1080; 3840×1606 → 1920×804; 2880×2160 at 1440
+/// → 1920×1440; 1920×1080 at 1080 → `None`.
+pub fn scaled_size(native: (u32, u32), cap: u32) -> Option<(u32, u32)> {
+    let (w, h) = (u128::from(native.0), u128::from(native.1));
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let (bw, bh) = decode_box(cap);
+    let (bw, bh) = (u128::from(bw), u128::from(bh));
+    if bh < 2 {
+        return None;
+    }
+    if w <= bw && h <= bh {
+        return None;
+    }
+    // Which side binds: bw / w against bh / h, cross-multiplied. At an equal
+    // aspect both give the box itself.
+    let (sw, sh) = match (bw * h).cmp(&(bh * w)) {
+        std::cmp::Ordering::Greater => (nearest_even(w * bh, h), bh),
+        _ => (bw, nearest_even(h * bw, w)),
+    };
+    // Each side is at most the native one (a scale under 1, rounded to the
+    // nearest even), so it fits a `u32`.
+    Some((sw.max(2) as u32, sh.max(2) as u32))
+}
+
+/// The size a D3D11 picture's readback cuts the decoded surface to
+/// ([`visible_size`]): the size asked of the video processor when the file
+/// was opened `scaled` (the stream's own size would never fit the scaled
+/// surface), else the stream's own size (`native`, #223 follow-up).
+pub fn visible_reference(
+    native: Option<(u32, u32)>,
+    scaled: Option<(u32, u32)>,
+) -> Option<(u32, u32)> {
+    scaled.or(native)
+}
+
+/// Whether Media Foundation took a scaled open: the type it negotiated is
+/// exactly the `requested` size. Behind the video processor the output
+/// type is ours and the processor draws the picture into all of it, so a
+/// larger type (even by NVDEC's padding) would be picture the readback
+/// cuts off, and a reader that kept the native size would hand over the
+/// top-left of the native picture on the D3D11 path. Anything but the
+/// exact size is a refusal: the file plays at its own size, counted in
+/// `scale_refusals`. (A padded TEXTURE with an exact type is fine: the
+/// readback takes the UV plane's offset from the texture's height.)
+pub fn scale_took(requested: (u32, u32), negotiated: (u32, u32)) -> bool {
+    requested == negotiated
+}
+
+/// #282: whether a picture's surface tells the DECODER's path: only on
+/// the D3D11 path of an unscaled open. A scaled open's picture lies in
+/// the video processor's texture ([`DecodePath::of_surface`]), so its
+/// first picture is neither a GPU decode nor a software one in
+/// [`HwCounters`] (the scaled open is counted in `scaled_opens`); the
+/// decoder's own path behind the processor shows only in the bench's
+/// timings.
+pub fn decoder_path_visible(on_d3d: bool, scaled: bool) -> bool {
+    on_d3d && !scaled
+}
+
+/// #282: the frame rate a reader reports: the negotiated type's. A scaled
+/// open's output type carries no rate of ours (setting one could start the
+/// video processor's frame-rate conversion when the decoder reports
+/// another), so when the processor's type has none either, the native
+/// type's rate is reported instead of the 29.97 guess. An unscaled open
+/// with none keeps that guess, as before #282.
+pub fn scaled_frame_rate(
+    negotiated: Option<u64>,
+    native: Option<u64>,
+    scaled: bool,
+) -> Option<u64> {
+    match (negotiated, scaled) {
+        (Some(rate), _) => Some(rate),
+        (None, true) => native,
+        (None, false) => None,
+    }
+}
+
+/// #282: a display aperture (`MF_MT_MINIMUM_DISPLAY_APERTURE`, an
+/// `MFVideoArea`): the picture's whole-pixel offset and size inside a
+/// decoded frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VideoArea {
+    pub x: i16,
+    pub y: i16,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// #282: an `MFVideoArea` from its 16-byte blob (little-endian:
+/// `OffsetX {fract: u16, value: i16}`, `OffsetY`, then `SIZE {cx, cy}` as
+/// two `i32`); `None` for any other length.
+pub fn video_area(blob: &[u8]) -> Option<VideoArea> {
+    let b: &[u8; 16] = blob.try_into().ok()?;
+    Some(VideoArea {
+        x: i16::from_le_bytes([b[2], b[3]]),
+        y: i16::from_le_bytes([b[6], b[7]]),
+        width: i32::from_le_bytes([b[8], b[9], b[10], b[11]]),
+        height: i32::from_le_bytes([b[12], b[13], b[14], b[15]]),
+    })
+}
+
+/// #282 (review round 2): whether a scaled open would scale the decoder's
+/// padding into the picture. NVDEC pads its output type to 16 rows (a
+/// 3840×1606 stream decodes as 3840×1616, #223's green strip); the video
+/// processor behind it crops the padding only by the decoder type's
+/// display aperture. So a `decoded` type larger than the `native` picture
+/// is safe only with an aperture of exactly the native picture at the
+/// origin; otherwise the scaled open is refused (the file plays at its own
+/// size, the readback cutting the padding as before).
+pub fn padding_reaches_processor(
+    decoded: (u32, u32),
+    aperture: Option<VideoArea>,
+    native: (u32, u32),
+) -> bool {
+    let padded = decoded.0 > native.0 || decoded.1 > native.1;
+    padded && !aperture_is(aperture, native)
+}
+
+/// Whether `aperture` is exactly the `native` picture at the origin.
+fn aperture_is(aperture: Option<VideoArea>, native: (u32, u32)) -> bool {
+    aperture.is_some_and(|area| {
+        area.x == 0
+            && area.y == 0
+            && i64::from(area.width) == i64::from(native.0)
+            && i64::from(area.height) == i64::from(native.1)
+    })
+}
+
+/// NVDEC pads its surfaces and output types to whole 16-pixel blocks
+/// (1080 → 1088, 858 → 864, 1350 → 1360 on SNV; 1440 / 1280 / 720 never).
+const DECODER_BLOCK: u32 = 16;
+
+/// #282 (review round 3): whether a scaled open may go on, judged at its
+/// open from what the decoder hands the video processor (`decoder`: its
+/// output type's size and display aperture; `None` when the source
+/// reader's chain could not be read).
+///
+/// - The decoder's padding in reach of the processor
+///   ([`padding_reaches_processor`]): refused.
+/// - On the D3D11 path the decoder may only learn its padded size at the
+///   first frame, after this check (a VP9 / AV1 sample entry carries no
+///   frame header), so a stream whose size is not whole 16-pixel blocks is
+///   scaled only when the decoder has already shown the native aperture;
+///   one in whole blocks (3840×2160, 2560×1440, 4096×2160) cannot be
+///   padded.
+/// - In software Media Foundation's decoders hand over the stream's own
+///   size (the CI fixture: 160×120 coded 160×128), so only the padding seen
+///   at open refuses.
+///
+/// A refusal plays the file at its own size: never a green strip.
+pub fn scaled_open_safe(
+    native: (u32, u32),
+    decoder: Option<((u32, u32), Option<VideoArea>)>,
+    on_d3d: bool,
+) -> bool {
+    let whole_blocks =
+        native.0.is_multiple_of(DECODER_BLOCK) && native.1.is_multiple_of(DECODER_BLOCK);
+    match decoder {
+        Some((size, aperture)) => {
+            !padding_reaches_processor(size, aperture, native)
+                && (!on_d3d || whole_blocks || aperture_is(aperture, native))
+        }
+        None => !on_d3d || whole_blocks,
+    }
+}
+
+/// `a` and `b`'s greatest common divisor (`a` when `b` is 0).
+fn gcd(mut a: u128, mut b: u128) -> u128 {
+    for _ in 0..EUCLID_MAX_STEPS {
+        if b == 0 {
+            break;
+        }
+        (a, b) = (b, a % b);
+    }
+    a
+}
+
+/// #282: the pixel aspect ratio of a scaled open's output type that keeps
+/// the picture's display aspect exactly: the `native` size at its own
+/// `native_par` (`MF_MT_PIXEL_ASPECT_RATIO`; none or a zero term = square
+/// pixels) shown at the `scaled` size, reduced. The nearest-even rounding
+/// of [`scaled_size`] leaves the scaled size a fraction of a pixel off the
+/// native aspect (3840×1606 → 1920×804: 804:803), and a video processor
+/// that keeps the display aspect would letterbox that fraction into a
+/// one-pixel black edge; with this ratio it fills the whole frame (the
+/// stretch, 0.1 %, is invisible). `None` when a size is 0 or a reduced
+/// term does not fit a `u32` (the type then carries no ratio).
+pub fn scaled_pixel_aspect(
+    native: (u32, u32),
+    native_par: Option<(u32, u32)>,
+    scaled: (u32, u32),
+) -> Option<(u32, u32)> {
+    let (par_w, par_h) = match native_par {
+        Some((w, h)) if w > 0 && h > 0 => (u128::from(w), u128::from(h)),
+        _ => (1, 1),
+    };
+    let num = par_w * u128::from(native.0) * u128::from(scaled.1);
+    let den = par_h * u128::from(native.1) * u128::from(scaled.0);
+    if num == 0 || den == 0 {
+        return None;
+    }
+    let common = gcd(num, den);
+    Some((
+        u32::try_from(num / common).ok()?,
+        u32::try_from(den / common).ok()?,
+    ))
+}
+
 /// What the hardware path did across the process, every open asked for in
-/// `Hardware` mode (the decode bench's included).
+/// `Hardware` mode (the decode bench's included); and (#282) the scaled
+/// opens of any mode.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HwDecodeStats {
     /// Opens asked for in `Hardware` mode, counted before the open: a file
     /// that then opened nowhere (no reader at all) counts here and in none of
     /// the counts below.
     pub requested: u64,
-    /// Of those, the ones whose first picture came out of the GPU decoder.
+    /// Of those, the ones whose first picture came out of the GPU decoder
+    /// (a scaled open's never counts here nor in `mf_software`:
+    /// [`decoder_path_visible`]).
     pub gpu_decodes: u64,
     /// Of those, the ones on the D3D path whose first picture Media
     /// Foundation's decoder made in software (it found no decoder on the
@@ -478,9 +754,21 @@ pub struct HwDecodeStats {
     pub path_changes: u64,
     /// The last fall back, [`HwFallback::describe`].
     pub last_fallback: Option<String>,
+    /// #282: opens of a file larger than the decode cap's box that Media
+    /// Foundation scaled at decode, in any mode (a software reopen after a
+    /// decode error on the D3D path counts again).
+    pub scaled_opens: u64,
+    /// #282: scaled opens Media Foundation refused (or negotiated at
+    /// another size, [`scale_took`], or with the decoder's padding in reach
+    /// of the processor, [`padding_reaches_processor`]); each of those
+    /// readers then opens that file at its own size, when it opens at all
+    /// (a refused D3D11 open that then fell back to software may open it
+    /// scaled there, counted in `scaled_opens`).
+    pub scale_refusals: u64,
 }
 
-/// The process's [`HwDecodeStats`], counted as the readers go.
+/// The process's [`HwDecodeStats`], counted as the readers go (every
+/// `Hardware` open, and the scaled opens of any mode).
 #[derive(Debug, Default)]
 pub struct HwCounters {
     requested: AtomicU64,
@@ -490,6 +778,8 @@ pub struct HwCounters {
     mid_stream_fallbacks: AtomicU64,
     path_changes: AtomicU64,
     last_fallback: Mutex<Option<String>>,
+    scaled_opens: AtomicU64,
+    scale_refusals: AtomicU64,
 }
 
 impl HwCounters {
@@ -502,7 +792,20 @@ impl HwCounters {
             mid_stream_fallbacks: AtomicU64::new(0),
             path_changes: AtomicU64::new(0),
             last_fallback: Mutex::new(None),
+            scaled_opens: AtomicU64::new(0),
+            scale_refusals: AtomicU64::new(0),
         }
+    }
+
+    /// #282: a file opened scaled to the decode cap.
+    pub fn scaled_open(&self) {
+        self.scaled_opens.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// #282: Media Foundation refused a scaled open (the file opened at its
+    /// own size).
+    pub fn scale_refused(&self) {
+        self.scale_refusals.fetch_add(1, Ordering::Relaxed);
     }
 
     /// A `Hardware` open was asked for (counted before the open).
@@ -553,6 +856,8 @@ impl HwCounters {
             mid_stream_fallbacks: self.mid_stream_fallbacks.load(Ordering::Relaxed),
             path_changes: self.path_changes.load(Ordering::Relaxed),
             last_fallback,
+            scaled_opens: self.scaled_opens.load(Ordering::Relaxed),
+            scale_refusals: self.scale_refusals.load(Ordering::Relaxed),
         }
     }
 }
@@ -567,3 +872,7 @@ pub fn hw_counters() -> &'static HwCounters {
 #[cfg(test)]
 #[path = "hw_decode_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "hw_decode_tests_scale.rs"]
+mod tests_scale;

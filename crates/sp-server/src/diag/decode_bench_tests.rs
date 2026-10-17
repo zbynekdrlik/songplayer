@@ -651,6 +651,8 @@ fn on_the_gpu() -> DecodeFacts {
         path_changes: 0,
         adapter: Some("NVIDIA GeForce RTX 3070 Ti".to_string()),
         fallback: None,
+        max_height: Some(2160),
+        scaled_from: None,
     }
 }
 
@@ -798,4 +800,45 @@ async fn a_body_that_panics_is_a_failed_run_with_the_bench_free() {
         other => panic!("expected a failed run, got {other:?}"),
     }
     assert!(bench.try_start().is_some());
+}
+
+// ---------------------------------------------------------------------------
+// The decode cap (#282)
+// ---------------------------------------------------------------------------
+
+/// Review round 2: a run decoded scaled to the cap says so in its report
+/// and its end line; an unscaled one carries the cap and a null.
+#[test]
+fn a_scaled_run_names_its_cap_and_the_streams_own_size() {
+    let scaled = clean_report().with_decode(DecodeFacts {
+        max_height: Some(1080),
+        scaled_from: Some((3840, 2160)),
+        ..on_the_gpu()
+    });
+    assert_eq!(scaled.max_height, Some(1080));
+    assert_eq!(scaled.scaled_from, Some((3840, 2160)));
+    let json = serde_json::to_value(&scaled).unwrap();
+    assert_eq!(json["max_height"], 1080);
+    assert_eq!(json["scaled_from"], serde_json::json!([3840, 2160]));
+    assert!(
+        scaled
+            .summary()
+            .ends_with(" hw_fallback=- scaled_from=3840x2160 max_height=1080"),
+        "{}",
+        scaled.summary()
+    );
+    let unscaled = clean_report().with_decode(on_the_gpu());
+    let json = serde_json::to_value(&unscaled).unwrap();
+    assert_eq!(json["max_height"], 2160);
+    assert!(json["scaled_from"].is_null());
+    assert!(
+        unscaled.summary().ends_with(" hw_fallback=-"),
+        "an unscaled run's line is unchanged: {}",
+        unscaled.summary()
+    );
+    let before = serde_json::to_value(clean_report()).unwrap();
+    assert!(
+        before["max_height"].is_null(),
+        "not known before the reader"
+    );
 }

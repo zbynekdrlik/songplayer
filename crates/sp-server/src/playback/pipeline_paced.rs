@@ -177,7 +177,9 @@ fn ended_early(
 /// [`DecodeProducer`] (`paced_producer.rs`, Linux-tested) — off the
 /// time-critical emit/submit path (`preview.md`). Exits on a Stop from the
 /// consumer, dropping the decoder on this thread. #223 S3b: the reader opens in
-/// the `video_hw_decode` mode applied when the song opens (`video_decode.rs`).
+/// the `video_hw_decode` mode applied when the song opens (`video_decode.rs`);
+/// #282: under the decode cap applied then (`max_resolution`), so a picture
+/// larger than the cap's box is decoded scaled.
 #[cfg_attr(test, mutants::skip)]
 #[allow(clippy::too_many_arguments)]
 fn run_decode_producer(
@@ -194,8 +196,11 @@ fn run_decode_producer(
 
     // #223 S3b: `video_hw_decode` as applied now; a change applies from the
     // next song. The reader falls back to software on its own (WARN).
-    let mode = crate::playback::video_decode::global().mode();
-    let video_reader = match MediaFoundationVideoReader::open_with(&video_path, mode) {
+    // #282: the decode cap too (a refused scaled open plays unscaled, WARN).
+    let decode = crate::playback::video_decode::global();
+    let cap = Some(decode.max_height());
+    let video_reader = match MediaFoundationVideoReader::open_with(&video_path, decode.mode(), cap)
+    {
         Ok(v) => v,
         Err(e) => {
             let _ = open_tx.send(Err(format!(

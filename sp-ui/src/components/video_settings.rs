@@ -49,8 +49,10 @@ pub fn VideoSettings(
     view! {
         <fieldset data-testid="settings-video">
             <legend>"Video: sťahovanie a 4K"</legend>
+            // #282: the same cap scales a taller video at playback (the
+            // operator's switch per site when 4K is a problem).
             <label>
-                "Najvyššie rozlíšenie sťahovania"
+                "Najvyššie rozlíšenie (sťahovanie aj prehrávanie)"
                 <select
                     data-testid="settings-max-resolution"
                     prop:value=move || max_resolution.get()
@@ -59,6 +61,9 @@ pub fn VideoSettings(
                     {options}
                 </select>
             </label>
+            <span class="settings-hint" data-testid="settings-max-resolution-hint">
+                "Vyššie video sa pri prehrávaní zmenší na túto výšku (grafikou). Platí od ďalšej piesne, bez reštartu. Automaticky = 2160 s GPU dekódovaním."
+            </span>
             <label>
                 <input
                     type="checkbox"

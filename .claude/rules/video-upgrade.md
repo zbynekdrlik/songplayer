@@ -160,7 +160,11 @@ Logs: INFO `video upgrade: start` and `video upgrade: done`, or a WARN
   and saved by its Save. It has three controls:
   - the cap select `settings-max-resolution`: `""` = "Automaticky (4K s
     dekódovaním na GPU, inak 1440)", then 2160 / 1440 / 1080 / 720; a value
-    set through the API shows as "N (vlastné)", never as automatic;
+    set through the API shows as "N (vlastné)", never as automatic. #282:
+    its label is "Najvyššie rozlíšenie (sťahovanie aj prehrávanie)" and the
+    hint `settings-max-resolution-hint` says a taller video is scaled at
+    playback, from the next song, without a restart (the owner: "musí byť
+    spôsob to zmeniť" per site when 4K is a problem);
   - `settings-video-hw-decode` → `video_hw_decode`;
   - `settings-video-upgrade` → `video_upgrade_enabled`.
 - Each control is sent only when it differs from what the page loaded
