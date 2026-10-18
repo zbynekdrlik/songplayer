@@ -31,6 +31,7 @@ pub(crate) mod failure_backoff; // #229: the pause after failed opens (pure; the
 mod failure_retry; // #229: the engine's retry of a playlist whose opens fail
 pub mod fleet_shift; // #224 part 2: a date step relabels (pure split + the relabel registry)
 pub mod frame_buf; // #203 shared-frame seam: Arc<Vec<u8>> holdover, no pixel copy
+pub mod gpu_resident; // #279 P3a: the precondition, the producer lease, the GPU pipelines' table
 mod handle_pipeline_event;
 pub mod lock_state;
 pub mod loop_stats; // the per-minute `pipeline: loop-stats` line + the shared percentile rule (pure)

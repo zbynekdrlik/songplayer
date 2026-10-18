@@ -481,3 +481,7 @@ fn a_held_ring_frame_gives_the_preview_its_audio_only_and_is_counted() {
 /// #277: an early end of the video (a child module over these mocks).
 #[path = "paced_producer_tests_early.rs"]
 mod early;
+
+/// #279 P3a: GPU-resident frames (a child module over these mocks).
+#[path = "paced_producer_tests_gpu.rs"]
+mod gpu;

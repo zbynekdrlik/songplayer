@@ -733,6 +733,13 @@ impl DecodeTaps {
         self.offer_audio(audio);
     }
 
+    /// #279 P3a: whether a live-preview viewer is connected (a GPU picture
+    /// it cannot get is then a miss the producer counts).
+    #[inline]
+    pub fn wants_picture(&self) -> bool {
+        self.stream.shared().has_viewer()
+    }
+
     /// #279 P2: the audio alone, for a held step whose picture is a GPU
     /// one the taps cannot read yet (P3b): the stream keeps its sound.
     #[inline]

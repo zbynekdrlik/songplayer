@@ -21,11 +21,19 @@
 //! ([`DecodeProducer::early_end`], `playback::early_end`), never as its
 //! natural end.
 //!
+//! #279 P3a: a frame the GPU-resident reader copied into its pipeline's
+//! ring (`DecodedVideoFrame::gpu`) becomes a `Picture::Gpu`; the preview
+//! taps get no picture of it before P3b, only its audio (a viewer watching
+//! then is a counted miss). Each change of the decoded frames' kind (the
+//! song's first frame's, a fall back mid-song) is reported once
+//! ([`DecodeProducer::take_kind_change`]) for the GPU-resident table.
+//!
 //! The Windows producer thread (`pipeline_paced::run_decode_producer`) only
 //! opens the readers and pushes what this hands it, so every item is built
 //! and tested here, on Linux.
 
 use sp_decoder::{DecodedAudioFrame, DecodedVideoFrame, DecoderError, SplitSyncedDecoder};
+use sp_gpu::GpuFrame;
 
 use crate::playback::early_end::EarlyEnd;
 use crate::playback::frame_buf::SharedFrame;
@@ -78,8 +86,24 @@ pub struct DecodeProducer {
     /// or the last seek): the song failed.
     early: Option<EarlyEnd>,
     /// #279 P2: held steps whose GPU picture the preview taps could not
-    /// take (their audio still offered).
+    /// take (their audio still offered); #279 P3a: decoded GPU frames too,
+    /// while a viewer watches.
     preview_misses: CpuMisses,
+    /// #279 P3a: whether the last decoded frame lay on the GPU.
+    gpu_kind: Option<bool>,
+    /// #279 P3a: a change of it not taken yet.
+    kind_change: Option<KindChange>,
+}
+
+/// #279 P3a: the decoded frames' kind changed ([`DecodeProducer::take_kind_change`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KindChange {
+    /// The frames lie on the GPU now (`false`: in CPU memory).
+    pub gpu: bool,
+    /// It is the song's first frame (else a change mid-song: a fall back).
+    pub first: bool,
+    /// The frame's size.
+    pub size: (u32, u32),
 }
 
 impl DecodeProducer {
@@ -93,6 +117,27 @@ impl DecodeProducer {
             held: None,
             early: None,
             preview_misses: CpuMisses::default(),
+            gpu_kind: None,
+            kind_change: None,
+        }
+    }
+
+    /// #279 P3a: the kind of the decoded frames, when it changed since the
+    /// last take (the song's first frame always reports).
+    pub fn take_kind_change(&mut self) -> Option<KindChange> {
+        self.kind_change.take()
+    }
+
+    /// Note a decoded frame's kind ([`Self::take_kind_change`]).
+    fn note_kind(&mut self, video: &DecodedVideoFrame) {
+        let gpu = video.gpu.is_some();
+        if self.gpu_kind != Some(gpu) {
+            self.kind_change = Some(KindChange {
+                gpu,
+                first: self.gpu_kind.is_none(),
+                size: (video.width, video.height),
+            });
+            self.gpu_kind = Some(gpu);
         }
     }
 
@@ -126,7 +171,11 @@ impl DecodeProducer {
         taps: &DecodeTaps,
     ) -> Result<Option<QueuedFrame>, DecoderError> {
         if let Some((video, audio)) = decoder.next_synced()? {
-            taps.offer_frame(&video, &audio);
+            match &video.gpu {
+                None => taps.offer_frame(&video, &audio),
+                Some(frame) => offer_gpu(&mut self.preview_misses, taps, frame, &audio),
+            }
+            self.note_kind(&video);
             let ms = video.timestamp_ms;
             self.current_ms = ms;
             let frame = to_paced_frame(video, audio, self.pts_offset_ms);
@@ -154,12 +203,11 @@ impl DecodeProducer {
         };
         // #279 P2: a held GPU picture gives the taps no picture (P3b), only
         // its audio.
-        match held
-            .video
-            .cpu_for(CpuUse::Preview, &mut self.preview_misses)
-        {
-            Some(nv12) => taps.offer_picture(held.width, held.height, held.stride, nv12, &audio),
-            None => taps.offer_audio(&audio),
+        match &held.video {
+            Picture::Cpu(nv12) => {
+                taps.offer_picture(held.width, held.height, held.stride, nv12, &audio)
+            }
+            Picture::Gpu(frame) => offer_gpu(&mut self.preview_misses, taps, frame, &audio),
         }
         self.current_ms = ms;
         let frame = PacedFrame {
@@ -211,6 +259,21 @@ impl DecodeProducer {
     }
 }
 
+/// #279 P2 / P3a: a GPU picture gives the preview taps no picture (P3b),
+/// only its audio; while a viewer watches it is a miss, counted in
+/// `misses` (and WARNed, rate-limited).
+fn offer_gpu(
+    misses: &mut CpuMisses,
+    taps: &DecodeTaps,
+    frame: &GpuFrame,
+    audio: &[DecodedAudioFrame],
+) {
+    if taps.wants_picture() {
+        misses.note_now(CpuUse::Preview, frame);
+    }
+    taps.offer_audio(audio);
+}
+
 /// A 0-based PTS in ns: `ms` from the origin `pts_offset_ms` (a position
 /// before the origin reads 0).
 fn pts_ns(ms: u64, pts_offset_ms: u64) -> i64 {
@@ -249,8 +312,11 @@ pub fn to_paced_frame(
         // Wrap the decoded NV12 buffer ONCE on the producer thread (#203 2b);
         // every downstream hop (pacer repeat, handoff, submit holdover, a held
         // step) is an `Arc` bump of this allocation, recycled to the frame pool
-        // on last drop.
-        video: Picture::Cpu(SharedFrame::new(video.data)),
+        // on last drop. #279 P3a: a frame in a ring slot travels as itself.
+        video: match video.gpu {
+            Some(frame) => Picture::Gpu(frame),
+            None => Picture::Cpu(SharedFrame::new(video.data)),
+        },
         audio: paced_audio(audio, pts_offset_ms),
     }
 }

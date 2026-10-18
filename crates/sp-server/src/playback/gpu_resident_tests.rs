@@ -1,0 +1,321 @@
+//! #279 P3a: the precondition, the producer lease and the pipelines' table
+//! (`gpu_resident.rs`), on Linux over a fake producer. Wired via
+//! `#[cfg(test)] #[path = "gpu_resident_tests.rs"] mod tests;`.
+//!
+//! The table is process-wide: every test uses playlist ids of its own
+//! (27_9xx), never another test's.
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
+
+use sp_core::config::{NdiSource, VideoDecode};
+use sp_decoder::DecodeMode;
+use sp_gpu::RingStats;
+
+use super::{
+    BLOCKED_NDI_CPU, Lease, Leased, PRODUCER_IDLE_RELEASE, PRODUCER_REBUILD_BACKOFF, PipelineGpu,
+    Producer, Resident, ResidentLog, RingStatus, note_song_path, pipelines, resident_log,
+};
+use crate::playback::video_decode::HwDecodeSetting;
+
+/// A producer whose ring dies when the test says.
+#[derive(Debug, Default)]
+struct Fake {
+    lost: AtomicBool,
+    stats: RingStats,
+}
+
+impl Producer for Fake {
+    fn lost(&self) -> bool {
+        self.lost.load(Ordering::Relaxed)
+    }
+
+    fn ring(&self) -> RingStats {
+        self.stats
+    }
+}
+
+fn made() -> Result<Fake, String> {
+    Ok(Fake::default())
+}
+
+/// A build the test must never see.
+fn never() -> Result<Fake, String> {
+    panic!("the lease built a producer it must not")
+}
+
+#[test]
+fn gpu_takes_effect_only_while_ndi_comes_from_the_gpu() {
+    assert_eq!(BLOCKED_NDI_CPU, "ndi_source_cpu");
+    let table = [
+        (VideoDecode::Software, NdiSource::Cpu, Resident::Off),
+        (VideoDecode::Software, NdiSource::Gpu, Resident::Off),
+        (VideoDecode::Gpu, NdiSource::Gpu, Resident::On),
+        (
+            VideoDecode::Gpu,
+            NdiSource::Cpu,
+            Resident::Blocked("ndi_source_cpu"),
+        ),
+    ];
+    for (decode, ndi, resident) in table {
+        assert_eq!(Resident::of(decode, ndi), resident, "{decode:?} / {ndi:?}");
+    }
+    assert_eq!(Resident::Off.blocked(), None);
+    assert_eq!(Resident::On.blocked(), None);
+    assert_eq!(
+        Resident::Blocked("ndi_source_cpu").blocked(),
+        Some("ndi_source_cpu")
+    );
+}
+
+#[test]
+fn each_change_of_the_precondition_logs_once_a_block_as_a_warn() {
+    let blocked = Resident::Blocked(BLOCKED_NDI_CPU);
+    assert_eq!(
+        resident_log(Resident::Off, Resident::Off),
+        ResidentLog::Quiet
+    );
+    assert_eq!(resident_log(blocked, blocked), ResidentLog::Quiet);
+    assert_eq!(
+        resident_log(Resident::Off, blocked),
+        ResidentLog::Warn(BLOCKED_NDI_CPU)
+    );
+    assert_eq!(
+        resident_log(Resident::On, blocked),
+        ResidentLog::Warn(BLOCKED_NDI_CPU)
+    );
+    assert_eq!(resident_log(blocked, Resident::On), ResidentLog::Info);
+    assert_eq!(resident_log(Resident::On, Resident::Off), ResidentLog::Info);
+    assert_eq!(resident_log(Resident::Off, Resident::On), ResidentLog::Info);
+}
+
+#[test]
+fn the_lease_keeps_its_producer_across_songs() {
+    let t0 = Instant::now();
+    let mut lease = Lease::<Fake>::default();
+    assert!(lease.held().is_none());
+    let first = lease.take(t0, made);
+    let Leased::Made(producer) = &first else {
+        panic!("the first open makes the producer: {first:?}");
+    };
+    let later = lease.take(t0 + Duration::from_secs(5), never);
+    let Leased::Kept(kept) = &later else {
+        panic!("a later open keeps it: {later:?}");
+    };
+    assert!(Arc::ptr_eq(producer, kept), "the same producer");
+    assert!(lease.held().is_some_and(|held| Arc::ptr_eq(held, producer)));
+    assert!(first.producer().is_some() && later.producer().is_some());
+}
+
+#[test]
+fn a_lost_producer_is_dropped_and_made_again_after_the_backoff() {
+    assert_eq!(PRODUCER_REBUILD_BACKOFF, Duration::from_secs(30));
+    let t0 = Instant::now();
+    let mut lease = Lease::<Fake>::default();
+    let Leased::Made(producer) = lease.take(t0, made) else {
+        panic!("made");
+    };
+    producer.lost.store(true, Ordering::Relaxed);
+    let at = t0 + Duration::from_secs(10);
+    let lost = lease.take(at, never);
+    assert!(matches!(lost, Leased::Lost), "{lost:?}");
+    assert!(lost.producer().is_none());
+    assert!(lease.held().is_none(), "the dead producer is let go");
+    let waiting = lease.take(at + Duration::from_millis(29_999), never);
+    match waiting {
+        Leased::Waiting { retry_in } => assert_eq!(retry_in, Duration::from_millis(1)),
+        other => panic!("the backoff runs: {other:?}"),
+    }
+    let again = lease.take(at + PRODUCER_REBUILD_BACKOFF, made);
+    assert!(
+        matches!(again, Leased::Made(_)),
+        "made again at 30 s: {again:?}"
+    );
+}
+
+#[test]
+fn a_failed_build_waits_the_backoff_then_tries_again() {
+    let t0 = Instant::now();
+    let mut lease = Lease::<Fake>::default();
+    let failed = lease.take(t0, || Err("no adapter".to_string()));
+    match &failed {
+        Leased::Failed(why) => assert_eq!(why, "no adapter"),
+        other => panic!("a failed build: {other:?}"),
+    }
+    assert!(failed.producer().is_none());
+    let waiting = lease.take(t0 + Duration::from_secs(29), never);
+    assert!(matches!(waiting, Leased::Waiting { .. }), "{waiting:?}");
+    assert!(waiting.producer().is_none());
+    let made_now = lease.take(t0 + PRODUCER_REBUILD_BACKOFF, made);
+    assert!(matches!(made_now, Leased::Made(_)), "{made_now:?}");
+    let kept = lease.take(t0 + PRODUCER_REBUILD_BACKOFF, never);
+    assert!(matches!(kept, Leased::Kept(_)), "no backoff left: {kept:?}");
+}
+
+#[test]
+fn an_idle_producer_is_let_go_after_ten_minutes_with_no_open() {
+    assert_eq!(PRODUCER_IDLE_RELEASE, Duration::from_secs(600));
+    let t0 = Instant::now();
+    let mut lease = Lease::<Fake>::default();
+    assert!(
+        !lease.release_idle(t0 + PRODUCER_IDLE_RELEASE),
+        "nothing held"
+    );
+    let Leased::Made(_) = lease.take(t0, made) else {
+        panic!("made");
+    };
+    let reopen = t0 + Duration::from_secs(300);
+    assert!(matches!(lease.take(reopen, never), Leased::Kept(_)));
+    let almost = reopen + PRODUCER_IDLE_RELEASE - Duration::from_millis(1);
+    assert!(!lease.release_idle(almost), "an open 10 min ago keeps it");
+    assert!(lease.held().is_some());
+    assert!(lease.release_idle(reopen + PRODUCER_IDLE_RELEASE), "let go");
+    assert!(lease.held().is_none());
+    assert!(
+        !lease.release_idle(reopen + 2 * PRODUCER_IDLE_RELEASE),
+        "once"
+    );
+    let again = lease.take(reopen + 2 * PRODUCER_IDLE_RELEASE, made);
+    assert!(
+        matches!(again, Leased::Made(_)),
+        "no backoff after a release"
+    );
+}
+
+#[test]
+fn a_rings_status_rounds_its_vram_to_megabytes() {
+    let stats = RingStats {
+        slots: 20,
+        in_use: 14,
+        waits: 3,
+        full: 1,
+        dead: false,
+        copy_us_p99: Some(410),
+        vram_bytes: 20 * 12_441_600,
+    };
+    assert_eq!(
+        RingStatus::of(stats),
+        RingStatus {
+            slots: 20,
+            in_use: 14,
+            waits: 3,
+            full: 1,
+            dead: false,
+            copy_us_p99: Some(410),
+            vram_mb: 249,
+        }
+    );
+    let small = RingStats {
+        vram_bytes: 3_110_400,
+        dead: true,
+        ..RingStats::default()
+    };
+    assert_eq!(RingStatus::of(small).vram_mb, 3);
+    assert!(RingStatus::of(small).dead);
+    assert_eq!(RingStatus::of(RingStats::default()).vram_mb, 0);
+}
+
+#[test]
+fn the_table_lists_the_pipelines_that_decode_on_the_gpu_or_hold_a_producer() {
+    let table = pipelines();
+    let (decoding, holding, neither) = (27_901, 27_902, 27_903);
+    table.set_gpu_decoding(decoding, true);
+    let producer = Arc::new(Fake {
+        stats: RingStats {
+            slots: 2,
+            vram_bytes: 6_220_800,
+            ..RingStats::default()
+        },
+        ..Fake::default()
+    });
+    table.set_producer(holding, Some(&producer));
+    table.set_gpu_decoding(neither, false);
+    let mine: Vec<_> = table
+        .status()
+        .into_iter()
+        .filter(|row| (27_901..=27_903).contains(&row.playlist_id))
+        .collect();
+    assert_eq!(mine.len(), 2, "{mine:?}");
+    assert_eq!(
+        (mine[0].playlist_id, mine[0].gpu_decoding),
+        (decoding, true)
+    );
+    assert_eq!(mine[0].ring, None);
+    assert_eq!(
+        (mine[1].playlist_id, mine[1].gpu_decoding),
+        (holding, false)
+    );
+    assert_eq!(mine[1].ring.map(|r| (r.slots, r.vram_mb)), Some((2, 6)));
+    assert!(table.gpu_decoding(decoding));
+    assert!(!table.gpu_decoding(holding));
+    assert!(!table.gpu_decoding(27_999), "no row");
+    drop(producer);
+    assert!(
+        table.status().iter().all(|row| row.playlist_id != holding),
+        "a producer let go leaves no row behind"
+    );
+    table.forget(decoding);
+    assert!(!table.gpu_decoding(decoding), "forgotten");
+    table.set_producer::<Fake>(holding, None);
+    table.forget(holding);
+    table.forget(neither);
+}
+
+#[test]
+fn a_songs_path_is_written_to_the_table() {
+    let id = 27_904;
+    note_song_path(id, true, true, Some("AV01"), (3840, 2160), None);
+    assert!(pipelines().gpu_decoding(id));
+    note_song_path(id, false, false, Some("AV01"), (3840, 2160), None);
+    assert!(!pipelines().gpu_decoding(id), "a fall back mid-song");
+    pipelines().forget(id);
+}
+
+#[test]
+fn a_pipeline_opens_its_songs_in_the_base_mode_until_the_precondition_holds() {
+    let setting = HwDecodeSetting::default();
+    setting.set(true);
+    let mut gpu = PipelineGpu::new(27_905);
+    let t0 = Instant::now();
+    let never_made = || -> Result<sp_gpu::ProducerGpu, String> { panic!("no producer when off") };
+    assert_eq!(
+        gpu.decode_mode_with(&setting, t0, never_made),
+        DecodeMode::Hardware,
+        "video_decode=software: video_hw_decode's mode, no producer asked for"
+    );
+    setting.set_video_decode(VideoDecode::Gpu);
+    assert_eq!(
+        gpu.decode_mode_with(&setting, t0, never_made),
+        DecodeMode::Hardware,
+        "blocked while NDI comes from the canvas"
+    );
+    setting.set_ndi_source(NdiSource::Gpu);
+    let mut asked = 0;
+    let mode = gpu.decode_mode_with(&setting, t0, || {
+        asked += 1;
+        Err("no adapter".to_string())
+    });
+    assert_eq!(asked, 1, "on: the producer asked for");
+    assert_eq!(mode, DecodeMode::Hardware, "a failed build: the base mode");
+    assert_eq!(
+        gpu.decode_mode_with(&setting, t0 + Duration::from_secs(29), never_made),
+        DecodeMode::Hardware,
+        "the backoff: no producer asked for"
+    );
+    pipelines().set_gpu_decoding(27_905, true);
+    assert!(
+        pipelines()
+            .status()
+            .iter()
+            .any(|row| row.playlist_id == 27_905)
+    );
+    drop(gpu);
+    assert!(
+        pipelines()
+            .status()
+            .iter()
+            .all(|row| row.playlist_id != 27_905),
+        "a pipeline that ended leaves no row"
+    );
+}

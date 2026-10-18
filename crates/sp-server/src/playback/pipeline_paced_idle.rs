@@ -99,6 +99,8 @@ pub(crate) fn run_idle_wait(
             _ => pacer.tick_wall(),
         }
         if should_run_heartbeat(last_heartbeat.elapsed()) {
+            // #279 P3a: an idle pipeline lets its producer go after 10 min.
+            output.gpu().release_idle(Instant::now());
             emit_heartbeat_paced(
                 &handoff,
                 event_tx,

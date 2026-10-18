@@ -40,6 +40,7 @@ use sp_ndi::AudioFrame;
 
 use crate::playback::fleet_shift;
 use crate::playback::frame_buf::BlackNv12;
+use crate::playback::gpu_resident::PipelineGpu;
 use crate::playback::paced_grid::{GridStep, PacedGrid};
 use crate::playback::pacer::{FrameBlend, PacedFrame, PacedSink};
 use crate::playback::picture::Picture;
@@ -640,12 +641,15 @@ impl Drop for PacedOutput {
 /// pipeline-lifetime consumer thread, spawned on the first paced scope and
 /// respawned when it is gone, plus the ONE standby black the idle fill, the
 /// pre-roll and the consumer's own fills show. Owned by the pipeline thread
-/// for its whole life; dropping it stops and joins the consumer.
+/// for its whole life; dropping it stops and joins the consumer. #279 P3a:
+/// it also holds the pipeline's GPU-resident side (its producer lease), so
+/// the producer device lives across the songs and goes with the pipeline.
 pub struct PipelineOutput<O: BoundaryOut + Clone + Send + 'static> {
     playlist_id: i64,
     out: O,
     paced: Option<PacedOutput>,
     black: BlackNv12,
+    gpu: PipelineGpu,
 }
 
 impl<O: BoundaryOut + Clone + Send + 'static> PipelineOutput<O> {
@@ -657,7 +661,14 @@ impl<O: BoundaryOut + Clone + Send + 'static> PipelineOutput<O> {
             out,
             paced: None,
             black: BlackNv12::default(),
+            gpu: PipelineGpu::new(playlist_id),
         }
+    }
+
+    /// #279 P3a: the pipeline's GPU-resident side (the mode each song opens
+    /// in, the producer's idle release).
+    pub fn gpu(&mut self) -> &mut PipelineGpu {
+        &mut self.gpu
     }
 
     /// The standby NV12 black for `width`×`height`, built once for the
