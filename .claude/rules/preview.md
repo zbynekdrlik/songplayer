@@ -580,7 +580,10 @@ read from the health row's `gpu_decoded` (a `Memo` over the 1 Hz
 preview of a song that turns GPU-decoded unmounts, and the slot offers it
 again once the song decodes in CPU memory (a fall back, the next song).
 Spec: `e2e/player-gpu-preview.spec.ts` (chromium). P3b brings the preview
-back from the ring.
+back from the ring. Until then PP keeps `video_decode` = `software`: with
+`gpu` there, every `deploy-pp` run would fail
+`post-deploy-pp-preview.spec.ts` (its on-program card has no
+`preview-start`).
 
 ## chrome-channel E2E note (#178 Round 2)
 

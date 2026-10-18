@@ -2,17 +2,25 @@
 //!
 //! A DXVA decoder hands each picture over as a sample with one
 //! `MFCreateDXGISurfaceBuffer` buffer over a SLICE of its texture array. A
-//! `GpuResident` reader does not read that slice back: `DxgiSurface::copy_into`
-//! copies it (`GetResource` + `GetSubresourceIndex`) into a slot of the
-//! pipeline's ring (`sp_gpu::ProducerGpu::copy_from`). CI has no GPU decoder
+//! `GpuResident` reader whose producer is not retired does not read that
+//! slice back: `DxgiSurface::copy_into` copies it (`GetResource` +
+//! `GetSubresourceIndex`) into a slot of the pipeline's ring
+//! (`sp_gpu::ProducerGpu::copy_from`); a retired producer's slice is read
+//! back (`DxgiSurface::picture`, `SurfaceUse::of`). CI has no GPU decoder
 //! and its WARP refuses the video device (`video-decode.md`), so
 //! `copy_texture_as_decoded_sample` (doc-hidden) wraps a slice of an array
 //! the test made on the producer's own device exactly as a decoder wraps its
-//! output, and runs that path. The ring frame is then drawn in place by a
-//! compositor on ANOTHER WARP device and must equal the same picture
-//! uploaded (and differ from the other slice's). WARP makes an NV12 texture
-//! ARRAY of at most 2 slices (`gpu-max.md`), so the array has 2. A refusal
-//! fails the test; nothing is skipped.
+//! output, and runs the reader's own choice. The ring frame is then drawn in
+//! place by a compositor on ANOTHER WARP device and must equal the same
+//! picture uploaded (and differ from the other slice's). WARP makes an NV12
+//! texture ARRAY of at most 2 slices (`gpu-max.md`), so the array has 2. A
+//! refusal fails the test; nothing is skipped.
+//!
+//! The retired test reads back slice 1 of that 2-slice SRV-bound array
+//! through Media Foundation's staging copy, which no CI run has proven on
+//! WARP yet (the single-texture readback in `mf_hw_decode.rs` reads
+//! subresource 0). If WARP refuses it, read the HRESULT in the panic; never
+//! switch the test to slice 0, which would lose the which-slice proof.
 
 #![cfg(windows)]
 

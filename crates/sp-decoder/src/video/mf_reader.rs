@@ -39,10 +39,12 @@
 //! #279 P3a: a `GpuResident` reader's session is its pipeline's producer
 //! device (`hw_session.rs`), and each picture in a DXGI surface is copied
 //! into the producer's ring instead of read back (the child module
-//! `mf_reader_resident.rs`, `dxgi_frame.rs::DxgiSurface::copy_into`): the
-//! frame carries `gpu` and no bytes. A copy that fails is a decode error,
-//! so the reader goes on in software exactly as after any decode error on
-//! the D3D path; the session (and the producer it shares) goes with it.
+//! `mf_reader_resident.rs`, `dxgi_frame.rs::DxgiSurface::picture`): the
+//! frame carries `gpu` and no bytes. Once the producer is retired its
+//! pictures are read back as a `Hardware` reader's, on the same decoder. A
+//! copy that fails is a decode error, so the reader goes on in software
+//! exactly as after any decode error on the D3D path; the session (and the
+//! producer it shares) goes with it.
 
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};

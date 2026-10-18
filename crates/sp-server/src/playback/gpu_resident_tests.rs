@@ -16,7 +16,7 @@ use sp_gpu::RingStats;
 use super::{
     BLOCKED_NDI_CPU, Lease, Leased, PRODUCER_IDLE_RELEASE, PRODUCER_REBUILD_BACKOFF, PipelineGpu,
     Pipelines, Producer, Resident, ResidentLog, RingStatus, note_song_path, pipelines,
-    precondition_changed, resident_log, retires, song_ended,
+    precondition_changed, resident_log, retires, song_ended, take_for_open,
 };
 use crate::playback::video_decode::HwDecodeSetting;
 
@@ -449,6 +449,66 @@ fn a_retired_producer_that_died_is_lost_not_replaced() {
         matches!(waiting, Leased::Waiting { .. }),
         "the backoff: {waiting:?}"
     );
+}
+
+/// Review round 4: the settings task stops `gpu` while a producer is
+/// being made. Its retire scan finds no producer yet (the row is written
+/// after the build), so the open asks the precondition again once the row
+/// holds it, and retires it: the song opens in the base mode, never
+/// GPU-resident with NDI on the canvas.
+#[test]
+fn a_producer_made_while_gpu_stops_taking_effect_is_retired_at_its_open() {
+    let table = Pipelines::empty();
+    let setting = HwDecodeSetting::default();
+    setting.set_video_decode(VideoDecode::Gpu);
+    setting.set_ndi_source(NdiSource::Gpu);
+    assert_eq!(setting.resident(), Resident::On);
+    let mut lease = Lease::<Fake>::default();
+    let make = || {
+        // The settings task, while the device is made: NDI back on the
+        // canvas, and its scan retires nothing.
+        setting.set_ndi_source(NdiSource::Cpu);
+        assert_eq!(
+            precondition_changed(&table, Resident::On, setting.resident()),
+            0,
+            "the table holds no producer yet"
+        );
+        made()
+    };
+    let leased = take_for_open(&mut lease, &table, 1, Instant::now(), make, || {
+        setting.resident()
+    });
+    assert!(matches!(leased, Leased::Retired), "{leased:?}");
+    assert!(
+        leased.producer().is_none(),
+        "the song opens in the base mode"
+    );
+    let held = lease.held().expect("the lease holds it, retired");
+    assert!(held.retired(), "retired at its open");
+    let rows = table.status();
+    assert_eq!(rows.len(), 1, "its row holds it: {rows:?}");
+}
+
+/// Review round 4: while `gpu` keeps taking effect the producer taken is
+/// the song's, and its row holds it, so a later change's scan retires it.
+#[test]
+fn a_producer_taken_while_gpu_holds_is_the_songs_and_a_later_scan_retires_it() {
+    let table = Pipelines::empty();
+    let mut lease = Lease::<Fake>::default();
+    let t0 = Instant::now();
+    let leased = take_for_open(&mut lease, &table, 1, t0, made, || Resident::On);
+    let Leased::Made(producer) = &leased else {
+        panic!("made: {leased:?}");
+    };
+    assert!(!producer.retired(), "the song's producer");
+    let kept = take_for_open(&mut lease, &table, 1, t0, never, || Resident::On);
+    assert!(matches!(kept, Leased::Kept(_)), "{kept:?}");
+    assert_eq!(
+        precondition_changed(&table, Resident::On, Resident::Off),
+        1,
+        "the row held it"
+    );
+    assert!(producer.retired());
 }
 
 /// Review round 1: a song's end leaves its row decoding nothing.

@@ -23,12 +23,15 @@
 //! texture the caller made, wrapped the way a decoder wraps its output: the
 //! Windows CI test of the layout, where no GPU decoder exists.
 //!
-//! #279 P3a: on a GPU-resident reader the picture is not read back:
-//! [`DxgiSurface::copy_into`] copies the slice the decoder wrote
-//! (`GetResource` + `GetSubresourceIndex`) into a slot of the pipeline's
-//! ring (`sp_gpu::ProducerGpu::copy_from`); `copy_texture_as_decoded_sample`
-//! (doc-hidden) runs that copy on a slice of a texture array the caller
-//! made, the Windows CI test of the path.
+//! #279 P3a: `DxgiSurface::picture` chooses by `hw_decode::SurfaceUse`.
+//! On a GPU-resident reader whose producer is not retired the picture is
+//! not read back: [`DxgiSurface::copy_into`] copies the slice the decoder
+//! wrote (`GetResource` + `GetSubresourceIndex`) into a slot of the
+//! pipeline's ring (`sp_gpu::ProducerGpu::copy_from`). A retired
+//! producer's picture takes the readback above, as a `Hardware` reader's.
+//! `copy_texture_as_decoded_sample` (doc-hidden) runs that same choice on
+//! a slice of a texture array the caller made, the Windows CI test of
+//! both.
 
 use std::ffi::c_void;
 

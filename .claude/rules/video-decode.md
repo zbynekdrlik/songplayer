@@ -513,9 +513,17 @@ Design: #279 comment 6244390810 (`Design-by: main`), plan
 `docs/superpowers/plans/2026-10-16-gpu-video-path.md` §5.1-§5.3,
 §5.8-§5.11, §9 P3a. With `video_decode` = `software` (the default) the
 `video_hw_decode` paths above are as they were; what still runs at the
-default is the producer's per-song INFO (`path=ram`), the table's row, and
-MAX's standby black composed as Black (`gpu-max.md`: the same pixels, fewer
-uploads on black boundaries).
+default is the producer's per-song INFO (`path=ram`) with its `codec()`
+read (`GetNativeMediaType`, which the bench has called on the box since
+#223 S0), the table's row, and MAX's standby black composed as Black
+(`gpu-max.md`: the same pixels, fewer uploads on black boundaries).
+
+**Never set `video_decode` = `gpu` on PP before P3b** (the design's
+shared-benefit line: PP's preview gate keeps software until then). A
+GPU-decoded song offers no preview (`preview.md`), so every `deploy-pp`
+run would fail `post-deploy-pp-preview.spec.ts`: the on-program card
+shows "Náhľad nedostupný pri GPU dekódovaní." and has no
+`preview-start`.
 
 - **The setting** `video_decode` (`sp_core::config::video_decode`: exactly
   `gpu`, trimmed, is `VideoDecode::Gpu`, anything else software) is read
@@ -541,7 +549,13 @@ uploads on black boundaries).
   at once (its device is healthy: no backoff). Never a reopen in software
   here: round 1 did that, and it froze the program with silence for up to
   a GOP, then decoded the rest of the song in software, which this file
-  bans while SNV / PP play to a room. Known bounds:
+  bans while SNV / PP play to a room. A producer being MADE while the
+  task retires (review round 4: the table does not hold it yet, so the
+  scan misses it) is retired by its own open: `gpu_resident::take_for_open`
+  writes its row, then asks the precondition again (the task writes the
+  setting before its scan takes the table's lock, so one of the two sees
+  the other), and the song opens in the base mode (`Leased::Retired`, one
+  INFO). Known bounds:
   - the two settings tasks (this one and MAX's `program_max_phase.rs`,
     which switches NDI) each read `program_ndi_source` every 5 s, so they
     can disagree up to ~5 s either way: NDI on the canvas before the
@@ -553,7 +567,19 @@ uploads on black boundaries).
     `ReturnGate`) changes no setting: a GPU-resident song keeps decoding
     into its ring and NDI shows its pictures black until the readback
     returns (the compositor that stopped reading back is MAX's too).
-    P3b's CPU path for a ring frame is what lifts it.
+    P3b's CPU path for a ring frame is what lifts it;
+  - `PipelineGpu`'s drop race (review round 3, left): a playlist
+    re-created while its old pipeline still tears down. The old
+    `PipelineGpu`'s drop forgets the playlist's row, now the NEW
+    pipeline's, so a later retire misses the new producer and a
+    GPU-resident song on it is black on NDI for the rest of the song. It
+    needs a re-created playlist, a GPU-resident song on it and a
+    switch-off together; a generation check or a process-wide retire epoch
+    is the fix (a follow-up);
+  - the rollback order: set `video_decode` = `software` FIRST, then
+    `program_ndi_source` = `cpu` (one settings poll apart, ≥ 5 s). The
+    other order opens the up-to-5 s window above, NDI on the canvas while
+    a song still decodes GPU-resident (black NDI).
 - **The decode cap** (review round 1): `gpu` in effect takes the hardware
   decode's cap (`max_resolution` automatic = 2160) even with
   `video_hw_decode` off (`load_settings`: `hw || Resident::On`).
@@ -571,7 +597,17 @@ uploads on black boundaries).
   - a producer whose ring died (a lost device, an abandoned key) is
     dropped at the next open, and the next one is made only
     `PRODUCER_REBUILD_BACKOFF` (30 s) later, a failed build likewise;
-    meanwhile the songs open in the base mode.
+    meanwhile the songs open in the base mode;
+  - it is built on the pipeline's paced EMIT thread
+    (`PipelineGpu::song_mode()`, at the song's open, before the decode
+    feed attaches; the consumer fills those boundaries, so no hole, only
+    a few `consumer_fill_pairs` and late frames), and an idle release
+    drops its device and slot textures on that thread at an idle
+    heartbeat. A `Hardware` reader's `VideoDevice` is made on the decode
+    thread instead. The cost falls only at a pipeline's first
+    GPU-resident song, after a release, a backoff or a retire; moving
+    the build onto the decode thread (and the drop off the emit thread)
+    is P4's.
 - **The open** (`open_with(path, GpuResident(p), cap)`): `HwSession`
   (`video/hw_session.rs`) resets its DXGI device manager to the
   PRODUCER's device (`HwDevice::Producer`) instead of a new
@@ -646,27 +682,44 @@ uploads on black boundaries).
     into the ring, draws like an upload of the same picture (worst ≤ 1) and
     unlike slice 0; a picture larger than its surface is refused before any
     slot is taken; a RETIRED producer's slice is read back byte for byte,
-    with no slot taken;
+    with no slot taken (slice 1 of the SRV-bound 2-slice array through
+    Media Foundation's staging copy: unproven on WARP until its first CI
+    run; if refused, read the HRESULT, never switch it to slice 0, which
+    loses the which-slice proof);
   - `hw_decode_tests.rs` (the modes compare by kind, `resident_opens`,
     `SurfaceUse::of`; on Windows GPU-resident modes compare by their
     producer);
   - sp-gpu `tests/ring.rs` (a producer copies a slice and counts it; a
     retired producer says so, its ring alive);
-  - sp-server `gpu_resident_tests.rs`, `paced_producer_tests_gpu.rs`,
-    `video_decode_tests.rs`.
+  - sp-server `gpu_resident_tests.rs` (incl. a producer made while the
+    settings task stops `gpu`: retired at its open, `take_for_open`),
+    `paced_producer_tests_gpu.rs`, `video_decode_tests.rs`.
 
   WARP refuses the video device, so the D3D decode path into the ring
   runs only on the box.
 - **Box gates (the main session):**
   - `decode-bench` with `"resident": true` on each 4K sample (AV1, VP9)
     within D2 (`diag-bench.md`), its `ring.in_use` 0 after the run;
+  - before `program_ndi_source` = `gpu`: tell camera-box what changes
+    on `SP-program` (`gpu-max.md` P1b gate 2: the FourCC NV12 → UYVY, a
+    constant +33.3 ms arrival lag, its genlock FIFO `shallow_depth` +1);
   - then `program_ndi_source` = `gpu` and `video_decode` = `gpu` with a
     hardware-decodable song on program: `GET /api/v1/program`
-    `gpu.gpu_sides_per_s` at the program's rate and `max.upload_mb_s` 0,
-    `status.video_decode.pipelines[].ring.full` +0 (`waits` reported: 20
-    slots against the holds above), and the sum of every
+    `gpu.gpu_sides_per_s` at the program's rate and `max.upload_mb_s` 0
+    (the design and plan call it `gpu.upload_mb_s`; this build has it on
+    `max`), `status.video_decode.pipelines[].ring.full` +0 (`waits`
+    reported: 20 slots against the holds above), and the sum of every
     `pipelines[].ring.vram_mb` (one producer per GPU-resident pipeline, ≤
     249 MB at 4K each, until 10 min idle; P4 adds the VRAM guard);
+  - over that whole window and over the A/B, each of these stays +0:
+    `gpu.km_acquire_timeouts`, `gpu.abandoned`, `gpu.open_failures` (each
+    a ring side drawn BLACK on the wall or NDI; WARP never runs the keyed
+    mutexes against real NVDEC surfaces, so only the box proves them),
+    `video_decode.mid_stream_fallbacks` and `open_fallbacks` (a fall back
+    is the software decode this file bans while SNV plays to a room);
+  - in the same window, with `video_decode` = `gpu`: the A/V gate
+    (`post-deploy-av-sync.spec.ts`), `max-gate` and cg OBS's `genlock-fifo
+    audit` hold (`gpu-max.md` P1b gate 3);
   - the retire (review round 3): on a song playing GPU-resident, set
     `program_ndi_source` = `cpu` mid-song. Expect one WARN `the song's
     pictures changed kind mid-song (… or its producer retired)`,
@@ -676,7 +729,8 @@ uploads on black boundaries).
   - while `video_decode` = `gpu` is set on SNV, `post-deploy-preview.spec.ts`
     and `post-deploy-owner-path.spec.ts` find no live preview on a
     GPU-decoded song (none before P3b): no deploy during the A/B window,
-    and switch it back before one;
+    and switch it back before one (`video_decode` first, see the rollback
+    order); never on PP before P3b (above);
   - the wall measured before and after, an hour on each side
     (`gpu-max.md`, "Judging a deploy on the wall").
 

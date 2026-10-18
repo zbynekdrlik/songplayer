@@ -11,7 +11,8 @@
 //!   `status.video_decode.gpu_resident_blocked` says why
 //!   ([`BLOCKED_NDI_CPU`]); each change of that state is logged once
 //!   ([`resident_log`]: a WARN into a block), and when `gpu` stops taking
-//!   effect every live producer is retired ([`precondition_changed`]): a
+//!   effect every live producer is retired ([`precondition_changed`]; one
+//!   being made meanwhile is retired at its own open, [`take_for_open`]): a
 //!   song playing GPU-resident reads its pictures back from its next one
 //!   (the GPU decoder goes on: no reopen, no gap), and the pipeline's next
 //!   GPU-resident song gets a new producer at once.
@@ -112,11 +113,10 @@ pub fn resident_log(before: Resident, after: Resident) -> ResidentLog {
     }
 }
 
-/// Log a change of the precondition from `before` to `after`
-/// ([`resident_log`]). Glue: the decision is tested, the lines are the
-/// logger's.
+/// Log a change of the precondition into `after` ([`resident_log`]).
+/// Glue: the decision is tested, the lines are the logger's.
 #[cfg_attr(test, mutants::skip)]
-pub fn log_resident(change: ResidentLog, before: Resident, after: Resident) {
+pub fn log_resident(change: ResidentLog, after: Resident) {
     match change {
         ResidentLog::Quiet => {}
         ResidentLog::Warn(why) => warn!(
@@ -130,8 +130,6 @@ pub fn log_resident(change: ResidentLog, before: Resident, after: Resident) {
             "video decode: GPU-resident decode is now {} (#279 P3a)",
             if after == Resident::On {
                 "on (from the next song)"
-            } else if retires(before, after) {
-                "off (a song playing GPU-resident reads its pictures back from its next one)"
             } else {
                 "off"
             }
@@ -192,19 +190,30 @@ pub fn retires(before: Resident, after: Resident) -> bool {
 /// effect every live producer of `table` is retired, so a song playing
 /// GPU-resident reads its pictures back from its next one (what the next
 /// songs do): with NDI back on the canvas it would otherwise be black
-/// there for the rest of the song. How many were retired.
+/// there for the rest of the song. How many were retired. A producer
+/// being made while this runs is retired by its own open
+/// ([`take_for_open`]).
 pub fn precondition_changed(table: &Pipelines, before: Resident, after: Resident) -> usize {
-    log_resident(resident_log(before, after), before, after);
+    log_resident(resident_log(before, after), after);
     if !retires(before, after) {
         return 0;
     }
     let retired = table.retire_producers();
-    info!(
-        producers = retired,
-        "gpu resident: video_decode=gpu stopped taking effect - the GPU-resident songs read \
-         their pictures back from their next one (#279 P3a)"
-    );
+    log_retired(retired);
     retired
+}
+
+/// Log the producers a change retired: one INFO, only when it retired
+/// any. Glue: the count is [`precondition_changed`]'s tested answer.
+#[cfg_attr(test, mutants::skip)]
+fn log_retired(producers: usize) {
+    if producers > 0 {
+        info!(
+            producers,
+            "gpu resident: video_decode=gpu stopped taking effect - the GPU-resident songs read \
+             their pictures back from their next one (#279 P3a)"
+        );
+    }
 }
 
 /// What a song's open got of its pipeline's lease.
@@ -221,6 +230,9 @@ pub enum Leased<T> {
     Lost,
     /// The build failed (why); tried again after the backoff.
     Failed(String),
+    /// `gpu` stopped taking effect while the producer was taken: retired
+    /// at once ([`take_for_open`]); the song opens in the base mode.
+    Retired,
 }
 
 impl<T> Leased<T> {
@@ -228,7 +240,7 @@ impl<T> Leased<T> {
     pub fn producer(&self) -> Option<&Arc<T>> {
         match self {
             Leased::Kept(producer) | Leased::Made(producer) => Some(producer),
-            Leased::Waiting { .. } | Leased::Lost | Leased::Failed(_) => None,
+            Leased::Waiting { .. } | Leased::Lost | Leased::Failed(_) | Leased::Retired => None,
         }
     }
 }
@@ -256,12 +268,13 @@ impl<T> Default for Lease<T> {
 }
 
 impl<T: Producer> Lease<T> {
-    /// The producer for a GPU-resident open at `now`: the held one while its
-    /// ring lives; a dead one is dropped (`Lost`, the backoff starts), a
-    /// retired one too; a retired one alive (`gpu` stopped taking effect,
-    /// then took effect again before a song opened) is dropped and replaced
-    /// at once, its device being healthy; with none held, `make` builds one unless the backoff
-    /// runs (`Waiting`); a failed build starts the backoff (`Failed`).
+    /// The producer for a GPU-resident open at `now`: the held one while it
+    /// lives and is not retired. A dead one, retired or not, is dropped
+    /// (`Lost`, the backoff starts); a retired one whose device lives (`gpu`
+    /// stopped taking effect, then took effect again before a song opened)
+    /// is replaced at once. With none held, `make` builds one unless the
+    /// backoff runs (`Waiting`); a failed build starts the backoff
+    /// (`Failed`).
     pub fn take(&mut self, now: Instant, make: impl FnOnce() -> Result<T, String>) -> Leased<T> {
         if let Some(held) = &self.held {
             if held.lost() {
@@ -330,6 +343,34 @@ impl<T: Producer> Lease<T> {
     }
 }
 
+/// The producer for playlist `playlist_id`'s GPU-resident open at `now`
+/// (review round 4): [`Lease::take`], the held producer written into
+/// `table`'s row, then the precondition asked again (`resident`). The
+/// settings task writes the setting before its retire scan takes the
+/// table's lock, and the row is written under that lock before this second
+/// read, so the scan sees the producer or this read sees the change. A
+/// producer made while `gpu` stopped taking effect would otherwise escape
+/// the retire, and its song would be black on NDI for its whole length:
+/// here it is retired (`Retired`), and the song opens in the base mode.
+pub fn take_for_open<T: Producer>(
+    lease: &mut Lease<T>,
+    table: &Pipelines,
+    playlist_id: i64,
+    now: Instant,
+    make: impl FnOnce() -> Result<T, String>,
+    resident: impl FnOnce() -> Resident,
+) -> Leased<T> {
+    let leased = lease.take(now, make);
+    table.set_producer(playlist_id, lease.held());
+    if let Some(producer) = leased.producer()
+        && resident() != Resident::On
+    {
+        producer.retire();
+        return Leased::Retired;
+    }
+    leased
+}
+
 /// A pipeline's GPU-resident side: its lease, and its row in the table
 /// (forgotten when the pipeline ends: this lives in its `PipelineOutput`).
 #[derive(Debug)]
@@ -389,9 +430,15 @@ impl PipelineGpu {
             }
             return base;
         }
-        let leased = self.lease.take(now, make);
+        let leased = take_for_open(
+            &mut self.lease,
+            pipelines(),
+            self.playlist_id,
+            now,
+            make,
+            || setting.resident(),
+        );
         log_leased(self.playlist_id, &leased);
-        pipelines().set_producer(self.playlist_id, self.lease.held());
         match leased.producer() {
             Some(producer) => DecodeMode::GpuResident(Arc::clone(producer)),
             None => base,
@@ -447,6 +494,11 @@ fn log_leased<T: std::fmt::Debug>(playlist_id: i64, leased: &Leased<T>) {
             %why,
             "gpu resident: the producer device could not be made - this song decodes as \
              before, tried again in 30 s (#279 P3a)"
+        ),
+        Leased::Retired => info!(
+            playlist_id,
+            "gpu resident: video_decode=gpu stopped taking effect while the producer device \
+             was taken - retired, this song decodes as before (#279 P3a)"
         ),
     }
 }
