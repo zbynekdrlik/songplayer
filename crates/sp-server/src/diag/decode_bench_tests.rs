@@ -224,6 +224,7 @@ impl VideoStream for Script {
                 stride: layout.stride,
                 timestamp_ms: 0,
                 pixel_format: PixelFormat::Nv12,
+                gpu: None,
             })),
         }
     }

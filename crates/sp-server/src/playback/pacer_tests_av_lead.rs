@@ -57,6 +57,7 @@ impl VideoStream for Video30 {
             stride: 4,
             timestamp_ms: ts,
             pixel_format: PixelFormat::Nv12,
+            gpu: None,
         }))
     }
     fn width(&self) -> u32 {

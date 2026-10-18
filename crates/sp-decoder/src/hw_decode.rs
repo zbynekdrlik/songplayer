@@ -34,25 +34,49 @@
 //!
 //! [`HwCounters`] counts what the hardware path did across the process; the
 //! decode bench reports one reader's, `GET /api/v1/status` the process's.
+//!
+//! #279 P3a: [`DecodeMode::GpuResident`] opens the D3D path on a
+//! pipeline's producer device and keeps each GPU-decoded picture on the
+//! GPU, in a slot of the producer's ring, instead of reading it back; its
+//! fall backs are the ones above (a ring that is full past its bound or
+//! dead, or a lost producer device, is a decode error on the D3D path).
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use sp_core::nv12::{nv12_chroma_row, nv12_len};
-use sp_gpu::{MAX_PICTURE_SIDE, mapped_len, unpad_rows_into};
+use sp_gpu::{MAX_PICTURE_SIDE, ProducerGpu, mapped_len, unpad_rows_into};
 
 use crate::error::DecoderError;
 
 /// What a caller asks the reader for.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default)]
 pub enum DecodeMode {
     /// Media Foundation's software decoders (no Direct3D device).
     #[default]
     Software,
     /// A Direct3D 11 device on the GPU for the decoder MFT (DXVA), with a
-    /// software fallback.
+    /// software fallback; each GPU-decoded picture is read back to the CPU.
     Hardware,
+    /// #279 P3a: the decoder MFT decodes on a pipeline's producer device
+    /// (`sp_gpu::ProducerGpu`, the picked adapter) and each picture it
+    /// hands over in a DXGI surface STAYS on the GPU: copied into a slot of
+    /// the producer's ring and handed over as `DecodedVideoFrame::gpu`, no
+    /// bytes read back. A picture Media Foundation hands over in system
+    /// memory stays a CPU picture; the fall backs are `Hardware`'s (a
+    /// refused open, a decode error or a lost device: software).
+    GpuResident(Arc<ProducerGpu>),
 }
+
+/// Two modes are equal when they are the same kind and, GPU-resident, on
+/// the same producer (an `Arc` identity).
+impl PartialEq for DecodeMode {
+    fn eq(&self, other: &Self) -> bool {
+        self.key() == other.key()
+    }
+}
+
+impl Eq for DecodeMode {}
 
 impl DecodeMode {
     /// `Hardware` when `hw` is set (the setting `video_hw_decode`, the
@@ -62,6 +86,31 @@ impl DecodeMode {
             DecodeMode::Hardware
         } else {
             DecodeMode::Software
+        }
+    }
+
+    /// Whether the reader asks for the D3D path (`Hardware` or
+    /// `GpuResident`).
+    pub fn on_gpu(&self) -> bool {
+        !matches!(self, DecodeMode::Software)
+    }
+
+    /// `"software"`, `"hardware"` or `"gpu_resident"` (the logs, the
+    /// decode bench).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DecodeMode::Software => "software",
+            DecodeMode::Hardware => "hardware",
+            DecodeMode::GpuResident(_) => "gpu_resident",
+        }
+    }
+
+    /// The kind, and a GPU-resident mode's producer by address.
+    fn key(&self) -> (u8, usize) {
+        match self {
+            DecodeMode::Software => (0, 0),
+            DecodeMode::Hardware => (1, 0),
+            DecodeMode::GpuResident(producer) => (2, Arc::as_ptr(producer) as usize),
         }
     }
 }
@@ -743,13 +792,13 @@ pub fn scaled_pixel_aspect(
 }
 
 /// What the hardware path did across the process, every open asked for in
-/// `Hardware` mode (the decode bench's included); and (#282) the scaled
-/// opens of any mode.
+/// `Hardware` (or, #279 P3a, `GpuResident`) mode (the decode bench's
+/// included); and (#282) the scaled opens of any mode.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HwDecodeStats {
-    /// Opens asked for in `Hardware` mode, counted before the open: a file
-    /// that then opened nowhere (no reader at all) counts here and in none of
-    /// the counts below.
+    /// Opens asked for on the D3D path (`Hardware` or `GpuResident` mode),
+    /// counted before the open: a file that then opened nowhere (no reader
+    /// at all) counts here and in none of the counts below.
     pub requested: u64,
     /// Of those, the ones whose first picture came out of the GPU decoder
     /// (a scaled open's never counts here nor in `mf_software`:
@@ -781,6 +830,10 @@ pub struct HwDecodeStats {
     /// when it opens at all (a refused D3D11 open that then fell back to
     /// software may open it scaled there, counted in `scaled_opens`).
     pub scale_refusals: u64,
+    /// #279 P3a: of `requested`, the opens in `GpuResident` mode that
+    /// opened on the D3D path (their GPU-decoded pictures copied into the
+    /// producer's ring).
+    pub resident_opens: u64,
 }
 
 /// The process's [`HwDecodeStats`], counted as the readers go (every
@@ -796,6 +849,7 @@ pub struct HwCounters {
     last_fallback: Mutex<Option<String>>,
     scaled_opens: AtomicU64,
     scale_refusals: AtomicU64,
+    resident_opens: AtomicU64,
 }
 
 impl HwCounters {
@@ -810,7 +864,13 @@ impl HwCounters {
             last_fallback: Mutex::new(None),
             scaled_opens: AtomicU64::new(0),
             scale_refusals: AtomicU64::new(0),
+            resident_opens: AtomicU64::new(0),
         }
+    }
+
+    /// #279 P3a: a `GpuResident` open came up on the D3D path.
+    pub fn resident_open(&self) {
+        self.resident_opens.fetch_add(1, Ordering::Relaxed);
     }
 
     /// #282: a file opened scaled to the decode cap.
@@ -874,6 +934,7 @@ impl HwCounters {
             last_fallback,
             scaled_opens: self.scaled_opens.load(Ordering::Relaxed),
             scale_refusals: self.scale_refusals.load(Ordering::Relaxed),
+            resident_opens: self.resident_opens.load(Ordering::Relaxed),
         }
     }
 }

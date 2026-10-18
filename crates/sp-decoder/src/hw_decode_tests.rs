@@ -19,6 +19,19 @@ fn the_mode_is_software_unless_hardware_is_asked_for() {
     assert_eq!(DecodeMode::from_hw_flag(true), DecodeMode::Hardware);
 }
 
+/// #279 P3a: the D3D path is asked for in `Hardware` (and `GpuResident`,
+/// whose producer exists only on Windows) mode; the modes' words; a kind
+/// equals only itself.
+#[test]
+fn the_modes_say_their_path_and_compare_by_kind() {
+    assert!(!DecodeMode::Software.on_gpu());
+    assert!(DecodeMode::Hardware.on_gpu());
+    assert_eq!(DecodeMode::Software.as_str(), "software");
+    assert_eq!(DecodeMode::Hardware.as_str(), "hardware");
+    assert_ne!(DecodeMode::Software, DecodeMode::Hardware);
+    assert_eq!(DecodeMode::Hardware.clone(), DecodeMode::Hardware);
+}
+
 #[test]
 fn only_a_decoder_textures_picture_came_out_of_the_gpu_decoder() {
     assert_eq!(D3D11_BIND_DECODER, 0x200, "d3d11.h");
@@ -568,6 +581,10 @@ fn the_counters_count_each_outcome_on_its_own() {
     }
     counters.scale_refused();
     counters.scale_refused();
+    // #279 P3a: GPU-resident opens, their own counter.
+    for _ in 0..6 {
+        counters.resident_open();
+    }
     assert_eq!(
         counters.snapshot(),
         HwDecodeStats {
@@ -580,6 +597,7 @@ fn the_counters_count_each_outcome_on_its_own() {
             last_fallback: Some("mid-stream: device hung".into()),
             scaled_opens: 5,
             scale_refusals: 2,
+            resident_opens: 6,
         }
     );
 }

@@ -209,6 +209,7 @@ fn the_status_carries_the_setting_and_the_counters() {
         last_fallback: Some("mid-stream: device removed".into()),
         scaled_opens: 9,
         scale_refusals: 3,
+        resident_opens: 0,
     };
     assert_eq!(
         status_of(&setting, stats),

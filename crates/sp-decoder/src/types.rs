@@ -46,6 +46,11 @@ pub struct DecodedVideoFrame {
     pub timestamp_ms: u64,
     /// Pixel format of `data`.
     pub pixel_format: PixelFormat,
+    /// #279 P3a: the picture in a ring slot on the GPU (a GPU-resident
+    /// reader's DXGI surface, copied there, `sp_gpu::GpuFrame`); `data` is
+    /// then empty and `stride` one chroma row. `None` for a picture in CPU
+    /// memory.
+    pub gpu: Option<sp_gpu::GpuFrame>,
 }
 
 /// A chunk of decoded audio as interleaved f32 PCM samples.
@@ -95,6 +100,7 @@ mod tests {
             stride: 2,
             timestamp_ms: 0,
             pixel_format: PixelFormat::Nv12,
+            gpu: None,
         };
         assert_eq!(f.pixel_format, PixelFormat::Nv12);
         // NV12 size: w * h * 3 / 2 = 2 * 2 * 3 / 2 = 6

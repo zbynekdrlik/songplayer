@@ -72,6 +72,7 @@ impl VideoStream for Video {
             stride: 4,
             timestamp_ms: ms,
             pixel_format: PixelFormat::Nv12,
+            gpu: None,
         }))
     }
     fn width(&self) -> u32 {
@@ -214,6 +215,7 @@ fn a_frame_and_its_audio_go_out_on_the_songs_origin() {
         stride: 4,
         timestamp_ms: 1_400,
         pixel_format: PixelFormat::Nv12,
+        gpu: None,
     };
     let frame = to_paced_frame(video, vec![chunk(1_350), chunk(900)], 1_000);
     assert_eq!(frame.pts_ns, 400_000_000);
@@ -246,6 +248,7 @@ fn a_frame_and_its_audio_go_out_on_the_songs_origin() {
         stride: 4,
         timestamp_ms: 900,
         pixel_format: PixelFormat::Nv12,
+        gpu: None,
     };
     assert_eq!(to_paced_frame(early, Vec::new(), 1_000).pts_ns, 0);
 }

@@ -40,12 +40,12 @@ pub(crate) fn bench_file(
         bytes,
         max_wall_s = max_wall.as_secs(),
         thread_priority = thread_priority.unwrap_or_default(),
-        hw = mode == DecodeMode::Hardware,
+        mode = mode.as_str(),
         max_height,
         "decode-bench: start"
     );
     let requested = DecodeFacts {
-        mode,
+        mode: mode.clone(),
         max_height: Some(max_height),
         ..DecodeFacts::default()
     };

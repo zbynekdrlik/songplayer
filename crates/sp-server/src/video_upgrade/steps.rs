@@ -70,7 +70,7 @@ impl Steps for Real {
 
     #[cfg_attr(test, mutants::skip)] // the real reader on a decode thread
     async fn facts(&self, path: &Path) -> Result<VideoFacts, String> {
-        facts_on_decode_thread(path.to_path_buf(), self.mode).await
+        facts_on_decode_thread(path.to_path_buf(), self.mode.clone()).await
     }
 
     #[cfg_attr(test, mutants::skip)] // spawns yt-dlp
@@ -141,7 +141,7 @@ impl Steps for Real {
 
     #[cfg_attr(test, mutants::skip)] // the real reader
     async fn codec(&self, path: &Path) -> Result<String, String> {
-        codec_on_decode_thread(path.to_path_buf(), self.mode).await
+        codec_on_decode_thread(path.to_path_buf(), self.mode.clone()).await
     }
 
     #[cfg_attr(test, mutants::skip)] // spawns ffmpeg; its args are `repair::remux_args`, tested
