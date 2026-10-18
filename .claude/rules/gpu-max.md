@@ -1353,7 +1353,8 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   stride's padding not counted; 0 when every picture was resident). The
   worker records it with `uploads` for EVERY compose that ran, at the
   instant it served the boundary (`MaxWorker::draw` →
-  `MaxOut::record_uploads`, `program_max_upload.rs`, a child of
+  `MaxOut::record_compose` since #279 P3a; `record_uploads` is the tests'
+  plain upload record), `program_max_upload.rs`, a child of
   `program_max.rs`): a boundary whose Spout send then failed moved its
   bytes all the same; a failed compose is not counted. `max.upload_mb_s`
   (10^6 bytes) and `max.uploads_per_s` = everything after the oldest of
@@ -2041,13 +2042,26 @@ the copy) is `video-decode.md` "GPU-resident decode".
     `new_warp` (doc-hidden, tests) is a WARP device WITHOUT the video API
     (WARP refuses it);
   - `copy_from(source, subresource, visible)` is the ring's copy, timed
-    into `RingCore::record_copy`, then `GetDeviceRemovedReason`: a removed
-    device kills the ring ("the producer device was lost", its HRESULT)
-    and returns `GpuError::removed`;
-  - `stats()` reads the ring's core without the ring's lock; `ring_dead()`,
-    `adapter()`, `device()`.
+    into `RingCore::record_copy` (the WHOLE call: the ring's lock, a wait
+    for a free slot, a new slot's texture, the key, the copy, its flush,
+    the release), then `GetDeviceRemovedReason`: a removed device kills the
+    ring ("the producer device was lost", its HRESULT) and returns
+    `GpuError::removed`;
+  - `ring_dead()` asks the device too (review round 1): Media Foundation's
+    decoder can meet a removed device first (its read fails, the reader
+    reopens in software and no copy runs), and the ring dies there then, so
+    the pipeline's next song still builds a new producer;
+  - `retire()` / `retired()` (review round 1): the reader asks `retired()`
+    before each copy, so a retired producer's songs go on in software from
+    their next picture; its ring and the frames in it stay valid (the
+    compositor draws them to their last drop). sp-server retires every
+    producer when `video_decode` = `gpu` stops taking effect
+    (`video-decode.md`);
+  - `stats()` reads the ring's core without the ring's lock; `adapter()`,
+    `device()`.
 - **`RingStats`** adds `copy_us_p99` (`ring::p99`, nearest rank, over the
-  last `COPY_WINDOW` = 900 copies, `None` before the first) and
+  last `COPY_WINDOW` = 900 copies, `None` before the first; each copy's
+  whole `copy_from`, a slot's wait included, which `waits` counts too) and
   `vram_bytes` (`RingState::vram_bytes`: every made slot's NV12 bytes,
   `SizeClass::bytes`).
 - **`GET /api/v1/program` → `gpu`** (`program_max_upload.rs` `GpuStatus`,
@@ -2055,8 +2069,8 @@ the copy) is `video-decode.md` "GPU-resident decode".
   `MaxOut::record_compose` from `MaxWorker::draw`):
   - over the upload window (the last 900 composes within 30 s):
     `gpu_sides_per_s` (ring slots drawn in place) and `cpu_sides_per_s`
-    (CPU pictures drawn, uploaded or resident:
-    `Composition::uploads().len()`);
+    (CPU pictures drawn, uploaded or resident: `Composition::cpu_sides`,
+    `uploads()`'s count with no allocation on the `program-max` thread);
   - since the start (`ComposeStats`): `km_acquire_timeouts`, `abandoned`,
     `open_failures`, `gpu_opens`;
   - the mock serves zeros.

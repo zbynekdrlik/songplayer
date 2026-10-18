@@ -79,7 +79,7 @@ use crate::playback::ndi_health_expect::program_degraded_reason;
 use crate::playback::ndi_input::{InputSettings, NdiInputStatus, load_input_settings};
 use crate::playback::program_bus::{ProgramBus, ProgramStatus};
 use crate::playback::program_item::ItemStatus;
-use crate::playback::program_max::MaxStatus;
+use crate::playback::program_max::{GpuStatus, MaxStatus};
 use crate::playback::program_switch::{
     RefusedSource, SourceError, Via, refused_sources, switch_source,
 };

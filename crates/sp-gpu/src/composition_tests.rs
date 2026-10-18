@@ -525,3 +525,41 @@ fn a_compose_uploads_its_cpu_pictures_and_opens_each_ring_slot_once() {
     assert!(opened(&Composition::Black).is_empty());
     assert!(uploaded(&Composition::Black).is_empty());
 }
+
+/// #279 P3a review round 1: the CPU pictures a compose draws, counted with
+/// no allocation, are `uploads()`'s.
+#[test]
+fn cpu_sides_counts_the_cpu_pictures_it_draws() {
+    let ring = FakeRing::new(2);
+    let a = ring_frame(&ring, 1920, 1080);
+    let cases = [
+        Composition::Black,
+        Composition::Picture(picture(1, 1920, 1080)),
+        Composition::Picture(Side::Gpu(&a)),
+        Composition::Fade {
+            from: Some(picture(1, 1920, 1080)),
+            to: Some(picture(2, 1280, 720)),
+            weight_q8: 128,
+        },
+        Composition::Fade {
+            from: Some(picture(1, 1920, 1080)),
+            to: Some(Side::Gpu(&a)),
+            weight_q8: 64,
+        },
+        Composition::Fade {
+            from: Some(picture(1, 1920, 1080)),
+            to: Some(picture(2, 1280, 720)),
+            weight_q8: 0,
+        },
+        Composition::Fade {
+            from: None,
+            to: Some(picture(2, 1280, 720)),
+            weight_q8: 256,
+        },
+    ];
+    let counted: Vec<usize> = cases.iter().map(Composition::cpu_sides).collect();
+    assert_eq!(counted, [0, 1, 0, 2, 1, 1, 1]);
+    for c in &cases {
+        assert_eq!(c.cpu_sides(), c.uploads().len());
+    }
+}

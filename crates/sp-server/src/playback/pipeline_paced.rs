@@ -416,10 +416,8 @@ pub(crate) fn decode_and_send_paced(
     // fills the bounded look-ahead queue.
     let shared: Arc<SharedQueue<QueuedFrame>> = Arc::new(SharedQueue::new(DECODE_QUEUE_BOUND));
     let (open_tx, open_rx) = crossbeam_channel::bounded::<Result<(u64, f32, u64), String>>(1);
-    // #279 P3a: the song's decode mode, on the pipeline's producer when
-    // `video_decode` = gpu takes effect (`gpu_resident.rs`).
-    let decode = crate::playback::video_decode::global();
-    let mode = output.gpu().decode_mode(&decode, Instant::now());
+    // #279 P3a: GPU-resident when `video_decode` = gpu takes effect.
+    let mode = output.gpu().song_mode();
     let producer = {
         let shared = shared.clone();
         let taps = taps.clone();
@@ -802,8 +800,6 @@ pub(crate) fn decode_and_send_paced(
     // next push — so the join completes within ~one decode.
     shared.stop();
     let _ = producer.join();
-    // #279 P3a: the song is over, so its pictures lie nowhere (the producer
-    // is joined: no late frame of it can write the row after this).
-    crate::playback::gpu_resident::pipelines().set_gpu_decoding(playlist_id, false);
+    crate::playback::gpu_resident::song_ended(playlist_id); // #279 P3a
     result
 }

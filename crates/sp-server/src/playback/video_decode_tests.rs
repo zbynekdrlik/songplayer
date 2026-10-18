@@ -423,3 +423,26 @@ fn the_setting_says_whether_each_value_changed() {
     assert!(setting.set_video_decode(VideoDecode::Software));
     assert_eq!(setting.resident(), Resident::Off);
 }
+
+/// Review round 1: a GPU-resident song decodes on the GPU, so `gpu` in
+/// effect takes the hardware decode's cap (automatic = 2160) even with
+/// `video_hw_decode` off; blocked, the software cap (1440) stays.
+#[tokio::test]
+async fn gpu_in_effect_takes_the_hardware_cap() {
+    let pool = settings_pool().await;
+    let setting = HwDecodeSetting::default();
+    apply_setting(&pool, &setting).await;
+    assert_eq!(setting.max_height(), 1440, "software, automatic");
+    set_setting(&pool, "video_decode", "gpu").await.unwrap();
+    apply_setting(&pool, &setting).await;
+    assert_eq!(setting.max_height(), 1440, "gpu blocked: decoded as before");
+    set_setting(&pool, "program_ndi_source", "gpu")
+        .await
+        .unwrap();
+    assert!(apply_setting(&pool, &setting).await);
+    assert_eq!(setting.resident(), Resident::On);
+    assert_eq!(setting.max_height(), 2160, "gpu in effect: the GPU's cap");
+    set_setting(&pool, "max_resolution", "1080").await.unwrap();
+    apply_setting(&pool, &setting).await;
+    assert_eq!(setting.max_height(), 1080, "a set cap holds");
+}

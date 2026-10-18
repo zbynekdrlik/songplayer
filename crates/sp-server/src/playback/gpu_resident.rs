@@ -10,7 +10,9 @@
 //!   in today's mode (`video_hw_decode`'s), and
 //!   `status.video_decode.gpu_resident_blocked` says why
 //!   ([`BLOCKED_NDI_CPU`]); each change of that state is logged once
-//!   ([`resident_log`]: a WARN into a block).
+//!   ([`resident_log`]: a WARN into a block), and when `gpu` stops taking
+//!   effect every live producer is retired ([`precondition_changed`]): a
+//!   song playing GPU-resident goes on in software from its next picture.
 //! - **The producer lease** ([`Lease`], [`PipelineGpu`]): one producer
 //!   device and ring per pipeline (`sp_gpu::ProducerGpu`), made at the
 //!   pipeline's first GPU-resident open, kept across its songs, let go
@@ -130,18 +132,21 @@ pub fn log_resident(change: ResidentLog, after: Resident) {
 
 /// What a pipeline's lease needs of its producer.
 pub trait Producer: Send + Sync + 'static {
-    /// Whether its ring is dead (its device was lost, or a slot's key
-    /// abandoned).
+    /// Whether it takes no more songs: its ring is dead (its device was
+    /// lost, or a slot's key abandoned), or it was retired.
     fn lost(&self) -> bool;
     /// Its ring's counters.
     fn ring(&self) -> RingStats;
+    /// Stop its copies: its songs go on in software from their next
+    /// picture (`sp_gpu::ProducerGpu::retire`).
+    fn retire(&self);
 }
 
 impl Producer for ProducerGpu {
     /// Glue: `ProducerGpu`'s own (no producer exists off Windows).
     #[cfg_attr(test, mutants::skip)]
     fn lost(&self) -> bool {
-        self.ring_dead()
+        self.ring_dead() || self.retired()
     }
 
     /// Glue, as `lost`.
@@ -149,6 +154,38 @@ impl Producer for ProducerGpu {
     fn ring(&self) -> RingStats {
         self.stats()
     }
+
+    /// Glue, as `lost`.
+    #[cfg_attr(test, mutants::skip)]
+    fn retire(&self) {
+        ProducerGpu::retire(self);
+    }
+}
+
+/// Whether a change of the precondition from `before` to `after` retires
+/// the producers: `gpu` stopped taking effect (switched off, or NDI back on
+/// the CPU canvas, which shows a GPU picture as black).
+pub fn retires(before: Resident, after: Resident) -> bool {
+    before == Resident::On && after != Resident::On
+}
+
+/// A change of the precondition (the video-decode settings task, every
+/// 5 s): logged once ([`resident_log`]), and when `gpu` stopped taking
+/// effect every live producer of `table` is retired, so a song playing
+/// GPU-resident goes on in software from its next picture instead of
+/// showing black on NDI for the rest of it. How many were retired.
+pub fn precondition_changed(table: &Pipelines, before: Resident, after: Resident) -> usize {
+    log_resident(resident_log(before, after), after);
+    if !retires(before, after) {
+        return 0;
+    }
+    let retired = table.retire_producers();
+    info!(
+        producers = retired,
+        "gpu resident: video_decode=gpu stopped taking effect - the GPU-resident songs go on \
+         in software from their next picture (#279 P3a)"
+    );
+    retired
 }
 
 /// What a song's open got of its pipeline's lease.
@@ -299,6 +336,14 @@ impl PipelineGpu {
         })
     }
 
+    /// The mode the pipeline's next song opens in, from the process's
+    /// setting now (`pipeline_paced`'s song open). Glue over
+    /// [`decode_mode`](Self::decode_mode).
+    #[cfg_attr(test, mutants::skip)]
+    pub fn song_mode(&mut self) -> DecodeMode {
+        self.decode_mode(&crate::playback::video_decode::global(), Instant::now())
+    }
+
     /// [`decode_mode`](Self::decode_mode) with the producer made by `make`.
     pub fn decode_mode_with(
         &mut self,
@@ -435,6 +480,13 @@ struct Row {
     producer: Option<Weak<dyn Producer>>,
 }
 
+/// Playlist `playlist_id`'s song ended: its pictures lie nowhere. Called
+/// after its decode producer was joined, so no late frame of it writes the
+/// row after this.
+pub fn song_ended(playlist_id: i64) {
+    pipelines().set_gpu_decoding(playlist_id, false);
+}
+
 /// The pipelines that decode on the GPU or hold a producer, by playlist.
 pub struct Pipelines(Mutex<BTreeMap<i64, Row>>);
 
@@ -464,6 +516,19 @@ impl Pipelines {
         self.rows().entry(playlist_id).or_default().producer = weak;
     }
 
+    /// Retire every live producer ([`Producer::retire`]); how many.
+    pub fn retire_producers(&self) -> usize {
+        let live: Vec<Arc<dyn Producer>> = self
+            .rows()
+            .values()
+            .filter_map(|row| row.producer.as_ref().and_then(Weak::upgrade))
+            .collect();
+        for producer in &live {
+            producer.retire();
+        }
+        live.len()
+    }
+
     /// Playlist `playlist_id`'s pipeline ended.
     pub fn forget(&self, playlist_id: i64) {
         self.rows().remove(&playlist_id);
@@ -479,7 +544,7 @@ impl Pipelines {
     /// Every pipeline that decodes on the GPU or holds a live producer, by
     /// playlist id, with its ring's counters (read after the table's lock).
     pub fn status(&self) -> Vec<PipelineDecode> {
-        let rows: Vec<(i64, bool, Option<Arc<dyn Producer>>)> = self
+        let rows: Vec<_> = self
             .rows()
             .iter()
             .map(|(&id, row)| {
@@ -512,7 +577,9 @@ pub fn note_song_path(
     ring: Option<RingStats>,
 ) {
     pipelines().set_gpu_decoding(playlist_id, gpu);
-    let path = if gpu { "gpu_resident" } else { "cpu" };
+    // `ram`: the pictures lie in CPU memory (decoded in software, or on
+    // the GPU and read back).
+    let path = if gpu { "gpu_resident" } else { "ram" };
     if first {
         info!(
             playlist_id,

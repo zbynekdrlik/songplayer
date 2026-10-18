@@ -19,6 +19,7 @@
 //! is `crate::ring_state`'s; this module only calls Direct3D.
 
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -41,6 +42,8 @@ pub struct ProducerGpu {
     adapter: AdapterInfo,
     core: Arc<RingCore>,
     ring: Mutex<PictureRing>,
+    /// [`retire`](Self::retire)d: its songs leave it at their next picture.
+    retired: AtomicBool,
 }
 
 impl ProducerGpu {
@@ -69,6 +72,7 @@ impl ProducerGpu {
             adapter,
             core: ring.core(),
             ring: Mutex::new(ring),
+            retired: AtomicBool::new(false),
         })
     }
 
@@ -90,16 +94,48 @@ impl ProducerGpu {
     }
 
     /// Whether the ring is dead (a lost device, a slot's key abandoned):
-    /// every later copy fails, and the lease builds a new producer.
+    /// every later copy fails, and the lease builds a new producer. The
+    /// device is asked too: Media Foundation's decoder may meet a removed
+    /// device first (its read fails, the reader goes on in software and no
+    /// copy runs), and the ring dies here then, so the pipeline's next song
+    /// still builds a new producer.
     pub fn ring_dead(&self) -> bool {
-        self.core.is_dead()
+        if self.core.is_dead() {
+            return true;
+        }
+        match unsafe { self.device.GetDeviceRemovedReason() } {
+            Ok(()) => false,
+            Err(e) => {
+                let hresult = e.code().0 as u32;
+                self.core
+                    .kill("the producer device was lost", Some(hresult));
+                true
+            }
+        }
+    }
+
+    /// #279 P3a: stop its copies: the songs decoding on it go on in
+    /// software from their next picture (the reader asks
+    /// [`retired`](Self::retired) before each copy). Its ring and the frames
+    /// in it stay valid: the compositor draws them to their last drop.
+    /// sp-server retires every producer when `video_decode` = `gpu` stops
+    /// taking effect.
+    pub fn retire(&self) {
+        self.retired.store(true, Ordering::Relaxed);
+    }
+
+    /// Whether it was [`retire`](Self::retire)d.
+    pub fn retired(&self) -> bool {
+        self.retired.load(Ordering::Relaxed)
     }
 
     /// Copy the top-left `visible` picture of subresource `subresource` of
     /// `source` (a texture of [`device`](Self::device): a slice of the
     /// decoder's texture array, or the video processor's output of a
     /// scaled open) into a ring slot ([`PictureRing::copy_from`]) and hand
-    /// it over, timed into [`RingStats::copy_us_p99`]. Then the device's
+    /// it over, timed into [`RingStats::copy_us_p99`] (the whole call: the
+    /// ring's lock, a wait for a free slot, a new slot's texture, the key,
+    /// the copy, its flush, the release). Then the device's
     /// removed reason: a lost device kills the ring and is
     /// [`GpuError::DeviceLost`], whatever the copy answered.
     pub fn copy_from(
@@ -134,6 +170,7 @@ impl fmt::Debug for ProducerGpu {
             .field("adapter", &self.adapter.name)
             .field("ring", &self.core.id())
             .field("dead", &self.core.is_dead())
+            .field("retired", &self.retired())
             .finish()
     }
 }

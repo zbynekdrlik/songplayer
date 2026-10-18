@@ -48,9 +48,7 @@ use tokio::sync::broadcast;
 use tracing::{info, warn};
 
 use crate::downloader::format::max_resolution;
-use crate::playback::gpu_resident::{
-    PipelineDecode, Resident, log_resident, pipelines, resident_log,
-};
+use crate::playback::gpu_resident::{PipelineDecode, Resident, pipelines, precondition_changed};
 
 /// How often the settings task re-reads `video_hw_decode` and
 /// `max_resolution` (the cadence of the other settings tasks: MAX, VBAN,
@@ -174,13 +172,17 @@ struct Stored {
 async fn load_settings(pool: &SqlitePool) -> Result<Stored, sqlx::Error> {
     use crate::db::models::get_setting;
     let hw = load_hw_decode(pool).await?;
-    let max_height = load_max_height(pool, hw).await?;
     let decode = video_decode(get_setting(pool, SETTING_VIDEO_DECODE).await?.as_deref());
     let ndi = program_ndi_source(
         get_setting(pool, SETTING_PROGRAM_NDI_SOURCE)
             .await?
             .as_deref(),
     );
+    // #279 P3a: a GPU-resident song decodes on the GPU, so it takes the
+    // hardware decode's cap (`max_resolution` automatic = 2160) even with
+    // `video_hw_decode` off.
+    let on_gpu = hw || Resident::of(decode, ndi) == Resident::On;
+    let max_height = load_max_height(pool, on_gpu).await?;
     Ok(Stored {
         hw,
         max_height,
@@ -191,7 +193,8 @@ async fn load_settings(pool: &SqlitePool) -> Result<Stored, sqlx::Error> {
 
 /// Apply the stored settings to `setting`; whether anything changed. An
 /// unreadable one changes nothing. #279 P3a: a change of the precondition
-/// is logged once (`gpu_resident::resident_log`).
+/// is logged once and, when `gpu` stops taking effect, retires the
+/// producers (`gpu_resident::precondition_changed`).
 pub async fn apply_setting(pool: &SqlitePool, setting: &HwDecodeSetting) -> bool {
     match load_settings(pool).await {
         Ok(stored) => {
@@ -210,7 +213,7 @@ pub async fn apply_setting(pool: &SqlitePool, setting: &HwDecodeSetting) -> bool
                 );
             }
             let after = setting.resident();
-            log_resident(resident_log(before, after), after);
+            precondition_changed(pipelines(), before, after);
             changed
         }
         Err(e) => {

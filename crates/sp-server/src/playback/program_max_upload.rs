@@ -79,7 +79,9 @@ pub(super) struct Uploads {
 impl Uploads {
     /// A compose of a boundary served `at` that uploaded `bytes` in
     /// `pictures` pictures (0 and 0 when every picture was resident, or for
-    /// Black) and drew no ring slot.
+    /// Black) and drew no ring slot. Tests only: production records
+    /// [`push_compose`](Self::push_compose).
+    #[cfg(test)]
     pub(super) fn push(&mut self, at: Instant, bytes: u64, pictures: u32) {
         self.keep(Compose {
             at,
@@ -203,6 +205,8 @@ pub struct GpuStatus {
 impl MaxOut {
     /// #279 P0: a compose of a boundary served `at` uploaded `bytes` in
     /// `pictures` pictures (`ComposeStats::upload_bytes` / `uploads`).
+    /// Tests only: `MaxWorker::draw` records [`record_compose`](Self::record_compose).
+    #[cfg(test)]
     pub fn record_uploads(&self, at: Instant, bytes: u64, pictures: u32) {
         self.lock_stats().uploads.push(at, bytes, pictures);
     }

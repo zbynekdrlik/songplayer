@@ -736,7 +736,7 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         match compositor.compose(&composition) {
             Ok(compose) => {
                 // #279 P0 / P3a: what crossed to the GPU, its sides by kind.
-                let cpu_sides = composition.uploads().len();
+                let cpu_sides = composition.cpu_sides();
                 self.out.record_compose(now, &compose, cpu_sides);
                 let fhd_draw_us = compositor.draw_us(TargetId::PRIMARY);
                 let at = elapsed_100ns(self.started, now);

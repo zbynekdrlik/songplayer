@@ -5,8 +5,9 @@
 //! The table is process-wide: every test uses playlist ids of its own
 //! (27_9xx), never another test's.
 
-use std::sync::Arc;
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use sp_core::config::{NdiSource, VideoDecode};
@@ -15,24 +16,31 @@ use sp_gpu::RingStats;
 
 use super::{
     BLOCKED_NDI_CPU, Lease, Leased, PRODUCER_IDLE_RELEASE, PRODUCER_REBUILD_BACKOFF, PipelineGpu,
-    Producer, Resident, ResidentLog, RingStatus, note_song_path, pipelines, resident_log,
+    Pipelines, Producer, Resident, ResidentLog, RingStatus, note_song_path, pipelines,
+    precondition_changed, resident_log, retires, song_ended,
 };
 use crate::playback::video_decode::HwDecodeSetting;
 
-/// A producer whose ring dies when the test says.
+/// A producer whose ring dies when the test says; retired like
+/// `ProducerGpu` (a retired one is lost to the next song too).
 #[derive(Debug, Default)]
 struct Fake {
     lost: AtomicBool,
+    retired: AtomicBool,
     stats: RingStats,
 }
 
 impl Producer for Fake {
     fn lost(&self) -> bool {
-        self.lost.load(Ordering::Relaxed)
+        self.lost.load(Ordering::Relaxed) || self.retired.load(Ordering::Relaxed)
     }
 
     fn ring(&self) -> RingStats {
         self.stats
+    }
+
+    fn retire(&self) {
+        self.retired.store(true, Ordering::Relaxed);
     }
 }
 
@@ -347,4 +355,76 @@ fn a_pipeline_opens_its_songs_in_the_base_mode_until_the_precondition_holds() {
             .all(|row| row.playlist_id != 27_905),
         "a pipeline that ended leaves no row"
     );
+}
+
+/// Review round 1: when `gpu` stops taking effect (switched off, NDI back
+/// on the canvas) the producers are retired; any other change retires none.
+#[test]
+fn the_precondition_retires_only_when_gpu_stops_taking_effect() {
+    let blocked = Resident::Blocked(BLOCKED_NDI_CPU);
+    assert!(retires(Resident::On, Resident::Off));
+    assert!(retires(Resident::On, blocked));
+    for (before, after) in [
+        (Resident::On, Resident::On),
+        (Resident::Off, Resident::On),
+        (blocked, Resident::On),
+        (Resident::Off, blocked),
+        (blocked, Resident::Off),
+        (Resident::Off, Resident::Off),
+    ] {
+        assert!(!retires(before, after), "{before:?} -> {after:?}");
+    }
+}
+
+/// Review round 1: a change that stops `gpu` retires every LIVE producer
+/// of the table (a song playing on one goes on in software from its next
+/// picture); one whose pipeline let it go is not counted.
+#[test]
+fn a_change_that_stops_gpu_retires_every_live_producer() {
+    let table = Pipelines(Mutex::new(BTreeMap::new()));
+    let (a, b) = (Arc::new(Fake::default()), Arc::new(Fake::default()));
+    table.set_producer(1, Some(&a));
+    table.set_producer(2, Some(&b));
+    let gone = Arc::new(Fake::default());
+    table.set_producer(3, Some(&gone));
+    drop(gone);
+    table.set_gpu_decoding(4, true);
+    let blocked = Resident::Blocked(BLOCKED_NDI_CPU);
+    assert_eq!(precondition_changed(&table, Resident::Off, Resident::On), 0);
+    assert!(!a.lost() && !b.lost(), "a change into gpu retires nothing");
+    assert_eq!(precondition_changed(&table, Resident::On, blocked), 2);
+    assert!(a.retired.load(Ordering::Relaxed) && b.retired.load(Ordering::Relaxed));
+    assert!(a.lost(), "a retired producer takes no more songs");
+    let fresh = Arc::new(Fake::default());
+    table.set_producer(1, Some(&fresh));
+    assert_eq!(precondition_changed(&table, blocked, Resident::Off), 0);
+    assert!(!fresh.lost(), "no change out of gpu: nothing retired");
+    assert_eq!(precondition_changed(&table, Resident::On, Resident::Off), 2);
+    assert!(fresh.lost());
+}
+
+/// Review round 1: a retired producer is lost to the pipeline's next song
+/// (dropped, the backoff), like a dead one.
+#[test]
+fn a_retired_producer_is_dropped_at_the_next_open() {
+    let t0 = Instant::now();
+    let mut lease = Lease::<Fake>::default();
+    let Leased::Made(producer) = lease.take(t0, made) else {
+        panic!("made");
+    };
+    producer.retire();
+    let next = lease.take(t0 + Duration::from_secs(1), never);
+    assert!(matches!(next, Leased::Lost), "{next:?}");
+    assert!(lease.held().is_none());
+}
+
+/// Review round 1: a song's end leaves its row decoding nothing.
+#[test]
+fn a_songs_end_clears_its_row() {
+    let id = 27_906;
+    pipelines().set_gpu_decoding(id, true);
+    assert!(pipelines().gpu_decoding(id));
+    song_ended(id);
+    assert!(!pipelines().gpu_decoding(id), "the song is over");
+    pipelines().forget(id);
 }

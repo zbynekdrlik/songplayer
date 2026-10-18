@@ -12,6 +12,26 @@ use crate::error::DecoderError;
 // Mode and path
 // ---------------------------------------------------------------------------
 
+/// #279 P3a review round 1: GPU-resident modes compare by their producer
+/// (on Windows, where one can be made: WARP producers).
+#[cfg(windows)]
+#[test]
+fn gpu_resident_modes_compare_by_their_producer() {
+    use std::sync::Arc;
+    let a = Arc::new(sp_gpu::ProducerGpu::new_warp().expect("a WARP producer"));
+    let b = Arc::new(sp_gpu::ProducerGpu::new_warp().expect("another"));
+    let on_a = DecodeMode::GpuResident(Arc::clone(&a));
+    assert_eq!(
+        on_a,
+        DecodeMode::GpuResident(Arc::clone(&a)),
+        "the same producer"
+    );
+    assert_ne!(on_a, DecodeMode::GpuResident(b), "another producer");
+    assert_ne!(on_a, DecodeMode::Hardware);
+    assert!(on_a.on_gpu());
+    assert_eq!(on_a.as_str(), "gpu_resident");
+}
+
 #[test]
 fn the_mode_is_software_unless_hardware_is_asked_for() {
     assert_eq!(DecodeMode::default(), DecodeMode::Software);

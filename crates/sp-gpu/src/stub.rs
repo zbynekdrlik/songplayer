@@ -303,6 +303,18 @@ impl ProducerGpu {
     pub fn ring_dead(&self) -> bool {
         match self.0 {}
     }
+
+    /// Never runs (no value exists). `mutants::skip`: as `adapter`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn retire(&self) {
+        match self.0 {}
+    }
+
+    /// Never runs (no value exists). `mutants::skip`: as `adapter`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn retired(&self) -> bool {
+        match self.0 {}
+    }
 }
 
 #[cfg(test)]

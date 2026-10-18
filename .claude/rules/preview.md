@@ -568,7 +568,9 @@ hands the producer ring frames, not bytes:
   the stream keeps its sound;
 - a GPU picture while a viewer watches (`DecodeTaps::wants_picture`) is a
   counted miss (`preview_misses`, the rate-limited WARN); with nobody
-  watching nothing is counted.
+  watching nothing is counted. `wants_picture` reads the live stream's
+  viewers only: the #15 JPEG thumbnail tap gets no picture of a GPU frame
+  either, and its polls are not counted as misses.
 
 The encoder would starve on such a song, so the Player does not offer a
 preview: `sp_core::player_view::gpu_preview(slot, gpu_decoded)` turns

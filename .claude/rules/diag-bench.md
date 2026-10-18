@@ -217,8 +217,8 @@ failed`).
 **Logs:**
 
 - one INFO `decode-bench: start` (file, bytes, `max_wall_s`, priority,
-  `hw`), logged BEFORE the open, so a run that wedges inside it still names
-  its file;
+  `mode` = `software` / `hardware` / `gpu_resident`, `max_height`), logged
+  BEFORE the open, so a run that wedges inside it still names its file;
 - at the end, one INFO `decode-bench: done: <summary>` (size, codec, fps,
   `open_ms`, the stats, the gate; a `hw` run adds `hw=requested
   decode_path=… adapter=… hw_fallback=…`, a software run's line is S0's),

@@ -64,8 +64,10 @@ pub struct RingStats {
     /// The ring is dead ([`GpuError::RingDead`]).
     pub dead: bool,
     /// #279 P3a: the 99th percentile of the last [`COPY_WINDOW`] copies
-    /// into a slot, µs (the producer's `copy_from`: the slot's key, the
-    /// copy, its flush, the release); `None` before the first.
+    /// into a slot, µs (the producer's whole `copy_from`: the ring's lock, a
+    /// wait for a free slot (each also counted in `waits`), a new slot's
+    /// texture, the key, the copy, its flush, the release); `None` before
+    /// the first.
     pub copy_us_p99: Option<u64>,
     /// #279 P3a: the VRAM the slots' textures hold, bytes.
     pub vram_bytes: u64,

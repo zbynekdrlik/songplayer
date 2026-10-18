@@ -506,8 +506,11 @@ rounds 1–2):
 
 Design: #279 comment 6244390810 (`Design-by: main`), plan
 `docs/superpowers/plans/2026-10-16-gpu-video-path.md` §5.1-§5.3,
-§5.8-§5.11, §9 P3a. With `video_decode` = `software` (the default) nothing
-here runs, and the `video_hw_decode` paths above are as they were.
+§5.8-§5.11, §9 P3a. With `video_decode` = `software` (the default) the
+`video_hw_decode` paths above are as they were; what still runs at the
+default is the producer's per-song INFO (`path=ram`), the table's row, and
+MAX's standby black composed as Black (`gpu-max.md`: the same pixels, fewer
+uploads on black boundaries).
 
 - **The setting** `video_decode` (`sp_core::config::video_decode`: exactly
   `gpu`, trimmed, is `VideoDecode::Gpu`, anything else software) is read
@@ -521,6 +524,26 @@ here runs, and the `video_hw_decode` paths above are as they were.
   - `status.video_decode.gpu_resident_blocked` reads `ndi_source_cpu`;
   - each change into the block logs one WARN (`resident_log`), and on / off
     one INFO.
+- **When `gpu` stops taking effect** (switched off, or `program_ndi_source`
+  back to `cpu`; review round 1), the settings task retires every live
+  producer (`gpu_resident::precondition_changed` →
+  `Pipelines::retire_producers` → `ProducerGpu::retire`): a song playing
+  GPU-resident goes on in software from its next picture (the reader's
+  `retired()` check, a decode error, `FallbackGate`'s reopen), instead of
+  showing black on NDI for the rest of it. A retired producer is lost to
+  the next take (dropped, the 30 s backoff). Known bounds:
+  - the two settings tasks (this one and MAX's `program_max_phase.rs`,
+    which switches NDI) each read `program_ndi_source` every 5 s, so NDI
+    can be on the canvas up to ~5 s before the retire (black NDI for a
+    GPU-resident song meanwhile, plus the frames already queued);
+  - an AUTOMATIC NDI fall back to the canvas (a stale readback, P1b's
+    `ReturnGate`) changes no setting: a GPU-resident song keeps decoding
+    into its ring and NDI shows its pictures black until the readback
+    returns (the compositor that stopped reading back is MAX's too).
+    P3b's CPU path for a ring frame is what lifts it.
+- **The decode cap** (review round 1): `gpu` in effect takes the hardware
+  decode's cap (`max_resolution` automatic = 2160) even with
+  `video_hw_decode` off (`load_settings`: `hw || Resident::On`).
 - **The producer** (`sp_gpu::ProducerGpu`, `gpu-max.md`) is ONE
   `VideoDevice` and the pipeline's 20-slot `PictureRing` on it, one per
   PIPELINE (`gpu_resident::PipelineGpu`, a `Lease`, in the pipeline's
@@ -576,6 +599,17 @@ here runs, and the `video_hw_decode` paths above are as they were.
     {slots, in_use, waits, full, dead, copy_us_p99, vram_mb}}]`;
   - the `/api/v1/ndi/health` row's `gpu_decoded` feeds the Player's
     preview slot (`preview.md`).
+- **The ring's 20 slots** (`RING_CAPACITY`, P2's sizing kept by P3a's
+  design) hold, from ONE pipeline: the 12 queued frames, the producer's
+  frame waiting to be pushed, the decoder's `frame_before_end`, the held
+  step, the pacer's shown / next frame, the handoff's 2, and the bus's
+  pending reorder entries and submit queue (`PROGRAM_PENDING_BOUND` 16,
+  `PROGRAM_QUEUE_BOUND` 10, normally 1-3), MAX's queue and the
+  compositor's open slots. The steady state is ~16-18; a catch-up or a
+  bus stall can reach 20, and a copy then waits `RING_WAIT` (100 ms,
+  counted in `waits`) and, past it, is a decode error: the song goes on in
+  software (`full` +1). The box gate reads `ring.full` (+0 required) and
+  reports `waits`.
 - **Tests:**
   - sp-decoder `tests/mf_gpu_resident.rs` (Windows, WARP): a
     decoder-like 2-slice 640×368 NV12 array on the producer's device, its
@@ -596,8 +630,14 @@ here runs, and the `video_hw_decode` paths above are as they were.
   - then `program_ndi_source` = `gpu` and `video_decode` = `gpu` with a
     hardware-decodable song on program: `GET /api/v1/program`
     `gpu.gpu_sides_per_s` at the program's rate and `max.upload_mb_s` 0,
-    `status.video_decode.pipelines[].ring.waits` +0 (20 slots against the
-    12 queued plus the pacer's and the bus's holds);
+    `status.video_decode.pipelines[].ring.full` +0 (`waits` reported: 20
+    slots against the holds above), and the sum of every
+    `pipelines[].ring.vram_mb` (one producer per GPU-resident pipeline, ≤
+    249 MB at 4K each, until 10 min idle; P4 adds the VRAM guard);
+  - while `video_decode` = `gpu` is set on SNV, `post-deploy-preview.spec.ts`
+    and `post-deploy-owner-path.spec.ts` find no live preview on a
+    GPU-decoded song (none before P3b): no deploy during the A/B window,
+    and switch it back before one;
   - the wall measured before and after, an hour on each side
     (`gpu-max.md`, "Judging a deploy on the wall").
 

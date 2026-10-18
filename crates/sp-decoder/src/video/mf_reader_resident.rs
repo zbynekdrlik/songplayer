@@ -38,6 +38,13 @@ impl MediaFoundationVideoReader {
         let (width, height) = visible_size(frame_size(&media_type), self.reference);
         let scaled = self.scaled_from.is_some();
         match self.hw.as_ref().and_then(HwSession::producer) {
+            // `video_decode` = gpu stopped taking effect while the song
+            // played: a decode error, so the reader goes on in software from
+            // this picture (`FallbackGate`).
+            Some(producer) if producer.retired() => Err(DecoderError::BufferLock(
+                "GPU ring: the producer was retired (video_decode=gpu no longer takes effect)"
+                    .into(),
+            )),
             Some(producer) => {
                 let (frame, path) = surface.copy_into(producer, width, height, scaled)?;
                 // A chroma row of a picture this wide fits a `u32` (≤ 16384).
