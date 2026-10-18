@@ -61,11 +61,6 @@ impl HwSession {
             HwDevice::Producer(producer) if producer.ring_dead() => {
                 return Err("the producer's ring is dead (its device was lost)".into());
             }
-            HwDevice::Producer(producer) if producer.retired() => {
-                return Err(
-                    "the producer was retired (video_decode=gpu no longer takes effect)".into(),
-                );
-            }
             HwDevice::Producer(producer) => SessionDevice::Producer(producer),
         };
         let d3d = match &device {

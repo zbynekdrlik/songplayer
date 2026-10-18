@@ -292,8 +292,8 @@ rounds 1–2):
   own decoder. CI pins the software one: `tests/mf_decode_cap.rs`
   `a_reopen_after_a_decode_error_keeps_the_decode_cap`.
 - **Which readers take the cap.** The paced producer and the decode bench
-  (the cap in force, computed with the SETTING's `video_hw_decode`, not
-  the bench request's `hw`: the bench measures what playback runs; set
+  (the cap in force, computed with the SETTING's `video_hw_decode` — #279
+  P3a: or `video_decode` = gpu in effect —, not the bench request's `hw`: the bench measures what playback runs; set
   the setting back to automatic to bench a 4K sample at 4K; the report
   carries `max_height` and `scaled_from`). The video upgrade's facts and
   the repair's codec open with `None`: they measure the FILE (a 4K file
@@ -495,10 +495,12 @@ rounds 1–2):
   The setting stays `true` on SNV.
 - `GET /api/v1/status` → `video_decode {hw_decode, hw_requested,
   gpu_decodes, mf_software, open_fallbacks, mid_stream_fallbacks,
-  path_changes, last_fallback, max_height, scaled_opens, scale_refusals}`
-  (the setting + the decode cap (#282) + the counters; counts of FILES since the
-  process started, not live state; `#[serde(default)]`, so a missing key
-  reads as zero).
+  path_changes, last_fallback, max_height, scaled_opens, scale_refusals,
+  video_decode, gpu_resident_opens, gpu_resident_blocked, pipelines}`
+  (the setting + the decode cap (#282) + the counters + #279 P3a's
+  GPU-resident fields, "GPU-resident decode" below; counts of FILES since
+  the process started, not live state; `#[serde(default)]`, so a missing
+  key reads as zero).
 - `POST /api/v1/diag/decode-bench` takes `"hw": true` and reports
   `decode_path` / `adapter` / `hw_fallback` (`diag-bench.md`).
 
@@ -525,17 +527,25 @@ uploads on black boundaries).
   - each change into the block logs one WARN (`resident_log`), and on / off
     one INFO.
 - **When `gpu` stops taking effect** (switched off, or `program_ndi_source`
-  back to `cpu`; review round 1), the settings task retires every live
+  back to `cpu`; review rounds 1-2), the settings task retires every live
   producer (`gpu_resident::precondition_changed` →
   `Pipelines::retire_producers` → `ProducerGpu::retire`): a song playing
-  GPU-resident goes on in software from its next picture (the reader's
-  `retired()` check, a decode error, `FallbackGate`'s reopen), instead of
-  showing black on NDI for the rest of it. A retired producer is lost to
-  the next take (dropped, the 30 s backoff). Known bounds:
+  GPU-resident reads its pictures back from its next one, the GPU decoder
+  going on (`mf_reader_resident.rs`: a retired producer's surfaces take
+  the `Hardware` readback; no reopen, no gap, no software decode). With
+  NDI back on the canvas it would otherwise show black there for the rest
+  of the song. A retired producer still held at the next take is replaced
+  at once (its device is healthy: no backoff). Never a reopen in software
+  here: round 1 did that, and it froze the program with silence for up to
+  a GOP, then decoded the rest of the song in software, which this file
+  bans while SNV / PP play to a room. Known bounds:
   - the two settings tasks (this one and MAX's `program_max_phase.rs`,
-    which switches NDI) each read `program_ndi_source` every 5 s, so NDI
-    can be on the canvas up to ~5 s before the retire (black NDI for a
-    GPU-resident song meanwhile, plus the frames already queued);
+    which switches NDI) each read `program_ndi_source` every 5 s, so they
+    can disagree up to ~5 s either way: NDI on the canvas before the
+    retire (black NDI for a GPU-resident song meanwhile, plus the frames
+    already queued), or, when it goes to the GPU, a song opened
+    GPU-resident while NDI still reads the canvas (black NDI until MAX's
+    task switches it);
   - an AUTOMATIC NDI fall back to the canvas (a stale readback, P1b's
     `ReturnGate`) changes no setting: a GPU-resident song keeps decoding
     into its ring and NDI shows its pictures black until the readback
@@ -585,7 +595,8 @@ uploads on black boundaries).
   "GPU ring: …"`), so `FallbackGate` reopens the file in software once
   (`mid-stream: …`, and the paced producer's WARN that the pictures
   changed kind): a ring full past `RING_WAIT` (100 ms), a dead ring, a
-  refused picture, a lost producer device. A lost device kills the ring
+  refused picture, a lost producer device (a retired producer is no
+  failure: its surfaces are read back, above). A lost device kills the ring
   (`GpuError::removed`), so the pipeline's next song drops the producer and
   waits the 30 s backoff.
 - **sp-server** (`gpu_resident.rs`, `paced_producer.rs`):

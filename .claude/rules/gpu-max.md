@@ -2051,12 +2051,13 @@ the copy) is `video-decode.md` "GPU-resident decode".
     decoder can meet a removed device first (its read fails, the reader
     reopens in software and no copy runs), and the ring dies there then, so
     the pipeline's next song still builds a new producer;
-  - `retire()` / `retired()` (review round 1): the reader asks `retired()`
-    before each copy, so a retired producer's songs go on in software from
-    their next picture; its ring and the frames in it stay valid (the
-    compositor draws them to their last drop). sp-server retires every
-    producer when `video_decode` = `gpu` stops taking effect
-    (`video-decode.md`);
+  - `retire()` / `retired()` (review rounds 1-2): the reader asks
+    `retired()` before each copy, so a retired producer's songs read their
+    pictures back from their next one (the GPU decoder goes on: no reopen,
+    no gap); its ring and the frames in it stay valid (the compositor draws
+    them to their last drop). sp-server retires every producer when
+    `video_decode` = `gpu` stops taking effect and replaces a retired one
+    at the pipeline's next GPU-resident song (`video-decode.md`);
   - `stats()` reads the ring's core without the ring's lock; `adapter()`,
     `device()`.
 - **`RingStats`** adds `copy_us_p99` (`ring::p99`, nearest rank, over the

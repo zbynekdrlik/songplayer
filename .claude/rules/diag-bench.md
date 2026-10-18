@@ -105,9 +105,10 @@ failed`).
 - #282: it opens under the decode cap in force (`max_resolution`, the
   start line's `max_height`), as the producer does: a sample larger than
   the cap's 16:9 box is decoded scaled, and `width` / `height` report the
-  scaled size. The cap is computed with the SETTING's `video_hw_decode`,
-  not the request's `hw` (on a box with the setting off, automatic is
-  1440 even for a `"hw": true` run). Set `max_resolution` back to
+  scaled size. The cap is computed with the SETTING's `video_hw_decode`
+  (#279 P3a: or `video_decode` = gpu in effect), not the request's `hw`
+  (on a box with both off, automatic is 1440 even for a `"hw": true` or
+  `"resident": true` run). Set `max_resolution` back to
   automatic to measure a 4K sample at 4K (`video-decode.md` "The decode
   cap"). The report carries `max_height` (the cap the run opened under)
   and `scaled_from` (`[w, h]`, the stream's own size, when the run decoded

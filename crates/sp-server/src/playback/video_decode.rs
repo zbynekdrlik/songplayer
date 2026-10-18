@@ -48,7 +48,9 @@ use tokio::sync::broadcast;
 use tracing::{info, warn};
 
 use crate::downloader::format::max_resolution;
-use crate::playback::gpu_resident::{PipelineDecode, Resident, pipelines, precondition_changed};
+use crate::playback::gpu_resident::{
+    PipelineDecode, Pipelines, Resident, pipelines, precondition_changed,
+};
 
 /// How often the settings task re-reads `video_hw_decode` and
 /// `max_resolution` (the cadence of the other settings tasks: MAX, VBAN,
@@ -196,6 +198,16 @@ async fn load_settings(pool: &SqlitePool) -> Result<Stored, sqlx::Error> {
 /// is logged once and, when `gpu` stops taking effect, retires the
 /// producers (`gpu_resident::precondition_changed`).
 pub async fn apply_setting(pool: &SqlitePool, setting: &HwDecodeSetting) -> bool {
+    apply_setting_to(pool, setting, pipelines()).await
+}
+
+/// [`apply_setting`], retiring the producers of `table` (the process's, or
+/// a test's own).
+pub async fn apply_setting_to(
+    pool: &SqlitePool,
+    setting: &HwDecodeSetting,
+    table: &Pipelines,
+) -> bool {
     match load_settings(pool).await {
         Ok(stored) => {
             let before = setting.resident();
@@ -213,7 +225,7 @@ pub async fn apply_setting(pool: &SqlitePool, setting: &HwDecodeSetting) -> bool
                 );
             }
             let after = setting.resident();
-            precondition_changed(pipelines(), before, after);
+            precondition_changed(table, before, after);
             changed
         }
         Err(e) => {

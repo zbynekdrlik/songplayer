@@ -263,7 +263,9 @@ pub fn video_hw_decode(raw: Option<&str>) -> bool {
 /// GPU stays in VRAM, in its pipeline's picture ring (no readback, no
 /// upload); `software` (the default) = today's path, `video_hw_decode`
 /// choosing the decoder. The paced decode producer reads it when it opens
-/// a song, so a change applies from the next song.
+/// a song, so a change applies from the next song; when `gpu` stops taking
+/// effect a song playing GPU-resident reads its pictures back from its
+/// next one.
 pub const SETTING_VIDEO_DECODE: &str = "video_decode";
 
 /// #279 P3a: the two values of [`SETTING_VIDEO_DECODE`].

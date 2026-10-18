@@ -302,6 +302,22 @@ fn a_producer_copies_a_slice_into_its_ring_and_counts_it() {
     assert_eq!(producer.stats().in_use, 0, "the slot freed with its frame");
 }
 
+/// #279 P3a review round 2: a retired producer says so; its device is
+/// healthy, so its ring lives (`ring_dead` asks the device and finds it
+/// there); the reader decides to read its pictures back.
+#[test]
+fn a_retired_producer_says_so_and_its_ring_lives() {
+    let producer =
+        ProducerGpu::new_warp().unwrap_or_else(|e| panic!("WARP must make the producer: {e}"));
+    assert!(!producer.retired());
+    assert!(!producer.ring_dead(), "a healthy device: the ring lives");
+    producer.retire();
+    assert!(producer.retired());
+    assert!(!producer.ring_dead(), "retired, not dead");
+    let shown = format!("{producer:?}");
+    assert!(shown.contains("retired: true"), "{shown}");
+}
+
 /// #279 P3a: production's producer takes the adapter `pick_adapter`
 /// chooses, never WARP on its own: `windows-latest` has none (`NoAdapter`).
 #[test]

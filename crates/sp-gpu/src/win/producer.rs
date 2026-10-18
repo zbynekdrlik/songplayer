@@ -42,7 +42,8 @@ pub struct ProducerGpu {
     adapter: AdapterInfo,
     core: Arc<RingCore>,
     ring: Mutex<PictureRing>,
-    /// [`retire`](Self::retire)d: its songs leave it at their next picture.
+    /// [`retire`](Self::retire)d: its songs read their pictures back from
+    /// their next one.
     retired: AtomicBool,
 }
 
@@ -114,12 +115,13 @@ impl ProducerGpu {
         }
     }
 
-    /// #279 P3a: stop its copies: the songs decoding on it go on in
-    /// software from their next picture (the reader asks
-    /// [`retired`](Self::retired) before each copy). Its ring and the frames
-    /// in it stay valid: the compositor draws them to their last drop.
-    /// sp-server retires every producer when `video_decode` = `gpu` stops
-    /// taking effect.
+    /// #279 P3a: stop its copies: the songs decoding on it read their
+    /// pictures back from their next one, the GPU decoder going on (the
+    /// reader asks [`retired`](Self::retired) before each copy: no reopen,
+    /// no gap). Its ring and the frames in it stay valid: the compositor
+    /// draws them to their last drop. sp-server retires every producer when
+    /// `video_decode` = `gpu` stops taking effect, and replaces a retired
+    /// one at the pipeline's next GPU-resident song.
     pub fn retire(&self) {
         self.retired.store(true, Ordering::Relaxed);
     }

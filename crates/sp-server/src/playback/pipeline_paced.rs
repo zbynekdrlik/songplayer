@@ -388,6 +388,50 @@ fn producer_drain_wait(
     }
 }
 
+/// What a song's decode producer opens (`spawn_producer`).
+struct SongInput<'a> {
+    video_path: &'a std::path::Path,
+    audio_path: &'a std::path::Path,
+    start_position_ms: Option<u64>,
+    playlist_id: i64,
+}
+
+/// Spawn the song's decode producer (`run_decode_producer`) on its own
+/// decode thread: it owns the decoder on its STA thread and fills the
+/// bounded look-ahead queue. The bench's decode thread starts the same way
+/// (#223 S0); the producer reports each seek's real position (#217,
+/// `Seeked`).
+#[cfg_attr(test, mutants::skip)]
+fn spawn_producer(
+    song: &SongInput<'_>,
+    shared: &Arc<SharedQueue<QueuedFrame>>,
+    open_tx: crossbeam_channel::Sender<Result<(u64, f32, u64), String>>,
+    taps: &crate::playback::preview::preview_stream::DecodeTaps,
+    event_tx: &tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
+    mode: sp_decoder::DecodeMode,
+) -> std::thread::JoinHandle<()> {
+    let shared = shared.clone();
+    let taps = taps.clone();
+    let video_path = song.video_path.to_path_buf();
+    let audio_path = song.audio_path.to_path_buf();
+    let event_tx = event_tx.clone();
+    let (start_position_ms, playlist_id) = (song.start_position_ms, song.playlist_id);
+    spawn_decode_thread(format!("paced-decode-{playlist_id}"), move || {
+        run_decode_producer(
+            video_path,
+            audio_path,
+            start_position_ms,
+            shared,
+            open_tx,
+            taps,
+            playlist_id,
+            event_tx,
+            mode,
+        );
+    })
+    .expect("spawn paced decode producer thread")
+}
+
 /// Boundary-paced EMIT loop (#147 producer/consumer split). The command / event
 /// contract of the deleted SDK-clocked `decode_and_send`, but the cadence is the wall-clock grid
 /// and the decode happens on a dedicated producer thread ([`run_decode_producer`])
@@ -418,29 +462,13 @@ pub(crate) fn decode_and_send_paced(
     let (open_tx, open_rx) = crossbeam_channel::bounded::<Result<(u64, f32, u64), String>>(1);
     // #279 P3a: GPU-resident when `video_decode` = gpu takes effect.
     let mode = output.gpu().song_mode();
-    let producer = {
-        let shared = shared.clone();
-        let taps = taps.clone();
-        let video_path = video_path.to_path_buf();
-        let audio_path = audio_path.to_path_buf();
-        // #217: the producer reports each seek's real position (`Seeked`).
-        let event_tx = event_tx.clone();
-        // The bench's decode thread starts the same way (#223 S0).
-        spawn_decode_thread(format!("paced-decode-{playlist_id}"), move || {
-            run_decode_producer(
-                video_path,
-                audio_path,
-                start_position_ms,
-                shared,
-                open_tx,
-                taps,
-                playlist_id,
-                event_tx,
-                mode,
-            );
-        })
-        .expect("spawn paced decode producer thread")
+    let song = SongInput {
+        video_path,
+        audio_path,
+        start_position_ms,
+        playlist_id,
     };
+    let producer = spawn_producer(&song, &shared, open_tx, taps, event_tx, mode);
 
     // The pre-roll's standby black (#147 song-start hole): the SAME cached NV12
     // black as the idle fill.

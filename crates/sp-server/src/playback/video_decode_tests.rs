@@ -7,18 +7,21 @@
 //! touches the process value ([`global`]); every other test has its own.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use sp_core::config::{NdiSource, VideoDecode};
 use sp_decoder::{DecodeMode, HwDecodeStats};
+use sp_gpu::RingStats;
 use tokio::sync::broadcast;
 
 use super::{
-    HwDecodeSetting, VIDEO_DECODE_SETTINGS_POLL, VideoDecodeStatus, apply_setting, global,
-    load_hw_decode, load_max_height, run_settings_task, start, status, status_of,
+    HwDecodeSetting, VIDEO_DECODE_SETTINGS_POLL, VideoDecodeStatus, apply_setting,
+    apply_setting_to, global, load_hw_decode, load_max_height, run_settings_task, start, status,
+    status_of,
 };
 use crate::db::models::set_setting;
-use crate::playback::gpu_resident::{PipelineDecode, Resident, RingStatus};
+use crate::playback::gpu_resident::{PipelineDecode, Pipelines, Producer, Resident, RingStatus};
 
 async fn settings_pool() -> sqlx::SqlitePool {
     let pool = crate::db::create_memory_pool().await.unwrap();
@@ -445,4 +448,51 @@ async fn gpu_in_effect_takes_the_hardware_cap() {
     set_setting(&pool, "max_resolution", "1080").await.unwrap();
     apply_setting(&pool, &setting).await;
     assert_eq!(setting.max_height(), 1080, "a set cap holds");
+}
+
+/// A producer the settings task can retire (`gpu_resident::Producer`).
+#[derive(Default)]
+struct Retirable(AtomicBool);
+
+impl Producer for Retirable {
+    fn lost(&self) -> bool {
+        false
+    }
+
+    fn ring(&self) -> RingStats {
+        RingStats::default()
+    }
+
+    fn retire(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    fn retired(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
+}
+
+/// Review round 2: the settings task retires the producers when `gpu`
+/// stops taking effect (here NDI back on the canvas), never when it starts
+/// (a table of the test's own: the process's is untouched).
+#[tokio::test]
+async fn the_task_retires_the_producers_when_gpu_stops_taking_effect() {
+    let pool = settings_pool().await;
+    let setting = HwDecodeSetting::default();
+    let table = Pipelines::empty();
+    let producer = Arc::new(Retirable::default());
+    table.set_producer(1, Some(&producer));
+    set_setting(&pool, "video_decode", "gpu").await.unwrap();
+    set_setting(&pool, "program_ndi_source", "gpu")
+        .await
+        .unwrap();
+    assert!(apply_setting_to(&pool, &setting, &table).await);
+    assert_eq!(setting.resident(), Resident::On);
+    assert!(!producer.retired(), "gpu taking effect retires nothing");
+    set_setting(&pool, "program_ndi_source", "cpu")
+        .await
+        .unwrap();
+    assert!(apply_setting_to(&pool, &setting, &table).await);
+    assert_eq!(setting.resident(), Resident::Blocked("ndi_source_cpu"));
+    assert!(producer.retired(), "NDI back on the canvas: retired");
 }

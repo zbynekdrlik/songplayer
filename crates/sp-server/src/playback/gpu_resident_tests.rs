@@ -5,9 +5,8 @@
 //! The table is process-wide: every test uses playlist ids of its own
 //! (27_9xx), never another test's.
 
-use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use sp_core::config::{NdiSource, VideoDecode};
@@ -21,8 +20,8 @@ use super::{
 };
 use crate::playback::video_decode::HwDecodeSetting;
 
-/// A producer whose ring dies when the test says; retired like
-/// `ProducerGpu` (a retired one is lost to the next song too).
+/// A producer whose ring dies when the test says, retired like
+/// `ProducerGpu`.
 #[derive(Debug, Default)]
 struct Fake {
     lost: AtomicBool,
@@ -32,7 +31,7 @@ struct Fake {
 
 impl Producer for Fake {
     fn lost(&self) -> bool {
-        self.lost.load(Ordering::Relaxed) || self.retired.load(Ordering::Relaxed)
+        self.lost.load(Ordering::Relaxed)
     }
 
     fn ring(&self) -> RingStats {
@@ -41,6 +40,10 @@ impl Producer for Fake {
 
     fn retire(&self) {
         self.retired.store(true, Ordering::Relaxed);
+    }
+
+    fn retired(&self) -> bool {
+        self.retired.load(Ordering::Relaxed)
     }
 }
 
@@ -381,7 +384,7 @@ fn the_precondition_retires_only_when_gpu_stops_taking_effect() {
 /// picture); one whose pipeline let it go is not counted.
 #[test]
 fn a_change_that_stops_gpu_retires_every_live_producer() {
-    let table = Pipelines(Mutex::new(BTreeMap::new()));
+    let table = Pipelines::empty();
     let (a, b) = (Arc::new(Fake::default()), Arc::new(Fake::default()));
     table.set_producer(1, Some(&a));
     table.set_producer(2, Some(&b));
@@ -391,37 +394,48 @@ fn a_change_that_stops_gpu_retires_every_live_producer() {
     table.set_gpu_decoding(4, true);
     let blocked = Resident::Blocked(BLOCKED_NDI_CPU);
     assert_eq!(precondition_changed(&table, Resident::Off, Resident::On), 0);
-    assert!(!a.lost() && !b.lost(), "a change into gpu retires nothing");
+    assert!(
+        !a.retired() && !b.retired(),
+        "a change into gpu retires nothing"
+    );
     assert_eq!(precondition_changed(&table, Resident::On, blocked), 2);
-    assert!(a.retired.load(Ordering::Relaxed) && b.retired.load(Ordering::Relaxed));
-    assert!(a.lost(), "a retired producer takes no more songs");
+    assert!(a.retired() && b.retired());
+    assert!(!a.lost(), "retired, not dead: its ring lives");
     let fresh = Arc::new(Fake::default());
     table.set_producer(1, Some(&fresh));
     assert_eq!(precondition_changed(&table, blocked, Resident::Off), 0);
-    assert!(!fresh.lost(), "no change out of gpu: nothing retired");
+    assert!(!fresh.retired(), "no change out of gpu: nothing retired");
     assert_eq!(precondition_changed(&table, Resident::On, Resident::Off), 2);
-    assert!(fresh.lost());
+    assert!(fresh.retired());
 }
 
-/// Review round 1: a retired producer is lost to the pipeline's next song
-/// (dropped, the backoff), like a dead one.
+/// Review round 2: a retired producer still held at the next open (`gpu`
+/// took effect again before a song opened) is replaced at once: its device
+/// is healthy, so no backoff and no "lost" WARN.
 #[test]
-fn a_retired_producer_is_dropped_at_the_next_open() {
+fn a_retired_producer_is_replaced_at_the_next_open_at_once() {
     let t0 = Instant::now();
     let mut lease = Lease::<Fake>::default();
-    let Leased::Made(producer) = lease.take(t0, made) else {
+    let Leased::Made(old) = lease.take(t0, made) else {
         panic!("made");
     };
-    producer.retire();
-    let next = lease.take(t0 + Duration::from_secs(1), never);
-    assert!(matches!(next, Leased::Lost), "{next:?}");
-    assert!(lease.held().is_none());
+    old.retire();
+    let next = lease.take(t0 + Duration::from_secs(1), made);
+    let Leased::Made(new) = &next else {
+        panic!("a new producer at once: {next:?}");
+    };
+    assert!(!Arc::ptr_eq(&old, new), "another producer");
+    let later = lease.take(t0 + Duration::from_secs(2), never);
+    assert!(
+        matches!(later, Leased::Kept(_)),
+        "the new one kept: {later:?}"
+    );
 }
 
 /// Review round 1: a song's end leaves its row decoding nothing.
 #[test]
 fn a_songs_end_clears_its_row() {
-    let id = 27_906;
+    let id = 27_910;
     pipelines().set_gpu_decoding(id, true);
     assert!(pipelines().gpu_decoding(id));
     song_ended(id);

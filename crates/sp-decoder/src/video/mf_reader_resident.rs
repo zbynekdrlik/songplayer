@@ -4,7 +4,10 @@
 //! into a slot of the pipeline's ring (`DxgiSurface::copy_into`, no bytes
 //! read back), else read back into a `frame_pool` buffer (#223 S3b,
 //! `DxgiSurface::read`). Either way at the size `hw_decode::visible_size`
-//! cuts it to.
+//! cuts it to. A RETIRED producer's surfaces (`video_decode` = gpu stopped
+//! taking effect while the song played) are read back from that picture
+//! on, like a `Hardware` reader's: the GPU decoder goes on, no reopen, no
+//! gap in the program.
 
 use sp_core::nv12::nv12_chroma_row;
 use sp_gpu::GpuFrame;
@@ -38,20 +41,14 @@ impl MediaFoundationVideoReader {
         let (width, height) = visible_size(frame_size(&media_type), self.reference);
         let scaled = self.scaled_from.is_some();
         match self.hw.as_ref().and_then(HwSession::producer) {
-            // `video_decode` = gpu stopped taking effect while the song
-            // played: a decode error, so the reader goes on in software from
-            // this picture (`FallbackGate`).
-            Some(producer) if producer.retired() => Err(DecoderError::BufferLock(
-                "GPU ring: the producer was retired (video_decode=gpu no longer takes effect)"
-                    .into(),
-            )),
-            Some(producer) => {
+            Some(producer) if !producer.retired() => {
                 let (frame, path) = surface.copy_into(producer, width, height, scaled)?;
                 // A chroma row of a picture this wide fits a `u32` (≤ 16384).
                 let stride = nv12_chroma_row(width) as u32;
                 Ok((Vec::new(), width, height, stride, path, Some(frame)))
             }
-            None => {
+            // No producer (`Hardware`), or a retired one: read back.
+            _ => {
                 let picture = surface.read(width, height, scaled)?;
                 Ok((
                     picture.data,
