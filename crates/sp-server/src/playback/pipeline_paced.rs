@@ -802,5 +802,8 @@ pub(crate) fn decode_and_send_paced(
     // next push — so the join completes within ~one decode.
     shared.stop();
     let _ = producer.join();
+    // #279 P3a: the song is over, so its pictures lie nowhere (the producer
+    // is joined: no late frame of it can write the row after this).
+    crate::playback::gpu_resident::pipelines().set_gpu_decoding(playlist_id, false);
     result
 }

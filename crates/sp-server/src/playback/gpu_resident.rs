@@ -13,9 +13,13 @@
 //!   ([`resident_log`]: a WARN into a block).
 //! - **The producer lease** ([`Lease`], [`PipelineGpu`]): one producer
 //!   device and ring per pipeline (`sp_gpu::ProducerGpu`), made at the
-//!   pipeline's first GPU-resident open, kept across its songs, let go after
-//!   [`PRODUCER_IDLE_RELEASE`] (10 min) with no such open, and when the
-//!   pipeline ends (it lives in the pipeline's `PipelineOutput`). A producer
+//!   pipeline's first GPU-resident open, kept across its songs, let go
+//!   [`PRODUCER_IDLE_RELEASE`] (10 min) after the pipeline went idle with no
+//!   such open since (its idle fill's heartbeats measure it, so a long song
+//!   never counts as idle), and when the pipeline ends (it lives in the
+//!   pipeline's `PipelineOutput`); a song that opens while `gpu` does not
+//!   take effect lets it go at once (the switch off, or NDI back on the
+//!   canvas: nothing else would while songs keep playing). A producer
 //!   whose ring died (its device was lost, or a slot's key abandoned) is
 //!   dropped at the next open, and a new one is made only
 //!   [`PRODUCER_REBUILD_BACKOFF`] (30 s) later; a failed build waits the
@@ -43,8 +47,8 @@ use crate::playback::video_decode::HwDecodeSetting;
 /// waits for NDI `SP-program` to come from the GPU.
 pub const BLOCKED_NDI_CPU: &str = "ndi_source_cpu";
 
-/// A pipeline's producer is let go after this long with no GPU-resident
-/// open.
+/// A pipeline's producer is let go after this long idle (no song) with no
+/// GPU-resident open.
 pub const PRODUCER_IDLE_RELEASE: Duration = Duration::from_secs(600);
 
 /// After a lost producer device or a failed build, no new producer before
@@ -178,8 +182,9 @@ impl<T> Leased<T> {
 #[derive(Debug)]
 pub struct Lease<T> {
     held: Option<Arc<T>>,
-    /// The last GPU-resident open on the held producer.
-    last_open: Option<Instant>,
+    /// When the pipeline was first seen idle since the held producer's last
+    /// open ([`Lease::release_idle`]); an open clears it.
+    idle_since: Option<Instant>,
     /// No build before this.
     retry_at: Option<Instant>,
 }
@@ -188,7 +193,7 @@ impl<T> Default for Lease<T> {
     fn default() -> Self {
         Self {
             held: None,
-            last_open: None,
+            idle_since: None,
             retry_at: None,
         }
     }
@@ -202,7 +207,7 @@ impl<T: Producer> Lease<T> {
     pub fn take(&mut self, now: Instant, make: impl FnOnce() -> Result<T, String>) -> Leased<T> {
         if let Some(held) = &self.held {
             if !held.lost() {
-                self.last_open = Some(now);
+                self.idle_since = None;
                 return Leased::Kept(Arc::clone(held));
             }
             self.held = None;
@@ -220,7 +225,7 @@ impl<T: Producer> Lease<T> {
             Ok(producer) => {
                 let producer = Arc::new(producer);
                 self.held = Some(Arc::clone(&producer));
-                self.last_open = Some(now);
+                self.idle_since = None;
                 self.retry_at = None;
                 Leased::Made(producer)
             }
@@ -231,17 +236,31 @@ impl<T: Producer> Lease<T> {
         }
     }
 
-    /// Let go of the held producer once [`PRODUCER_IDLE_RELEASE`] passed
-    /// since its last open; whether it did.
+    /// The pipeline is idle at `now` (its idle fill asks at each
+    /// heartbeat): the first such call since the held producer's last open
+    /// starts the idle time, and the producer is let go once
+    /// [`PRODUCER_IDLE_RELEASE`] passed since; whether it was. A song never
+    /// calls it, so a song longer than 10 min keeps its producer for the
+    /// next one.
     pub fn release_idle(&mut self, now: Instant) -> bool {
-        let idle = self
-            .last_open
-            .is_some_and(|at| now.saturating_duration_since(at) >= PRODUCER_IDLE_RELEASE);
-        if idle && self.held.is_some() {
+        if self.held.is_none() {
+            return false;
+        }
+        let since = *self.idle_since.get_or_insert(now);
+        if now.saturating_duration_since(since) >= PRODUCER_IDLE_RELEASE {
             self.held = None;
+            self.idle_since = None;
             return true;
         }
         false
+    }
+
+    /// Let go of the held producer now (a song opened with the
+    /// precondition off); whether one was held. No backoff follows: the
+    /// next GPU-resident open makes one at once.
+    pub fn release(&mut self) -> bool {
+        self.idle_since = None;
+        self.held.take().is_some()
     }
 
     /// The producer held now.
@@ -289,6 +308,16 @@ impl PipelineGpu {
     ) -> DecodeMode {
         let base = setting.mode();
         if setting.resident() != Resident::On {
+            // The producer is for GPU-resident songs: one opened otherwise
+            // lets it go, or it would stay while songs keep playing.
+            if self.lease.release() {
+                info!(
+                    playlist_id = self.playlist_id,
+                    "gpu resident: the producer device let go - video_decode=gpu does not take \
+                     effect (#279 P3a)"
+                );
+                pipelines().set_producer::<ProducerGpu>(self.playlist_id, None);
+            }
             return base;
         }
         let leased = self.lease.take(now, make);
@@ -300,8 +329,11 @@ impl PipelineGpu {
         }
     }
 
-    /// Let go of the producer when it was idle long enough
-    /// ([`Lease::release_idle`]); the idle fill asks at its heartbeats.
+    /// The pipeline is idle at `now`: let go of the producer once it was
+    /// idle long enough ([`Lease::release_idle`]); the idle fill asks at its
+    /// heartbeats. Glue: off Windows no `ProducerGpu` can be made, so no
+    /// Linux test can hold one here; the decision is [`Lease::release_idle`]'s.
+    #[cfg_attr(test, mutants::skip)]
     pub fn release_idle(&mut self, now: Instant) {
         if self.lease.release_idle(now) {
             info!(

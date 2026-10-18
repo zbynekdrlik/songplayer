@@ -154,32 +154,61 @@ fn a_failed_build_waits_the_backoff_then_tries_again() {
 }
 
 #[test]
-fn an_idle_producer_is_let_go_after_ten_minutes_with_no_open() {
+fn an_idle_producer_is_let_go_ten_minutes_after_the_pipeline_went_idle() {
     assert_eq!(PRODUCER_IDLE_RELEASE, Duration::from_secs(600));
+    let min = |m: u64| Duration::from_secs(60 * m);
     let t0 = Instant::now();
     let mut lease = Lease::<Fake>::default();
-    assert!(
-        !lease.release_idle(t0 + PRODUCER_IDLE_RELEASE),
-        "nothing held"
-    );
+    assert!(!lease.release_idle(t0), "nothing held");
+    assert!(!lease.release_idle(t0 + min(30)), "still nothing held");
     let Leased::Made(_) = lease.take(t0, made) else {
         panic!("made");
     };
-    let reopen = t0 + Duration::from_secs(300);
-    assert!(matches!(lease.take(reopen, never), Leased::Kept(_)));
-    let almost = reopen + PRODUCER_IDLE_RELEASE - Duration::from_millis(1);
-    assert!(!lease.release_idle(almost), "an open 10 min ago keeps it");
+    // A 20 min song asks nothing; its end is the first idle heartbeat.
+    let idle = t0 + min(20);
+    assert!(!lease.release_idle(idle), "a long song is no idle time");
+    let almost = idle + PRODUCER_IDLE_RELEASE - Duration::from_millis(1);
+    assert!(!lease.release_idle(almost), "idle under 10 min keeps it");
     assert!(lease.held().is_some());
-    assert!(lease.release_idle(reopen + PRODUCER_IDLE_RELEASE), "let go");
+    assert!(lease.release_idle(idle + PRODUCER_IDLE_RELEASE), "let go");
     assert!(lease.held().is_none());
     assert!(
-        !lease.release_idle(reopen + 2 * PRODUCER_IDLE_RELEASE),
+        !lease.release_idle(idle + 2 * PRODUCER_IDLE_RELEASE),
         "once"
     );
-    let again = lease.take(reopen + 2 * PRODUCER_IDLE_RELEASE, made);
+    let again = idle + 2 * PRODUCER_IDLE_RELEASE;
     assert!(
-        matches!(again, Leased::Made(_)),
+        matches!(lease.take(again, made), Leased::Made(_)),
         "no backoff after a release"
+    );
+    // An open between two idle stretches starts the idle time again.
+    assert!(!lease.release_idle(again + min(1)), "idle from here");
+    assert!(matches!(lease.take(again + min(8), never), Leased::Kept(_)));
+    assert!(
+        !lease.release_idle(again + min(12)),
+        "idle again from here, 11 min after the first idle heartbeat"
+    );
+    assert!(!lease.release_idle(again + min(21)), "9 min idle");
+    assert!(lease.release_idle(again + min(22)), "10 min idle");
+}
+
+#[test]
+fn a_released_producer_is_made_again_at_once() {
+    let t0 = Instant::now();
+    let mut lease = Lease::<Fake>::default();
+    assert!(!lease.release(), "nothing held");
+    let Leased::Made(_) = lease.take(t0, made) else {
+        panic!("made");
+    };
+    assert!(!lease.release_idle(t0), "idle from here");
+    assert!(lease.release(), "a song opened with the precondition off");
+    assert!(lease.held().is_none());
+    assert!(!lease.release(), "once");
+    let again = lease.take(t0 + Duration::from_secs(1), made);
+    assert!(matches!(again, Leased::Made(_)), "no backoff: {again:?}");
+    assert!(
+        !lease.release_idle(t0 + PRODUCER_IDLE_RELEASE),
+        "the idle time starts afresh after a release"
     );
 }
 
