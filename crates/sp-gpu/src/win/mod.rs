@@ -17,6 +17,7 @@
 mod device;
 mod pipeline;
 mod probe;
+mod producer;
 mod receiver;
 mod ring;
 mod sides;
@@ -41,6 +42,7 @@ use windows::core::Interface;
 
 pub use device::adapters;
 pub use probe::{probe_gpu, probe_on_listed_adapter, probe_warp};
+pub use producer::ProducerGpu;
 pub use receiver::read_shared_texture;
 pub use ring::PictureRing;
 pub use spout_lock::{ListSentinel, mutex_holder, spout_list_holder};

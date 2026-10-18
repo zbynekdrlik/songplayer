@@ -25,6 +25,7 @@ use crate::adapter::AdapterInfo;
 use crate::composition::{Composition, Fit, Target};
 use crate::error::GpuError;
 use crate::probe::GpuProbe;
+use crate::ring::RingStats;
 use crate::spout::SharedTextureInfo;
 use crate::spout_lock::{LockHolder, SentinelEnd};
 use crate::spout_state::Registration;
@@ -271,13 +272,58 @@ pub fn probe_gpu() -> Result<GpuProbe, GpuError> {
     Err(GpuError::Unsupported)
 }
 
+/// #279 P3a: off Windows there is no producer device: [`ProducerGpu::new`]
+/// reports [`GpuError::Unsupported`]. The type has no values, so its
+/// methods never run; it is `Send + Sync`, like the Windows type (a
+/// pipeline's lease shares it with its songs' decode threads).
+#[derive(Debug)]
+pub struct ProducerGpu(Infallible);
+
+impl ProducerGpu {
+    /// [`GpuError::Unsupported`]: no Direct3D 11 off Windows.
+    pub fn new() -> Result<Self, GpuError> {
+        Err(GpuError::Unsupported)
+    }
+
+    /// Never runs (no value exists). `mutants::skip`: an uninhabited
+    /// receiver, so no test can call it.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn adapter(&self) -> &AdapterInfo {
+        match self.0 {}
+    }
+
+    /// Never runs (no value exists). `mutants::skip`: as `adapter`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn stats(&self) -> RingStats {
+        match self.0 {}
+    }
+
+    /// Never runs (no value exists). `mutants::skip`: as `adapter`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn ring_dead(&self) -> bool {
+        match self.0 {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        Compositor, ListSentinel, VblankTracker, probe_gpu, spout_list_holder, spout_sender_info,
-        spout_sender_names,
+        Compositor, ListSentinel, ProducerGpu, VblankTracker, probe_gpu, spout_list_holder,
+        spout_sender_info, spout_sender_names,
     };
     use crate::error::GpuError;
+
+    #[test]
+    fn off_windows_no_producer_device_can_be_built() {
+        assert_eq!(ProducerGpu::new().unwrap_err(), GpuError::Unsupported);
+    }
+
+    /// A pipeline's lease shares its producer across threads (#279 P3a).
+    #[test]
+    fn the_producer_type_is_send_and_sync_like_the_windows_one() {
+        fn shared<T: Send + Sync>() {}
+        shared::<ProducerGpu>();
+    }
 
     #[test]
     fn off_windows_the_gpu_cannot_be_probed() {

@@ -16,6 +16,10 @@
 //!   again once let go; a full ring waits its bound, then refuses; a new
 //!   size is written over a free slot of the other, made again.
 //!
+//! #279 P3a: `ProducerGpu` (a pipeline's producer device and ring) copies
+//! a decoder-like slice into its ring, times and counts it, and its frame
+//! is drawn in place; `ProducerGpu::new` takes the picked adapter or none.
+//!
 //! P0's probe proved NV12 sharing by NT handle + keyed mutex on two WARP
 //! devices (`gpu_resident_ok`, #279 comment 6217311216). Windows only: a
 //! refusal FAILS here, nothing is skipped.
@@ -30,7 +34,7 @@ use std::io::Write;
 use common::{assert_matches_reference_in, pattern, picture, warp_fhd};
 use sp_gpu::{
     ComposeStats, Composition, Compositor, FHD_HEIGHT, FHD_TARGET, FHD_WIDTH, GpuError, GpuFrame,
-    PictureRing, RING_WAIT, Side,
+    PictureRing, ProducerGpu, RING_WAIT, Side,
 };
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_WARP, D3D_FEATURE_LEVEL_11_0};
@@ -252,6 +256,61 @@ fn a_slot_is_copied_out_of_a_slice_of_a_decoder_like_texture_array() {
         FHD,
         "slice 1 of a 2-slice 640x368 array, its 640x360 box",
     );
+}
+
+/// #279 P3a: the producer's own copy path (what sp-decoder's GPU-resident
+/// reader calls per picture): slice 1 of a decoder-like 2-slice array made
+/// on the producer device, into a ring slot, timed and counted, then drawn
+/// in place on the compositor's device within S1a's reference.
+#[test]
+fn a_producer_copies_a_slice_into_its_ring_and_counts_it() {
+    let producer =
+        ProducerGpu::new_warp().unwrap_or_else(|e| panic!("WARP must make the producer: {e}"));
+    let (picture_size, surface_size) = ((640, 360), (640, 368));
+    let pictures: Vec<(u32, Vec<u8>)> = [5, 90]
+        .into_iter()
+        .map(|seed| pattern(picture_size.0, picture_size.1, seed))
+        .collect();
+    let slices: Vec<Vec<u8>> = pictures
+        .iter()
+        .map(|(stride, data)| surface(picture_size, surface_size, (*stride, &data[..])))
+        .collect();
+    let array = texture(producer.device(), DXGI_FORMAT_NV12, surface_size, &slices);
+    let frame = producer
+        .copy_from(&array, 1, picture_size)
+        .unwrap_or_else(|e| panic!("the producer's copy of slice 1: {e}"));
+    let stats = producer.stats();
+    log(format!(
+        "a producer's copy on WARP: {stats:?} ({producer:?})"
+    ));
+    assert_eq!((stats.slots, stats.in_use, stats.waits), (1, 1, 0));
+    assert!(stats.copy_us_p99.is_some(), "the copy was timed");
+    assert_eq!(stats.vram_bytes, 640 * 360 * 3 / 2, "one 640x360 NV12 slot");
+    assert!(!producer.ring_dead());
+    let mut compositor = warp_fhd();
+    let (drawn, bgra) = compose(&mut compositor, &Composition::Picture(Side::Gpu(&frame)));
+    assert_eq!((drawn.gpu_sides, drawn.uploads), (1, 0), "sampled in place");
+    let (stride, data) = &pictures[1];
+    let cpu = Composition::Picture(picture(1, picture_size.0, picture_size.1, *stride, data));
+    assert_matches_reference_in(
+        &bgra,
+        &cpu.layers_on(FHD_TARGET),
+        FHD,
+        "the producer's slot of slice 1",
+    );
+    drop(frame);
+    assert_eq!(producer.stats().in_use, 0, "the slot freed with its frame");
+}
+
+/// #279 P3a: production's producer takes the adapter `pick_adapter`
+/// chooses, never WARP on its own: `windows-latest` has none (`NoAdapter`).
+#[test]
+fn the_production_producer_takes_the_picked_adapter_or_none() {
+    match ProducerGpu::new() {
+        Ok(producer) => log(format!("a producer on the picked adapter: {producer:?}")),
+        Err(GpuError::NoAdapter) => log("no adapter for a producer (no GPU)".to_string()),
+        Err(e) => panic!("the picked adapter or NoAdapter, never {e}"),
+    }
 }
 
 #[test]

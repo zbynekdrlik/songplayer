@@ -573,3 +573,17 @@ fn a_forgotten_slot_is_opened_again() {
     assert_eq!(keys.touch(key(1, 0, 1)), opened(Vec::new()));
     assert_eq!(keys.touch(key(1, 1, 1)), kept());
 }
+
+/// #279 P3a: a slot's texture holds its class's NV12 bytes in VRAM, and the
+/// ring's VRAM is every made slot's.
+#[test]
+fn the_vram_is_every_made_slots_nv12_bytes() {
+    assert_eq!(fhd().bytes(), 3_110_400);
+    assert_eq!(class(641, 359).bytes(), 642 * 360 * 3 / 2, "its even size");
+    let mut ring = RingState::new(4);
+    assert_eq!(ring.vram_bytes(), 0);
+    for c in [fhd(), fhd(), class(640, 360)] {
+        assert!(matches!(ring.take(c), Take::Create { .. }));
+    }
+    assert_eq!(ring.vram_bytes(), 2 * 3_110_400 + 345_600);
+}

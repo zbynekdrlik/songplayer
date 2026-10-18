@@ -98,6 +98,12 @@ impl PictureRing {
         self.core.stats()
     }
 
+    /// The ring's shared state (#279 P3a: `ProducerGpu` reads its counters
+    /// and records its copies with no lock on the ring itself).
+    pub(crate) fn core(&self) -> Arc<RingCore> {
+        Arc::clone(&self.core)
+    }
+
     /// Copy the top-left `visible` picture of subresource `subresource` of
     /// `source` (an NV12 texture of this device: a slice of a decoder's
     /// texture array, its index the decoder's subresource) into a free slot

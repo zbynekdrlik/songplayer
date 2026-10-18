@@ -290,3 +290,49 @@ fn a_kept_value_lives_as_long_as_the_frame() {
     );
     assert_eq!(core.stats().in_use, 0);
 }
+
+/// #279 P3a: the copy times' p99 is the nearest rank, `None` for none.
+#[test]
+fn the_copy_p99_is_the_nearest_rank_of_the_values() {
+    assert_eq!(super::p99(&[]), None);
+    assert_eq!(super::p99(&[7]), Some(7));
+    let hundred: Vec<u64> = (1..=100).rev().collect();
+    assert_eq!(super::p99(&hundred), Some(99), "the 99th of 100");
+    let two_hundred: Vec<u64> = (1..=200).collect();
+    assert_eq!(super::p99(&two_hundred), Some(198), "the 198th of 200");
+}
+
+/// #279 P3a: a ring's copies are timed into its counters, over the last
+/// `COPY_WINDOW` (older ones leave), and its slots' VRAM is counted.
+#[test]
+fn the_ring_counts_its_copies_and_its_vram() {
+    let core = RingCore::new(2);
+    assert_eq!(core.stats().copy_us_p99, None, "no copy yet");
+    for _ in 0..10 {
+        core.record_copy(1_000);
+    }
+    for _ in 0..super::COPY_WINDOW - 10 {
+        core.record_copy(3);
+    }
+    assert_eq!(core.copies_held(), super::COPY_WINDOW);
+    assert_eq!(
+        core.stats().copy_us_p99,
+        Some(1_000),
+        "the 10 slow copies are the window's top 1.1 %"
+    );
+    core.record_copy(3);
+    assert_eq!(core.copies_held(), super::COPY_WINDOW, "the oldest left");
+    for _ in 0..9 {
+        core.record_copy(3);
+    }
+    assert_eq!(core.stats().copy_us_p99, Some(3), "every slow copy left");
+    let class = SizeClass::of(RingFormat::Nv12, 1919, 1080);
+    let taken = core.take(class, NOW).expect("an empty slot");
+    assert_eq!(
+        core.stats().vram_bytes,
+        3_110_400,
+        "one 1920x1080 NV12 slot"
+    );
+    core.release(taken.slot, taken.alloc_gen);
+    assert_eq!(core.stats().vram_bytes, 3_110_400, "a freed slot keeps it");
+}
