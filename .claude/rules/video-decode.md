@@ -464,7 +464,9 @@ rounds 1–2):
   second
   error goes to the caller, as before S3b.
 - `HwCounters` (`sp_decoder::hw_counters()`, process-wide, every
-  `Hardware` open, the bench's too): `requested` (counted before the open,
+  `Hardware` and #279 P3a `GpuResident` open, the bench's too;
+  `resident_opens` counts the GPU-resident ones on the D3D path):
+  `requested` (counted before the open,
   so a file that then opens nowhere counts only there), `gpu_decodes`,
   `mf_software`, `open_fallbacks`, `mid_stream_fallbacks`,
   `path_changes`, `last_fallback`. A fall back is counted once the file
@@ -478,9 +480,10 @@ rounds 1–2):
   path passes D2, 1440p not slower).
 - `start` (lib.rs, before the pipelines) applies it to the process value
   (`global()`), then a task re-reads it every 5 s. The PACED producer
-  (`pipeline_paced.rs::run_decode_producer`) opens each song with
-  `global().mode()`: a change applies from the next song, a playing song
-  keeps its reader. (#221 lane 3 deleted the SDK-clocked path, which
+  (`pipeline_paced.rs::run_decode_producer`) opens each song in the mode
+  `PipelineGpu::song_mode()` gives (`global().mode()`, or #279 P3a
+  GPU-resident on the pipeline's producer): a change applies from the
+  next song, a playing song keeps its reader. (#221 lane 3 deleted the SDK-clocked path, which
   stayed software.)
 - Toggle: `PATCH /api/v1/settings {"video_hw_decode": "true"}`; no restart.
 - **Never switch SNV (or PP) to software decode while it plays to a room**
@@ -579,7 +582,9 @@ uploads on black boundaries).
   `HwCounters::resident_opens` (`status.video_decode.gpu_resident_opens`)
   counts the opens on the D3D path.
 - **Each picture** (`video/mf_reader_resident.rs::surface_picture`, a
-  child of `mf_reader.rs`):
+  child of `mf_reader.rs`, through `DxgiSurface::picture`; the choice is
+  the pure `hw_decode::SurfaceUse::of(resident, retired)`: the ring for a
+  GPU-resident reader whose producer is not retired, else the readback):
   - a DXGI surface is copied into a ring slot (`DxgiSurface::copy_into`
     → `ProducerGpu::copy_from(texture, subresource, visible size)`: the
     slot's key, `CopySubresourceRegion` of the slice's even box, flush,
@@ -621,15 +626,32 @@ uploads on black boundaries).
   counted in `waits`) and, past it, is a decode error: the song goes on in
   software (`full` +1). The box gate reads `ring.full` (+0 required) and
   reports `waits`.
+- **A ring killed while its producer's device is healthy** (review round
+  3): the COMPOSITOR losing its own device mid-compose leaves the slot
+  keys it held abandoned, and the producer's next write (or the rebuilt
+  compositor's draw) kills the ring (`ring_state`'s abandoned rule, left
+  to P4 since P2). The design's fall back then applies: a dead ring is a
+  decode error, the song reopens in SOFTWARE (up to a GOP of silence, the
+  rest of the song in software) and the next song waits the 30 s
+  backoff. Reading back on the same healthy decoder instead (round 2's
+  path for a retired producer) would be gapless, but changes a fall back
+  the design chose: a follow-up for the main session. The box gate reads
+  `gpu.abandoned` and `max.device_resets` against
+  `video_decode.mid_stream_fallbacks`.
 - **Tests:**
   - sp-decoder `tests/mf_gpu_resident.rs` (Windows, WARP): a
     decoder-like 2-slice 640×368 NV12 array on the producer's device, its
     slice 1 wrapped as a decoded sample (`copy_texture_as_decoded_sample`,
-    doc-hidden) and copied into the ring, draws like an upload of the same
-    picture (worst ≤ 1) and unlike slice 0; a picture larger than its
-    surface is refused before any slot is taken;
-  - `hw_decode_tests.rs` (the modes compare by kind, `resident_opens`);
-  - sp-gpu `tests/ring.rs` (a producer copies a slice and counts it);
+    doc-hidden, through the reader's own `DxgiSurface::picture`) and copied
+    into the ring, draws like an upload of the same picture (worst ≤ 1) and
+    unlike slice 0; a picture larger than its surface is refused before any
+    slot is taken; a RETIRED producer's slice is read back byte for byte,
+    with no slot taken;
+  - `hw_decode_tests.rs` (the modes compare by kind, `resident_opens`,
+    `SurfaceUse::of`; on Windows GPU-resident modes compare by their
+    producer);
+  - sp-gpu `tests/ring.rs` (a producer copies a slice and counts it; a
+    retired producer says so, its ring alive);
   - sp-server `gpu_resident_tests.rs`, `paced_producer_tests_gpu.rs`,
     `video_decode_tests.rs`.
 
@@ -645,6 +667,12 @@ uploads on black boundaries).
     slots against the holds above), and the sum of every
     `pipelines[].ring.vram_mb` (one producer per GPU-resident pipeline, ≤
     249 MB at 4K each, until 10 min idle; P4 adds the VRAM guard);
+  - the retire (review round 3): on a song playing GPU-resident, set
+    `program_ndi_source` = `cpu` mid-song. Expect one WARN `the song's
+    pictures changed kind mid-song (… or its producer retired)`,
+    `mid_stream_fallbacks` +0, `pipelines[].gpu_decoding` false, NDI
+    showing the picture within ~5 s of MAX's switch, and no loss in the
+    audio fault ledger for that song;
   - while `video_decode` = `gpu` is set on SNV, `post-deploy-preview.spec.ts`
     and `post-deploy-owner-path.spec.ts` find no live preview on a
     GPU-decoded song (none before P3b): no deploy during the A/B window,

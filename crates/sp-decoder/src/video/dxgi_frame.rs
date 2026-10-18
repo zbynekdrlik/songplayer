@@ -32,6 +32,7 @@
 
 use std::ffi::c_void;
 
+use sp_core::nv12::nv12_chroma_row;
 use sp_gpu::{GpuFrame, ProducerGpu};
 use windows::Win32::Foundation::FALSE;
 use windows::Win32::Graphics::Direct3D11::{D3D11_TEXTURE2D_DESC, ID3D11Texture2D};
@@ -42,7 +43,7 @@ use windows::Win32::Media::MediaFoundation::{
 use windows::core::Interface;
 
 use crate::error::DecoderError;
-use crate::hw_decode::{DecodePath, SurfaceLayout, mapped_from_scanline0};
+use crate::hw_decode::{DecodePath, SurfaceLayout, SurfaceUse, mapped_from_scanline0};
 
 /// A picture read back out of a DXGI surface.
 #[derive(Debug)]
@@ -54,6 +55,21 @@ pub struct DxgiPicture {
     /// Whether the texture was a decoder's output (`D3D11_BIND_DECODER`),
     /// or the video processor's of a scaled open (#282).
     pub path: DecodePath,
+}
+
+/// #279 P3a: a DXGI surface's picture as the reader hands it over
+/// (`DxgiSurface::picture`).
+#[derive(Debug)]
+pub struct Surfaced {
+    /// The packed NV12 bytes (read back); empty for a ring frame.
+    pub data: Vec<u8>,
+    /// Their row stride; for a ring frame one chroma row, as a CPU picture
+    /// of that size would have.
+    pub stride: u32,
+    /// As [`DxgiPicture::path`].
+    pub path: DecodePath,
+    /// The ring slot it was copied into; `None` when read back.
+    pub gpu: Option<GpuFrame>,
 }
 
 /// A sample's picture in a DXGI surface: its one buffer, as a media buffer
@@ -92,6 +108,40 @@ impl DxgiSurface {
         scaled: bool,
     ) -> Result<DxgiPicture, DecoderError> {
         read_picture(&self.buffer, &self.dxgi, width, height, scaled)
+    }
+
+    /// #279 P3a: the `width`×`height` picture as the reader hands it over:
+    /// copied into `producer`'s ring when [`SurfaceUse::of`] says so (a
+    /// GPU-resident reader whose producer is not retired), else read back.
+    pub(super) fn picture(
+        &self,
+        producer: Option<&ProducerGpu>,
+        width: u32,
+        height: u32,
+        scaled: bool,
+    ) -> Result<Surfaced, DecoderError> {
+        let retired = producer.is_some_and(|p| p.retired());
+        match (SurfaceUse::of(producer.is_some(), retired), producer) {
+            (SurfaceUse::Ring, Some(producer)) => {
+                let (frame, path) = self.copy_into(producer, width, height, scaled)?;
+                Ok(Surfaced {
+                    data: Vec::new(),
+                    // A chroma row of a picture this wide fits a `u32` (≤ 16384).
+                    stride: nv12_chroma_row(width) as u32,
+                    path,
+                    gpu: Some(frame),
+                })
+            }
+            _ => {
+                let read = self.read(width, height, scaled)?;
+                Ok(Surfaced {
+                    data: read.data,
+                    stride: read.stride,
+                    path: read.path,
+                    gpu: None,
+                })
+            }
+        }
     }
 
     /// #279 P3a: copy the `width`×`height` picture into a slot of
@@ -235,13 +285,15 @@ pub fn read_texture_as_decoded_sample(
     surface.read(width, height, false)
 }
 
-/// #279 P3a: copy subresource `subresource` of `texture` (a texture of
-/// `producer`'s device: a decoder's array, made by the caller) into a slot
-/// of `producer`'s ring as a `width`×`height` picture, wrapped the way a
-/// DXVA decoder wraps its output (`MFCreateDXGISurfaceBuffer` of that
-/// subresource in an `MFCreateSample` sample): the same `DxgiSurface::of` +
-/// `copy_into` a GPU-resident reader's picture takes. For the Windows CI
-/// test of the path (no GPU decoder there); not for production.
+/// #279 P3a: hand subresource `subresource` of `texture` (a texture of
+/// `producer`'s device: a decoder's array, made by the caller) over as a
+/// `width`×`height` picture, wrapped the way a DXVA decoder wraps its
+/// output (`MFCreateDXGISurfaceBuffer` of that subresource in an
+/// `MFCreateSample` sample): the same `DxgiSurface::of` +
+/// `DxgiSurface::picture` a GPU-resident reader's picture takes, so
+/// copied into `producer`'s ring, or read back once `producer` is retired.
+/// For the Windows CI test of the path (no GPU decoder there); not for
+/// production.
 #[doc(hidden)]
 pub fn copy_texture_as_decoded_sample(
     producer: &ProducerGpu,
@@ -249,7 +301,7 @@ pub fn copy_texture_as_decoded_sample(
     subresource: u32,
     width: u32,
     height: u32,
-) -> Result<(GpuFrame, DecodePath), DecoderError> {
+) -> Result<Surfaced, DecoderError> {
     super::mf_reader::com_startup()?;
     let buffer =
         unsafe { MFCreateDXGISurfaceBuffer(&ID3D11Texture2D::IID, texture, subresource, FALSE) }
@@ -261,5 +313,5 @@ pub fn copy_texture_as_decoded_sample(
     let surface = DxgiSurface::of(&sample)?.ok_or_else(|| {
         DecoderError::BufferLock("the wrapped texture is not a DXGI surface".into())
     })?;
-    surface.copy_into(producer, width, height, false)
+    surface.picture(Some(producer), width, height, false)
 }

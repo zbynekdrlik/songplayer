@@ -112,10 +112,11 @@ pub fn resident_log(before: Resident, after: Resident) -> ResidentLog {
     }
 }
 
-/// Log a change of the precondition ([`resident_log`]). Glue: the decision
-/// is tested, the lines are the logger's.
+/// Log a change of the precondition from `before` to `after`
+/// ([`resident_log`]). Glue: the decision is tested, the lines are the
+/// logger's.
 #[cfg_attr(test, mutants::skip)]
-pub fn log_resident(change: ResidentLog, after: Resident) {
+pub fn log_resident(change: ResidentLog, before: Resident, after: Resident) {
     match change {
         ResidentLog::Quiet => {}
         ResidentLog::Warn(why) => warn!(
@@ -129,8 +130,10 @@ pub fn log_resident(change: ResidentLog, after: Resident) {
             "video decode: GPU-resident decode is now {} (#279 P3a)",
             if after == Resident::On {
                 "on (from the next song)"
-            } else {
+            } else if retires(before, after) {
                 "off (a song playing GPU-resident reads its pictures back from its next one)"
+            } else {
+                "off"
             }
         ),
     }
@@ -191,7 +194,7 @@ pub fn retires(before: Resident, after: Resident) -> bool {
 /// songs do): with NDI back on the canvas it would otherwise be black
 /// there for the rest of the song. How many were retired.
 pub fn precondition_changed(table: &Pipelines, before: Resident, after: Resident) -> usize {
-    log_resident(resident_log(before, after), after);
+    log_resident(resident_log(before, after), before, after);
     if !retires(before, after) {
         return 0;
     }
@@ -254,23 +257,23 @@ impl<T> Default for Lease<T> {
 
 impl<T: Producer> Lease<T> {
     /// The producer for a GPU-resident open at `now`: the held one while its
-    /// ring lives; a dead one is dropped (`Lost`, the backoff starts); a
-    /// retired one (`gpu` stopped taking effect, then took effect again
-    /// before a song opened) is dropped and replaced at once, its device
-    /// being healthy; with none held, `make` builds one unless the backoff
+    /// ring lives; a dead one is dropped (`Lost`, the backoff starts), a
+    /// retired one too; a retired one alive (`gpu` stopped taking effect,
+    /// then took effect again before a song opened) is dropped and replaced
+    /// at once, its device being healthy; with none held, `make` builds one unless the backoff
     /// runs (`Waiting`); a failed build starts the backoff (`Failed`).
     pub fn take(&mut self, now: Instant, make: impl FnOnce() -> Result<T, String>) -> Leased<T> {
         if let Some(held) = &self.held {
-            if held.retired() {
-                self.held = None;
-            } else if !held.lost() {
-                self.idle_since = None;
-                return Leased::Kept(Arc::clone(held));
-            } else {
+            if held.lost() {
                 self.held = None;
                 self.retry_at = Some(now + PRODUCER_REBUILD_BACKOFF);
                 return Leased::Lost;
             }
+            if !held.retired() {
+                self.idle_since = None;
+                return Leased::Kept(Arc::clone(held));
+            }
+            self.held = None;
         }
         if let Some(at) = self.retry_at
             && now < at

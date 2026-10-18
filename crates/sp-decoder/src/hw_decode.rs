@@ -115,6 +115,30 @@ impl DecodeMode {
     }
 }
 
+/// #279 P3a: what a DXGI surface becomes on the D3D path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SurfaceUse {
+    /// Copied into the producer's ring: a GPU-resident reader whose
+    /// producer is not retired.
+    Ring,
+    /// Read back into CPU memory: a `Hardware` reader, or a retired
+    /// producer's (its songs read their pictures back from the next one,
+    /// the GPU decoder going on: never a reopen in software).
+    ReadBack,
+}
+
+impl SurfaceUse {
+    /// The use of a surface of a reader that decodes on a producer
+    /// (`resident`) which was `retired`, or not.
+    pub fn of(resident: bool, retired: bool) -> Self {
+        if resident && !retired {
+            SurfaceUse::Ring
+        } else {
+            SurfaceUse::ReadBack
+        }
+    }
+}
+
 /// What really decoded a picture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DecodePath {

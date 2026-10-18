@@ -9,7 +9,6 @@
 //! on, like a `Hardware` reader's: the GPU decoder goes on, no reopen, no
 //! gap in the program.
 
-use sp_core::nv12::nv12_chroma_row;
 use sp_gpu::GpuFrame;
 use windows::Win32::Media::MediaFoundation::IMFMediaType;
 
@@ -26,9 +25,9 @@ pub(super) type SurfacePicture = (Vec<u8>, u32, u32, u32, DecodePath, Option<Gpu
 impl MediaFoundationVideoReader {
     /// The picture in `surface`, at the size the current type gives
     /// (`visible_size`: never the decoder's padded rows): copied into the
-    /// session's producer ring on a GPU-resident reader (its stride one
-    /// chroma row, as a CPU picture of that size would have), else read
-    /// back.
+    /// session's producer ring on a GPU-resident reader whose producer is
+    /// not retired, else read back (`DxgiSurface::picture`, the choice
+    /// `hw_decode::SurfaceUse::of`).
     pub(super) fn surface_picture(
         &self,
         surface: &DxgiSurface,
@@ -40,25 +39,15 @@ impl MediaFoundationVideoReader {
         };
         let (width, height) = visible_size(frame_size(&media_type), self.reference);
         let scaled = self.scaled_from.is_some();
-        match self.hw.as_ref().and_then(HwSession::producer) {
-            Some(producer) if !producer.retired() => {
-                let (frame, path) = surface.copy_into(producer, width, height, scaled)?;
-                // A chroma row of a picture this wide fits a `u32` (≤ 16384).
-                let stride = nv12_chroma_row(width) as u32;
-                Ok((Vec::new(), width, height, stride, path, Some(frame)))
-            }
-            // No producer (`Hardware`), or a retired one: read back.
-            _ => {
-                let picture = surface.read(width, height, scaled)?;
-                Ok((
-                    picture.data,
-                    width,
-                    height,
-                    picture.stride,
-                    picture.path,
-                    None,
-                ))
-            }
-        }
+        let producer = self.hw.as_ref().and_then(HwSession::producer);
+        let picture = surface.picture(producer, width, height, scaled)?;
+        Ok((
+            picture.data,
+            width,
+            height,
+            picture.stride,
+            picture.path,
+            picture.gpu,
+        ))
     }
 }

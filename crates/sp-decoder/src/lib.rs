@@ -32,7 +32,7 @@ pub use audio::{
 pub use error::DecoderError;
 pub use frame_pool::PooledBuf;
 pub use hw_decode::{
-    DecodeMode, DecodePath, FallbackStage, HwDecodeStats, HwFallback, hw_counters,
+    DecodeMode, DecodePath, FallbackStage, HwDecodeStats, HwFallback, SurfaceUse, hw_counters,
 };
 pub use level_probe::{LevelProbe, LevelReading, PROBE_INTERVAL};
 pub use peak_limiter::{LIMIT_CEILING, PeakLimiter};
@@ -44,4 +44,6 @@ pub use types::{DecodedAudioFrame, DecodedVideoFrame, PixelFormat, VideoStreamIn
 pub use video::MediaFoundationVideoReader;
 #[cfg(windows)]
 #[doc(hidden)]
-pub use video::{DxgiPicture, copy_texture_as_decoded_sample, read_texture_as_decoded_sample};
+pub use video::{
+    DxgiPicture, Surfaced, copy_texture_as_decoded_sample, read_texture_as_decoded_sample,
+};

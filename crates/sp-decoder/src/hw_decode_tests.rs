@@ -4,7 +4,8 @@
 use super::{
     D3D11_BIND_DECODER, DXGI_FORMAT_NV12, DecodeMode, DecodePath, FallbackGate, FallbackStage,
     HwCounters, HwDecodeStats, HwFallback, OnDecodeError, PathNote, PathTracker, Resume,
-    SurfaceError, SurfaceLayout, hw_counters, mapped_from_scanline0, on_decode_error, visible_size,
+    SurfaceError, SurfaceLayout, SurfaceUse, hw_counters, mapped_from_scanline0, on_decode_error,
+    visible_size,
 };
 use crate::error::DecoderError;
 
@@ -30,6 +31,21 @@ fn gpu_resident_modes_compare_by_their_producer() {
     assert_ne!(on_a, DecodeMode::Hardware);
     assert!(on_a.on_gpu());
     assert_eq!(on_a.as_str(), "gpu_resident");
+}
+
+/// #279 P3a review round 3: a surface goes into the ring only for a
+/// GPU-resident reader whose producer is not retired; anything else is
+/// read back (a retired producer's songs: never a reopen in software).
+#[test]
+fn a_surface_goes_into_the_ring_only_for_a_live_producer() {
+    assert_eq!(SurfaceUse::of(true, false), SurfaceUse::Ring);
+    assert_eq!(SurfaceUse::of(true, true), SurfaceUse::ReadBack, "retired");
+    assert_eq!(
+        SurfaceUse::of(false, false),
+        SurfaceUse::ReadBack,
+        "Hardware"
+    );
+    assert_eq!(SurfaceUse::of(false, true), SurfaceUse::ReadBack);
 }
 
 #[test]

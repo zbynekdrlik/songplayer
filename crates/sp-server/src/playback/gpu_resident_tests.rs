@@ -380,8 +380,8 @@ fn the_precondition_retires_only_when_gpu_stops_taking_effect() {
 }
 
 /// Review round 1: a change that stops `gpu` retires every LIVE producer
-/// of the table (a song playing on one goes on in software from its next
-/// picture); one whose pipeline let it go is not counted.
+/// of the table (a song playing on one reads its pictures back from its
+/// next one); one whose pipeline let it go is not counted.
 #[test]
 fn a_change_that_stops_gpu_retires_every_live_producer() {
     let table = Pipelines::empty();
@@ -400,7 +400,6 @@ fn a_change_that_stops_gpu_retires_every_live_producer() {
     );
     assert_eq!(precondition_changed(&table, Resident::On, blocked), 2);
     assert!(a.retired() && b.retired());
-    assert!(!a.lost(), "retired, not dead: its ring lives");
     let fresh = Arc::new(Fake::default());
     table.set_producer(1, Some(&fresh));
     assert_eq!(precondition_changed(&table, blocked, Resident::Off), 0);
@@ -429,6 +428,26 @@ fn a_retired_producer_is_replaced_at_the_next_open_at_once() {
     assert!(
         matches!(later, Leased::Kept(_)),
         "the new one kept: {later:?}"
+    );
+}
+
+/// Review round 3: a retired producer whose device was lost meanwhile is
+/// a dead one: `Lost` and the backoff, never a replacement at once.
+#[test]
+fn a_retired_producer_that_died_is_lost_not_replaced() {
+    let t0 = Instant::now();
+    let mut lease = Lease::<Fake>::default();
+    let Leased::Made(producer) = lease.take(t0, made) else {
+        panic!("made");
+    };
+    producer.retire();
+    producer.lost.store(true, Ordering::Relaxed);
+    let next = lease.take(t0 + Duration::from_secs(1), never);
+    assert!(matches!(next, Leased::Lost), "{next:?}");
+    let waiting = lease.take(t0 + Duration::from_secs(2), never);
+    assert!(
+        matches!(waiting, Leased::Waiting { .. }),
+        "the backoff: {waiting:?}"
     );
 }
 

@@ -304,7 +304,8 @@ fn a_producer_copies_a_slice_into_its_ring_and_counts_it() {
 
 /// #279 P3a review round 2: a retired producer says so; its device is
 /// healthy, so its ring lives (`ring_dead` asks the device and finds it
-/// there); the reader decides to read its pictures back.
+/// there). The reader's readback of a retired producer's surface is
+/// sp-decoder's `tests/mf_gpu_resident.rs`.
 #[test]
 fn a_retired_producer_says_so_and_its_ring_lives() {
     let producer =

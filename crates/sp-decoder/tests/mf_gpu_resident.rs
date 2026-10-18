@@ -128,8 +128,12 @@ fn a_decoders_slice_is_copied_into_the_ring_and_draws_as_its_picture() {
     let slices: Vec<Vec<u8>> = pictures.iter().map(|p| slice(p.as_slice())).collect();
     let array = texture_array(producer.device(), &slices);
 
-    let (frame, path) = copy_texture_as_decoded_sample(&producer, &array, 1, PICTURE.0, PICTURE.1)
+    let surfaced = copy_texture_as_decoded_sample(&producer, &array, 1, PICTURE.0, PICTURE.1)
         .unwrap_or_else(|e| panic!("the copy of slice 1 into the ring: {e}"));
+    assert!(surfaced.data.is_empty(), "no bytes read back");
+    assert_eq!(surfaced.stride, PICTURE.0, "one chroma row");
+    let path = surfaced.path;
+    let frame = surfaced.gpu.expect("a live producer copies into its ring");
     assert_eq!(
         (frame.width(), frame.height(), frame.texture_size()),
         (PICTURE.0, PICTURE.1, PICTURE),
@@ -176,9 +180,42 @@ fn a_picture_larger_than_its_surface_is_refused_before_any_slot() {
     let array = texture_array(producer.device(), &slices);
     let refused = copy_texture_as_decoded_sample(&producer, &array, 0, PICTURE.0, SURFACE.1 + 2);
     let error = match refused {
-        Ok((frame, _)) => panic!("a picture over its surface was copied: {frame:?}"),
+        Ok(surfaced) => panic!("a picture over its surface was copied: {surfaced:?}"),
         Err(error) => error.to_string(),
     };
     assert!(error.contains("GPU ring"), "{error}");
     assert_eq!(producer.stats().slots, 0, "no slot taken");
+}
+
+/// #279 P3a review round 3: a retired producer's surface is read back, not
+/// copied: the reader's own choice (`DxgiSurface::picture`,
+/// `SurfaceUse::of`) on the path a GPU-resident reader's picture takes. Its
+/// bytes are the slice's picture, and no ring slot is taken.
+#[test]
+fn a_retired_producers_surface_is_read_back_not_copied() {
+    let producer =
+        ProducerGpu::new_warp().unwrap_or_else(|e| panic!("WARP must make the producer: {e}"));
+    let pictures = [picture_bytes(11), picture_bytes(77)];
+    let slices: Vec<Vec<u8>> = pictures.iter().map(|p| slice(p.as_slice())).collect();
+    let array = texture_array(producer.device(), &slices);
+    producer.retire();
+    let surfaced = copy_texture_as_decoded_sample(&producer, &array, 1, PICTURE.0, PICTURE.1)
+        .unwrap_or_else(|e| panic!("the readback of slice 1: {e}"));
+    assert!(
+        surfaced.gpu.is_none(),
+        "a retired producer takes no ring slot"
+    );
+    assert_eq!(producer.stats().slots, 0, "no slot made");
+    assert_eq!(surfaced.stride, PICTURE.0);
+    assert_eq!(surfaced.path, DecodePath::Software, "no decoder texture");
+    assert_eq!(surfaced.data.len(), pictures[1].len());
+    let first_off = surfaced
+        .data
+        .iter()
+        .zip(&pictures[1])
+        .position(|(got, want)| got != want);
+    assert_eq!(
+        first_off, None,
+        "slice 1's picture, read back byte for byte"
+    );
 }

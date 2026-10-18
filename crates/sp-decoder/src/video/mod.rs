@@ -14,7 +14,9 @@ pub mod mf_reader;
 mod mf_scaled; // #282: the scaled open's MF reads (type, chain, facts, refusal guard)
 
 #[doc(hidden)]
-pub use dxgi_frame::{DxgiPicture, copy_texture_as_decoded_sample, read_texture_as_decoded_sample};
+pub use dxgi_frame::{
+    DxgiPicture, Surfaced, copy_texture_as_decoded_sample, read_texture_as_decoded_sample,
+};
 pub use mf_reader::MediaFoundationVideoReader;
 // #282 follow-up: what a scaled open read of Media Foundation, and the
 // tests' refusal guard (`MediaFoundationVideoReader::scaled_open_facts`,
