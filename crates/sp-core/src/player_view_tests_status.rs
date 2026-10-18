@@ -226,6 +226,10 @@ fn the_preview_slot_says_why_it_offers_no_preview() {
     );
     assert_eq!(PreviewSlot::Pending.text(), "Načítavam…");
     assert_eq!(PreviewSlot::Offered.text(), "");
+    assert_eq!(
+        PreviewSlot::GpuDecoded.text(),
+        "Náhľad nedostupný pri GPU dekódovaní."
+    );
 }
 
 /// The operator's preview ends only when nothing plays: never while the
@@ -237,6 +241,28 @@ fn only_an_idle_playlist_ends_the_operators_preview() {
     assert!(!PreviewSlot::Paused.ends_preview());
     assert!(!PreviewSlot::Pending.ends_preview());
     assert!(!PreviewSlot::Offered.ends_preview());
+    assert!(!PreviewSlot::GpuDecoded.ends_preview(), "#279 P3a");
+}
+
+/// #279 P3a: a playlist that decodes on the GPU offers no preview (its
+/// pictures reach no tap before P3b); every other slot is untouched.
+#[test]
+fn a_gpu_decoded_playlist_offers_no_preview_and_says_why() {
+    use super::PreviewSlot::{GpuDecoded, Idle as SlotIdle, Offered, Paused, Pending};
+    for slot in [Offered, Paused, Pending, SlotIdle] {
+        assert_eq!(gpu_preview(slot, false), slot, "{slot:?} on the CPU");
+    }
+    assert_eq!(gpu_preview(Offered, true), GpuDecoded);
+    for slot in [Paused, Pending, SlotIdle] {
+        assert_eq!(gpu_preview(slot, true), slot, "{slot:?} on the GPU");
+    }
+    for (on, showing) in [(false, false), (true, false), (true, true)] {
+        assert_eq!(
+            preview_view(GpuDecoded, on, showing),
+            PreviewView::Placeholder,
+            "started {on} / showing {showing}"
+        );
+    }
 }
 
 /// What the slot shows, for every slot, started or not, showing or not.

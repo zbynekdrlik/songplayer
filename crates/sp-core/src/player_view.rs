@@ -321,6 +321,8 @@ pub fn picker_option_text(name: &str, scene: &str, status: PlaylistStatus) -> St
 pub const PREVIEW_PAUSED: &str = "Náhľad sa zobrazí, keď playlist hrá — tento je pozastavený.";
 /// #266: the preview slot's line for a playlist that plays nothing.
 pub const PREVIEW_IDLE: &str = "Náhľad sa zobrazí, keď playlist hrá — tento nehrá.";
+/// #279 P3a: the preview slot's line while its playlist decodes on the GPU.
+pub const PREVIEW_GPU: &str = "Náhľad nedostupný pri GPU dekódovaní.";
 
 /// #266: what the Player's live-preview slot may do for its playlist.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -340,6 +342,10 @@ pub enum PreviewSlot {
     Paused,
     /// Nothing plays.
     Idle,
+    /// #279 P3a: the pipeline decodes its song GPU-resident: its pictures
+    /// stay in VRAM and reach no preview tap before P3b, so no preview is
+    /// offered ([`gpu_preview`]).
+    GpuDecoded,
 }
 
 impl PreviewSlot {
@@ -350,6 +356,7 @@ impl PreviewSlot {
             PreviewSlot::Offered => "",
             PreviewSlot::Paused => PREVIEW_PAUSED,
             PreviewSlot::Idle => PREVIEW_IDLE,
+            PreviewSlot::GpuDecoded => PREVIEW_GPU,
         }
     }
 
@@ -389,6 +396,17 @@ pub fn preview_slot(
         PreviewSlot::Paused
     } else {
         PreviewSlot::Idle
+    }
+}
+
+/// #279 P3a: the slot of a playlist whose pipeline decodes on the GPU
+/// (`gpu_decoded`, its `/api/v1/ndi/health` row): an offered preview reads
+/// [`PreviewSlot::GpuDecoded`] (it would get no picture until P3b); every
+/// other slot is as [`preview_slot`] said.
+pub fn gpu_preview(slot: PreviewSlot, gpu_decoded: bool) -> PreviewSlot {
+    match slot {
+        PreviewSlot::Offered if gpu_decoded => PreviewSlot::GpuDecoded,
+        other => other,
     }
 }
 
