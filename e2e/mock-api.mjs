@@ -2125,6 +2125,16 @@ function programBody() {
       readback_us_p99: 0,
       uyvy_us_p99: 0,
     },
+    // #279 P3a: the compositor's sides (mirrors `program_max::GpuStatus`);
+    // the mock composes nothing.
+    gpu: {
+      gpu_sides_per_s: 0,
+      cpu_sides_per_s: 0,
+      km_acquire_timeouts: 0,
+      abandoned: 0,
+      open_failures: 0,
+      gpu_opens: 0,
+    },
   };
 }
 // #239: `max.fhd` (mirrors `FhdStatus`). Its setting is ON unless it says

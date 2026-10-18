@@ -31,13 +31,19 @@ use std::sync::Arc;
 
 /// A reference-counted pixel buffer shared without copying (see the module doc).
 #[derive(Clone)]
-pub struct SharedFrame(Arc<PooledBuf>);
+pub struct SharedFrame(Arc<Shared>);
+
+/// The pixel buffer, and (#279 P3a) whether it is a standby black.
+struct Shared {
+    buf: PooledBuf,
+    black: bool,
+}
 
 impl SharedFrame {
     /// Wrap owned pixels. One small `Arc` header allocation; the pixel buffer is
     /// MOVED in, never copied.
     pub fn new(data: Vec<u8>) -> Self {
-        Self(Arc::new(PooledBuf::from(data)))
+        Self::wrap(PooledBuf::from(data), false)
     }
 
     /// Copy borrowed pixels into a buffer taken from `sp_decoder::frame_pool`
@@ -45,17 +51,33 @@ impl SharedFrame {
     /// byte copy, but never a fresh per-frame allocation. Recycled on the last
     /// drop like every other `SharedFrame`.
     pub fn copy_from_slice(src: &[u8]) -> Self {
-        Self(Arc::new(PooledBuf::copy_from_slice(src)))
+        Self::wrap(PooledBuf::copy_from_slice(src), false)
+    }
+
+    /// #279 P3a: the standby NV12 black ([`BlackNv12`]'s), marked as such:
+    /// MAX draws a boundary that shows it as `Composition::Black`, with no
+    /// upload (`program_max_ids.rs`).
+    pub fn standby_black(data: Vec<u8>) -> Self {
+        Self::wrap(PooledBuf::from(data), true)
+    }
+
+    fn wrap(buf: PooledBuf, black: bool) -> Self {
+        Self(Arc::new(Shared { buf, black }))
+    }
+
+    /// #279 P3a: whether it is the standby black ([`Self::standby_black`]).
+    pub fn is_standby_black(&self) -> bool {
+        self.0.black
     }
 
     /// The pixel buffer length in bytes.
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.0.buf.len()
     }
 
     /// Whether the buffer holds no bytes.
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.0.buf.is_empty()
     }
 
     /// Whether two handles point at the SAME underlying allocation (an `Arc`
@@ -70,7 +92,7 @@ impl SharedFrame {
 impl Deref for SharedFrame {
     type Target = [u8];
     fn deref(&self) -> &[u8] {
-        &self.0
+        &self.0.buf
     }
 }
 
@@ -79,7 +101,7 @@ impl fmt::Debug for SharedFrame {
     /// (which derives `Debug` and holds a `SharedFrame`) stays cheap to format.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SharedFrame")
-            .field("len", &self.0.len())
+            .field("len", &self.0.buf.len())
             .finish()
     }
 }
@@ -102,13 +124,25 @@ pub struct PerSize(Option<(u32, u32, SharedFrame)>);
 impl PerSize {
     /// The picture of `width`×`height`, its bytes `make`'s.
     pub fn get(&mut self, width: u32, height: u32, make: fn(u32, u32) -> Vec<u8>) -> SharedFrame {
+        self.get_with(width, height, make, SharedFrame::new)
+    }
+
+    /// [`get`](Self::get), the bytes wrapped by `wrap` (#279 P3a: the
+    /// standby black's mark).
+    pub fn get_with(
+        &mut self,
+        width: u32,
+        height: u32,
+        make: fn(u32, u32) -> Vec<u8>,
+        wrap: fn(Vec<u8>) -> SharedFrame,
+    ) -> SharedFrame {
         if let Some((w, h, frame)) = &self.0
             && *w == width
             && *h == height
         {
             return frame.clone();
         }
-        let frame = SharedFrame::new(make(width, height));
+        let frame = wrap(make(width, height));
         self.0 = Some((width, height, frame.clone()));
         frame
     }
@@ -123,9 +157,11 @@ impl PerSize {
 pub struct BlackNv12(PerSize);
 
 impl BlackNv12 {
-    /// The neutral NV12 black of `width`×`height`.
+    /// The neutral NV12 black of `width`×`height`, marked as the standby
+    /// black (#279 P3a, [`SharedFrame::is_standby_black`]).
     pub fn get(&mut self, width: u32, height: u32) -> SharedFrame {
-        self.0.get(width, height, black_nv12_bytes)
+        self.0
+            .get_with(width, height, black_nv12_bytes, SharedFrame::standby_black)
     }
 }
 
@@ -156,6 +192,23 @@ mod tests {
         let e = SharedFrame::new(Vec::new());
         assert_eq!(e.len(), 0);
         assert!(e.is_empty());
+    }
+
+    /// #279 P3a: only the standby black is marked; a frame of the same
+    /// bytes is not, and the cache hands the marked one out again.
+    #[test]
+    fn only_the_standby_black_is_marked() {
+        let mut cache = BlackNv12::default();
+        let black = cache.get(4, 2);
+        assert!(black.is_standby_black());
+        assert!(black.clone().is_standby_black(), "a clone too");
+        assert!(cache.get(4, 2).ptr_eq(&black), "cached");
+        assert_eq!(&black[..], &black_nv12_bytes(4, 2)[..]);
+        assert!(!SharedFrame::new(black_nv12_bytes(4, 2)).is_standby_black());
+        assert!(!SharedFrame::copy_from_slice(&black).is_standby_black());
+        let mut plain = PerSize::default();
+        assert!(!plain.get(4, 2, black_nv12_bytes).is_standby_black());
+        assert!(cache.get(8, 2).is_standby_black(), "another size too");
     }
 
     #[test]

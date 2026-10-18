@@ -125,6 +125,9 @@ pub struct ProgramResponse {
     pub max: MaxStatus,
     /// #279 P1b: NDI `SP-program`'s source and its delay line.
     pub ndi: NdiStatus,
+    /// #279 P3a: how the compositor drew the pictures (ring slots in place
+    /// vs CPU pictures) and the ring slots' failures.
+    pub gpu: GpuStatus,
     /// #221 ROZHODNUTÉ 6022247729: the playlists a cut refuses now (`null`
     /// when the playlists cannot be read).
     pub cut_refused: Option<Vec<RefusedSource>>,
@@ -194,6 +197,7 @@ impl ProgramResponse {
             remote: bus.remote().status(&stored.remote, &bus.on_air_now()),
             max: bus.max().status(),
             ndi: bus.max().ndi_status(),
+            gpu: bus.max().gpu_status(),
             cut_refused,
             burn_on: bus.item().burn_on(),
             burned_boundaries: bus.item().burned(),
