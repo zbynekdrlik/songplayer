@@ -6,7 +6,7 @@ paths:
   - "crates/sp-decoder/src/subtype.rs"
 ---
 
-# Diagnostic benches: `/api/v1/diag/*` (#223 S0, S3b)
+# Diagnostic benches: `/api/v1/diag/*` (#223 S0, S3b; #279 P0, P3a)
 
 These are measurement routes. The main session runs them on the box to decide
 a design gate. Playback never calls them, and the dashboard has no button for
@@ -63,17 +63,26 @@ below):
     -H 'content-type: application/json' \
     -d '{"file":"av1_2160p.mp4","seconds":15,"hw":true}'
   ```
+- `resident` (#279 P3a, optional, default `false`, never with `hw`): `true`
+  makes a producer device of the run's own on the production adapter
+  (`sp_gpu::ProducerGpu::new`, like a pipeline's) and opens the reader
+  GPU-resident on it (`video-decode.md` "GPU-resident decode"): every
+  GPU-decoded picture is copied into the producer's ring and never read
+  back, so the timings are what a GPU-resident song pays (the decode and
+  the ring copy). The box gate "decode bench gpu_resident": each 4K
+  sample (AV1, VP9) within D2.
 
 Answers:
 
 - **200:** the report.
 - **500:** the report of a run the decoder ended, at open or mid-run. It
   carries `error` and the pictures decoded so far.
-- **400:** a bad name, `seconds` out of range, or (#279) a missing `file`
-  / `seconds`.
+- **400:** a bad name, `seconds` out of range, (#279) a missing `file`
+  / `seconds`, or (#279 P3a) `hw` and `resident` both.
 - From axum, before the handler runs (NOT logged): **400** for a body that is
   not JSON, **422** for a field of the wrong type (a negative or a
-  fractional `seconds`, a `hw` or `probe` that is not a bool), **415**
+  fractional `seconds`, a `hw`, `resident` or `probe` that is not a
+  bool), **415**
   without `Content-Type: application/json`. A missing `file` or `seconds`
   is the handler's 400 (#279).
 - **404:** no such sample. The body names the path it looked at.
@@ -163,6 +172,19 @@ failed`).
   - `adapter`: the GPU's name, only when `decode_path` is `"hardware"`
     (the box: `NVIDIA GeForce RTX 3070 Ti`).
   - `hw_fallback`: `open: <why>` / `mid-stream: <why>`, else `null`.
+- #279 P3a, a `resident` run (`hw_requested` is true for it too):
+  - `gpu_resident`: `true`; its `decode_path` `"hardware"` = the pictures
+    were copied into the ring (a `"software"` run fell back, as for `hw`);
+  - `ring` (`null` for any other run): the producer's ring after the run,
+    `{slots, in_use, waits, full, dead, copy_us_p99, vram_mb}`. Every
+    picture goes back at once, so `in_use` reads 0; `waits` > 0 = the
+    copy found every slot in use;
+  - a producer device that cannot be made (no production adapter, as on
+    `windows-latest`) is a 500 with the report, `error` `producer device:
+    <why>`, no ring;
+  - the end line adds ` gpu_resident ring_slots=… ring_waits=… ring_full=…
+    ring_dead=… copy_us_p99=… vram_mb=…` (` gpu_resident ring=-` with no
+    producer).
 
 **The gate is revision 2's D2.**
 
@@ -209,8 +231,8 @@ failed`).
 ### `{"probe": true}`: the GPU capability probe (#279 P0)
 
 - The same route, with `{"probe": true}` and NO other field
-  (`diag/gpu_probe.rs::ask`: a probe with `file`, `seconds` or `hw` is a
-  400; a request that is no probe and lacks `file` or `seconds` is a 400
+  (`diag/gpu_probe.rs::ask`: a probe with `file`, `seconds`, `hw` or
+  `resident` is a 400; a request that is no probe and lacks `file` or `seconds` is a 400
   too: both are optional in the body since #279, so no longer axum's 422;
   a `probe` that is not a bool is axum's 422).
 - It runs `sp_gpu::probe_gpu()` (`gpu-max.md` "The capability probe") on a
@@ -271,7 +293,12 @@ curl -s -X POST http://10.77.9.201:8920/api/v1/diag/fit-bench \
   - Linux tests drive it with a scripted stream and a scripted clock, with no
     wall-time thresholds.
 - `diag/decode_bench_mf.rs`: the `cfg(windows)` thread body (open in the
-  mode, facts, the reader's `DecodeFacts` after the run, log).
+  mode, facts, the reader's `DecodeFacts` after the run, log; #279 P3a: a
+  resident run's producer made first through `decode_bench::decode_mode`,
+  Linux-tested with `make` a parameter, and its ring read after the
+  reader is dropped). The request's mode is `decode_bench::BenchMode`
+  (`Software` / `Hardware` / `Resident`); tests of a resident run:
+  `decode_bench_tests_resident.rs`.
   - The Windows job's router test covers it on the decoder crate's
     `tests/fixtures/black_3s.mp4`. It expects `codec` H264, `ended`
     `end_of_stream` and `thread_priority` 0; a software run reads

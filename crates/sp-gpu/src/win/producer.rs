@@ -1,9 +1,9 @@
 //! #279 P3a: a pipeline's PRODUCER device and its picture ring (glue).
 //!
-//! The GPU-resident path (epic #279, plan §5.1-§5.3; the P3a design comment
-//! 6244390810) decodes each playlist on its own Direct3D 11 device: the
-//! adapter `pick_adapter` chooses (the compositor's), the video API,
-//! multithread-protected (`VideoDevice`: Media Foundation's decoder MFT
+//! The GPU-resident path (epic #279, plan §5.1-§5.3; the P3a design
+//! comment 6244390810) decodes each playlist on its own Direct3D 11
+//! device: the adapter `pick_adapter` chooses (the compositor's), the
+//! video API, multithread-protected (`VideoDevice`: Media Foundation's decoder MFT
 //! drives it from its own threads). Each decoded picture, a slice of the
 //! decoder's texture array on that device, is copied into a slot of the
 //! pipeline's ring ([`PictureRing::copy_from`]) and travels on as a

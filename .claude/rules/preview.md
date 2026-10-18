@@ -19,6 +19,7 @@ paths:
   - "sp-ui/src/components/player.rs"
   - "sp-ui/preview_player.js"
   - "e2e/player-paused.spec.ts"
+  - "e2e/player-gpu-preview.spec.ts"
   - "e2e/post-deploy-preview.spec.ts"
   - "e2e/post-deploy-pp-preview.spec.ts"
   - "e2e/pp-preview-gate*.ts"
@@ -556,6 +557,28 @@ black. Design record: the `## Design (before code) — #266` comment.
   msedge` only when it is missing (with `CI=true` that command re-installs
   Edge every run), a failed install failing the step by name. Not covered:
   the public `sppp.newlevel.media` path (Cloudflare) the owner uses.
+
+## #279 P3a: a GPU-decoded song offers no preview (until P3b)
+
+A song decoded GPU-resident (`video-decode.md` "GPU-resident decode")
+hands the producer ring frames, not bytes:
+
+- `DecodeProducer::next_item` (and a held step past the video's end) gives
+  the taps its AUDIO only (`offer_gpu` → `DecodeTaps::offer_audio`), so
+  the stream keeps its sound;
+- a GPU picture while a viewer watches (`DecodeTaps::wants_picture`) is a
+  counted miss (`preview_misses`, the rate-limited WARN); with nobody
+  watching nothing is counted.
+
+The encoder would starve on such a song, so the Player does not offer a
+preview: `sp_core::player_view::gpu_preview(slot, gpu_decoded)` turns
+`Offered` into `GpuDecoded` ("Náhľad nedostupný pri GPU dekódovaní."),
+read from the health row's `gpu_decoded` (a `Memo` over the 1 Hz
+`store.ndi_health` poll). Every other slot is unchanged, so a running
+preview of a song that turns GPU-decoded unmounts, and the slot offers it
+again once the song decodes in CPU memory (a fall back, the next song).
+Spec: `e2e/player-gpu-preview.spec.ts` (chromium). P3b brings the preview
+back from the ring.
 
 ## chrome-channel E2E note (#178 Round 2)
 

@@ -7,6 +7,8 @@ paths:
   - "crates/sp-gpu/tests/video_device.rs"
   - "crates/sp-server/src/playback/video_decode*.rs"
   - "crates/sp-server/src/playback/pipeline_paced.rs"
+  - "crates/sp-server/src/playback/gpu_resident*.rs"
+  - "crates/sp-gpu/src/win/producer.rs"
 ---
 
 # The Media Foundation video reader: software and opt-in hardware decode (#223 S3b)
@@ -15,7 +17,7 @@ Design: #223 revision 3, R3-4 point 2 (comment 5979609879); the S0 result
 that asked for it (comment 5981771378: 4K AV1 95 %, 4K VP9 93 % of the
 frame period in software); the anchors and MF facts (comment 5990523303).
 
-## The two modes
+## The modes
 
 `MediaFoundationVideoReader::open_with(path, DecodeMode)`:
 
@@ -37,6 +39,13 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   with ONE `MFCreateDXGISurfaceBuffer` buffer over a slice of its
   `D3D11_BIND_DECODER` texture array. One device per reader: a lost device
   never touches another song.
+- **`GpuResident(Arc<ProducerGpu>)`** (#279 P3a, the setting `video_decode`
+  = `gpu`; "GPU-resident decode" below): the `Hardware` path on the
+  pipeline's producer device (`sp_gpu::ProducerGpu`: the same
+  `pick_adapter` device with the video API), and every DXGI surface is
+  COPIED into a slot of the producer's ring instead of read back: the
+  picture never comes to RAM. Off by default; nothing of it runs with
+  `video_decode` = `software`.
 
 ## Reading a GPU picture back (`video/dxgi_frame.rs`)
 
@@ -492,6 +501,105 @@ rounds 1–2):
   reads as zero).
 - `POST /api/v1/diag/decode-bench` takes `"hw": true` and reports
   `decode_path` / `adapter` / `hw_fallback` (`diag-bench.md`).
+
+## GPU-resident decode (#279 P3a)
+
+Design: #279 comment 6244390810 (`Design-by: main`), plan
+`docs/superpowers/plans/2026-10-16-gpu-video-path.md` §5.1-§5.3,
+§5.8-§5.11, §9 P3a. With `video_decode` = `software` (the default) nothing
+here runs, and the `video_hw_decode` paths above are as they were.
+
+- **The setting** `video_decode` (`sp_core::config::video_decode`: exactly
+  `gpu`, trimmed, is `VideoDecode::Gpu`, anything else software) is read
+  with `video_hw_decode` by the 5 s settings task
+  (`HwDecodeSetting::set_video_decode` / `set_ndi_source`) and applies
+  from the next song.
+- **The precondition** (`gpu_resident::Resident::of`): `gpu` takes effect
+  only while `program_ndi_source` = `gpu`, because the CPU canvas shows a
+  GPU picture as black. While it is blocked:
+  - each song opens in `video_hw_decode`'s mode;
+  - `status.video_decode.gpu_resident_blocked` reads `ndi_source_cpu`;
+  - each change into the block logs one WARN (`resident_log`), and on / off
+    one INFO.
+- **The producer** (`sp_gpu::ProducerGpu`, `gpu-max.md`) is ONE
+  `VideoDevice` and the pipeline's 20-slot `PictureRing` on it, one per
+  PIPELINE (`gpu_resident::PipelineGpu`, a `Lease`, in the pipeline's
+  `PipelineOutput`):
+  - made at the first GPU-resident open (`ProducerGpu::new`) and kept
+    across the songs;
+  - let go 10 min after the pipeline went idle (`PRODUCER_IDLE_RELEASE`,
+    counted from the idle fill's first heartbeat since the last open, so a
+    long song never counts as idle);
+  - let go at once when a song opens with the precondition off (no idle
+    fill runs while songs keep playing), and when the pipeline ends;
+  - a producer whose ring died (a lost device, an abandoned key) is
+    dropped at the next open, and the next one is made only
+    `PRODUCER_REBUILD_BACKOFF` (30 s) later, a failed build likewise;
+    meanwhile the songs open in the base mode.
+- **The open** (`open_with(path, GpuResident(p), cap)`): `HwSession`
+  (`video/hw_session.rs`) resets its DXGI device manager to the
+  PRODUCER's device (`HwDevice::Producer`) instead of a new
+  `VideoDevice`, so the decoder's pictures lie on the device of the ring
+  they are copied into. A producer whose ring is dead is refused there.
+  A failed open falls back to software at open, as a `Hardware` one does
+  (`hw_fallback` `open: …`). The open's INFO names `mode`;
+  `HwCounters::resident_opens` (`status.video_decode.gpu_resident_opens`)
+  counts the opens on the D3D path.
+- **Each picture** (`video/mf_reader_resident.rs::surface_picture`, a
+  child of `mf_reader.rs`):
+  - a DXGI surface is copied into a ring slot (`DxgiSurface::copy_into`
+    → `ProducerGpu::copy_from(texture, subresource, visible size)`: the
+    slot's key, `CopySubresourceRegion` of the slice's even box, flush,
+    release, timed into the ring's copy p99), at `visible_size` (never
+    NVDEC's padded rows), its path read as for a readback
+    (`DecodePath::of_surface`); a scaled open's processor surface is
+    copied the same way;
+  - the frame is `DecodedVideoFrame.gpu = Some(GpuFrame)`, `data` empty,
+    stride one chroma row;
+  - a SYSTEM-MEMORY sample (Media Foundation decoding in software behind
+    the manager) is read as before: a CPU picture.
+- **Never a dead song.** A copy that fails is a decode error (`BufferLock
+  "GPU ring: …"`), so `FallbackGate` reopens the file in software once
+  (`mid-stream: …`, and the paced producer's WARN that the pictures
+  changed kind): a ring full past `RING_WAIT` (100 ms), a dead ring, a
+  refused picture, a lost producer device. A lost device kills the ring
+  (`GpuError::removed`), so the pipeline's next song drops the producer and
+  waits the 30 s backoff.
+- **sp-server** (`gpu_resident.rs`, `paced_producer.rs`):
+  - a ring frame becomes `Picture::Gpu` (`to_paced_frame`);
+  - the producer reports each change of the frames' kind (`KindChange`:
+    the song's first frame, a fall back) into the table
+    (`note_song_path`): one INFO per song (path, codec, size, ring), a
+    WARN for a change mid-song; a song's end clears its row;
+  - `status.video_decode` adds `video_decode`, `gpu_resident_opens`,
+    `gpu_resident_blocked`, `pipelines [{playlist_id, gpu_decoding, ring
+    {slots, in_use, waits, full, dead, copy_us_p99, vram_mb}}]`;
+  - the `/api/v1/ndi/health` row's `gpu_decoded` feeds the Player's
+    preview slot (`preview.md`).
+- **Tests:**
+  - sp-decoder `tests/mf_gpu_resident.rs` (Windows, WARP): a
+    decoder-like 2-slice 640×368 NV12 array on the producer's device, its
+    slice 1 wrapped as a decoded sample (`copy_texture_as_decoded_sample`,
+    doc-hidden) and copied into the ring, draws like an upload of the same
+    picture (worst ≤ 1) and unlike slice 0; a picture larger than its
+    surface is refused before any slot is taken;
+  - `hw_decode_tests.rs` (the modes compare by kind, `resident_opens`);
+  - sp-gpu `tests/ring.rs` (a producer copies a slice and counts it);
+  - sp-server `gpu_resident_tests.rs`, `paced_producer_tests_gpu.rs`,
+    `video_decode_tests.rs`.
+
+  WARP refuses the video device, so the D3D decode path into the ring
+  runs only on the box.
+- **Box gates (the main session):**
+  - `decode-bench` with `"resident": true` on each 4K sample (AV1, VP9)
+    within D2 (`diag-bench.md`), its `ring.in_use` 0 after the run;
+  - then `program_ndi_source` = `gpu` and `video_decode` = `gpu` with a
+    hardware-decodable song on program: `GET /api/v1/program`
+    `gpu.gpu_sides_per_s` at the program's rate and `max.upload_mb_s` 0,
+    `status.video_decode.pipelines[].ring.waits` +0 (20 slots against the
+    12 queued plus the pacer's and the bus's holds);
+  - the wall measured before and after, an hour on each side
+    (`gpu-max.md`, "Judging a deploy on the wall").
 
 ## Tests and gates
 

@@ -11,6 +11,7 @@ paths:
   - "crates/sp-server/src/api/program_tests_ndi.rs"
   - "crates/sp-server/src/playback/picture*.rs"
   - "crates/sp-server/src/playback/pacer_tests_gpu.rs"
+  - "crates/sp-server/src/playback/frame_buf.rs"
   - "src-tauri/resources/THIRD-PARTY-NOTICES.txt"
   - "e2e/post-deploy-max.spec.ts"
   - "e2e/max-gate*.ts"
@@ -2002,11 +2003,10 @@ behaviour change).
   panic (`ProgramOutput::canvas_misses` is the tests' view,
   `DecodeProducer::preview_misses`). The standby blacks stay
   CPU. Tests read CPU bytes through the test-only `Picture::expect_cpu`.
-- Not on the API yet: `ComposeStats::{gpu_sides, gpu_opens,
-  km_acquire_timeouts, abandoned, open_failures}`, `RingStats` and the
-  CPU misses (P3a's telemetry: nothing writes a ring before it, so they
-  read 0 until then; the ring's death and the misses WARN meanwhile).
-  `RING_CAPACITY` = `pipeline_paced::DECODE_QUEUE_BOUND` + 8 is pinned by
+- #279 P3a puts the slots' counts on `GET /api/v1/program` `gpu` and
+  each pipeline's `RingStats` on `status.video_decode.pipelines` (the
+  next section); the CPU misses stay WARNs (rate-limited) and the ring's
+  death a WARN. `RING_CAPACITY` = `pipeline_paced::DECODE_QUEUE_BOUND` + 8 is pinned by
   a Windows test (`picture_tests.rs`).
 - **Tests.** sp-gpu: `ring_state_tests.rs`, `ring_tests.rs` (a write
   waits for a drop, threads with a safe-direction window), the `Side` /
@@ -2028,6 +2028,49 @@ behaviour change).
   `ProgramOutput`'s MAX offer and canvas miss, `PictureIds` and the
   worker (`program_max_worker_tests_gpu.rs`), a held ring frame's
   preview.
+
+## The producer device, the GPU sides on the API, the standby black (#279 P3a)
+
+Design: #279 comment 6244390810. The decode side (the setting, the lease,
+the copy) is `video-decode.md` "GPU-resident decode".
+
+- **`ProducerGpu`** (`win/producer.rs`; off Windows an uninhabited struct
+  whose `new` is `Unsupported`):
+  - one `VideoDevice` (`pick_adapter`, the video API,
+    multithread-protected) and one `PictureRing` on it, behind a `Mutex`;
+    `new_warp` (doc-hidden, tests) is a WARP device WITHOUT the video API
+    (WARP refuses it);
+  - `copy_from(source, subresource, visible)` is the ring's copy, timed
+    into `RingCore::record_copy`, then `GetDeviceRemovedReason`: a removed
+    device kills the ring ("the producer device was lost", its HRESULT)
+    and returns `GpuError::removed`;
+  - `stats()` reads the ring's core without the ring's lock; `ring_dead()`,
+    `adapter()`, `device()`.
+- **`RingStats`** adds `copy_us_p99` (`ring::p99`, nearest rank, over the
+  last `COPY_WINDOW` = 900 copies, `None` before the first) and
+  `vram_bytes` (`RingState::vram_bytes`: every made slot's NV12 bytes,
+  `SizeClass::bytes`).
+- **`GET /api/v1/program` → `gpu`** (`program_max_upload.rs` `GpuStatus`,
+  `MaxOut::gpu_status`; each compose recorded by
+  `MaxOut::record_compose` from `MaxWorker::draw`):
+  - over the upload window (the last 900 composes within 30 s):
+    `gpu_sides_per_s` (ring slots drawn in place) and `cpu_sides_per_s`
+    (CPU pictures drawn, uploaded or resident:
+    `Composition::uploads().len()`);
+  - since the start (`ComposeStats`): `km_acquire_timeouts`, `abandoned`,
+    `open_failures`, `gpu_opens`;
+  - the mock serves zeros.
+- **A pipeline's standby black composes as Black** (`frame_buf.rs`
+  `SharedFrame::standby_black` / `is_standby_black`, marked by
+  `BlackNv12`; `program_max_ids.rs::is_black`): a boundary whose picture
+  is that black is `Composition::Black` (no upload, no draw), and a fade
+  side of it is `None` (black). Before, MAX uploaded and drew the black
+  of an idle playlist on program.
+- **Tests:** `ring_tests.rs` / `ring_state_tests.rs` (the p99, the copies
+  counted, the VRAM); WARP `tests/ring.rs` (a producer copies a slice into
+  its ring and counts it; the production producer takes the picked
+  adapter or none); `program_max_upload_tests.rs`,
+  `program_max_worker_tests_gpu.rs`, `api/program_tests_max.rs`.
 
 ## HLSL at runtime
 
