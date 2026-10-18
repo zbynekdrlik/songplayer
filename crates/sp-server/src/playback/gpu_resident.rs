@@ -602,11 +602,18 @@ impl Pipelines {
     /// how many. One retired already (by an earlier change, or at its own
     /// open) is still held by its lease until the next open, and is not
     /// counted again.
+    ///
+    /// The producers are read after the table's lock (as [`status`](Self::status)
+    /// does): an `Arc` upgraded here can be the last one, and a producer's
+    /// drop (its device, its ring) never runs under the lock.
     pub fn retire_producers(&self) -> usize {
-        let fresh: Vec<Arc<dyn Producer>> = self
+        let live: Vec<Arc<dyn Producer>> = self
             .rows()
             .values()
             .filter_map(|row| row.producer.as_ref().and_then(Weak::upgrade))
+            .collect();
+        let fresh: Vec<Arc<dyn Producer>> = live
+            .into_iter()
             .filter(|producer| !producer.retired())
             .collect();
         for producer in &fresh {

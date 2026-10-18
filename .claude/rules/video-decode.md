@@ -518,8 +518,15 @@ default:
 - the producer's per-song INFO (`path=ram`) with its `codec()` read
   (`GetNativeMediaType`, which the bench has called on the box since
   #223 S0), and the table's row;
-- MAX's standby black composed as Black (`gpu-max.md`: the same pixels,
-  fewer uploads on black boundaries);
+- on the `program-max` thread (the timing-critical one): MAX's standby
+  black composed as Black (`gpu-max.md`: the same pixels, fewer uploads on
+  black boundaries), and every compose records `MaxOut::record_compose`
+  (it walks `Composition::cpu_sides()`, and the window entry carries the
+  sides by kind and the slot totals) under MAX's stats lock;
+- `GET /api/v1/program` builds `gpu` (`MaxOut::gpu_status`: a second
+  clone of the 900-compose window under that same lock, which each compose
+  also takes), and `status.video_decode` carries four more fields, its
+  read taking the table's lock;
 - the song's mode is read on the paced EMIT thread at its open
   (`PipelineGpu::song_mode()`), while its decode cap is still read on the
   decode thread, so one 5 s poll can land between the two reads;
@@ -552,7 +559,10 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
   - each change into the block logs one WARN (`resident_log`), and on / off
     one INFO.
 - **When `gpu` stops taking effect** (switched off, or `program_ndi_source`
-  back to `cpu`; review rounds 1-2), the settings task retires every live
+  back to `cpu`; review rounds 1-2; an addition to the design, which
+  applies `video_decode` at each song's open: needed, or NDI would show
+  the playing song black on the canvas, and the main session ratifies it
+  on #279), the settings task retires every live
   producer (`gpu_resident::precondition_changed` →
   `Pipelines::retire_producers` → `ProducerGpu::retire`): a song playing
   GPU-resident reads its pictures back from its next one, the GPU decoder
@@ -587,11 +597,22 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
     re-created while its old pipeline still tears down. The old
     `PipelineGpu`'s drop forgets the playlist's row, now the NEW
     pipeline's, so a later retire misses the new producer and a
-    GPU-resident song on it is black on NDI for the rest of the song. It
+    GPU-resident song on it is black on NDI for the rest of the song; the
+    lost row also reads `gpu_decoded` false (the Player offers a preview
+    that stays black) and leaves `status.video_decode.pipelines[]`, both
+    until the next song writes it again. It
     needs a re-created playlist, a GPU-resident song on it and a
     switch-off together; a generation check or a process-wide retire epoch
     is the fix: a follow-up candidate the lane returned to the main
-    session (to file, or add to P4's scope on #279);
+    session (to file, or add to P4's scope on #279), to decide before
+    `gpu` runs during an event;
+  - a PAUSED GPU-resident song never reaches the idle fill, so
+    `release_idle` never runs for it: its reader, its producer and the
+    slots of its queued frames (about 14 × 12.4 MB at 4K) stay in VRAM for
+    the whole pause, and pausing a stray (plan §7's precondition) frees
+    none of it. The 10 min rule could not free it either while the reader
+    lives. A candidate for P4's VRAM guard; read it in the VRAM-sum gate
+    below;
   - the rollback order: set `video_decode` = `software` FIRST, then
     `program_ndi_source` = `cpu` (one settings poll apart, ≥ 5 s). The
     other order opens the up-to-5 s window above, NDI on the canvas while
@@ -723,8 +744,11 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
      `program_ndi_source` = `cpu`): every existing gate holds, and the wall
      is measured an hour after the E2E against an hour before
      (`gpu-max.md`, "Judging a deploy on the wall"): this build changes
-     MAX at the default too (the standby black composed as Black, the same
-     pixels).
+     the `program-max` thread at the default too (the standby black
+     composed as Black, the same pixels; every compose's
+     `record_compose`; the `gpu` read's window clone, the default-path
+     list above), so a worse wall after this deploy is traced there
+     first.
   2. **NDI on the GPU alone** (P1b's window, `gpu-max.md` "The gates on
      the box" items 2-3): tell camera-box first what changes on
      `SP-program` (the FourCC NV12 → UYVY, a constant +33.3 ms arrival
@@ -782,13 +806,36 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          `pipelines[].gpu_decoding` false, NDI showing the picture within
          ~5 s of MAX's switch, and no loss in the audio fault ledger for
          that song;
-     - **the main A/B**: `video_decode` gpu vs software, interleaved in
-       one-minute blocks over ≥ 46 blocks (a whole ~45 min drift cycle
-       per side, like `fhd_ab2.ps1`; plan §7), the wall's jumps back per
-       block binned by offer phase; then the 72 h continuous monitor
-       (`wall_monitor5.py`, plan §9 P3a) on normal services.
-  4. **A worse A/B is reverted the same day** (`video_decode` back to
-     `software` first, then NDI: the rollback order above).
+     - **the main A/B** (`video_decode` gpu vs software), by plan §7's
+       fixed protocol:
+       - preconditions: record the build, the settings, HAGS, Arena's
+         uptime (no Arena restart inside a take) and the heavy children;
+         only the on-program pipeline decodes (every pipeline's
+         `transport` and `video_decode.pipelines[]` read, strays paused);
+       - content, fixed: `wall-25` (blend) and `wall-30` (#272), Blank
+         (the floor), one named 4K AV1 catalog song and one 1440p VP9
+         song;
+       - feeds: (A) the operator's clip on `SP-program-MAX`, and (B) the
+         independent Spout sender `spout_test_sender.py` on the clip,
+         the control that isolates SongPlayer's own disturbance;
+       - the metric: exact jumps back per 40 s (`wall_frames.py` /
+         `wall_analysis.py`, `--refresh-hz 60`) and one-refresh runs,
+         each block binned by the offer AND the compose phase after the
+         primary vblank (`max.send_phase_us_*`, `compose_phase_us_*`);
+       - interleaved one-minute blocks over ≥ 46 blocks (a whole ~45 min
+         drift cycle per side, like `fhd_ab2.ps1`), then A again; never a
+         conclusion from a short take;
+       - **acceptance (P3a's end state):** for (A) with `wall-25`,
+         `wall-30` and the 4K song, every phase bin within the Blank band
+         (0–3 per 40 s, + one standard deviation of Blank), and no bin
+         worse than the software side;
+       - then the 72 h continuous monitor (`wall_monitor5.py`, plan §9
+         P3a) on normal services; the table and the raw log paths go on
+         #279.
+  4. **A worse A/B is reverted the same day** ("worse" = any phase bin
+     over the software side's, or outside the acceptance band above;
+     `video_decode` back to `software` first, then NDI: the rollback order
+     above).
 
   Throughout: while `video_decode` = `gpu` is set on SNV,
   `post-deploy-preview.spec.ts` and `post-deploy-owner-path.spec.ts` find
