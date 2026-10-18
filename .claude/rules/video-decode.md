@@ -513,10 +513,24 @@ Design: #279 comment 6244390810 (`Design-by: main`), plan
 `docs/superpowers/plans/2026-10-16-gpu-video-path.md` §5.1-§5.3,
 §5.8-§5.11, §9 P3a. With `video_decode` = `software` (the default) the
 `video_hw_decode` paths above are as they were; what still runs at the
-default is the producer's per-song INFO (`path=ram`) with its `codec()`
-read (`GetNativeMediaType`, which the bench has called on the box since
-#223 S0), the table's row, and MAX's standby black composed as Black
-(`gpu-max.md`: the same pixels, fewer uploads on black boundaries).
+default:
+
+- the producer's per-song INFO (`path=ram`) with its `codec()` read
+  (`GetNativeMediaType`, which the bench has called on the box since
+  #223 S0), and the table's row;
+- MAX's standby black composed as Black (`gpu-max.md`: the same pixels,
+  fewer uploads on black boundaries);
+- the song's mode is read on the paced EMIT thread at its open
+  (`PipelineGpu::song_mode()`), while its decode cap is still read on the
+  decode thread, so one 5 s poll can land between the two reads;
+- the settings task reads `video_decode` and `program_ndi_source` too: an
+  unreadable one now also holds back a `video_hw_decode` change (the task
+  applies nothing on a read error);
+- each `/api/v1/ndi/health` row takes the table's lock to read
+  `gpu_decoded`; the idle heartbeat calls `release_idle` (nothing to let
+  go without a producer);
+- the log lines: the reader's open INFO names `mode`, and the bench's
+  start line logs `mode` where it logged `hw`.
 
 **Never set `video_decode` = `gpu` on PP before P3b** (the design's
 shared-benefit line: PP's preview gate keeps software until then). A
@@ -563,11 +577,12 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
     already queued), or, when it goes to the GPU, a song opened
     GPU-resident while NDI still reads the canvas (black NDI until MAX's
     task switches it);
-  - an AUTOMATIC NDI fall back to the canvas (a stale readback, P1b's
-    `ReturnGate`) changes no setting: a GPU-resident song keeps decoding
-    into its ring and NDI shows its pictures black until the readback
-    returns (the compositor that stopped reading back is MAX's too).
-    P3b's CPU path for a ring frame is what lifts it;
+  - an AUTOMATIC NDI fall back to the canvas (`ndi_source_for`'s rule: a
+    readback none or over 30 slots stale; the way back to the GPU is P1b's
+    `ReturnGate`, 30 on time in a row) changes no setting: a GPU-resident
+    song keeps decoding into its ring and NDI shows its pictures black
+    until the readback returns (the compositor that stopped reading back
+    is MAX's too). P3b's CPU path for a ring frame is what lifts it;
   - `PipelineGpu`'s drop race (review round 3, left): a playlist
     re-created while its old pipeline still tears down. The old
     `PipelineGpu`'s drop forgets the playlist's row, now the NEW
@@ -575,7 +590,8 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
     GPU-resident song on it is black on NDI for the rest of the song. It
     needs a re-created playlist, a GPU-resident song on it and a
     switch-off together; a generation check or a process-wide retire epoch
-    is the fix (a follow-up);
+    is the fix: a follow-up candidate the lane returned to the main
+    session (to file, or add to P4's scope on #279);
   - the rollback order: set `video_decode` = `software` FIRST, then
     `program_ndi_source` = `cpu` (one settings poll apart, ≥ 5 s). The
     other order opens the up-to-5 s window above, NDI on the canvas while
@@ -671,9 +687,12 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
   rest of the song in software) and the next song waits the 30 s
   backoff. Reading back on the same healthy decoder instead (round 2's
   path for a retired producer) would be gapless, but changes a fall back
-  the design chose: a follow-up for the main session. The box gate reads
-  `gpu.abandoned` and `max.device_resets` against
-  `video_decode.mid_stream_fallbacks`.
+  the design chose: a follow-up candidate the lane returned to the main
+  session (to file, or add to P4's scope on #279). It, and a ring full
+  past `RING_WAIT`, put a song on the software decode this file bans while
+  SNV / PP play to a room, so the main session decides it before `gpu`
+  runs during an event. The box gate reads `gpu.abandoned` and
+  `max.device_resets` against `video_decode.mid_stream_fallbacks`.
 - **Tests:**
   - sp-decoder `tests/mf_gpu_resident.rs` (Windows, WARP): a
     decoder-like 2-slice 640×368 NV12 array on the producer's device, its
@@ -697,42 +716,85 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
 
   WARP refuses the video device, so the D3D decode path into the ring
   runs only on the box.
-- **Box gates (the main session):**
-  - `decode-bench` with `"resident": true` on each 4K sample (AV1, VP9)
-    within D2 (`diag-bench.md`), its `ring.in_use` 0 after the run;
-  - before `program_ndi_source` = `gpu`: tell camera-box what changes
-    on `SP-program` (`gpu-max.md` P1b gate 2: the FourCC NV12 → UYVY, a
-    constant +33.3 ms arrival lag, its genlock FIFO `shallow_depth` +1);
-  - then `program_ndi_source` = `gpu` and `video_decode` = `gpu` with a
-    hardware-decodable song on program: `GET /api/v1/program`
-    `gpu.gpu_sides_per_s` at the program's rate and `max.upload_mb_s` 0
-    (the design and plan call it `gpu.upload_mb_s`; this build has it on
-    `max`), `status.video_decode.pipelines[].ring.full` +0 (`waits`
-    reported: 20 slots against the holds above), and the sum of every
-    `pipelines[].ring.vram_mb` (one producer per GPU-resident pipeline, ≤
-    249 MB at 4K each, until 10 min idle; P4 adds the VRAM guard);
-  - over that whole window and over the A/B, each of these stays +0:
-    `gpu.km_acquire_timeouts`, `gpu.abandoned`, `gpu.open_failures` (each
-    a ring side drawn BLACK on the wall or NDI; WARP never runs the keyed
-    mutexes against real NVDEC surfaces, so only the box proves them),
-    `video_decode.mid_stream_fallbacks` and `open_fallbacks` (a fall back
-    is the software decode this file bans while SNV plays to a room);
-  - in the same window, with `video_decode` = `gpu`: the A/V gate
-    (`post-deploy-av-sync.spec.ts`), `max-gate` and cg OBS's `genlock-fifo
-    audit` hold (`gpu-max.md` P1b gate 3);
-  - the retire (review round 3): on a song playing GPU-resident, set
-    `program_ndi_source` = `cpu` mid-song. Expect one WARN `the song's
-    pictures changed kind mid-song (… or its producer retired)`,
-    `mid_stream_fallbacks` +0, `pipelines[].gpu_decoding` false, NDI
-    showing the picture within ~5 s of MAX's switch, and no loss in the
-    audio fault ledger for that song;
-  - while `video_decode` = `gpu` is set on SNV, `post-deploy-preview.spec.ts`
-    and `post-deploy-owner-path.spec.ts` find no live preview on a
-    GPU-decoded song (none before P3b): no deploy during the A/B window,
-    and switch it back before one (`video_decode` first, see the rollback
-    order); never on PP before P3b (above);
-  - the wall measured before and after, an hour on each side
-    (`gpu-max.md`, "Judging a deploy on the wall").
+- **Box gates (the main session), in the design's order (#279 comment
+  6244390810, "Box gates"; the plan §7 and §9 P3a). Each step starts only
+  once the one before held:**
+  1. **The deploy at the default** (`video_decode` = `software`,
+     `program_ndi_source` = `cpu`): every existing gate holds, and the wall
+     is measured an hour after the E2E against an hour before
+     (`gpu-max.md`, "Judging a deploy on the wall"): this build changes
+     MAX at the default too (the standby black composed as Black, the same
+     pixels).
+  2. **NDI on the GPU alone** (P1b's window, `gpu-max.md` "The gates on
+     the box" items 2-3): tell camera-box first what changes on
+     `SP-program` (the FourCC NV12 → UYVY, a constant +33.3 ms arrival
+     lag, its genlock FIFO `shallow_depth` +1), then
+     `program_ndi_source` = `gpu` with `video_decode` still `software`
+     for a whole drift hour: an NDI receiver reads 1920×1080 UYVY,
+     `ndi.repeats` / `readback_late` +0 over songs and fades, the
+     automatic fall backs to the canvas counted (`ndi.switches` against
+     the setting's flips), the A/V gate (`post-deploy-av-sync.spec.ts`),
+     `max-gate` and cg OBS's `genlock-fifo audit` hold.
+  3. **Then `video_decode` = `gpu`** (NDI stays on `gpu`):
+     - `decode-bench` with `"resident": true` on each 4K sample (AV1, VP9)
+       within D2 (`diag-bench.md`), its `ring.in_use` 0 after the run,
+       BOTH at SNV's decode cap (1440: the sample opens scaled, so the
+       copy is of the video processor's surface) and at `max_resolution`
+       automatic (the copy of the DECODER's surface, a texture-array
+       slice);
+     - with a 4K song on program, at the cap and at automatic (the design
+       says "a 4K song"): `GET /api/v1/program` `gpu.gpu_sides_per_s` at
+       the program's rate and `max.upload_mb_s` 0 (the design and plan
+       call it `gpu.upload_mb_s`; this build has it on `max`),
+       `status.video_decode.pipelines[].ring.full` +0 (`waits` reported:
+       20 slots against the holds above), and the sum of every
+       `pipelines[].ring.vram_mb` (one producer per GPU-resident
+       pipeline, ≤ 249 MB at 4K each, until 10 min idle; P4 adds the VRAM
+       guard);
+     - over that whole window and over the A/B, each of these stays +0:
+       `gpu.km_acquire_timeouts`, `gpu.abandoned`, `gpu.open_failures`
+       (each a ring side drawn BLACK on the wall or NDI; WARP never runs
+       the keyed mutexes against real NVDEC surfaces, so only the box
+       proves them), `video_decode.mid_stream_fallbacks` and
+       `open_fallbacks` (a fall back is the software decode this file
+       bans while SNV plays to a room);
+     - NDI / A/V / max gates again with `video_decode` = `gpu`: the A/V
+       gate, `max-gate`, cg OBS's `genlock-fifo audit`, `ndi.repeats` /
+       `readback_late` +0;
+     - what only the box can prove, each read on the counters above:
+       - a padded-height song (AV1 1920×1080, NVDEC's surface 1088 rows)
+         decoded GPU-resident: MAX's and the wall's bottom rows show no
+         green strip (#223's);
+       - a seek on a GPU-resident 4K song: the pictures before the target
+         are copied, then dropped: `ring.full` +0, no fall back;
+       - a fade between two GPU-resident playlists (one compose draws
+         the slots of two producers): `km_acquire_timeouts` +0;
+       - the producer device built on the emit thread at a pipeline's
+         first GPU-resident song on program (the producer bullet above
+         claims no hole, unmeasured): read `consumer_fill_pairs`, the
+         late frames and the audio fault ledger at that song's start;
+       - 10 min after a GPU-resident pipeline went idle its
+         `pipelines[]` row and its `vram_mb` are gone;
+       - the retire (review round 3): on a song playing GPU-resident, set
+         `program_ndi_source` = `cpu` mid-song. Expect one WARN `the
+         song's pictures changed kind mid-song (… or its producer
+         retired)`, `mid_stream_fallbacks` +0,
+         `pipelines[].gpu_decoding` false, NDI showing the picture within
+         ~5 s of MAX's switch, and no loss in the audio fault ledger for
+         that song;
+     - **the main A/B**: `video_decode` gpu vs software, interleaved in
+       one-minute blocks over ≥ 46 blocks (a whole ~45 min drift cycle
+       per side, like `fhd_ab2.ps1`; plan §7), the wall's jumps back per
+       block binned by offer phase; then the 72 h continuous monitor
+       (`wall_monitor5.py`, plan §9 P3a) on normal services.
+  4. **A worse A/B is reverted the same day** (`video_decode` back to
+     `software` first, then NDI: the rollback order above).
+
+  Throughout: while `video_decode` = `gpu` is set on SNV,
+  `post-deploy-preview.spec.ts` and `post-deploy-owner-path.spec.ts` find
+  no live preview on a GPU-decoded song (none before P3b): no deploy
+  during the A/B window, and switch it back before one (`video_decode`
+  first); never on PP before P3b (above).
 
 ## Tests and gates
 

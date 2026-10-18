@@ -404,8 +404,30 @@ fn a_change_that_stops_gpu_retires_every_live_producer() {
     table.set_producer(1, Some(&fresh));
     assert_eq!(precondition_changed(&table, blocked, Resident::Off), 0);
     assert!(!fresh.retired(), "no change out of gpu: nothing retired");
-    assert_eq!(precondition_changed(&table, Resident::On, Resident::Off), 2);
+    assert_eq!(
+        precondition_changed(&table, Resident::On, Resident::Off),
+        1,
+        "b was retired already: only the fresh one counts"
+    );
     assert!(fresh.retired());
+}
+
+/// Review round 5: a producer retired already (still held by its lease
+/// until the next open) is not retired, nor counted, again.
+#[test]
+fn a_producer_retired_already_is_not_counted_again() {
+    let table = Pipelines::empty();
+    let (a, b) = (Arc::new(Fake::default()), Arc::new(Fake::default()));
+    table.set_producer(1, Some(&a));
+    table.set_producer(2, Some(&b));
+    assert_eq!(table.retire_producers(), 2);
+    assert!(a.retired() && b.retired());
+    assert_eq!(table.retire_producers(), 0, "both retired already");
+    assert_eq!(
+        precondition_changed(&table, Resident::On, Resident::Off),
+        0,
+        "a later switch-off retires none of them"
+    );
 }
 
 /// Review round 2: a retired producer still held at the next open (`gpu`
@@ -475,9 +497,13 @@ fn a_producer_made_while_gpu_stops_taking_effect_is_retired_at_its_open() {
         );
         made()
     };
-    let leased = take_for_open(&mut lease, &table, 1, Instant::now(), make, || {
+    let resident = || {
+        // Review round 5: the second read comes AFTER the row is written
+        // (the order the race's fix rests on; no mutant reorders it).
+        assert_eq!(table.status().len(), 1, "the row before the second read");
         setting.resident()
-    });
+    };
+    let leased = take_for_open(&mut lease, &table, 1, Instant::now(), make, resident);
     assert!(matches!(leased, Leased::Retired), "{leased:?}");
     assert!(
         leased.producer().is_none(),

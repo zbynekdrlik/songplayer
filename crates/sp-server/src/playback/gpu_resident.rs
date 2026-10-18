@@ -598,17 +598,21 @@ impl Pipelines {
         self.rows().entry(playlist_id).or_default().producer = weak;
     }
 
-    /// Retire every live producer ([`Producer::retire`]); how many.
+    /// Retire every live producer not retired yet ([`Producer::retire`]);
+    /// how many. One retired already (by an earlier change, or at its own
+    /// open) is still held by its lease until the next open, and is not
+    /// counted again.
     pub fn retire_producers(&self) -> usize {
-        let live: Vec<Arc<dyn Producer>> = self
+        let fresh: Vec<Arc<dyn Producer>> = self
             .rows()
             .values()
             .filter_map(|row| row.producer.as_ref().and_then(Weak::upgrade))
+            .filter(|producer| !producer.retired())
             .collect();
-        for producer in &live {
+        for producer in &fresh {
             producer.retire();
         }
-        live.len()
+        fresh.len()
     }
 
     /// Playlist `playlist_id`'s pipeline ended.

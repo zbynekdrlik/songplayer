@@ -43,8 +43,10 @@
 //! frame carries `gpu` and no bytes. Once the producer is retired its
 //! pictures are read back as a `Hardware` reader's, on the same decoder. A
 //! copy that fails is a decode error, so the reader goes on in software
-//! exactly as after any decode error on the D3D path; the session (and the
-//! producer it shares) goes with it.
+//! exactly as after any decode error on the D3D path, and lets go of its
+//! session: only its own reference to the producer goes. The producer
+//! stays in its pipeline's lease, dropped at the next open only if its
+//! ring died.
 
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
