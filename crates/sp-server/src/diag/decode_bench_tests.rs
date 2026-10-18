@@ -8,11 +8,11 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use sp_decoder::{
-    DecodeMode, DecodePath, DecodedVideoFrame, DecoderError, MediaStream, PixelFormat, VideoStream,
+    DecodePath, DecodedVideoFrame, DecoderError, MediaStream, PixelFormat, VideoStream,
 };
 
 use super::{
-    BenchEnd, BenchFileError, BenchOutcome, BenchReport, BenchRun, Budget, DecodeBench,
+    BenchEnd, BenchFileError, BenchMode, BenchOutcome, BenchReport, BenchRun, Budget, DecodeBench,
     DecodeFacts, DecodeUs, MAX_NAME_BYTES, PictureLayout, StreamFacts, bench_file_name,
     bench_seconds, is_device_name, measure, run_on_decode_thread,
 };
@@ -647,13 +647,14 @@ fn the_end_log_line_names_the_stats_and_the_gate() {
 /// What a `"hw": true` run on the box's RTX reports.
 fn on_the_gpu() -> DecodeFacts {
     DecodeFacts {
-        mode: DecodeMode::Hardware,
+        mode: BenchMode::Hardware,
         path: Some(DecodePath::Hardware),
         path_changes: 0,
         adapter: Some("NVIDIA GeForce RTX 3070 Ti".to_string()),
         fallback: None,
         max_height: Some(2160),
         scaled_from: None,
+        ring: None,
     }
 }
 
@@ -717,7 +718,7 @@ fn a_hardware_run_that_decoded_in_software_names_no_adapter() {
 fn a_hardware_run_with_no_picture_has_no_path() {
     let report = BenchReport::open_failed("x.mp4", "open: no video".to_string(), 3, None)
         .with_decode(DecodeFacts {
-            mode: DecodeMode::Hardware,
+            mode: BenchMode::Hardware,
             ..DecodeFacts::default()
         });
     assert!(report.hw_requested);
@@ -754,7 +755,7 @@ fn a_hardware_runs_end_line_names_its_path() {
     );
     let failed = BenchReport::open_failed("x.mp4", "open: no video".to_string(), 3, None)
         .with_decode(DecodeFacts {
-            mode: DecodeMode::Hardware,
+            mode: BenchMode::Hardware,
             fallback: Some("open: no video device".to_string()),
             ..DecodeFacts::default()
         });
@@ -843,3 +844,7 @@ fn a_scaled_run_names_its_cap_and_the_streams_own_size() {
         "not known before the reader"
     );
 }
+
+/// #279 P3a: GPU-resident runs (a child module: this file's cap).
+#[path = "decode_bench_tests_resident.rs"]
+mod resident;

@@ -16,37 +16,49 @@ use serde::Serialize;
 use sp_gpu::probe::{GpuProbe, ProbeError, ProbeReport, Verdict, Vram};
 use sp_gpu::{AdapterInfo, GpuError};
 
-use super::decode_bench::BenchSlot;
+use super::decode_bench::{BenchMode, BenchSlot};
 
 /// What a `decode-bench` request asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BenchAsk<'a> {
     /// `{"probe": true}`: the GPU capability probe.
     Probe,
-    /// `{"file", "seconds", "hw"?}`: a decode run.
+    /// `{"file", "seconds", "hw"?, "resident"?}`: a decode run.
     Decode {
         file: &'a str,
         seconds: u64,
-        hw: bool,
+        mode: BenchMode,
     },
 }
 
 /// The request's shape, or why it has none: a probe names no file, no
-/// seconds and no `hw`; a decode run names a file and its seconds.
+/// seconds, no `hw` and no `resident`; a decode run names a file and its
+/// seconds, and at most one of `hw` / `resident` (#279 P3a: two modes).
 pub fn ask(
     probe: bool,
     file: Option<&str>,
     seconds: Option<u64>,
     hw: bool,
+    resident: bool,
 ) -> Result<BenchAsk<'_>, &'static str> {
     if probe {
-        if file.is_some() || seconds.is_some() || hw {
-            return Err("a probe takes no file, seconds or hw");
+        if file.is_some() || seconds.is_some() || hw || resident {
+            return Err("a probe takes no file, seconds, hw or resident");
         }
         return Ok(BenchAsk::Probe);
     }
+    if hw && resident {
+        return Err("hw and resident are two modes: send one of them");
+    }
     match (file, seconds) {
-        (Some(file), Some(seconds)) => Ok(BenchAsk::Decode { file, seconds, hw }),
+        (Some(file), Some(seconds)) => {
+            let mode = BenchMode::of(hw, resident);
+            Ok(BenchAsk::Decode {
+                file,
+                seconds,
+                mode,
+            })
+        }
         _ => Err("file and seconds are required (or \"probe\": true)"),
     }
 }

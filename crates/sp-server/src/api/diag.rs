@@ -5,13 +5,16 @@
 //! decodes `<data dir>/bench/<name>` through SongPlayer's real video decoder
 //! and answers what one picture costs (`diag::decode_bench`). #223 S3b: an
 //! optional `"hw": true` decodes on the GPU (the reader's `Hardware` mode);
-//! the report says which path really decoded:
+//! #279 P3a: an optional `"resident": true` decodes GPU-resident, each
+//! picture copied into a producer device's ring (never both: a 400); the
+//! report says which path really decoded:
 //!
 //! - 200: the report;
 //! - 500 (JSON): the report of a run the decoder ended, with its error and
 //!   the pictures decoded so far;
 //! - 500 (text): a run with no report, its thread did not start or panicked;
-//! - 400: a `file` that is not a bare name, or `seconds` outside 1..=15;
+//! - 400: a `file` that is not a bare name, `seconds` outside 1..=15, or
+//!   `hw` and `resident` both;
 //! - 404: no such file in the sample dir;
 //! - 409: another run is in progress;
 //! - 501: a build without Media Foundation (Linux).
@@ -24,8 +27,8 @@
 //! 400.
 //!
 //! axum answers a body that is not JSON (400), a field of the wrong type
-//! (`seconds` not a whole number, `hw` or `probe` not a bool: 422), or not
-//! `application/json` (415) before this handler runs.
+//! (`seconds` not a whole number, `hw`, `resident` or `probe` not a bool:
+//! 422), or not `application/json` (415) before this handler runs.
 
 use axum::Json;
 use axum::extract::State;
@@ -33,8 +36,6 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use tracing::{info, warn};
-
-use sp_decoder::DecodeMode;
 
 use crate::AppState;
 use crate::diag::decode_bench::{self, BenchFileError, BenchOutcome, BenchReport};
@@ -50,6 +51,10 @@ pub struct DecodeBenchRequest {
     /// #223 S3b: decode on the GPU (`Hardware` mode). Absent = software.
     #[serde(default)]
     pub hw: bool,
+    /// #279 P3a: decode GPU-resident (into a producer's ring), never with
+    /// `hw`.
+    #[serde(default)]
+    pub resident: bool,
     /// #279 P0: run the GPU capability probe instead (no other field).
     #[serde(default)]
     pub probe: bool,
@@ -63,12 +68,17 @@ pub async fn post_decode_bench(
 ) -> Response {
     // Every refusal says why, and logs it (a failed run is a WARN below).
     let refuse = |status: StatusCode, why: String| {
-        info!(file = ?req.file, seconds = ?req.seconds, hw = req.hw, probe = req.probe, %status, %why, "decode-bench: no report");
+        info!(file = ?req.file, seconds = ?req.seconds, hw = req.hw, resident = req.resident, probe = req.probe, %status, %why, "decode-bench: no report");
         (status, why).into_response()
     };
-    let ask = gpu_probe::ask(req.probe, req.file.as_deref(), req.seconds, req.hw);
-    let (file, seconds, hw) = match ask {
-        Ok(BenchAsk::Decode { file, seconds, hw }) => (file, seconds, hw),
+    let (file, seconds) = (req.file.as_deref(), req.seconds);
+    let ask = gpu_probe::ask(req.probe, file, seconds, req.hw, req.resident);
+    let (file, seconds, mode) = match ask {
+        Ok(BenchAsk::Decode {
+            file,
+            seconds,
+            mode,
+        }) => (file, seconds, mode),
         Ok(BenchAsk::Probe) => return post_gpu_probe(&state).await,
         Err(why) => return refuse(StatusCode::BAD_REQUEST, why.to_string()),
     };
@@ -90,7 +100,6 @@ pub async fn post_decode_bench(
         let why = "a decode-bench run is in progress".to_string();
         return refuse(StatusCode::CONFLICT, why);
     };
-    let mode = DecodeMode::from_hw_flag(hw);
     match decode_bench::run(path, file.to_string(), max_wall, mode, slot).await {
         BenchOutcome::Report(report) => (report_status(&report), Json(report)).into_response(),
         BenchOutcome::Unsupported => {

@@ -146,6 +146,41 @@ async fn a_hardware_request_without_media_foundation_is_501() {
     assert!(state.decode_bench.try_start().is_some());
 }
 
+/// #279 P3a: `resident` is an optional bool too (axum's 422), and it is
+/// never sent with `hw` (the handler's 400, before any file is looked up).
+#[tokio::test]
+async fn resident_is_a_bool_and_never_comes_with_hw() {
+    let (state, _tmp, dir) = bench_state().await;
+    std::fs::write(dir.join("x.mp4"), b"x").unwrap();
+    for resident in [r#""yes""#, "1", "null"] {
+        let body = format!(r#"{{"file":"x.mp4","seconds":1,"resident":{resident}}}"#);
+        let (status, text) = post_bench(&state, &body).await;
+        let why = format!("resident {resident}: {text}");
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{why}");
+    }
+    let both = serde_json::json!({
+        "file": "missing.mp4", "seconds": 1, "hw": true, "resident": true
+    })
+    .to_string();
+    let (status, text) = post_bench(&state, &both).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{text}");
+    assert_eq!(text, "hw and resident are two modes: send one of them");
+    assert!(state.decode_bench.try_start().is_some());
+}
+
+/// #279 P3a: a `"resident": true` request reaches the run like any other
+/// (on Linux: no Media Foundation, 501).
+#[cfg(not(windows))]
+#[tokio::test]
+async fn a_resident_request_without_media_foundation_is_501() {
+    let (state, _tmp, dir) = bench_state().await;
+    std::fs::write(dir.join("x.mp4"), b"x").unwrap();
+    let body = serde_json::json!({ "file": "x.mp4", "seconds": 1, "resident": true });
+    let (status, text) = post_bench(&state, &body.to_string()).await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{text}");
+    assert!(state.decode_bench.try_start().is_some());
+}
+
 /// The decoder crate's H.264 fixture: 160×120, 30 fps, 3 s
 /// (`crates/sp-decoder/tests/fixtures/regen.sh`).
 #[cfg(windows)]
@@ -239,4 +274,35 @@ async fn a_file_the_decoder_cannot_read_is_500_with_the_error() {
     assert_eq!(report["ended"], "error", "{text}");
     assert!(!report["error"].as_str().unwrap().is_empty(), "{text}");
     assert_eq!(report["frames"], 0, "{text}");
+}
+
+/// #279 P3a: `"resident": true` on the fixture. `windows-latest` has no
+/// production adapter (only the Basic Render Driver), so the producer
+/// device cannot be made there: a 500 whose report names it. A runner with
+/// a GPU measures the fixture GPU-resident and reports its ring.
+#[cfg(windows)]
+#[tokio::test]
+async fn a_resident_request_reports_its_producer_or_why_there_is_none() {
+    let (state, _tmp, dir) = bench_state().await;
+    std::fs::copy(decoder_fixture(), dir.join("h264.mp4")).unwrap();
+    let body = serde_json::json!({ "file": "h264.mp4", "seconds": 15, "resident": true });
+    let (status, text) = post_bench(&state, &body.to_string()).await;
+    let report: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(report["gpu_resident"], true, "{text}");
+    assert_eq!(report["hw_requested"], true, "{text}");
+    match status {
+        StatusCode::INTERNAL_SERVER_ERROR => {
+            let error = report["error"].as_str().unwrap_or_default();
+            assert!(error.starts_with("producer device: "), "{text}");
+            assert!(report["ring"].is_null(), "{text}");
+            assert_eq!(report["frames"], 0, "{text}");
+        }
+        StatusCode::OK => {
+            assert_eq!(report["ended"], "end_of_stream", "{text}");
+            assert!(report["ring"]["slots"].is_u64(), "{text}");
+            assert_eq!(report["ring"]["in_use"], 0, "every picture went back");
+        }
+        other => panic!("status {other}: {text}"),
+    }
+    assert!(state.decode_bench.try_start().is_some());
 }
