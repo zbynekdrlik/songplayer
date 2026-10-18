@@ -221,9 +221,10 @@ mod tests {
 
     #[test]
     fn last_owner_drop_returns_the_allocation_to_the_pool() {
-        // #203 2b: `SharedFrame` wraps `Arc<PooledBuf>`, so when the LAST owner
-        // drops, the pixel buffer is RECYCLED into the pool (for the next
-        // decoded frame) instead of freed. A unique, large capacity isolates
+        // #203 2b: `SharedFrame` holds its `PooledBuf` behind an `Arc` (#279
+        // P3a: with the standby-black mark), so when the LAST owner drops,
+        // the pixel buffer is RECYCLED into the pool (for the next decoded
+        // frame) instead of freed. A unique, large capacity isolates
         // this from every other test's pool traffic — no clear_pool needed.
         use sp_decoder::frame_pool::{pool_len, take};
         const CAP: usize = 1_500_007;
