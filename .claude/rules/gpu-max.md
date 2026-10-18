@@ -984,6 +984,16 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
     `program_max.rs`, holds both phases). Tune it on the box like the send
     phase: PATCH it, measure the wall over a whole drift cycle (never a
     short take: the effect comes in waves).
+  - **Judging a deploy on the wall (#279 P2, 17.10.2026):** two 40 s takes
+    15 min after a deploy read 11 / 11 against a baseline of 2 / 2; the
+    revert, then a whole hour on each build starting after its E2E, read the
+    same distribution (dev.12 23 / 30 takes at 0–2, worst 13 and 61; dev.13
+    22 / 30, worst 6). A first post-deploy take decides only whether to
+    revert at once; whether a build is worse needs an hour on each side.
+    The read-only watch: `diag\wall-bridge\drift_watch.ps1` (one take per
+    2 min with the song and MAX's counters), run as an interactive task of
+    the Resolume user (`schtasks /create … /ru Resolume /it`, then `/run`;
+    `/change` hangs asking for a password), deleted after.
   - The cost: the picture leaves later (mean lead ~K + 10 ms, up from
     ~22 ms) and the thread waits up to one period + 3 ms after the offer
     before it composes. Two outstanding jobs never coalesce: a lead under
