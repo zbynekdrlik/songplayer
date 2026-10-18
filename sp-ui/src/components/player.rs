@@ -90,9 +90,21 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     // included). It read the scene-aware `state` (`Playing | WaitingForScene`
     // + a song), so a PAUSED playlist off program offered a preview that could
     // only stay black (the owner's ytslow at PP). A Memo (Rule 1): a position
-    // tick never re-runs the slot.
+    // tick never re-runs the slot. #279 P3a: a song decoded GPU-resident (its
+    // health row's `gpu_decoded`, the 1 Hz poll) gives the preview taps no
+    // picture before P3b, so the slot says so (`player_view::gpu_preview`)
+    // instead of offering a preview that would stay black.
+    let gpu_decoded = Memo::new(move |_| {
+        store
+            .ndi_health
+            .get()
+            .iter()
+            .any(|o| o.playlist_id == pid && o.gpu_decoded)
+    });
     let preview_slot = Memo::new(move |_| {
-        player_view::preview_slot(state_known.get(), has_content.get(), state(), transport())
+        let slot =
+            player_view::preview_slot(state_known.get(), has_content.get(), state(), transport());
+        player_view::gpu_preview(slot, gpu_decoded.get())
     });
 
     // Playback-command errors (play / pause / skip / prev / seek / mode) surface

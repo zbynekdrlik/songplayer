@@ -213,6 +213,10 @@ pub struct NdiOutputHealth {
     /// did): the Player says why the program is black from it.
     #[serde(default)]
     pub open_failures: Option<sp_core::playback::OpenFailures>,
+    /// #279 P3a: its song's pictures are decoded GPU-resident (they stay in
+    /// VRAM): the Player offers no live preview of it before P3b.
+    #[serde(default)]
+    pub gpu_decoded: bool,
 }
 
 impl NdiOutputHealth {
