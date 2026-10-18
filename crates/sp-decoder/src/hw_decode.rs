@@ -672,9 +672,12 @@ const DECODER_BLOCK: u32 = 16;
 ///   chain goes on. What is proven of the software decoders: on CI's
 ///   runner its H.264 software decoder showed the stream's own size at open
 ///   with no aperture (160×120 for the fixture coded 160×128, CI run
-///   39040435639); the VP9 / AV1 software decoders, and any decoder's type
-///   after its first frame, are not proven here. The reader logs the
-///   decoder's output again at the first scaled picture (one INFO).
+///   39040435639). At its FIRST picture the same decoder turns to its coded
+///   size, 160×128, and shows the native aperture (0, 0, 160×120) with it
+///   (CI run 39081688670, `mf_decode_cap`'s stderr lines): its padding
+///   never reaches the processor. The VP9 / AV1 software decoders are not
+///   proven here. The reader logs the decoder's output again at the first
+///   scaled picture (one INFO).
 ///
 /// A refusal plays the file at its own size: never a green strip.
 pub fn scaled_open_safe(

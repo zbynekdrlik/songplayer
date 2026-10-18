@@ -193,10 +193,11 @@ rounds 1–2):
       lets a D3D11 stream of whole blocks through; it names `path`). What
       is PROVEN of the software decoders: CI run 39040435639 printed the
       runner's H.264 software decoder (the line names no MFT) showing
-      `160×120`, no aperture, AT OPEN for the fixture coded 160×128. The
-      VP9 / AV1 software decoders and any decoder's type after its first
-      frame are not proven; the CI log's `at the first picture` line
-      (below) shows H.264's;
+      `160×120`, no aperture, AT OPEN for the fixture coded 160×128; at
+      its FIRST PICTURE the same decoder turns to `160×128` WITH the native
+      aperture `(0, 0, 160×120)` and range 2 (CI run 39081688670's `at the
+      first picture` lines), so its padding never reaches the processor.
+      The VP9 / AV1 software decoders are not proven;
   - Media Foundation refuses the attribute or the type.
 
   A refusal logs WARN `mf_reader: the scaled open was refused; this file
