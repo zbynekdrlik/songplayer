@@ -994,6 +994,14 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
     2 min with the song and MAX's counters), run as an interactive task of
     the Resolume user (`schtasks /create … /ru Resolume /it`, then `/run`;
     `/change` hangs asking for a password), deleted after.
+    **Delete every such task as soon as its run ends, in the same turn: a
+    `/sc once /st 23:59` trigger FIRES AGAIN at 23:59 that day** (19.10.2026:
+    four A/B tasks ran at once at 21:59Z, in the middle of a deploy's E2E;
+    each took the state the one before had changed as "the operator's",
+    so their restores left the program on Blank and Arena's group 2
+    soloed, and three post-deploy tests failed for it). Read the trigger
+    back (`schtasks /query /tn X /v /fo list` → "Next Run Time"), or end
+    the script with its own `schtasks /delete /tn X /f`.
   - The cost: the picture leaves later (mean lead ~K + 10 ms, up from
     ~22 ms) and the thread waits up to one period + 3 ms after the offer
     before it composes. Two outstanding jobs never coalesce: a lead under
