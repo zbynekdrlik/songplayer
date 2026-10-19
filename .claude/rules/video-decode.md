@@ -379,7 +379,7 @@ rounds 1–2):
     - `frames` and `source_fps` equal to the uncapped run's. Unequal
       means frame-rate conversion: a repeated picture;
     - a mean well under the uncapped run's;
-    - the log's `opened scaled to the decode cap` line says `path=D3D11`
+    - the log's `opened scaled to the decode cap` line says `path="D3D11"`
       and names the `decoder` output, the `chain` (a `VideoProcessor`
       after the `Decoder`), the colours (two stated, unequal values of
       `colour_out` and `colour_decoder` suggest a conversion: check the
@@ -859,12 +859,16 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          MB/s, and #282 found the cap moves the wall's backs 10–15×).
          `max_resolution` is also the DOWNLOAD cap (#282), so an
          automatic take, BEFORE it switches the cap: arms #230's
-         background hold well past the take's planned end, #230's own
-         4 h (`background_hold_until_ms`, UTC ms, `background-hold.md`:
-         no new download fetches a ≤ 2160 file that would stay after
-         the take; the watcher ends a hold at its time, so a take that
-         overran a tight end would lose it with the cap still automatic;
-         only the `finally` below ends it) and switches
+         background hold until the take's planned end plus a margin of
+         at least #230's own 4 h (`background_hold_until_ms`, UTC ms,
+         `background-hold.md`: no new download fetches a ≤ 2160 file
+         that would stay after the take; the watcher ends a hold at its
+         time, so a take that overran a tight end would lose it with the
+         cap still automatic; only the `finally` below ends it). The
+         watcher reads the stored end only after an on-air change: with
+         a hold already running (an operator's `sp-90s`), it would still
+         end at that older time, so after arming make one cut (to Blank)
+         before switching the cap. It then switches
          `video_upgrade_enabled` off. A cut to `sp-slow` ends that hold
          and one to `sp-90s` re-arms it for 4 h (`background_hold.rs`,
          `RELEASE_SCENE` / `HOLD_SCENE`), and a dashboard cut names its
@@ -1096,19 +1100,29 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
             counts nothing there, `decoder_path_visible`).
          8. Steps 7 and 8 are told apart by the COUNTERS and the log since
             the restart, never by what a poll of the row happened to see:
-            - `mid_stream_fallbacks` +1, or the WARN `mf_reader: a decode
-              error on the D3D11 path; this file goes on in software`: a
-              MID-STREAM fall back (a ring full past `RING_WAIT`, a dead
-              ring, a refused picture, a lost device), whenever it came
-              (a first copy that failed reads like a failed open at the
-              poll, its `path="ram"` included); it fails gate 3's +0;
-            - that WARN with the count +0: the software reopen itself
-              failed, the song errors;
-            - a row true, then false, with the count +0 and the
-              producer's WARN `the song's pictures changed kind
-              mid-song (… or its producer retired)`: a retire, someone
-              changed `video_decode` or `program_ndi_source` under the
-              take, which voids it.
+            - `mid_stream_fallbacks` +1 (with the WARN `mf_reader: a
+              decode error on the D3D11 path; this file goes on in
+              software`): a MID-STREAM fall back (a ring full past
+              `RING_WAIT`, a dead ring, a refused picture, a lost
+              device), whenever it came (a first copy that failed reads
+              like a failed open at the poll, its `path="ram"`
+              included); it fails gate 3's +0;
+            - that WARN with the count +0, then the ERROR `paced
+              producer: decode error`: the software reopen itself
+              failed, and the song ENDS there (the producer marks its
+              end, the next song follows; no error event, no
+              `open_failures`): a lost song, reported as one though gate
+              3's counter reads +0;
+            - the producer's WARN `the song's pictures changed kind
+              mid-song (… or its producer retired)` with the count +0
+              and no `mf_reader` decode-error WARN: a retire when the
+              settings task logged `settings applied` and `gpu
+              resident: video_decode=gpu stopped taking effect - …`
+              since the restart (someone changed `video_decode` or
+              `program_ndi_source` under the take, which voids it);
+              without them, an unexplained change of kind (Media
+              Foundation handing a system-memory picture mid-file), not
+              a setting.
 
             Each such block is reported, never measured.
 
