@@ -184,7 +184,8 @@ pub fn tenth(x: f64) -> f64 {
 /// program's pictures. The rates cover the window above (read them with
 /// `max.state` `running`, or with NDI from the GPU); the counts run since
 /// the start. A GPU-resident song on program reads `gpu_sides_per_s` at
-/// the program's rate and `cpu_sides_per_s` (and `max.upload_mb_s`) 0.
+/// the program's rate (up to two per boundary for a song the pacer blends:
+/// a ring slot per side) and `cpu_sides_per_s` (and `max.upload_mb_s`) 0.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct GpuStatus {
     /// Ring slots drawn in place per second.

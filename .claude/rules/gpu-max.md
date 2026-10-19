@@ -2145,14 +2145,17 @@ canvas 3840×2160, `program_max_phase::program_max_size`).
   filling its width) with a new sender.
 - `GET /api/v1/program` `max.width` / `height` report the applied size. The
   hand-off mode is on no field of `GET /api/v1/program`: `GET
-  /api/v1/settings` shows its STORED value (absent, `""` and `synced` are
-  all the default), applied within one 5 s poll (the INFO `program max:
-  Spout hand-off applied` marks a change).
+  /api/v1/settings` shows its STORED value (anything but exactly `plain`
+  or `release_then_wait`, trimmed, is the default `synced`), applied
+  within one 5 s poll (the INFO `program max: Spout hand-off applied`
+  names the applied `mode` at a change).
 - The post-deploy MAX gate (`e2e/max-gate.ts`) requires 3840×2160, so an
   A/B value left set fails the next deploy's E2E.
 
 **How to judge any wall change from now on:**
-- count `pictures` against the content's own rate, next to the backs;
+- count the MISSING pictures (the distinct forward pictures against what
+  the content shows on the wall, never the raw count: `video-decode.md`,
+  the main A/B's metrics), next to the backs;
 - measure on NON-SongPlayer content too: an Arena clip on one layer while
   another layer receives SongPlayer's Spout;
 - a test that switches the bridge Arena puts every clip and setting back in
