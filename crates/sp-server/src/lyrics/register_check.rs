@@ -188,7 +188,7 @@ pub fn apply(track: &mut LyricsTrack, findings: Vec<Finding>) -> RegisterCheck {
                 fixed.push(line_of(track, index));
                 let line = &mut track.lines[index];
                 line.en = en;
-                line.sk = Some(sk);
+                line.sk = Some(super::haleluja::haleluja(&sk).into_owned());
                 // Word timings belong to the words that were there.
                 line.words = None;
             }

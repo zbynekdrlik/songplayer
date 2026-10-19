@@ -15,6 +15,7 @@ pub mod g35t_transcript;
 pub mod gather;
 pub mod genius;
 pub mod gpu_policy;
+pub mod haleluja; // #284: the SK lines say "haleluja"
 pub mod heavy_alloc_env;
 pub mod heavy_containment;
 pub mod heavy_faults;

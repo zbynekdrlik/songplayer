@@ -320,6 +320,10 @@ impl LyricsWorker {
         if let Err(e) = self.ensure_script().await {
             error!("lyrics_worker: failed to write lyrics_worker.py: {e}");
         }
+        // #284: before the loop, so it never races a lyrics write.
+        if let Err(e) = crate::lyrics::haleluja::rewrite_stored(&self.pool, &self.cache_dir).await {
+            warn!("lyrics_worker: the haleluja pass could not list the songs: {e}");
+        }
 
         // Start with a fresh yt-dlp scratch directory. Each song's
         // fetch_subtitles call writes a .json3 and then deletes it, but
