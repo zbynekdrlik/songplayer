@@ -868,13 +868,18 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          watcher reads the stored end only after an on-air change: with
          a hold already running (an operator's `sp-90s`), it would still
          end at that older time, so after arming make one cut (to Blank)
-         before switching the cap. It then switches
+         and read `GET /api/v1/background-hold` back (`held` true,
+         `until_utc_ms` the take's value: the watcher's timed release
+         deletes the stored end whatever it holds) before switching the
+         cap. It then switches
          `video_upgrade_enabled` off. A cut to `sp-slow` ends that hold
          and one to `sp-90s` re-arms it for 4 h (`background_hold.rs`,
          `RELEASE_SCENE` / `HOLD_SCENE`), and a dashboard cut names its
          playlist's scene: so the take plays none of its contents from
          ytslow or yt90s, reads `GET /api/v1/background-hold` `held` true
-         in every block (a block where it is false is dropped) and checks
+         in every block (a block where it is false is dropped, and the
+         hold is armed again, PATCH, one cut, the read back, or the
+         automatic take ends through its `finally`) and checks
          per block that the A/B songs' files are unchanged; no
          `deploy-pp` runs during it (PP's peer gate fails on SNV's hold,
          503 `background-hold`). When it ends, a `finally` (like Arena's
@@ -1040,7 +1045,10 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          `program_transition_ms`: it records the values found, and runs
          only with a fade of at most 4 s (the 10 s lead below; the
          default is 300 ms). A content block (G or S):
-         1. PATCH `video_decode`, wait at least one 5 s poll.
+         1. PATCH `video_decode`, then wait until `GET /api/v1/status`
+            `video_decode.video_decode` reads the PATCHed value (as last
+            applied: the settings task sleeps 5 s after each apply, so a
+            fixed 5 s wait can open the restart in the old mode).
          2. Restart the content: `POST /api/v1/test-item/start {"clip"}`,
             or play the song again. A Play claims no program, so on a
             playlist off program it plays off program.
@@ -1133,7 +1141,13 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          -2 with no `transition.active` and no pipeline's `transport` is
          `Playing` (the engine pauses the outgoing playlist only after its
          fade's hold). EVERY block's take (G, S and Blank alike) runs 45 s
-         and only its last 40 s are analysed (a margin).
+         and only its last 40 s are analysed (a margin). At a content
+         block's end `on_air_item` (its item and `started_at_utc_ns`)
+         must still be the one the take started on, else the block is
+         dropped and reported: a song that ended inside the take (step
+         8's failed reopen, a `FrameAlloc`, an audio-side decode error:
+         each only the ERROR `paced producer: decode error`, then
+         `Ended`).
          `gpu.gpu_sides_per_s` and `max.upload_mb_s` are rates over the
          last 30 s (`UPLOAD_RATE_SPAN`), so they confirm a side only 30 s
          after the restart: read them at the block's end, never as its
