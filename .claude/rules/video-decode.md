@@ -791,7 +791,11 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
        BOTH at SNV's decode cap (1440: the sample opens scaled, so the
        copy is of the video processor's surface) and at `max_resolution`
        automatic (the copy of the DECODER's surface, a texture-array
-       slice);
+       slice). Every automatic part of this gate (the bench and the 4K
+       song's window below) runs under the automatic take's arming and
+       `finally` (the main A/B below: #230's hold armed and read back,
+       `video_upgrade_enabled` off, the cap put back first, the hold
+       last), since automatic is also the DOWNLOAD cap;
      - with a 4K song on program, at the cap and at automatic (the design
        says "a 4K song"): `GET /api/v1/program` `gpu.gpu_sides_per_s`
        about 30 for a song the pacer does not blend, up to two ring
@@ -832,18 +836,24 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
        that failed, both log `path="ram"`):
        - a mid-stream +1 (step 8's WARN) is G's when the last
          `mf_reader: opened on the D3D11 path (hardware decode
-         requested)` INFO naming that `file` reads
-         `mode="gpu_resident"`, an outgoing song's during a cut
-         included;
+         requested)` INFO naming that `file` BEFORE that WARN reads
+         `mode="gpu_resident"`: any song's, an outgoing one's in a
+         cut (into any block, Blank included) too;
        - an open +1 (step 7's WARN) is G's when that file is a G
-         block's own content and no step-7 line since its restart
-         explains a base-mode open (a producer lost, not made or not
-         yet there, a retired producer's INFO,
+         block's own content (or, before the A/B, the 4K song on
+         program in gate 3's window) and no step-7 line since its
+         restart explains a base-mode open (a producer lost, not made
+         or not yet there, a retired producer's INFO,
          `gpu_resident_blocked`);
        - G's fails this gate; an S block's own content falling back
          is a fall back of the default path, reported and that block
-         never measured; any other reader's (a Blank block's
-         included) is reported, never G's.
+         never measured; a background job's reader is reported,
+         never G's.
+
+       `ring.full` / `ring.dead` are read at EVERY block's end read
+       (every `pipelines[]` row, the evidence below): an outgoing G
+       pipeline's ring can fill in a cut into Blank, and the next G
+       open replaces it with a ring starting at 0.
 
        A gate-3 failure during the A/B stops it and turns
        `video_decode` back to `software` the same day (NDI stays on
@@ -894,7 +904,11 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          unscaled, `hw_decode::scaled_open_safe`; name a 3840×2160 one),
          and automatic is a take of its own: the design's ≈ 132 vs ≈ 298
          MB/s, and #282 found the cap moves the wall's backs 10–15×).
-         `max_resolution` is also the DOWNLOAD cap (#282), so an
+         EVERY take switches `video_upgrade_enabled` off at its start
+         and puts it back in its `finally` (the upgrade worker could
+         open or swap an A/B file, and gate 3 judges every fall back
+         by its reader). `max_resolution` is also the DOWNLOAD cap
+         (#282), so an
          automatic take, BEFORE it switches the cap: arms #230's
          background hold until the take's planned end plus a margin of
          at least #230's own 4 h (`background_hold_until_ms`, UTC ms,
@@ -943,13 +957,19 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          + 15 s to + 55 s, and the Arena clip over its WHOLE loop, its
          seam included (Arena loops it on its own clock, never re-cued
          per block). The check is `wall_cadence.py`'s own same-picture
-         comparison (extended as below) run over the file's decoded
-         frames in the region it reads, the clip's file looped once so
-         its last frame meets its first. ffmpeg is a coarser stand-in:
-         `-stream_loop 1 -i <file> -vf crop=<region>,extractplanes=y,
-         freezedetect=d=1:n=<that threshold as a ratio of full
-         scale>` (`n` is a normalised difference; its default −60 dB
-         passes a near-still shot the reader holds). A still shot of
+         comparison run over the file's decoded frames (an input mode
+         its extension adds beside the held span below: the frames in
+         the pixel format its comparison reads), in the region it
+         reads mapped back into the FILE's own pixels (through Arena's
+         placement, and MAX's fit for a song), the clip's file looped
+         once so its last frame meets its first. ffmpeg is a coarser
+         stand-in: a song `ffmpeg -ss 15 -t 40 -i <file> -vf
+         crop=<region>,format=gray,freezedetect=d=1:n=<that threshold
+         as a ratio of full scale> -f null -`, the clip the same with
+         `-stream_loop 1` for `-ss` / `-t` (`format=gray`, never
+         `extractplanes`: ffmpeg decodes DXV and HAP to RGB; `n` is a
+         normalised difference, its default −60 dB passes a
+         near-still shot the reader holds). A still shot of
          their own would read as a hold on both sides (the
          dead-stretch rule below). A Blank block has EVERY
          pipeline paused (no `transport` `Playing`): an off-program
@@ -1139,8 +1159,7 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
            failures are gate 3's verdict already, whatever the wall
            showed (`gpu.km_acquire_timeouts`, `abandoned`,
            `open_failures`, `ring.full`, `ring.dead` over the A/B; the
-           fall-back counters by the mode of the reader their WARN
-           names, gate 3). So the counters
+           fall-back counters by gate 3's rule). So the counters
            and lines above
            are recorded, never used to name a side alone. A block whose
            log holds the ERROR `paced producer: decode error` is dropped
@@ -1341,7 +1360,7 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
             precondition (`gpu_resident_blocked`), the reader's open fall
             back (WARN `mf_reader: hardware decode did not open; this file
             decodes in software`, `open_fallbacks` +1: that song decodes in
-            SOFTWARE, and it fails gate 3's +0), or a picture in system
+            SOFTWARE, judged by gate 3's rule), or a picture in system
             memory (the producer's per-song INFO `paced producer: the
             song's pictures` with `path="ram"`; `mf_software` +1 only on
             an unscaled open: a scaled open, the 4K song at the 1440 cap,
@@ -1354,7 +1373,7 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
               `RING_WAIT`, a dead ring, a refused picture, a lost
               device), whenever it came (a first copy that failed reads
               like a failed open at the poll, its `path="ram"`
-              included); it fails gate 3's +0;
+              included); it is judged by gate 3's rule;
             - that WARN with the count +0, then the ERROR `paced
               producer: decode error`: the software reopen itself
               failed, and the song ENDS there (the producer marks its
