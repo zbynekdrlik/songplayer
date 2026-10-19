@@ -42,8 +42,11 @@ pub const MIN_WORDS_PER_MINUTE: u64 = 5;
 /// #283: whether `words` over a song of `song_ms` are too few to be its
 /// lyrics (under [`MIN_WORDS_PER_MINUTE`]): a failed transcription, never a
 /// track. No judgement without the song's length.
-pub fn is_sparse(_words: usize, _song_ms: Option<i64>) -> bool {
-    false
+pub fn is_sparse(words: usize, song_ms: Option<i64>) -> bool {
+    let Some(song_ms) = song_ms.and_then(|ms| u64::try_from(ms).ok()) else {
+        return false;
+    };
+    words as u64 * 60_000 < MIN_WORDS_PER_MINUTE * song_ms
 }
 
 /// #283: the English words of `track`'s lines — what [`is_sparse`] judges a
