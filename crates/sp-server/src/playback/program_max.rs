@@ -66,12 +66,9 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use sp_core::config::{
     DEFAULT_PROGRAM_MAX_COMPOSE_PHASE_US, DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US, NdiSource,
-    SETTING_PROGRAM_MAX_ENABLED, program_max_enabled,
+    SETTING_PROGRAM_MAX_ENABLED, SpoutSend, program_max_enabled,
 };
-use sp_gpu::{
-    CANVAS_HEIGHT, CANVAS_WIDTH, ComposeStats, Nv12Picture, SPOUT_SENDER_NAME, Side,
-    SpoutSendStats, VblankState,
-};
+use sp_gpu::{ComposeStats, Nv12Picture, SPOUT_SENDER_NAME, Side, SpoutSendStats, VblankState};
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
@@ -243,7 +240,8 @@ pub struct MaxStatus {
     /// `running`, `off`, `unsupported`, `quiesced` (#243 follow-up, while
     /// a quiesce holds) or `error: <why>` ([`state_label`]).
     pub state: String,
-    /// The fixed canvas: 3840×2160.
+    /// MAX's target: 3840×2160 unless `program_max_size` names another
+    /// (#251).
     pub width: u32,
     pub height: u32,
     /// Boundaries composed and sent to Spout.
@@ -359,6 +357,10 @@ struct Queue {
     fhd_enabled: bool,
     /// #279 P1b: the setting `program_ndi_source`, as last applied.
     ndi: NdiSource,
+    /// #251: the setting `program_max_spout_send`, as last applied.
+    spout_send: SpoutSend,
+    /// #251: the setting `program_max_size`, as last applied.
+    max_size: (u32, u32),
     /// A `program-max` thread takes jobs.
     consumer: bool,
     stop: bool,
@@ -516,6 +518,8 @@ impl MaxOut {
                 compose_phase_us: DEFAULT_PROGRAM_MAX_COMPOSE_PHASE_US,
                 fhd_enabled: false,
                 ndi: NdiSource::Cpu,
+                spout_send: SpoutSend::Synced,
+                max_size: phase::DEFAULT_MAX_SIZE,
                 consumer: false,
                 stop: false,
                 quiesced_until: None,
@@ -791,13 +795,13 @@ impl MaxOut {
     /// The telemetry. The windows are copied under the lock and sorted
     /// after it, so the thread's next record never waits for a sort.
     pub fn status(&self) -> MaxStatus {
-        let (enabled, coalesced, phases, fhd_enabled) = {
+        let (enabled, coalesced, phases, (fhd_enabled, (width, height))) = {
             let queue = self.lock_queue();
             (
                 queue.enabled,
                 queue.coalesced,
                 (queue.vblank_phase_us, queue.compose_phase_us),
-                queue.fhd_enabled,
+                (queue.fhd_enabled, queue.max_size),
             )
         };
         let (vblank_phase_us, compose_phase_us) = phases;
@@ -845,8 +849,8 @@ impl MaxOut {
         MaxStatus {
             enabled,
             state: state_label(&phase, enabled),
-            width: CANVAS_WIDTH,
-            height: CANVAS_HEIGHT,
+            width,
+            height,
             submitted,
             coalesced,
             failed,
@@ -955,12 +959,7 @@ fn spawn_max_thread(max: Arc<MaxOut>) {
     let spawned = std::thread::Builder::new()
         .name("program-max".into())
         .spawn(move || {
-            info!(
-                spout_name = SPOUT_SENDER_NAME,
-                width = CANVAS_WIDTH,
-                height = CANVAS_HEIGHT,
-                "program max thread started"
-            );
+            info!(spout_name = SPOUT_SENDER_NAME, "program max thread started");
             let vblank: Option<Box<dyn VblankSource>> = match sp_gpu::VblankTracker::start() {
                 Ok(tracker) => {
                     info!(output = %tracker.output().label(), "program max: paced on the output's refresh");

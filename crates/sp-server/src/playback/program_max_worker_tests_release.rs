@@ -8,8 +8,10 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use super::MaxWorker;
+use sp_gpu::{MAX_FIT, MAX_TARGET, Target};
+
 use super::tests::{Drawn, FakeGpu, not_registered, pic, picture, plain, spawn_loop, wait_until};
+use super::{MAX_RETRY_BACKOFF, MaxWorker};
 use crate::playback::program_max::{MAX_NOT_RUNNING, MaxJob, MaxOut};
 
 #[test]
@@ -115,4 +117,92 @@ fn the_loop_serves_jobs_releases_while_off_and_exits_on_stop() {
         "its end releases the GPU"
     );
     assert_eq!(max.status().state, format!("error: {MAX_NOT_RUNNING}"));
+}
+
+/// #251 (19.10.2026): a changed `program_max_size` drops MAX's sender, then
+/// its target, and the same boundary builds both anew at the new size; the
+/// same size again changes nothing, and back to the canvas makes them anew
+/// once more.
+#[test]
+fn a_changed_size_makes_max_anew_at_it() {
+    let max = MaxOut::new();
+    max.set_enabled(true);
+    let gpu = FakeGpu::default();
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    let t0 = Instant::now();
+    worker.serve(&MaxJob::Black { stamp_100ns: 1 }, t0);
+    assert!(max.set_max_size((1920, 1080)), "a change");
+    assert!(!max.set_max_size((1920, 1080)), "the same again");
+    worker.serve(&MaxJob::Black { stamp_100ns: 2 }, t0);
+    worker.serve(&MaxJob::Black { stamp_100ns: 3 }, t0);
+    let fhd_sized = Target {
+        width: 1920,
+        height: 1080,
+        fit: MAX_FIT,
+    };
+    {
+        let log = gpu.log();
+        assert_eq!(log.targets_added, [MAX_TARGET, fhd_sized]);
+        assert_eq!(log.max_sender_targets, [MAX_TARGET, fhd_sized]);
+        assert_eq!(log.drops, ["sender"], "the old sender, once");
+        assert_eq!(
+            (log.targets_removed, log.senders_built, log.sent),
+            (1, 2, 3),
+            "made anew once, every boundary sent"
+        );
+        assert_eq!(
+            log.order,
+            [
+                "fhd draw",
+                "max draw",
+                "max send",
+                "max target removed",
+                "fhd draw",
+                "max draw",
+                "max send",
+                "fhd draw",
+                "max draw",
+                "max send",
+            ],
+            "the old target off before the boundary that draws the new one"
+        );
+    }
+    assert!(max.set_max_size((3840, 2160)));
+    worker.serve(&MaxJob::Black { stamp_100ns: 4 }, t0);
+    let log = gpu.log();
+    assert_eq!(log.targets_added, [MAX_TARGET, fhd_sized, MAX_TARGET]);
+    assert_eq!((log.targets_removed, log.senders_built), (2, 3));
+}
+
+/// #251: a size change while MAX waits out a refused sender's backoff (its
+/// target already off the compositor) keeps the backoff; the build after it
+/// is at the new size.
+#[test]
+fn a_size_change_in_a_backoff_waits_it_out() {
+    let max = MaxOut::new();
+    max.set_enabled(true);
+    let gpu = FakeGpu::default();
+    gpu.script().send.push_back(not_registered());
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    let t0 = Instant::now();
+    worker.serve(&MaxJob::Black { stamp_100ns: 1 }, t0);
+    assert_eq!(gpu.log().targets_removed, 1, "refused: its target is off");
+    assert!(max.set_max_size((1920, 1080)));
+    worker.serve(&MaxJob::Black { stamp_100ns: 2 }, t0);
+    assert_eq!(gpu.log().senders_built, 1, "the backoff holds");
+    worker.serve(&MaxJob::Black { stamp_100ns: 3 }, t0 + MAX_RETRY_BACKOFF);
+    let log = gpu.log();
+    assert_eq!(
+        log.targets_added,
+        [
+            MAX_TARGET,
+            Target {
+                width: 1920,
+                height: 1080,
+                fit: MAX_FIT,
+            },
+        ]
+    );
+    assert_eq!((log.senders_built, log.sent), (2, 1));
+    assert_eq!(log.max_sender_targets[1].width, 1920, "the new sender's");
 }

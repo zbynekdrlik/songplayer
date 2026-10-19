@@ -164,6 +164,51 @@ pub fn program_ndi_source(raw: Option<&str>) -> NdiSource {
     }
 }
 
+/// #251 (19.10.2026): how `SP-program-MAX` and `SP-program` hand each frame
+/// to Spout ([`program_max_spout_send`]). Measured on SNV: while Arena
+/// receives `SP-program-MAX`, its own 30 fps clip lost 38–58 % of its frames
+/// on the wall; with no layer receiving it, none. Read with MAX's settings
+/// every 5 s, no restart; for the wall's A/B.
+pub const SETTING_PROGRAM_MAX_SPOUT_SEND: &str = "program_max_spout_send";
+
+/// #251: the hand-off of a frame to Spout's shared texture, around Spout's
+/// texture-access mutex (the one every receiver takes to read it).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SpoutSend {
+    /// Copy, flush, wait for the GPU to finish the copy, announce, then
+    /// release the mutex (#251 step 3: the receiver waits through the GPU).
+    #[default]
+    Synced,
+    /// Copy, flush, announce, release; no wait (spoutDX's `SendTexture`,
+    /// release 0.82.0).
+    Plain,
+    /// Copy, flush, release the mutex, then wait for the copy and announce
+    /// only once it is done (no receiver waits on SongPlayer's GPU).
+    ReleaseThenWait,
+}
+
+impl SpoutSend {
+    /// The setting's and the log's word.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SpoutSend::Synced => "synced",
+            SpoutSend::Plain => "plain",
+            SpoutSend::ReleaseThenWait => "release_then_wait",
+        }
+    }
+}
+
+/// #251: a stored `program_max_spout_send`: `plain` or `release_then_wait`
+/// (trimmed); anything else, absent included, is `synced`, today's hand-off,
+/// so a deploy changes nothing on the wall.
+pub fn program_max_spout_send(raw: Option<&str>) -> SpoutSend {
+    match raw.map(str::trim) {
+        Some("plain") => SpoutSend::Plain,
+        Some("release_then_wait") => SpoutSend::ReleaseThenWait,
+        _ => SpoutSend::Synced,
+    }
+}
+
 /// #223 follow-up: where after each vblank of the wall's display a
 /// `SP-program-MAX` send starts, in ms (decimals allowed): Resolume Arena
 /// takes the Spout texture at its own instant in each refresh, so a send
@@ -666,6 +711,39 @@ mod tests {
         assert_eq!(NdiSource::Cpu.as_str(), "cpu");
         assert_eq!(NdiSource::Gpu.as_str(), "gpu");
         assert_eq!(NdiSource::default(), NdiSource::Cpu, "nothing applied yet");
+    }
+
+    /// #251: the Spout hand-off is today's `synced` unless the setting names
+    /// one of the other two exactly (trimmed).
+    #[test]
+    fn the_spout_hand_off_is_synced_unless_the_setting_names_another() {
+        assert_eq!(SETTING_PROGRAM_MAX_SPOUT_SEND, "program_max_spout_send");
+        assert_eq!(
+            program_max_spout_send(None),
+            SpoutSend::Synced,
+            "no setting"
+        );
+        assert_eq!(program_max_spout_send(Some("plain")), SpoutSend::Plain);
+        assert_eq!(
+            program_max_spout_send(Some(" release_then_wait\n")),
+            SpoutSend::ReleaseThenWait,
+            "trimmed"
+        );
+        for other in ["synced", "", "PLAIN", "release", "true"] {
+            assert_eq!(
+                program_max_spout_send(Some(other)),
+                SpoutSend::Synced,
+                "{other:?}"
+            );
+        }
+        assert_eq!(SpoutSend::Synced.as_str(), "synced");
+        assert_eq!(SpoutSend::Plain.as_str(), "plain");
+        assert_eq!(SpoutSend::ReleaseThenWait.as_str(), "release_then_wait");
+        assert_eq!(
+            SpoutSend::default(),
+            SpoutSend::Synced,
+            "nothing applied yet"
+        );
     }
 
     /// #239: a save sends each Spout switch only when the checkbox changed

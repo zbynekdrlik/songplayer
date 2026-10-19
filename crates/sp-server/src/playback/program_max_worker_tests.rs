@@ -16,6 +16,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+use sp_core::config::SpoutSend;
 use sp_gpu::{
     ComposeStats, Composition, FHD_TARGET, GpuError, MAX_TARGET, PictureError, Side,
     SpoutSendStats, Target, TargetId, Targets,
@@ -127,6 +128,10 @@ pub(crate) struct Log {
     pub composes: u32,
     pub uyvy_enabled: u32,
     pub uyvy_read: u32,
+    /// #251: each Spout hand-off a sender was given ("max" / "fhd").
+    pub send_modes: Vec<(&'static str, SpoutSend)>,
+    /// #251: the target each MAX sender was made of (`program_max_size`).
+    pub max_sender_targets: Vec<Target>,
 }
 
 /// The fake GPU's next results; an empty queue answers `Ok`.
@@ -270,12 +275,15 @@ impl MaxGpu for FakeGpu {
         compositor: &FakeCompositor,
         target: TargetId,
     ) -> Result<FakeSender, GpuError> {
-        assert_eq!(
-            compositor.targets.get(target),
-            Some(&MAX_TARGET),
-            "MAX's sender of the MAX target the compositor holds"
+        let held = compositor.targets.get(target).copied();
+        assert!(
+            target != TargetId::PRIMARY && held.is_some_and(|t| t.fit == MAX_TARGET.fit),
+            "MAX's sender of a MAX target the compositor holds, not {held:?}"
         );
-        log_of(&self.0).senders_built += 1;
+        let mut log = log_of(&self.0);
+        log.senders_built += 1;
+        log.max_sender_targets.extend(held);
+        drop(log);
         match next_error(&self.0, |s| s.sender.pop_front()) {
             Some(error) => Err(error),
             None => Ok(FakeSender(self.0.clone(), false)),
@@ -435,6 +443,11 @@ impl MaxCompositor for FakeCompositor {
 }
 
 impl MaxSender for FakeSender {
+    fn set_send_mode(&mut self, mode: SpoutSend) {
+        let which = if self.1 { "fhd" } else { "max" };
+        log_of(&self.0).send_modes.push((which, mode));
+    }
+
     fn send(&mut self) -> Result<SpoutSendStats, GpuError> {
         let fhd = self.1;
         let scripted = next_error(&self.0, |s| {

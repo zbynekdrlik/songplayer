@@ -178,6 +178,12 @@ impl SpoutSender {
 
     /// Never runs (no value exists). `mutants::skip`: as `new`.
     #[cfg_attr(test, mutants::skip)]
+    pub fn set_send_mode(&mut self, _mode: sp_core::config::SpoutSend) {
+        match self.0 {}
+    }
+
+    /// Never runs (no value exists). `mutants::skip`: as `new`.
+    #[cfg_attr(test, mutants::skip)]
     pub fn size(&self) -> (u32, u32) {
         match self.0 {}
     }
