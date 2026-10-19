@@ -795,7 +795,11 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
        song's window below) runs under the automatic take's arming and
        `finally` (the main A/B below: #230's hold armed and read back,
        `video_upgrade_enabled` off, the cap put back first, the hold
-       last), since automatic is also the DOWNLOAD cap;
+       last), since automatic is also the DOWNLOAD cap; and the whole
+       gate, at both caps, runs with `video_upgrade_enabled` off, put
+       back in a `finally` (its check opens a song's file in the
+       hardware mode, which the fall-back rule below must not read as
+       the song's own reader);
      - with a 4K song on program, at the cap and at automatic (the design
        says "a 4K song"): `GET /api/v1/program` `gpu.gpu_sides_per_s`
        about 30 for a song the pacer does not blend, up to two ring
@@ -813,9 +817,9 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
        (each a ring side drawn BLACK on the wall or NDI; WARP never runs
        the keyed mutexes against real NVDEC surfaces, so only the box
        proves them) and every pipeline's `ring.full` (`ring.dead`
-       stays false; a ring restarts at 0 with each producer and its
-       row goes when the producer is released, so both are read as
-       values at each G block's end read): G's OWN failures, which
+       stays false; both read at EVERY block's end read, `full` as
+       each row's change since that row's last read, below): G's OWN
+       failures, which
        only G has (its ring and the compositor's draw of it);
        `video_decode.mid_stream_fallbacks`
        and `open_fallbacks` (a fall back is the software decode this
@@ -839,10 +843,11 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          requested)` INFO naming that `file` BEFORE that WARN reads
          `mode="gpu_resident"`: any song's, an outgoing one's in a
          cut (into any block, Blank included) too;
-       - an open +1 (step 7's WARN) is G's when that file is a G
-         block's own content (or, before the A/B, the 4K song on
-         program in gate 3's window) and no step-7 line since its
-         restart explains a base-mode open (a producer lost, not made
+       - an open +1 (step 7's WARN) is G's when the song was opened
+         while `gpu` took effect on its pipeline (the block it lands
+         in is a G block, or anywhere in this gate before the A/B,
+         its box-only checks included) and no step-7 line since that
+         open explains a base-mode open (a producer lost, not made
          or not yet there, a retired producer's INFO,
          `gpu_resident_blocked`);
        - G's fails this gate; an S block's own content falling back
@@ -851,9 +856,14 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          never G's.
 
        `ring.full` / `ring.dead` are read at EVERY block's end read
-       (every `pipelines[]` row, the evidence below): an outgoing G
-       pipeline's ring can fill in a cut into Blank, and the next G
-       open replaces it with a ring starting at 0.
+       (every `pipelines[]` row, the evidence below), `full` as each
+       row's change since that row's last read: an outgoing G
+       pipeline's ring can fill in a cut into Blank, and a ring
+       restarts at 0 only with a new producer. A producer is kept
+       across songs (`Leased::Kept`: G → Blank → G keeps the ring and
+       its count); the pipeline's next open after an S block's PATCH
+       retired it, or after its ring died, drops it: an S open lets
+       it go and its row goes, a G open makes a new ring at 0.
 
        A gate-3 failure during the A/B stops it and turns
        `video_decode` back to `software` the same day (NDI stays on
@@ -967,7 +977,8 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          crop=<region>,format=gray,freezedetect=d=1:n=<that threshold
          as a ratio of full scale> -f null -`, the clip the same with
          `-stream_loop 1` for `-ss` / `-t` (`format=gray`, never
-         `extractplanes`: ffmpeg decodes DXV and HAP to RGB; `n` is a
+         `extractplanes`: ffmpeg decodes HAP and DXV's DXT1 / DXT5 to
+         RGB(A); `n` is a
          normalised difference, its default −60 dB passes a
          near-still shot the reader holds). A still shot of
          their own would read as a hold on both sides (the
