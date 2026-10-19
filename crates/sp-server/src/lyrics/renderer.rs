@@ -202,7 +202,8 @@ impl LyricsState {
     /// line, and an SK is empty when its line has no translation. Returns
     /// `None` where the wall is blank (before the first line, in an
     /// instrumental break's blank stretch, after the last line): the caller
-    /// clears the stage display once there (#283, `presenter::sync_line`).
+    /// sends no line there, the song's title kept (#283 + #281,
+    /// `presenter::sync_line`).
     ///
     /// The lookup is shifted forward by `self.lead_ms` (0 unless operator-overridden).
     pub fn presenter_lines(&self, position_ms: u64) -> Option<PresenterLines> {

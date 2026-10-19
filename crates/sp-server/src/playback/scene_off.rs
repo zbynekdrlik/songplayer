@@ -168,28 +168,25 @@ impl PlaybackEngine {
     }
 
     /// The Presenter's stage display once `playlist_id` owns the wall: its
-    /// line at its last reported position, or cleared when it has none (no
-    /// lyrics, a blank position, nothing playing), so the old owner's last
-    /// line never stays there.
+    /// line at its last reported position, or (#281) its song's title with
+    /// no line where it has none (no lyrics, a blank position); cleared when
+    /// it plays nothing. So the old owner's last line never stays there.
     fn resync_presenter(&mut self, playlist_id: i64) {
         let client = self.presenter_client.as_ref();
         let Some(pp) = self.pipelines.get_mut(&playlist_id) else {
             return;
         };
-        let lines = match pp.state {
-            PlayState::Playing { .. } => pp
-                .lyrics_state
-                .as_ref()
-                .and_then(|lyrics| lyrics.presenter_lines(pp.cached_position_ms)),
-            _ => None,
-        };
-        pp.last_presenter_text = match lines {
-            Some(lines) => {
+        pp.last_presenter_text = match pp.state {
+            PlayState::Playing { .. } => {
+                let lines = pp
+                    .lyrics_state
+                    .as_ref()
+                    .and_then(|lyrics| lyrics.presenter_lines(pp.cached_position_ms));
                 let (song, artist) = (&pp.cached_song, &pp.cached_artist);
-                crate::presenter::maybe_push_line(client, None, lines, song, artist)
+                crate::presenter::sync_line(client, None, lines, song, artist)
             }
-            None => {
-                crate::presenter::push_empty(client, "a new wall owner with no line");
+            _ => {
+                crate::presenter::push_empty(client, "a new wall owner that plays nothing");
                 None
             }
         };

@@ -393,8 +393,9 @@ drops. The wall step runs before the pause/hold:
 - The stage display (#221 review round 3): with another playlist on
   program, the OFF ends with `resync_presenter(owner)` — the wall owner's
   line at its last position, or a cleared display. It repeats the owner's
-  line, or clears the display while the owner is in a blank stretch
-  (review round 4: blank like the wall until the owner's next line). (The
+  line, or clears the display's lines while the owner is in a blank stretch
+  (review round 4: blank like the wall until the owner's next line; #281:
+  the owner's song title stays there, `lyrics-display.md`). (The
   round-3 case, an owner change by an OFF alone — a cut to "OBS manuál"
   while cg OBS still showed another playlist — needed the deleted union of
   `legacy_cg.shown`.)

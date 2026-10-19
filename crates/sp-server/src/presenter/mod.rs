@@ -16,8 +16,15 @@ use std::sync::Arc;
 
 use crate::lyrics::renderer::PresenterLines;
 
-/// #222: the lines last pushed (current + next, EN + SK) — the push dedup key.
-pub type PushedLine = PresenterLines;
+/// #222 + #281: what was pushed last — the lines (current + next, EN + SK)
+/// AND the song's title (`currentSong`): the push dedup key. A new song is
+/// pushed even where its lines are the same as the last song's (both
+/// blank).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PushedLine {
+    pub lines: PresenterLines,
+    pub song: String,
+}
 
 /// Default Presenter API endpoint when `presenter_url` setting is empty.
 pub const DEFAULT_URL: &str = "http://10.77.9.205/api/stage";
@@ -49,27 +56,34 @@ pub async fn build_from_settings(
     }
 }
 
+/// The song's title as Presenter shows it (`currentSong`, its snapshot's
+/// `songName`): `"<song> - <artist>"`, the song alone with no artist.
+pub fn song_title(song: &str, artist: &str) -> String {
+    if artist.is_empty() {
+        song.to_string()
+    } else {
+        format!("{song} - {artist}")
+    }
+}
+
 /// #222: the payload to push for `lines`, or `None` when exactly these lines
 /// were pushed last (`last_seen`): the dedup key is the WHOLE payload,
-/// current + next, EN + SK. A Slovak line that arrives later under the same
-/// English one is pushed, and so is a repeated sentence whose next line
-/// changed ("What a God, what a God." ×4: the 4th repeat carries the line
-/// after the repeats). Both languages always go out (Presenter's stage
-/// layout picks what to show); a line with no translation sends "".
+/// current + next, EN + SK, and (#281) the song's title. A Slovak line that
+/// arrives later under the same English one is pushed, and so is a repeated
+/// sentence whose next line changed ("What a God, what a God." ×4: the 4th
+/// repeat carries the line after the repeats). Both languages always go out
+/// (Presenter's stage layout picks what to show); a line with no translation
+/// sends "".
 pub fn payload_for(
     last_seen: Option<&PushedLine>,
     lines: &PresenterLines,
     song: &str,
     artist: &str,
 ) -> Option<PresenterPayload> {
-    if last_seen == Some(lines) {
+    let current_song = song_title(song, artist);
+    if last_seen.is_some_and(|seen| seen.lines == *lines && seen.song == current_song) {
         return None;
     }
-    let current_song = if artist.is_empty() {
-        song.to_string()
-    } else {
-        format!("{song} - {artist}")
-    };
     Some(PresenterPayload {
         // Wrap long lyric lines so they don't overflow the stage display;
         // many source lines are 40-60 chars and become unreadable on a
@@ -86,7 +100,7 @@ pub fn payload_for(
 
 /// Line-change push helper used by the playback engine hot path. Spawns a
 /// fire-and-forget `tokio::spawn(client.push(...))` when `payload_for` has a
-/// payload (any of the four lines changed), and returns the new `last_seen`
+/// payload (a line or the song's title changed), and returns the new `last_seen`
 /// for the caller to persist. No-op when `client` is None (push disabled).
 #[cfg_attr(test, mutants::skip)] // spawn glue; `payload_for` is the tested decision
 pub fn maybe_push_line(
@@ -102,21 +116,28 @@ pub fn maybe_push_line(
     let Some(payload) = payload_for(last_seen.as_ref(), &lines, song, artist) else {
         return last_seen;
     };
+    let pushed = PushedLine {
+        lines,
+        song: payload.current_song.clone(),
+    };
     let client = client.clone();
     tokio::spawn(async move {
         if let Err(e) = client.push(payload).await {
             tracing::warn!(?e, "presenter push failed (non-fatal)");
         }
     });
-    Some(lines)
+    Some(pushed)
 }
 
-/// #283: the stage display at a position: the plan's `lines` through
-/// [`maybe_push_line`], or, where the wall is blank (`None`: before the
-/// first line, a break's blank stretch, after the last line's hide), ONE
-/// clear ([`push_empty`]), remembered as a pushed `PresenterLines::default()`
-/// so a later blank position pushes nothing more and the next line is
-/// pushed again. Without a client nothing is pushed and the key is kept.
+/// #283 + #281: the stage display at a position of a playing song: the
+/// plan's `lines` through [`maybe_push_line`], or, where the wall is blank
+/// (`None`: no lyrics, before the first line, a break's blank stretch, after
+/// the last line's hide), empty lines with the song's title KEPT, pushed
+/// once like any payload (the same dedup key), so the stage display shows
+/// no stale line and the title stays for the whole song; the next line is
+/// pushed again. The title goes only with the song ([`push_empty`] at its
+/// end, at a scene off with no owner). Without a client nothing is pushed
+/// and the key is kept.
 pub fn sync_line(
     client: Option<&Arc<PresenterClient>>,
     last_seen: Option<PushedLine>,
@@ -124,15 +145,7 @@ pub fn sync_line(
     song: &str,
     artist: &str,
 ) -> Option<PushedLine> {
-    let Some(lines) = lines else {
-        let cleared = PushedLine::default();
-        if client.is_none() || last_seen.as_ref() == Some(&cleared) {
-            return last_seen;
-        }
-        push_empty(client, "the wall is blank");
-        return Some(cleared);
-    };
-    maybe_push_line(client, last_seen, lines, song, artist)
+    maybe_push_line(client, last_seen, lines.unwrap_or_default(), song, artist)
 }
 
 /// Clear the stage display (`PresenterPayload::empty`), fire-and-forget like

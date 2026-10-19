@@ -53,13 +53,18 @@ fn one_line(en: &str) -> LyricsState {
 }
 
 /// 7 ("gamma.") and 9 ("delta.") both play their line on program; the
-/// authority published both on air with `owner` owning the wall.
+/// authority published both on air with `owner` owning the wall. Their
+/// songs' titles (the Presenter's `currentSong`, #281) are "Song - Artist"
+/// and "Later - Artist", as the engine caches them at a `Started`.
 async fn two_on_air(owner: i64) -> (PlaybackEngine, mpsc::Receiver<ResolumeCommand>) {
     let (mut engine, mut rx) = test_engine(&SONGS).await;
     play(&mut engine, 7, 42, Window::Due);
     play(&mut engine, 9, 44, Window::Due);
-    engine.pipelines.get_mut(&7).unwrap().lyrics_state = Some(one_line("gamma."));
-    engine.pipelines.get_mut(&9).unwrap().lyrics_state = Some(one_line("delta."));
+    for (pid, line, song) in [(7, "gamma.", "Song"), (9, "delta.", "Later")] {
+        let pp = engine.pipelines.get_mut(&pid).unwrap();
+        pp.lyrics_state = Some(one_line(line));
+        (pp.cached_song, pp.cached_artist) = (song.into(), "Artist".into());
+    }
     engine.on_air.publish(on_air(&[7, 9]), Some(owner));
     sent(&mut rx);
     (engine, rx)
@@ -256,13 +261,26 @@ fn is_cleared(body: &str) -> bool {
     body.contains(r#""currentText":"""#) && body.contains(r#""currentSong":"""#)
 }
 
+/// #281: a push with no line (EN and SK, current and next) and the song's
+/// title `title` kept.
+fn is_title_only(body: &str, title: &str) -> bool {
+    let push: serde_json::Value = serde_json::from_str(body).expect("a JSON body");
+    let lines = [
+        "currentText",
+        "nextText",
+        "currentTranslation",
+        "nextTranslation",
+    ];
+    lines.iter().all(|field| push[*field] == "") && push["currentSong"] == title
+}
+
 /// Review rounds 1-2: a new owner's ON — 9 owns ({7, 9} published, 9
 /// owns). 7 writes nothing any more, so 9's ON re-syncs the whole wall at
 /// once: its
 /// title (the scene-on's ONE `Resync`), its line — one `HideSubtitles` when
 /// 9 has none (it was played off program by hand, with no lyrics) — and the
-/// Presenter — cleared when 9 has no line. Never 7's line frozen on
-/// `#sp-subs` or on the stage display.
+/// Presenter — 9's title alone when 9 has no line (#281). Never 7's line
+/// frozen on `#sp-subs` or on the stage display.
 #[tokio::test]
 async fn the_new_owner_s_on_re_syncs_the_wall_s_line() {
     let (mut engine, mut rx) = two_on_air(7).await;
@@ -292,10 +310,10 @@ async fn the_new_owner_s_on_re_syncs_the_wall_s_line() {
     );
     let bodies = pushes(&stage, 2).await;
     assert!(
-        is_cleared(&bodies[1]),
-        "7's line leaves the stage: {bodies:?}"
+        is_title_only(&bodies[1], "Later - Artist"),
+        "7's line leaves the stage, 9's title stays: {bodies:?}"
     );
-    assert!(engine.pipelines[&9].last_presenter_text.is_none());
+    assert!(engine.pipelines[&9].last_presenter_text.is_some());
 
     // The same ON with a line (a re-kick of 9): 9's line goes up at once.
     engine.pipelines.get_mut(&9).unwrap().lyrics_state = Some(one_line("delta."));
@@ -352,8 +370,8 @@ async fn a_new_owner_that_plays_nothing_takes_the_old_owner_s_title_down() {
 
 /// Review round 3: an OFF re-syncs the stage display to the wall owner
 /// still on program ({7, 9} with 9 owning → {7} with 7 owning, and only 9's
-/// OFF handled), as its ON would: cleared here, 7 having no line — never
-/// 9's line left there, nor re-pushed.
+/// OFF handled), as its ON would: 7's title alone here (#281), 7 having no
+/// line — never 9's line left there, nor re-pushed.
 #[tokio::test]
 async fn an_owner_change_by_an_off_re_syncs_the_stage_display() {
     let (mut engine, mut rx) = two_on_air(9).await;
@@ -368,10 +386,10 @@ async fn an_owner_change_by_an_off_re_syncs_the_stage_display() {
 
     let bodies = pushes(&stage, 2).await;
     assert!(
-        is_cleared(&bodies[1]),
-        "9's line leaves the stage: {bodies:?}"
+        is_title_only(&bodies[1], "Song - Artist"),
+        "9's line leaves the stage, 7's title is up: {bodies:?}"
     );
-    assert!(engine.pipelines[&7].last_presenter_text.is_none());
+    assert!(engine.pipelines[&7].last_presenter_text.is_some());
 }
 
 /// A Resolume recovery re-syncs the owner's title and re-sends only its
@@ -534,11 +552,12 @@ async fn an_off_that_leaves_no_owner_blanks_the_stage_display_even_unflagged() {
 
 /// #283: the owner's last line leaves the stage display when it leaves the
 /// wall. The plan hides it `HOLD_TAIL_MS` after its sung end (62 s + 3 s);
-/// at 70 s the wall is blank and the Presenter is cleared ONCE, so it never
-/// shows "No tak." 45 s past its hide (SNV, 18.10.2026). A later blank
-/// position pushes nothing more; the next line is pushed again.
+/// at 70 s the wall is blank and the Presenter's lines are cleared ONCE, so
+/// it never shows "No tak." 45 s past its hide (SNV, 18.10.2026); #281: the
+/// song's title stays. A later blank position pushes nothing more; the next
+/// line is pushed again.
 #[tokio::test]
-async fn the_stage_display_is_cleared_when_the_wall_s_line_goes() {
+async fn the_stage_display_s_line_goes_with_the_wall_s_and_the_title_stays() {
     let (mut engine, mut rx) = two_on_air(9).await;
     let stage = presenter(&mut engine).await;
     engine.dispatch_lyrics_if_changed(9, 60_000);
@@ -546,7 +565,10 @@ async fn the_stage_display_is_cleared_when_the_wall_s_line_goes() {
 
     engine.dispatch_lyrics_if_changed(9, 70_000);
     let bodies = pushes(&stage, 2).await;
-    assert!(is_cleared(&bodies[1]), "the line left: {bodies:?}");
+    assert!(
+        is_title_only(&bodies[1], "Later - Artist"),
+        "the line left, the title stays: {bodies:?}"
+    );
     assert!(
         sent(&mut rx).iter().any(is_hide_subtitles),
         "the wall went blank at the same position"
@@ -555,9 +577,33 @@ async fn the_stage_display_is_cleared_when_the_wall_s_line_goes() {
     engine.dispatch_lyrics_if_changed(9, 71_000);
     tokio::time::sleep(Duration::from_millis(200)).await;
     let got = stage.received_requests().await.unwrap_or_default();
-    assert_eq!(got.len(), 2, "a clear already pushed is not pushed again");
+    assert_eq!(got.len(), 2, "a blank already pushed is not pushed again");
 
     engine.dispatch_lyrics_if_changed(9, 60_500);
     let bodies = pushes(&stage, 3).await;
     assert!(bodies[2].contains("delta"), "the line again: {bodies:?}");
+}
+
+/// #281: the owner's song with no lyrics still sends its title to the stage
+/// display from its position updates (no line), once: the dedup holds it
+/// back at the next position.
+#[tokio::test]
+async fn a_song_with_no_lyrics_sends_its_title_to_the_stage_display() {
+    let (mut engine, mut rx) = two_on_air(9).await;
+    let stage = presenter(&mut engine).await;
+    engine.pipelines.get_mut(&9).unwrap().lyrics_state = None;
+
+    engine.dispatch_lyrics_if_changed(9, 60_000);
+    let bodies = pushes(&stage, 1).await;
+    assert!(
+        is_title_only(&bodies[0], "Later - Artist"),
+        "the title alone: {bodies:?}"
+    );
+    assert!(engine.pipelines[&9].last_presenter_text.is_some());
+    assert!(subtitle_lines(&sent(&mut rx)).is_empty(), "no wall line");
+
+    engine.dispatch_lyrics_if_changed(9, 61_000);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let got = stage.received_requests().await.unwrap_or_default();
+    assert_eq!(got.len(), 1, "the same title is not pushed again");
 }

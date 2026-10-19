@@ -41,9 +41,10 @@ show) writes the wall lines, their clears and the Presenter; another
 playlist (the outgoing one of a cut until its OFF, or one played off
 program by hand) keeps only its own karaoke WS. The new owner's ON, and an
 OFF that leaves another playlist on program, push the owner's line to the
-Presenter at once, or clear it when it has none
-(`scene_off::resync_presenter`, review rounds 2-3), so the old owner's last
-line never stays on the stage display. With NO owner (nothing on air, or
+Presenter at once, or (#281) its song's title with no line when it has
+none, or clear it when it plays nothing (`scene_off::resync_presenter`,
+review rounds 2-3), so the old owner's last line never stays on the stage
+display. With NO owner (nothing on air, or
 "OBS manuál" on program) nobody writes them — a song played off program by
 hand feeds no Presenter — and the last owner's OFF blanks the stage display
 with the wall (ROZHODNUTÉ 6002459249, #221 lane 2).
@@ -60,20 +61,29 @@ loaded track (in `LyricsState::with_lead_and_offset`; `new` delegates to it).
   "" with no translation). `presenter::payload_for` sends them as
   `currentText`/`nextText` + `currentTranslation`/`nextTranslation` (all
   through `wrap_for_presenter`) and dedups on the WHOLE payload (current +
-  next, EN + SK) — `PlaylistPipeline.last_presenter_text` holds that
-  `PushedLine` (= the `PresenterLines` last pushed). So a Slovak line arriving
+  next, EN + SK) and, since #281, the song's title (`currentSong`) —
+  `PlaylistPipeline.last_presenter_text` holds that `PushedLine {lines,
+  song}`, so a new song is pushed even where its lines equal the last
+  song's (both blank). So a Slovak line arriving
   later under the same English one is pushed, and so is a sentence sung
   several times in a row whose NEXT line changed ("What a God, what a God."
   ×4: the 4th repeat carries the line after the repeats; release 0.69.0
   review, `a_repeated_line_is_pushed_again_when_its_next_line_changes`). A
   dedup on the current line alone left the stage display's "next" stale.
-  **#283: where the wall is blank the stage display goes blank too**
+  **#283: where the wall is blank the stage display's LINES go blank too**
   (`presenter::sync_line`, every position update): before the first line,
-  in a break's blank stretch and after the last line's hide, ONE clear
-  (`push_empty`), kept as a pushed `PresenterLines::default()`, so the next
-  line is pushed again. Before, a `None` from `presenter_lines` pushed
-  nothing and the last line stayed ("No tak." 45 s past its hide, SNV
-  18.10.2026; `tests_wall_owner.rs::the_stage_display_is_cleared_when_the_wall_s_line_goes`).
+  in a break's blank stretch and after the last line's hide, ONE push of
+  empty lines, kept as the pushed key, so the next line is pushed again.
+  Before, a `None` from `presenter_lines` pushed nothing and the last line
+  stayed ("No tak." 45 s past its hide, SNV 18.10.2026). **#281: the song's
+  title stays** in that push (`currentSong`), and a song with NO lyrics
+  sends its title alone from its position updates; the title goes only at
+  the song's end (`clear_lyrics`, `push_empty`), at an OFF with no owner,
+  and for an owner that plays nothing
+  (`tests_wall_owner.rs::the_stage_display_s_line_goes_with_the_wall_s_and_the_title_stays`,
+  `a_song_with_no_lyrics_sends_its_title_to_the_stage_display`). Presenter
+  already maps `currentSong` to its snapshot's `songName`; whether its
+  translation text mode draws it is Presenter's call (presenter#867).
   Presenter (its issue 799) picks per stage layout what to show; SongPlayer
   has no language setting for it. Read back on the box with Presenter's
   `GET /stage/snapshot?layout=api` (`current.main` = the EN,

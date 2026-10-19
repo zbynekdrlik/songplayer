@@ -44,22 +44,19 @@ impl super::PlaybackEngine {
         if pp.scene_off_due.is_some() {
             return; // held off program (tests_hold.rs)
         }
-        let lyrics = match &pp.lyrics_state {
-            Some(l) => l,
-            None => return,
-        };
-        let _video_id = match pp.current_video_id {
-            Some(id) => id,
-            None => return,
-        };
+        if pp.current_video_id.is_none() {
+            return;
+        }
 
         // Karaoke WebSocket dedup keyed on the line's English text.
-        let ws_msg = lyrics.update(playlist_id, position_ms);
-        let ws_signature = ws_signature_from(&ws_msg);
-        if pp.last_lyrics_ws_signature != ws_signature {
-            let _ = self.ws_event_tx.send(ws_msg);
-            if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
-                pp.last_lyrics_ws_signature = ws_signature;
+        if let Some(lyrics) = &pp.lyrics_state {
+            let ws_msg = lyrics.update(playlist_id, position_ms);
+            let ws_signature = ws_signature_from(&ws_msg);
+            if pp.last_lyrics_ws_signature != ws_signature {
+                let _ = self.ws_event_tx.send(ws_msg);
+                if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+                    pp.last_lyrics_ws_signature = ws_signature;
+                }
             }
         }
 
@@ -77,17 +74,15 @@ impl super::PlaybackEngine {
             pp.last_presenter_text = None;
             return;
         }
-        let lyrics = match &pp.lyrics_state {
-            Some(l) => l,
-            None => return,
-        };
         let video_id = match pp.current_video_id {
             Some(id) => id,
             None => return,
         };
 
-        // Resolume — gated on scene_active.
-        if pp.scene_active.load(Ordering::Acquire) {
+        // Resolume — gated on scene_active; a song with no lyrics sends none.
+        if let Some(lyrics) = &pp.lyrics_state
+            && pp.scene_active.load(Ordering::Acquire)
+        {
             let resolume_signature = match lyrics.resolume_lines_with_next(position_ms) {
                 Some((en, next_en, sk, next_sk)) => {
                     let sig = format!(
@@ -139,20 +134,21 @@ impl super::PlaybackEngine {
 
         // Presenter — fire-and-forget. `sync_line` is idempotent on an
         // identical payload (#222: compares the current + next lines, EN + SK,
-        // against the `last_seen` arg we pass, the pre-call snapshot) and
-        // (#283) clears the stage display once where the wall is blank.
+        // and #281 the song's title, against the `last_seen` arg we pass, the
+        // pre-call snapshot); where the wall is blank (#283), or the song has
+        // no lyrics, it sends no line and keeps the title (#281).
         let pp = match self.pipelines.get_mut(&playlist_id) {
             Some(pp) => pp,
             None => return,
         };
-        let lyrics = match &pp.lyrics_state {
-            Some(l) => l,
-            None => return,
-        };
+        let lines = pp
+            .lyrics_state
+            .as_ref()
+            .and_then(|l| l.presenter_lines(position_ms));
         pp.last_presenter_text = crate::presenter::sync_line(
             self.presenter_client.as_ref(),
             pp.last_presenter_text.take(),
-            lyrics.presenter_lines(position_ms),
+            lines,
             &pp.cached_song,
             &pp.cached_artist,
         );
