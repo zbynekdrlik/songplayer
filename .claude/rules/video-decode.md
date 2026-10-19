@@ -959,7 +959,12 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          readings carry a receive cost too) is #251's queued
          `recv2_ab` (comment 6271531140): read its result before the
          take;
-       - the metrics, every take analysed over the same 40 s:
+       - the metrics, every take analysed over the same 40 s. A take
+         whose captured region shows no moving content (about one
+         distinct picture per 40 s, or `wall_frames.py` exit 4) is
+         dropped and reported, never read as 0 backs: #251 comment
+         6273568431 saw Arena's `Display` output go black while the
+         composition had content and `GET /api/v1/wall` read `ok`.
          - the backs: exact jumps back per 40 s and one-refresh runs
            (`wall_frames.py` / `wall_analysis.py`, `--refresh-hz 60`, for
            `wall-25` / `wall-30`; `wall_cadence.py`'s `exact_backs` for the
@@ -1062,7 +1067,11 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
             would let the paused playlist's ON pick a song of its own
             (`WaitingForScene` + `SceneOn` → `SelectAndPlay`), while a
             playlist already `Playing` keeps its song through the ON.
-         4. Wait for the restart's FRESH mark: `GET /api/v1/program`
+         4. (The driver runs on SNV, a box script like `fhd_ab2.ps1`,
+            so its instants and SongPlayer's wire stamps share SNV's
+            clock: SNV's date can sit up to ~1.5 s off another box's,
+            dantesync's nightly step, `genlock.md`.) Wait for the
+            restart's FRESH mark: `GET /api/v1/program`
             `on_air_item` names the item with a `started_at_utc_ns` later
             than the restart request. The wall gate's check of the row and
             `position_ms` alone passes on the OLD play when two blocks in a
@@ -1149,10 +1158,13 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          block reads `on_air_item` at its take's START and at its END
          (for a clip before + 60 s, where the 60 s loop re-marks), and
          the block is dropped and reported unless, at the end: the item
-         is the same, its `started_at_utc_ns` within one slot of the
-         start's (a replay from 0 can move it by part of a slot), its
-         `position_ms` grown by about the take's 45 s, and its
-         `frame_utc_ns` within about 1 s of the read. An ended song
+         is the same, its `started_at_utc_ns` equal to the start's (it
+         does not move while the play goes on: `ItemTrack::observe`
+         re-anchors only at a new mark, a pts that went back or a
+         source change, so a Loop replay inside the take moves it by
+         the song's length), and its `position_ms` and `frame_utc_ns`
+         each grown by about the take's 45 s since the start's read
+         (no shared clock needed). An ended song
          leaves `on_air_item` as it was (a boundary with no item frame
          keeps it): only the still-advancing position tells it apart,
          a Single-mode playlist showing black for the rest of the take
