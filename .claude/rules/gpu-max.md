@@ -1075,7 +1075,8 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   MAX at once. Before a relaunch, read the connected clips
   (`ops\arena_layers.py`) to REPORT them, never to restore them
   (`wall.md`: no clip runs until the operator presses a scene); a test
-  reconnects only its own clip and undoes that.
+  reconnects only the clip it tests (the A/B's receiving clip included)
+  and undoes that.
 - **A forced kill can leave Spout's list to a receiver for good** (#243
   follow-up, PP 12.10.2026): hence the deploy's quiesce, the list sentinel
   and `max.list_holder` ("Spout locks handed over abandoned" above).
@@ -2119,8 +2120,12 @@ The receive costs it: with no layer receiving MAX, a running SongPlayer
 loses nothing. And ANY Spout receive costs it the same (#251 comment
 6275818478, `recv3_ab`: an all-black sender that is not SongPlayer's
 573–678, MAX 563–706, FHD `SP-program` 513–741, no receive 1198–1202 of
-~1 200 per 40 s), so the cause is Arena's Spout receive on SNV, not
-SongPlayer's sender, hand-off, size, content or uploads. The first
+~1 200 per 40 s), and an NDI input costs the same (6279611039: 205 /
+294 of 600 per 20 s, Spout 250 / 281, Arena's non-live Blank generator
+601). So the cause is any LIVE input in Arena on SNV, not SongPlayer's
+sender, hand-off, size, content or uploads: Arena presents every frame
+(6279484457, PresentMon), but its output window draws a stale
+composition picture about half the time. The first
 suspect, the hand-off, was ruled out below (#251 comment 6270228777),
 and so was the size (6271531140). That first suspect: since 0.82.0 (PP, no
 reports) the shim's `SendSynced` holds Spout's texture-access mutex while

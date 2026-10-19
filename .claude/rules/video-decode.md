@@ -1079,33 +1079,45 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
            song; a recorded `sp-90s` re-arms #230's hold, which then
            stays); one refused (409 / 404) is reported and left to the
            operator;
-         - the operator's cut is never overridden: the driver records
-           the source it last cut to, and at each block's start and
-           end read, and before the `finally`'s cut back, a program
-           `source` it did not cut means the operator took over: no
-           further cut, no cut back, no re-arm of the hold; the A/B
-           stops, reported (the cut-back counterpart of "each only
-           while it still has the take's own value");
+         - the operator's cut is never overridden: the driver's
+           record of the program's source is seeded with the source
+           read at the take's start and changed only once `source`
+           reads a cut the driver made. At each block's start and end
+           read, and right before EVERY cut the driver makes (step 3,
+           a Blank block's cut, the arming and re-arm cuts, the
+           `finally`'s cut back), a `source` other than the record
+           means the operator took over: no further cut, no cut back,
+           no re-arm of the hold; the `finally` runs at once without
+           its cut back, and the A/B stops, reported (the cut-back
+           counterpart of "each only while it still has the take's
+           own value");
          - no deploy is pending (through the A/B and every gate-3
-           span run with `gpu` set): at each block's start, before
-           an automatic take arms its hold, and at its take's end, no
-           ci.yml `push` run of dev or main queued or in progress (it
-           reaches its deploy job about 15–19 min in) and no
-           `deploy-pp` run queued or in progress that its `resolve`
-           job did not skip (its PP E2E starts 41–72 s after its
-           deploy job). The main session reads it on dev1 (`gh run
-           list`) before it gives the driver each block's go, or the
-           driver reads the public repo's REST runs list itself, one
-           unfiltered `/actions/runs` read per check (under the
-           unauthenticated 60 an hour); a failed read holds the next
-           block until a read succeeds. Through the whole block the
-           driver also polls SNV's `Runner.Worker` process every 2 s
-           or less (local, no limit): measured from a job's start,
-           an E2E job restarts SongPlayer at about + 18–21 s and a
-           deploy job kills it at about + 21–29 s, and a job re-run
-           gets there within a minute or two. The main session
-           re-runs or dispatches no SNV job, and no `deploy-pp`
-           during an automatic take, while a take runs. A pending
+           span run with `gpu` set): once per block (at its start;
+           block N's read is block N + 1's check) and before an
+           automatic take arms its hold, no ci.yml `push` run of dev
+           or main and no `deploy-pp` run in any status but
+           `completed` (`queued`, `in_progress`, `pending`, `waiting`,
+           `requested`; a `deploy-pp` its `resolve` job skips
+           completes in about 1 s as `skipped`). A ci.yml push run
+           reaches its deploy job about 15–19 min in; PP's E2E starts
+           41–72 s after its deploy job. The main session reads it on
+           dev1 (`gh run list`, authenticated) before it gives the
+           driver each block's go, or the driver reads the public
+           repo's `/actions/runs?per_page=100` itself with conditional
+           requests (`If-None-Match`: a 304 is not counted against the
+           unauthenticated 60 an hour, one read per ~65 s block being
+           ~55); a failed read holds the next block until a read
+           succeeds, and the yield's wait for an E2E's end reads at
+           most once a minute. Whenever any take value is set (in a
+           block, between blocks and takes, while a read is held,
+           through a gate-3 span) the driver also polls SNV's
+           `Runner.Worker` process every 2 s or less (local, no
+           limit): measured from a job's start, an E2E job restarts
+           SongPlayer at about + 14–23 s and a deploy job kills it at
+           about + 20–33 s, and a job re-run gets there within a
+           minute or two. The main session re-runs or dispatches no
+           SNV job, and no `deploy-pp` during an automatic take, while
+           a take runs. A pending
            deploy is never held: the A/B YIELDS, its `finally` run at
            once in this order (every take's): SongPlayer's writes
            first — `video_decode` = `software` and, in an automatic
@@ -1119,10 +1131,13 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
            upgrade switch, the hold last of these — then Arena's test
            changes. A write a restarting SongPlayer refused is retried
            once its API answers again (long before the E2E's suite).
-           The driver then waits until the deploy's E2E has ended,
-           re-runs a deploy E2E its block ran into (reported as the
-           A/B's), and starts a NEW take (the new build's
-           preconditions, never pooled with the blocks before). A
+           The driver then waits until the deploy's E2E has ended; a
+           deploy E2E a block ran into is re-run by the main session
+           on dev1 (`gh run rerun --job <id>`, reported as the
+           A/B's; on a main run its completion fires `deploy-pp`
+           again, which an automatic take waits out too), and only
+           then a NEW take starts (the new build's preconditions,
+           never pooled with the blocks before). A
            block a deploy cut is dropped, never a dead stretch, and
            ends its take. After a main release, a new automatic take
            waits until `deploy-pp`'s E2E has ended. A block
@@ -1167,9 +1182,13 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          second 546–656, at 30 a second 548–723, MAX on Blank 522 /
          587, no receive 1201; Arena's own composition monitor
          1140–1168 under a receive against 1199–1201 with none): so
-         (B) carries it at whatever rate the test sender sends. Read
-         any newer #251 result (its next lane measures how Arena
-         presents its output window) before the take;
+         (B) carries it at whatever rate the test sender sends. And it
+         is any LIVE input, Spout or NDI (#251 comments 6279484457 and
+         6279611039: an NDI source on L5 205 / 294 of 600 per 20 s,
+         Spout 250 / 281, Arena's own non-live Blank generator 601;
+         Arena presents every frame to the wall, but its output window
+         draws a stale composition picture about half the time). Read
+         any newer #251 result before the take;
        - the metrics, every take analysed over the same 40 s:
          - **every block's setup**, read at its take's start and end
            (Arena's composition, REST, read only, and `max.state`):
@@ -1624,8 +1643,9 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          neither the Spout hand-off nor MAX's size changes it (#251
          comments 6270228777 and 6271531140), and any Spout sender's
          receive costs the same, SongPlayer's or not (#251 comment
-         6275818478): the cause is Arena's Spout receive on SNV, #251's
-         open lane. So a met P3a acceptance is
+         6275818478), and so does an NDI one (6279611039): the cause
+         is any live input in Arena on SNV, #251's open lane. So a met
+         P3a acceptance is
          never reported as the room's judder fixed. This is the lane's
          reading of plan §7; the main session may set another before the
          take;
