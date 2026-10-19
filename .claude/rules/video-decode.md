@@ -962,17 +962,25 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
        - the metrics, every take analysed over the same 40 s. A take
          whose captured region shows no moving content (about one
          distinct picture per 40 s, or `wall_frames.py` exit 4, which
-         says only "no strip decoded": a black output, or an Arena
-         layer covering the strips, `test-item-burn.md`; the report
-         names which) is never read as 0 backs. It is dropped only when
-         the OUTPUT is dead whatever SongPlayer sends: a dxcam grab
-         after the take reads Arena's output black or still while its
-         composition has content (#251 comment 6273568431: the
-         `Display` output went black, `GET /api/v1/wall` read `ok`), or
-         the other side's blocks of the same content are dead too. A
-         region dead on ONE side only is that side's result, its
-         missing pictures counted (a G-only freeze is the strongest
-         "worse" there is, never dropped).
+         says only "no strip decoded": `test-item-burn.md` names
+         Arena's clip on another source, MAX off with the clip on MAX,
+         the clip not on air; also a black output, or an Arena layer
+         covering the strips; the report names which) is never read as
+         0 backs, and is decided as follows:
+         - DROPPED, and reported, only when Arena failed to output what
+           it composes: the output black or still while Arena's own
+           composition monitor shows the composition MOVING (#251
+           comment 6273568431: the `Display` output black, the monitor
+           showing SongPlayer's song, `GET /api/v1/wall` `ok`), or the
+           clip not on air / MAX off (a setup error: fix, run again);
+         - else, on SongPlayer's content region, it is that SIDE's
+           result: an output as still as its composition is what
+           SongPlayer sent, so its missing pictures are counted (below),
+           a G-only freeze being the strongest "worse" there is;
+         - an Arena clip region still with its composition (the clip
+           stopped), or a floor block's dead region (a Blank block's
+           test sender or Arena clip), is dropped and reported, the
+           sender or clip restarted: it is no SongPlayer side.
          - the backs: exact jumps back per 40 s and one-refresh runs
            (`wall_frames.py` / `wall_analysis.py`, `--refresh-hz 60`, for
            `wall-25` / `wall-30`; `wall_cadence.py`'s `exact_backs` for the
@@ -985,7 +993,11 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
            pictures (`wall_cadence.py`; for `wall-25` / `wall-30` the
            frame reader's `lost_boundaries`, with `lost_frames` and
            `unverified.boundaries` reported beside it: on a blended
-           `wall-25` a skipped boundary often loses no clip frame), never
+           `wall-25` a skipped boundary often loses no clip frame; but
+           `lost_boundaries` counts only skips BETWEEN two readings, so
+           a frame-clip take that is dead, or freezes to its end (a
+           frozen tail), counts the reference minus the distinct
+           boundaries it showed, `boundaries` in the same report), never
            the raw count, which re-shows inflate (#251's Part 2 read
            ~1 200-1 370 per 40 s for 30 fps songs). The reference is what
            the content shows on the wall. For SongPlayer's content it is
@@ -1171,10 +1183,12 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          re-anchors only at a new mark, a pts that went back or a
          source change, so a Loop replay inside the take moves it by
          the song's length), and its `position_ms` and `frame_utc_ns`
-         each grown by the driver's own elapsed time between its two
-         reads, within ~0.2 s (a slot of newest-frame jitter plus the
-         reads' latency; `frame_utc_ns` also moves by dantesync's
-         nightly step, up to ~1.5 s near 02:00 UTC). An ended song
+         each grown by the elapsed time between the two reads, timed on
+         a MONOTONIC clock (`[Diagnostics.Stopwatch]`, never the date),
+         within ~0.2 s (a slot of newest-frame jitter plus the reads'
+         latency). A block spanning dantesync's nightly date step
+         (04:00 local, `genlock.md`; up to ~1.5 s, which relabels
+         `frame_utc_ns`) is dropped. An ended song
          leaves `on_air_item` as it was (a boundary with no item frame
          keeps it): only the still-advancing position tells it apart,
          a Single-mode playlist showing black for the rest of the take
