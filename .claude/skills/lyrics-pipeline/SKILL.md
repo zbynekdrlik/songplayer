@@ -135,8 +135,11 @@ is now **text gathering + two tiers**, one forced aligner (mtl), one ASR vendor
    `lyrics_alignment_model = ALIGNMENT_MODEL_G35T_REV1`. Measured no-text
    quality: g35t 19.7% gold-norm ≤400ms vs the retired AssemblyAI 3.8%.
    Reuses the vocal WAV already isolated for the ★ tier (no 2nd Demucs).
-   - Empty/blank transcript → quarantine as `asr_gap`, unless the song already
-     serves lyrics (then only the attempt is recorded, the lyrics kept). No
+   - Empty/blank transcript, or one under 5 words a minute of the song
+     (#283, `g35t_transcript::is_sparse`: a failed transcription of shouts) →
+     quarantine as `asr_gap`, unless the song already serves lyrics that are
+     not themselves that sparse (then only the attempt is recorded, the
+     lyrics kept). No
      vocals / no gemini keys / g35t transport error → `Deferred` (row backs
      off, retries later).
 
