@@ -68,10 +68,7 @@ use sp_core::config::{
     DEFAULT_PROGRAM_MAX_COMPOSE_PHASE_US, DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US, NdiSource,
     SETTING_PROGRAM_MAX_ENABLED, SpoutSend, program_max_enabled,
 };
-use sp_gpu::{
-    CANVAS_HEIGHT, CANVAS_WIDTH, ComposeStats, Nv12Picture, SPOUT_SENDER_NAME, Side,
-    SpoutSendStats, VblankState,
-};
+use sp_gpu::{ComposeStats, Nv12Picture, SPOUT_SENDER_NAME, Side, SpoutSendStats, VblankState};
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
@@ -962,12 +959,7 @@ fn spawn_max_thread(max: Arc<MaxOut>) {
     let spawned = std::thread::Builder::new()
         .name("program-max".into())
         .spawn(move || {
-            info!(
-                spout_name = SPOUT_SENDER_NAME,
-                width = CANVAS_WIDTH,
-                height = CANVAS_HEIGHT,
-                "program max thread started"
-            );
+            info!(spout_name = SPOUT_SENDER_NAME, "program max thread started");
             let vblank: Option<Box<dyn VblankSource>> = match sp_gpu::VblankTracker::start() {
                 Ok(tracker) => {
                     info!(output = %tracker.output().label(), "program max: paced on the output's refresh");
