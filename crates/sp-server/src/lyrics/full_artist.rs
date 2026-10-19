@@ -22,7 +22,7 @@ use crate::db::models::VideoLyricsRow;
 
 /// One or more capital initials, each with its period, then a surname.
 static INITIALS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b((?:\p{Lu}\.\.\s*)+)(\p{Lu}[\p{L}\p{M}'’-]*)").expect("a valid pattern")
+    Regex::new(r"\b((?:\p{Lu}\.\s*)+)(\p{Lu}[\p{L}\p{M}'’-]*)").expect("a valid pattern")
 });
 
 /// The title's spelling of the person `initials` + `surname` names: each

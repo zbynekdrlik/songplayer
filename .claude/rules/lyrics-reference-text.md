@@ -3,6 +3,7 @@ paths:
   - "crates/sp-server/src/lyrics/reference_gate*.rs"
   - "crates/sp-server/src/lyrics/sung_coverage*.rs"
   - "crates/sp-server/src/lyrics/title_search*.rs"
+  - "crates/sp-server/src/lyrics/full_artist*.rs"
   - "crates/sp-server/src/lyrics/lrclib_search*.rs"
   - "crates/sp-server/src/lyrics/text_candidate*.rs"
   - "crates/sp-server/src/lyrics/transcript_cache*.rs"
@@ -104,6 +105,7 @@ Before it, no post-deploy check sent a Gemini 3.5 Transcribe request: a dead or 
 
 ## Texts
 
+- **The lookups ask for the artist IN FULL (#283).** The metadata prompt shortens a person's first names to initials for the wall's title (`metadata/gemini.rs`, "P. Wickham"; the parser too), and LRCLIB / lyrics.ovh / Genius asked for that missed the song (112 SNV rows, 19.10.2026). `process_song` calls `full_artist::expand_lookup_artist` right after the duration cap: each `X. (Y. )Surname` the video's own title spells out (`\bX…\.?\s+Surname\b`, any case) replaces it on the WORKER'S row only, so the Spotify resolver, gather's three lookups, the title search and the cleanups get "Phil Wickham"; the dashboard's stage broadcasts keep the display artist (cloned before), and the database's artist is never written. A name the title does not spell (`@JohnWilds`) stays.
 - `parse_json3` gives ONE line per sung caption line. Each line keeps its event's own span, never divided by hand. No production code reads `CandidateText::line_timings`: mtl re-times the text.
 - The scraped-lyrics Claude cleanup (`CleanupMode::ScrapedLyrics`) KEEPS every repeat, because mtl times exactly the lines it is given. When its prompt semantics change, bump the cleanup cache names (`_cleaned_v3.json` today), or the reprocess reuses stale decisions; bump `cache_sweep_plan::CLEANED_VERSION` with them (a test reads both writers), so the daily cache sweep deletes the older caches and keeps the new ones.
 - Turn a fetched timed track or a scraped plain lyric into a candidate only through `text_candidate::{timed_candidate, cleaned_text_candidate}`. `gather.rs` and the title search share them, and `gather_uses_lyrics_ovh_primary_with_genius_fallback` reads both files. The override, description, lyrics.ovh and Spotify candidates are built directly.
