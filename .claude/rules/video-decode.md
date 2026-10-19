@@ -691,7 +691,8 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
   refused picture, a lost producer device (a retired producer is no
   failure: its surfaces are read back, above). A lost device kills the ring
   (`GpuError::removed`), so the pipeline's next song drops the producer:
-  a G song waits the 30 s backoff, an S song lets it go with neither.
+  a G song waits the 30 s backoff, an S song lets it go with neither a
+  WARN nor a backoff.
 - **sp-server** (`gpu_resident.rs`, `paced_producer.rs`):
   - a ring frame becomes `Picture::Gpu` (`to_paced_frame`);
   - the producer reports each change of the frames' kind (`KindChange`:
@@ -720,8 +721,9 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
   compositor's draw) kills the ring (`ring_state`'s abandoned rule, left
   to P4 since P2). The design's fall back then applies: a dead ring is a
   decode error, the song reopens in SOFTWARE (up to a GOP of silence, the
-  rest of the song in software) and the next song waits the 30 s
-  backoff. Reading back on the same healthy decoder instead (round 2's
+  rest of the song in software) and the next G song waits the 30 s
+  backoff (an S song lets the producer go with neither a WARN nor a
+  backoff). Reading back on the same healthy decoder instead (round 2's
   path for a retired producer) would be gapless, but changes a fall back
   the design chose: a follow-up candidate the lane returned to the main
   session (to file, or add to P4's scope on #279). It, and a ring full
@@ -884,7 +886,10 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
        WARN and no backoff, and the next G open makes a new ring at
        once (`Made`, its INFO). On that G → S path a death the reads
        missed shows only by its effects: a mid-stream +1 (the rule
-       above), `gpu.abandoned`, or a display-driver reset in the log.
+       above), `gpu.abandoned` or `gpu.open_failures` (a slot that
+       does not open kills its ring), the WARN `sp-gpu: a picture ring
+       died` every ring kill writes, or a display-driver reset in the
+       log.
        The same holds for a G ring's `full` in a G → S switch of one
        playlist between its end read and step 1's retire (the S
        open removes the row before the S start read): a `full` +1 is
@@ -928,9 +933,12 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          the background hold (`GET /api/v1/background-hold`), and the
          program's source (`GET /api/v1/program` `source`) at the
          take's very start, before any cut (the automatic take's
-         arming cut included): every take's `finally` cuts back to it
-         (`POST /api/v1/program/cut`), right after `video_decode` is
-         put back (the order in the driver's guards below). #251's two
+         arming cut included). The FIRST take's is the one guard 2
+         checks (below); a later take compares its own with it, and a
+         difference (a leftover, or the operator took over) stops the
+         A/B, reported. Every take's `finally` cuts back to that one
+         (`POST /api/v1/program/cut`) in the order the driver's guards
+         give (below). #251's two
          wall levers (`gpu-max.md`, "Arena loses its OWN frames") keep ONE
          value for the whole take, read per block as in gate 1 (the size
          as `max.width` / `height`, the hand-off as its stored value in
@@ -977,7 +985,9 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          queued `deploy-pp` ends it through its `finally` first (PP's
          peer gate fails on SNV's hold, 503 `background-hold`; the
          driver's guards below). When it ends, a `finally` (like Arena's
-         changes) puts back the values found (`""` for one that was not
+         changes; the order in the driver's guards below, the cap
+         before the program's cut back) puts back the values found
+         (`""` for one that was not
          stored), one PATCH each, in this order: `max_resolution` first
          (then `max_height` reads 1440 again), `video_upgrade_enabled`,
          and `background_hold_until_ms` LAST, so the hold never ends
@@ -1053,28 +1063,52 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
            Arena's clips and settings) are checked against the
            operator's setup (the program on the operator's own
            source, never a test's Blank; no Arena group soloed; no
-           test change left): any other value stops the A/B,
-           reported. Every later take restores these first, checked
-           values (never a reload's state after an Arena restart;
-           the operator's overlays still never restored);
-         - at each block's start and its take's end, no SNV deploy
-           is pending: no ci.yml run for dev or main queued or in
-           progress (one in progress reaches its deploy job about
-           15 min in), read by the main session on dev1 (`gh run
-           list`) before it gives the driver each block's go, or by
-           the driver itself through the public repo's REST runs list
-           (unauthenticated, one read per block within its 60 an
-           hour) and the SNV runner's `Runner.Worker` process. A
-           pending deploy is never held: the A/B YIELDS. The driver
-           runs the take's `finally` before the deploy job starts
-           (`video_decode` = `software` first, the program cut back,
-           Arena's test changes undone, an automatic take's cap, then
-           the upgrade switch, then the hold), waits until the
-           deploy's E2E has ended, and starts a NEW take (the new
-           build's preconditions, never pooled with the blocks
-           before). A block a deploy cut is dropped, never a dead
-           stretch; a queued `deploy-pp` ends an automatic take the
-           same way before PP's peer gate meets SNV's hold. A block
+           test change left; the source not in `cut_refused` of `GET
+           /api/v1/program`, an NDI input active): any other value
+           stops the A/B, reported. Every later take restores these
+           first, checked values for SongPlayer's program source and
+           the Arena settings the A/B changed. After an Arena restart
+           its `finally` undoes only the A/B's own test changes (the
+           receiving clip's reconnection included) and leaves the
+           clip state the reload brought (`wall.md`: no clip runs
+           until the operator presses a scene); the operator's
+           overlays are never restored. A cut back restores the
+           source, not the song (a paused playlist starts its next
+           song; a recorded `sp-90s` re-arms #230's hold, which then
+           stays); one refused (409 / 404) is reported and left to the
+           operator;
+         - no SNV deploy is pending: at each block's start, before
+           an automatic take arms its hold, and at its take's end, no
+           ci.yml `push` run of dev or main queued or in progress (it
+           reaches its deploy job 16–19 min in) and no `deploy-pp` run
+           whose deploy job has started, read by the main session on
+           dev1 (`gh run list`) before it gives the driver each
+           block's go, or by the driver itself through the public
+           repo's REST runs list (unauthenticated; a failed or
+           rate-limited read counts as a pending deploy). Through the
+           whole block the driver also polls SNV's `Runner.Worker`
+           process every few seconds (local, no limit: a job re-run
+           reaches SongPlayer within 1–2 min, a deploy or E2E job
+           spends ≥ 30 s on checkout, the lease gate and artifacts
+           first), and the main session re-runs or dispatches no SNV
+           job while a take runs. A pending deploy is never held: the
+           A/B YIELDS, its `finally` run at once in this order (the
+           same as every take's): `video_decode` = `software` and, in
+           an automatic take, the cap put back, then wait until `GET
+           /api/v1/status` reads `video_decode.video_decode` =
+           `software` and `max_height` = 1440 (a cut back opens a
+           song at the then-applied cap, and a cut to `sp-slow` ends
+           #230's hold, which must never end while the cap is
+           automatic); then the program cut back; then Arena's test
+           changes undone; then the upgrade switch; the hold last. It
+           waits until the deploy's E2E has ended and starts a NEW
+           take (the new build's preconditions, never pooled with the
+           blocks before). A block a deploy cut is dropped, never a
+           dead stretch, and ends its take; a deploy's E2E it ran
+           into is re-run and reported as the A/B's. A `deploy-pp`
+           ends an automatic take the same way before PP's peer gate
+           meets SNV's hold; after a main release, a new automatic
+           take waits until `deploy-pp`'s E2E has ended. A block
            whose Arena
            content anyone else changed is
          dropped, and the A/B is read per Arena content. Each Arena
@@ -1626,9 +1660,10 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
   Throughout: while `video_decode` = `gpu` is set on SNV,
   `post-deploy-preview.spec.ts` and `post-deploy-owner-path.spec.ts` find
   no live preview on a GPU-decoded song (none before P3b): a deploy is
-  never held for the A/B; the A/B yields to it, its `finally` switching
-  `video_decode` back first (the driver's guards above); the 72 h run's
-  deploy policy is above; never on PP before P3b (above).
+  never held; the A/B, and every gate-3 span run with `gpu` set, yields
+  to it through its `finally`, `video_decode` back first (the driver's
+  guards above); the 72 h run's deploy policy is above; never on PP
+  before P3b (above).
 
 ## Tests and gates
 

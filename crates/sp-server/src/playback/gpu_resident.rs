@@ -26,9 +26,9 @@
 //!   take effect lets it go at once (the switch off, or NDI back on the
 //!   canvas: nothing else would while songs keep playing). A producer
 //!   whose ring died (its device was lost, or a slot's key abandoned) is
-//!   dropped at the next open, and a new one is made only
-//!   [`PRODUCER_REBUILD_BACKOFF`] (30 s) later; a failed build waits the
-//!   same. Meanwhile the songs open in the base mode. The song whose copy
+//!   dropped at the next open: a G open waits [`PRODUCER_REBUILD_BACKOFF`]
+//!   (30 s) for a new one (a failed build too) while songs open in the base
+//!   mode; an S open lets it go with no WARN and no backoff. The song whose copy
 //!   met the loss goes on in software by the reader's own fall back.
 //! - **The table** ([`pipelines`]): per playlist, whether its pipeline
 //!   decodes its song on the GPU (the decode producer reports each change of
