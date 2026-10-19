@@ -761,8 +761,10 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
      (anything but exactly `plain` or `release_then_wait`, trimmed, is the
      default `synced`; it is on no field of `GET /api/v1/program`, and the
      INFO `program max: Spout hand-off applied` names the applied `mode`
-     when a change took effect, within one 5 s poll); a
-     lever moved between the two hours voids the comparison): every
+     when a change took effect, within one 5 s poll), and the decode
+     cap read the same way (`status.video_decode.max_height`, #282: it
+     moves the backs 10–15×); a lever or the cap moved between the two
+     hours voids the comparison): every
      existing gate holds, and the wall is measured an hour after the E2E
      against an hour before (`gpu-max.md`, "Judging a deploy on the wall";
      since #251's 19.10 finding the missing pictures next to the backs,
@@ -845,11 +847,18 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          `GET /api/v1/settings`, its default as in gate 1); so does the
          decode cap (`max_resolution`, read per block as
          `status.video_decode.max_height`; production on SNV is 1440,
-         where the 4K song opens scaled to 2560×1440, and automatic is a
-         take of its own: the design's ≈ 132 vs ≈ 298 MB/s, and #282 found
-         the cap moves the wall's backs 10–15×). A take at another value
-         of any of the three is a take of its own, never mixed into this
-         one. Only the on-program pipeline
+         where a 3840×2160 song opens scaled to 2560×1440 on both sides,
+         confirmed at its first open in the take by
+         `status.video_decode.scaled_opens` +1 and `scale_refusals` +0 (a
+         4K file whose height is not whole 16-row blocks may play
+         unscaled, `hw_decode::scaled_open_safe`; name a 3840×2160 one),
+         and automatic is a take of its own: the design's ≈ 132 vs ≈ 298
+         MB/s, and #282 found the cap moves the wall's backs 10–15×).
+         `max_resolution` is also the DOWNLOAD cap (#282): for an
+         automatic take switch `video_upgrade_enabled` off and check per
+         block that the A/B songs' files are unchanged. A take at another
+         value of any of the three is a take of its own, never mixed into
+         this one. Only the on-program pipeline
          decodes: judge strays by every pipeline's `transport` and pause
          them (`video_decode.pipelines[]` lists only the pipelines that
          decode GPU-resident or hold a producer, and its `gpu_decoding`
@@ -999,13 +1008,25 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          NEXT song's open, while `software` retires the producers within
          one 5 s poll, so the two directions differ. Each block: PATCH,
          wait at least one 5 s poll, restart the content (`POST
-         /api/v1/test-item/start {"clip"}`, or play the song again), and
+         /api/v1/test-item/start {"clip"}`, or play the song again: a
+         Play claims no program, it plays off program), then cut the
+         program to the content's playlist when it is not on program
+         (`POST /api/v1/program/cut {"source": <playlist id>}`: the test
+         playlist for the clips; after a Blank block, or between contents
+         of different playlists), in that order, as
+         `post-deploy-wall-frames.spec.ts` does (cut first, and the
+         playlist's ON would start a song of the engine's own choice);
+         the cut's fade and the outgoing playlist's hold fall in the
+         switch. Then
          start the block's take once the restarted item is on air again
          (`GET /api/v1/program` `on_air_item` names it with a
          `started_at_utc_ns` later than the restart request: a fresh
          mark; `post-deploy-wall-frames.spec.ts`'s check of the row and
          `position_ms` alone passes on the OLD play when two blocks in a
-         row share a content) AND
+         row share a content; a 60 s clip's own loop landing between the
+         request and the restart's first frame is a fresh mark too, which
+         starts the take at most one pre-roll early, inside the dropped
+         first 5 s) AND
          `status.video_decode.pipelines[].gpu_decoding` reads its side
          (G: true; S: false or no row). `gpu_decoding` alone is a level:
          it can read the side before the new song's first frame (a G row
