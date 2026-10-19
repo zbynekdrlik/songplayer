@@ -10,6 +10,7 @@ paths:
   - "crates/sp-server/src/playback/gpu_resident*.rs"
   - "crates/sp-gpu/src/win/producer.rs"
   - "crates/sp-server/src/playback/paced_producer*.rs"
+  - "crates/sp-core/src/config_video_decode.rs"
 ---
 
 # The Media Foundation video reader: software and opt-in hardware decode (#223 S3b)
@@ -753,8 +754,14 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
   6244390810, "Box gates"; the plan §7 and §9 P3a). Each step starts only
   once the one before held:**
   1. **The deploy at the default** (`video_decode` = `software`,
-     `program_ndi_source` = `cpu`): every existing gate holds, and the wall
-     is measured an hour after the E2E against an hour before
+     `program_ndi_source` = `cpu`, and #251's two wall levers at their
+     defaults for BOTH hours: `program_max_size` and
+     `program_max_spout_send` unset, read before and after, the size as
+     `GET /api/v1/program` `max.width` / `height` = 3840×2160 and the
+     hand-off from `GET /api/v1/settings`, its only reading; a lever
+     moved between the two hours voids the comparison): every existing
+     gate holds, and the wall is measured an hour after the E2E against
+     an hour before
      (`gpu-max.md`, "Judging a deploy on the wall", and since #251's
      19.10 finding its "Arena loses its OWN frames": the pictures of the
      content against its own rate next to the backs): this build changes
@@ -829,8 +836,10 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          the background hold (`GET /api/v1/background-hold`). #251's two
          wall levers, `program_max_spout_send` and `program_max_size`
          (`gpu-max.md`, "Arena loses its OWN frames"), keep ONE value for
-         the whole take (`max.width` / `height` read per block; a take at
-         another value is a take of its own, never mixed into this one);
+         the whole take (read per block: the size as `GET /api/v1/program`
+         `max.width` / `height`, the hand-off from `GET /api/v1/settings`,
+         which is on no API field; a take at another value is a take of
+         its own, never mixed into this one);
          only the
          on-program pipeline decodes: judge strays by every pipeline's
          `transport` and pause them (`video_decode.pipelines[]` lists
@@ -851,9 +860,11 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          rate) and the wall's distinct pictures per 40 s (18.10:
          ≈ 2 150-2 310 in the half hour that juddered on Blank, ≈ 1 200
          after it; which content made the difference is not known).
-         Nothing here triggers an Arena clip (the operator's Stream Deck
-         alone runs them): a block whose Arena content changed is
-         dropped, and the A/B is read per Arena content. Each Arena
+         SongPlayer, CI and a script left running never trigger an Arena
+         clip (the operator's Stream Deck runs them); the A/B's own Arena
+         changes below are the main session's alone. A block whose Arena
+         content changed is dropped, and the A/B is read per Arena
+         content. Each Arena
          content gets its own Blank blocks, interleaved with its G and S
          blocks: SongPlayer's share is a side's bin minus the Blank bin
          under the SAME Arena content, never against a Blank taken under
@@ -871,8 +882,10 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          independent Spout sender `spout_test_sender.py` on the clip,
          the control that isolates SongPlayer's own disturbance. (B)
          re-points the operator's clip to that sender (#251's method,
-         comment 6212436810): an Arena change the main session arranges
-         with the owner first, never a script's;
+         comment 6212436810): an Arena change on SNV's bridge Arena,
+         which the owner allowed for tests (#251 comment 6263953328),
+         made by the main session only, under the lease and `finally`
+         rule below;
        - the metric: exact jumps back per 40 s (`wall_frames.py` /
          `wall_analysis.py`, `--refresh-hz 60`) and one-refresh runs,
          each block binned by the offer AND the compose phase after the
@@ -880,11 +893,22 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          and, since #251's 19.10 finding (comment 6270228777: the room's
          judder was MISSING frames, Arena's own 30 fps clip at 538-746
          of 1200 per 40 s while a layer receives `SP-program-MAX`, with
-         few backs), the pictures per 40 s of the content against its
-         own rate (`wall_cadence.py`), for SongPlayer's content and for
-         an Arena-native clip on one layer while another receives MAX
-         (#251's Part 1; that clip, like feed (B), is an Arena change the
-         main session arranges with the owner first);
+         few backs), the MISSING pictures per 40 s: the content's own
+         rate × 40 s minus its distinct FORWARD pictures
+         (`wall_cadence.py`; for `wall-25` / `wall-30` the frame reader's
+         own loss count), never the raw count, which re-shows inflate
+         (#251's Part 2 read ~1 200-1 370 per 40 s for 30 fps songs). It
+         is read for SongPlayer's content, and for an Arena-native clip
+         read in its OWN layer and screen region, apart from the layer
+         receiving `SP-program-MAX` (never blended Add over SongPlayer's
+         picture), while that receiving layer shows the block's G or S
+         content (on Blank G and S send the same black: a Blank block is
+         the floor, never a side). Setting up that clip is an Arena
+         change like feed (B): the main session's alone, allowed for
+         tests (#251 comment 6263953328), only while the rig lease is
+         free (`lease_free.ps1`'s exit code, binding), every clip and
+         setting put back in a `finally` (`gpu-max.md`, "How to judge
+         any wall change");
        - interleaved one-minute blocks over ≥ 46 blocks (a whole ~45 min
          drift cycle, every side's blocks spread over it, like
          `fhd_ab2.ps1`), then the first side again; never a conclusion
@@ -913,15 +937,28 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          `wall-30` and the 4K song, every phase bin within the Blank band
          (+ one standard deviation of Blank) of the same Arena content
          (0–3 per 40 s with no Arena loop playing, plan §7), and no bin
-         worse than S;
-       - **"worse"** (gate 4's revert): a phase bin whose G mean is over
-         S's by more than one standard deviation of S's blocks in that
-         bin, or whose G mean of pictures per 40 s is under S's by more
-         than one standard deviation of S's, judged only where each side
-         has ≥ 5 blocks in the bin (fewer: reported, not judged). This is
-         the lane's reading of
-         plan §7's "a worse A/B"; the main session may set another test
-         before the take;
+         worse than S. P3a can at best bring a side to that Blank floor
+         under the SAME MAX levers, and the floor is #251's: while a
+         layer receives `SP-program-MAX`, Arena loses about half of its
+         own clip's frames even with SongPlayer on Blank and
+         `max.upload_mb_s` 0 (538-746 of 1200 per 40 s, #251 comments
+         6266710679 and 6270228777), which no P3a side can lift
+         (`program_max_size` is #251's lever). So a met P3a acceptance
+         is never reported as the room's judder fixed;
+       - **"worse"** (gate 4's revert), either of:
+         - the backs: a phase bin whose G mean is over S's by more than
+           one standard deviation of S's blocks in that bin, judged only
+           where each side has ≥ 5 blocks in the bin. The ≥ 46 blocks of
+           a cycle are shared by G, S and Blank, so size the bins (fewer,
+           wider) until each holds ≥ 5 a side, or report the bin, not
+           judged;
+         - the missing pictures (above): G's mean over S's by more than
+           one standard deviation of S's, judged per Arena content over
+           ALL of a side's blocks in the cycle (≥ 5 a side), never per
+           phase bin.
+
+         This is the lane's reading of plan §7's "a worse A/B"; the
+         main session may set another test before the take;
        - before the 72 h run, which runs `gpu` during services: the
          main session decides the two follow-up candidates above (the
          drop race; a ring killed on a healthy device, reopened in

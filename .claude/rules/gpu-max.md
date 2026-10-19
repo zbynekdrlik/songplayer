@@ -2123,6 +2123,26 @@ before the wait, a frame announced only once copied).
   (`program_max_tests_ndi.rs`), and both senders per boundary
   (`program_max_worker_tests_fhd.rs`).
 
+The hand-off mode changed nothing (#251 comment 6270228777: every mode
+lost ~45–50 % of the clip's frames), so the next lever is the size Arena
+receives (#251 comment 6270237157):
+
+**The size:** `program_max_size` = `WxH` (trimmed; even sides, the width
+640..=3840, the height 360..=2160; anything else, absent included, is the
+canvas 3840×2160, `program_max_phase::program_max_size`).
+- It is read with MAX's settings every 5 s (`apply_phase_settings`, an INFO
+  line on a change) and kept on MAX's queue (`MaxOut::max_size`).
+- At each boundary the worker (`program_max_release.rs::resize_max`, a
+  child of `program_max_worker.rs`) compares it with the size MAX's target
+  was added at; on a difference it drops MAX's sender, then the target, and
+  the same boundary's build adds the target at the new size (`MAX_FIT`,
+  filling its width) with a new sender.
+- `GET /api/v1/program` `max.width` / `height` report the applied size. The
+  hand-off mode is on no API field: read `program_max_spout_send` from `GET
+  /api/v1/settings`.
+- The post-deploy MAX gate (`e2e/max-gate.ts`) requires 3840×2160, so an
+  A/B value left set fails the next deploy's E2E.
+
 **How to judge any wall change from now on:**
 - count `pictures` against the content's own rate, next to the backs;
 - measure on NON-SongPlayer content too: an Arena clip on one layer while

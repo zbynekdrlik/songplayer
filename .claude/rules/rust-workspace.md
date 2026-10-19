@@ -25,6 +25,14 @@ established split patterns:
   fields, fns and types, so the moved `impl <Type>` block needs no
   `pub(crate)` field. A method the parent calls is `pub(super)` there; a
   `pub fn` stays public API.
+- **A merge of dev that pushes a file over the cap** (#279 P3a round 8:
+  sp-core `config.rs` 974 on dev + the lane's 63 = 1037): move the LANE's
+  own new items into a child module re-exported from the file
+  (`config_video_decode.rs`, `pub use video_decode_setting::{…}`), so
+  dev's lines stay put and the next integration has no conflict surface;
+  and do the split INSIDE the merge commit (resolve, split, `wc -l`, then
+  commit), so no commit in the history is over the cap (a separate split
+  commit leaves the merge a red bisect stop).
 
 ## A function that starts returning a GUARD: move its callers in the same commit (#282 follow-up)
 
