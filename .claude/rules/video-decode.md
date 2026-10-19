@@ -809,7 +809,9 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
        the keyed mutexes against real NVDEC surfaces, so only the box
        proves them), `video_decode.mid_stream_fallbacks` and
        `open_fallbacks` (a fall back is the software decode this file
-       bans while SNV plays to a room);
+       bans while SNV plays to a room), and at the 1440 cap
+       `video_decode.scale_refusals` (a 4K song that opened unscaled on
+       either side);
      - NDI / A/V / max gates again with `video_decode` = `gpu`: the A/V
        gate, `max-gate`, cg OBS's `genlock-fifo audit`, `ndi.repeats` /
        `readback_late` +0;
@@ -856,7 +858,10 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          MB/s, and #282 found the cap moves the wall's backs 10–15×).
          `max_resolution` is also the DOWNLOAD cap (#282): for an
          automatic take switch `video_upgrade_enabled` off and check per
-         block that the A/B songs' files are unchanged. A take at another
+         block that the A/B songs' files are unchanged; when it ends, put
+         `max_resolution` and `video_upgrade_enabled` back to the values
+         found (a `finally`, like Arena's changes) and confirm
+         `max_height` reads 1440 again. A take at another
          value of any of the three is a take of its own, never mixed into
          this one. Only the on-program pipeline
          decodes: judge strays by every pipeline's `transport` and pause
@@ -1009,15 +1014,17 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          one 5 s poll, so the two directions differ. Each block: PATCH,
          wait at least one 5 s poll, restart the content (`POST
          /api/v1/test-item/start {"clip"}`, or play the song again: a
-         Play claims no program, it plays off program), then cut the
-         program to the content's playlist when it is not on program
-         (`POST /api/v1/program/cut {"source": <playlist id>}`: the test
-         playlist for the clips; after a Blank block, or between contents
-         of different playlists), in that order, as
-         `post-deploy-wall-frames.spec.ts` does (cut first, and the
-         playlist's ON would start a song of the engine's own choice);
-         the cut's fade and the outgoing playlist's hold fall in the
-         switch. Then
+         Play claims no program, so on a playlist off program it plays
+         off program), then cut the program to the content's playlist
+         when it is not on program (`POST /api/v1/program/cut {"source":
+         <playlist id>}`: the test playlist for the clips; after a Blank
+         block, or between contents of different playlists), in that
+         order, as `post-deploy-wall-frames.spec.ts` does: cutting first
+         would let the paused playlist's ON pick a song of its own
+         (`WaitingForScene` + `SceneOn` → `SelectAndPlay`), while a
+         playlist already `Playing` keeps its song through the ON. Hold
+         `program_transition` / `program_transition_ms` at one value for
+         the take, recorded with the settings. Then
          start the block's take once the restarted item is on air again
          (`GET /api/v1/program` `on_air_item` names it with a
          `started_at_utc_ns` later than the restart request: a fresh
@@ -1026,11 +1033,19 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          row share a content; a 60 s clip's own loop landing between the
          request and the restart's first frame is a fresh mark too, which
          starts the take at most one pre-roll early, inside the dropped
-         first 5 s) AND
-         `status.video_decode.pipelines[].gpu_decoding` reads its side
-         (G: true; S: false or no row). `gpu_decoding` alone is a level:
-         it can read the side before the new song's first frame (a G row
-         stays true until `song_ended`). A Blank block PATCHes nothing
+         first 5 s) AND the `status.video_decode.pipelines[]` row whose
+         `playlist_id` is `on_air_item.playlist_id` reads its side (G:
+         `gpu_decoding` true; S: false or no row) AND the cut is over, as
+         a Blank block waits: no `transition.active` and the outgoing
+         playlist's `transport` no longer `Playing` (`on_air_item`
+         follows a fade's incoming side from its first mixed boundary,
+         and the outgoing playlist is paused only after its hold).
+         `gpu_decoding` alone is a level, and only that row says
+         anything: it can read the side before the new song's first
+         frame (a G row stays true until `song_ended`), and another
+         pipeline's row is stale (a paused pipeline keeps `true`:
+         `retire_producers` leaves the flag, and `song_ended` never runs
+         for a paused song). A Blank block PATCHes nothing
          (it keeps the block before's `video_decode`): it cuts the
          program to Blank (source -2, SongPlayer's own black) and pauses
          every pipeline, opening no song, and its take starts once `GET
