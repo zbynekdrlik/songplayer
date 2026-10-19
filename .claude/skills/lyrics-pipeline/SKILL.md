@@ -138,8 +138,8 @@ is now **text gathering + two tiers**, one forced aligner (mtl), one ASR vendor
    - Empty/blank transcript, or one under 5 words a minute of the song
      (#283, `g35t_transcript::is_sparse`: a failed transcription of shouts) →
      quarantine as `asr_gap`, unless the song already serves lyrics that are
-     not themselves that sparse (then only the attempt is recorded, the
-     lyrics kept). No
+     not a base-tier track that sparse (then only the attempt is recorded,
+     the lyrics kept; a ★ or override text is kept however short). No
      vocals / no gemini keys / g35t transport error → `Deferred` (row backs
      off, retries later).
 
