@@ -957,72 +957,115 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          below, and (B)'s G / S blocks are reported only. Whether
          receiving ANY Spout sender costs Arena frames (so (B)'s clip
          readings carry a receive cost too) is #251's queued
-         `recv2_ab` (comment 6271531140): read its result before the
-         take;
+         `recv2_ab` (comment 6271531140). It ran (comment 6274680850:
+         MAX or FHD `SP-program` received = loss in 18 of 20 takes, no
+         receive = clean), but its independent sender's own picture
+         changes add to the count, so it does not answer. `recv3_ab`
+         (an all-black test sender, queued there) does: read its
+         result before the take;
        - the metrics, every take analysed over the same 40 s:
          - **every block's setup**, read at its take's start and end
-           (Arena's composition, REST, read only: each layer's clip and
-           source, connected or bypassed; and `max.state`): the
-           receiving clip on the block's feed, the clip the region
-           shows (that one, or the Arena-native clip) connected,
-           `max.state` `running` at both reads (never `off`,
-           `quiesced` or `error: …`), the test sender running (a (B)
-           block). A block that fails it is dropped and reported
-           whatever it read, the A/B's own Arena changes re-applied.
-           A layer above the region's own one covers the region only
-           when its picture lies over the captured rows, seen in a grab
-           of the wall output (the layer list never says it alone:
-           SongPlayer's `#sp-*` clips stay connected at opacity 0, and
-           Arena's `Blank` clips are transparent). An Arena content
-           that covers a region cannot be read there: its blocks of
-           the region are reported, not judged (never a dead stretch,
-           below), and the operator's layers are left as they are
-           (`wall.md`);
+           (Arena's composition, REST, read only, and `max.state`):
+           - the receiving clip on the block's feed;
+           - the clip the region shows (that one, or the Arena-native
+             clip) RUNNING by `wall.md`'s rule (connected, its layer
+             not bypassed, the layer's opacity and master over 0, its
+             group and the composition likewise); for (A)'s receiving
+             clip `GET /api/v1/wall` `songplayer_clip` `running`
+             applies that rule;
+           - `max.state` `running` at both reads (never `off`,
+             `quiesced` or `error: …`);
+           - the test sender running (a (B) block).
+
+           A block that fails it is dropped and reported whatever it
+           read, the A/B's own Arena changes re-applied. A layer above
+           the region's own one covers the region only when its
+           picture lies over the captured rows, seen in a grab of the
+           wall output taken with the end reads, after the reader
+           exits. The layer list never says it alone: SongPlayer's own
+           `#sp-*` clips stay connected whether or not they draw (the
+           title at opacity 0, the lines as empty text), and Arena's
+           `Blank` clips are transparent. While a song or a clip plays
+           on program, SongPlayer's own title (from + 1.5 s) and lyric
+           lines DO draw above the receiving layer: where they lie over
+           the captured rows they are SongPlayer's own cover, the same
+           on both sides (the frame reader's band consensus reads past
+           a partly covered strip, `test-item-burn.md`). An Arena
+           content that covers a region cannot be read there: its
+           blocks of the region are reported, not judged (never a dead
+           stretch, below), and the operator's layers are left as they
+           are (`wall.md`);
          - **a dead stretch is never averaged.** It STOPS the A/B
            before the next block, and no block of that region since
            it last read live is measured. A dead stretch is any of:
            - a take whose reader exits 4 (nothing decoded, its
-             `undecoded` naming which reading failed) or 5 (the capture
-             failed; an output that stopped presenting leaves too few
-             timed intervals);
+             `undecoded` naming which reading failed);
+           - a take whose reader exits 5 (the capture failed) WHILE the
+             evidence grabs below show the output black or still (an
+             output that stopped presenting leaves the reader too few
+             timed intervals). With the output still presenting, an
+             exit 5 is the capture's own failure (`test-item-burn.md`:
+             a broken capture never reads as a broken wall): its
+             stderr recorded, the block run again, never a dead
+             stretch;
            - a take that reads `frozen` or decodes under 95 % of its
              pictures (`MIN_COVERAGE`);
-           - a region that holds one picture over 1 s:
-             `pictures_per_boundary` with a key over 60 for the frame
-             reader, or fewer distinct pictures than half the
-             reference for `wall_cadence.py`;
-           - a content block whose end check finds its item stopped
-             (below).
+           - one picture held over 1 s: `pictures_per_boundary` with a
+             key over 60 for the frame reader, `wall_cadence.py`'s
+             longest still run over 1 s where it reports one. Never a
+             count of pictures: #251's receive loss alone reads 509–746
+             of 1 200 (the missing pictures' floor, below), so where
+             `wall_cadence.py` reports no such run, only the evidence
+             grabs and the end check say its region is dead;
+           - a content block whose end check finds its item stopped or
+             re-anchored (below).
 
-           Right after the take, never during it (ONE capture per take,
-           below), the driver records the evidence:
+           Right after the take, with its end reads and never during
+           it (ONE capture per take, below), the driver records the
+           evidence:
            - two dxcam grabs about 2 s apart of the wall output
              (`Output[1]`) and of Arena's composition preview on the
              primary (`Output[0]`), as #251 comment 6273568431 did;
            - the composition and `max.state`;
+           - the reader's stderr;
+           - the block's counters: the on-program pipeline's
+             `pacing.resyncs` (`GET /api/v1/ndi/health`), its
+             `status.video_decode.pipelines[]` `ring.waits` /
+             `ring.full`, and `gpu.km_acquire_timeouts`;
            - the box's log since the restart: SongPlayer's WARN and
              ERROR lines, a display-driver reset, Arena's own lines.
 
-           The block whose take first read it dead is where it began.
-           The main session decides before the take resumes:
-           - a setup failure, an operator's change, an Arena crash or
-             restart in the evidence, or a stretch that began in a
-             Blank block, or in an S block while the composition
-             preview moved (#251 comment 6273568431: the `Display`
-             output black, the preview showing the song, `GET
-             /api/v1/wall` `ok`), is not a G result. It is dropped and
-             reported;
-           - one that began in an S block with the preview as still as
-             the output is a defect of the default path, reported;
-           - one that began in a G block with no cause outside
-             SongPlayer in the evidence is a "worse" finding by itself
-             (below), never a count in a mean. A moving preview does not
-             clear it: receiving SongPlayer costs Arena its own frames
-             (#251), so G can make Arena's output fail.
+           A dead stretch is a SIDE's only when SongPlayer's own path
+           names it; Arena's receive loss (#251) is the same on G, S
+           and Blank, so the side a stretch first landed in proves
+           nothing. The main session decides before the take resumes:
+           - G's when the evidence names G's own path: the item
+             stopped or re-anchored in a G block, a `gpu resident`
+             WARN, or `ring.waits`, `ring.full` or
+             `gpu.km_acquire_timeouts` grown in the block. S's when
+             it names S's: the item
+             stopped or re-anchored in an S block, a `paced producer`
+             or `mf_reader` WARN;
+           - otherwise, once the region reads live again, an
+             OTHER-SIDE test before the take resumes: five blocks of
+             each side alternated under the same content and feed
+             (ordinary blocks of the take; a region that never reads
+             live again ends the take, reported). It is G's when it
+             recurs in at least two G blocks and in no S block, and
+             S's in the mirror case;
+           - otherwise it is no side's: dropped and reported (Arena's,
+             or the room's), an Arena crash or restart included.
 
-           The take resumes once the region reads live again, with the
-           operator's screen setup untouched (`wall.md`). An Arena
-           restart starts a new take (the preconditions);
+           A G dead stretch is a "worse" finding by itself (below),
+           never a count in a mean. An S one is a defect of the default
+           path, reported. The take resumes once the region reads live
+           again. Bringing Arena's output back is the main session's
+           step under the owner's ruling (#251 comment 6274074165:
+           reload the saved Advanced Output, or restart Arena). It never
+           changes the operator's screen setup itself (`wall.md`), and
+           an Arena restart starts a new take (the preconditions). An
+           automatic take whose STOP would outlast its #230 hold's
+           margin runs its `finally` first (the cap first);
          - the backs: exact jumps back per 40 s and one-refresh runs
            (`wall_frames.py` / `wall_analysis.py`, `--refresh-hz 60`, for
            `wall-25` / `wall-30`; `wall_cadence.py`'s `exact_backs` for the
@@ -1034,8 +1077,9 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
            the content's reference rate × 40 s minus its distinct FORWARD
            pictures (`wall_cadence.py`; for `wall-25` / `wall-30` the
            frame reader's `distinct_boundaries`: each picture counted
-           once however often it is re-shown, so a dead take or a
-           frozen tail counts every picture it did not show,
+           once however often it is re-shown, so a hold of up to 1 s
+           counts every picture it did not show (a longer hold or a
+           dead take is a dead stretch, above, never counted),
            `test-item-burn.md`; `lost_boundaries`, `lost_frames` and
            `unverified.boundaries` reported beside it, never as the
            count: `lost_boundaries` sees only skips between two
@@ -1221,10 +1265,11 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          fade's hold). EVERY block's take (G, S and Blank alike) runs 45 s
          and only its last 40 s are analysed (a margin). A reader with
          no span option, `wall_frames.py`, captures only those 40 s
-         (`--seconds 40`), launched early enough that its first poll
-         lands at the take's + 5 s: its import and `dxcam.create` run
-         before its 40 s start. The take's end is read after the reader
-         exits, and for a clip still before + 60 s. A content
+         (`--seconds 40`). Its 40 s start only after its import and
+         `dxcam.create`, and it has no start option, so it is launched
+         at + 5 s minus the box's measured start-up: its first poll
+         lands at or just before + 5 s. The take's end is read after
+         the reader exits, and for a clip still before + 60 s. A content
          block reads `on_air_item` at its take's START and at its END
          (for a clip before + 60 s, where the 60 s loop re-marks), and
          the block is dropped and reported unless, at the end: the item
@@ -1242,11 +1287,16 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          leaves `on_air_item` as it was (a boundary with no item frame
          keeps it): only the still-advancing position tells it apart,
          a Single-mode playlist showing black for the rest of the take
-         included. A stopped item (its `position_ms` not grown) whose
-         log holds no ERROR `paced producer: decode error` is a dead
-         stretch (the metrics), never only dropped: a G producer that
-         stalls repeats its last picture, and the item's position stops
-         the same way. Any content block whose log since its restart holds
+         included. An item stopped or re-anchored, with no ERROR `paced
+         producer: decode error` in its log, is a dead stretch (the
+         metrics), never only dropped. Stopped means its `position_ms`
+         not grown. Re-anchored means grown more than 1 s short of the
+         elapsed time, or the on-program pipeline's `pacing.resyncs`
+         grown in the block. A producer that stalls repeats its last
+         picture, and the item's position stops. When the stall ends,
+         the pacer re-anchors with no skip (`genlock.md`): the position
+         then grows by the elapsed time minus the stall. Any content
+         block whose log since its restart holds
          the ERROR `paced producer: decode error` is dropped and
          reported too: step 8's failed reopen, a `FrameAlloc`, an
          audio-side decode error, each of which ends its song with that

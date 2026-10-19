@@ -2137,8 +2137,12 @@ lost ~45–50 % of the clip's frames), so the next lever tried was the size
 Arena receives (#251 comment 6270237157). It changed nothing either (#251
 comment 6271531140: 3840×2160 a mean 632, 1920×1080 a mean 652 of 1 200
 per 40 s): the receive itself costs Arena half its frames while
-SongPlayer sends, and `recv2_ab` (queued there) tells whether any Spout
-sender's receive does. Both settings stay, at their defaults:
+SongPlayer sends. `recv2_ab` (#251 comment 6274680850) found MAX or FHD
+`SP-program` received = loss in 18 of 20 takes, no receive = clean, but
+its independent sender's own picture changes add to the count, so
+whether any Spout sender's receive costs Arena frames waits on
+`recv3_ab` (an all-black test sender, queued there). Both settings stay,
+at their defaults:
 
 **The size:** `program_max_size` = `WxH` (trimmed; even sides, the width
 640..=3840, the height 360..=2160; anything else, absent included, is the

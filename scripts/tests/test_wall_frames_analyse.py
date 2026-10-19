@@ -607,3 +607,16 @@ def test_distinct_boundaries_group_a_re_show_by_the_run_s_first_reading():
     report = wa.analyse(readings, 30)
     assert report["boundaries"] == 3
     assert report["distinct_boundaries"] == 3
+
+
+def test_distinct_boundaries_split_one_picture_from_two_at_same_picture():
+    # The edge as the reader reads it: weight 238 is 18/256 from the plain
+    # next frame, within SAME_PICTURE (18.24/256): one picture; 237 is
+    # 19/256, past it: two.
+    for weight, distinct in ((238, 40), (237, 41)):
+        readings = pacer_readings(30, Fraction(0), 40, frames=1800)
+        readings[40:42] = [wa.Reading("ok", 19, 20, weight, 8)] * 2
+        readings[44] = wa.Reading("ok", 20, None, 0, 8)
+        report = wa.analyse(readings, 30)
+        assert report["boundaries"] == 41, weight
+        assert report["distinct_boundaries"] == distinct, weight

@@ -219,10 +219,12 @@ imports `wall_clip`, `wall_analysis` and `av_sync_check` (with its
   groups it. It holds away from a loop seam: the new play's open hold
   (`loop_seams.hold_s`) repeats pictures, and a back across the seam
   reads as one more loop (the A/B's span holds no seam). Hand mutants of
-  it: 19 of 23 killed; the four left are equivalent (the loop label's
-  direction or scale, any injective label; `>=` for `>`, since positions
-  are multiples of 1/256 and `SAME_PICTURE` is 18.24/256; `abs()` over a
-  sorted difference).
+  it: 25 of 31 killed. The six left are equivalent: the loop label counted
+  down, scaled or subtracted (any label whose loops lie at least
+  `n_frames` apart); `>=` for `>`, since positions are multiples of 1/256
+  and `SAME_PICTURE` is 18.24/256; and `abs()` over a sorted difference.
+  The edge is pinned: weight 238 against the plain next frame is one
+  picture, 237 is two.
 - **What a clean verdict means (the owner's ruling, #272 comment
   6170760353):** the wall's judder is intermittent, so a clean verdict
   covers only the span captured. A short take (a post-deploy gate of N
@@ -506,8 +508,9 @@ per refresh: every grid phase through the program's byte blend at 24 / 25
 / 30 fps, loops / losses / jumps / weights / unverified steps at 60 and
 50 Hz / judder / the song-end clamp at every phase, a loss at the seam, a hold over 1 s there / the
 300-boundary minimum / coverage / the distinct pictures: a re-show once, one
-picture read two ways, a run grouped by its first reading, a frozen tail, a
-dead capture, across loops, a skipped blended boundary), `test_wall_timing.py` (the brackets: a locked recording and dxcam on time exact, 120 / 240 fps cameras proving counts and finding judder, cameras too coarse — 60 / 59.94 / 50 / 30 fps on 60 Hz, 60 fps on 50 Hz, 120 fps on 144 Hz, 60 fps on 75 Hz — never calling judder and never calling it clean, `unresolved`, a stall at the start, middle and end, blind refreshes hiding one boundary per refresh at 60 and 50 Hz, `hidden_refreshes`, `unseen_refreshes`, `held_range`, a frozen wall (dxcam only), the judged share, the required rate; round 6: unreadable pictures after the last boundary, cameras' pts on 1/90000, 1/10000, 1/1000 and 1/600 timebases, a rate within its tolerance either way, judder a box stall hid from dxcam; round 7: a grab preempted 2–40 ms before its acquire, an impossible bracket, a locked capture ending on unreadable pictures, a camera exposure mixing two boundaries) and `test_wall_capture.py` (round 7: `--locked` checked, a rate that cannot be checked)
+picture read two ways, the `SAME_PICTURE` edge, a run grouped by its first
+reading, a frozen tail, a dead capture, across loops, a skipped blended
+boundary), `test_wall_timing.py` (the brackets: a locked recording and dxcam on time exact, 120 / 240 fps cameras proving counts and finding judder, cameras too coarse — 60 / 59.94 / 50 / 30 fps on 60 Hz, 60 fps on 50 Hz, 120 fps on 144 Hz, 60 fps on 75 Hz — never calling judder and never calling it clean, `unresolved`, a stall at the start, middle and end, blind refreshes hiding one boundary per refresh at 60 and 50 Hz, `hidden_refreshes`, `unseen_refreshes`, `held_range`, a frozen wall (dxcam only), the judged share, the required rate; round 6: unreadable pictures after the last boundary, cameras' pts on 1/90000, 1/10000, 1/1000 and 1/600 timebases, a rate within its tolerance either way, judder a box stall hid from dxcam; round 7: a grab preempted 2–40 ms before its acquire, an impossible bracket, a locked capture ending on unreadable pictures, a camera exposure mixing two boundaries) and `test_wall_capture.py` (round 7: `--locked` checked, a rate that cannot be checked)
 (`av_sync_check.gray_video_args`, `showinfo_pts`, `read_video` against a
 stand-in ffmpeg — pts, a half frame, a failed exit, the kill when a read
 fails —, `poll_blind`, `check_present_rate`, `main`'s exit codes for a
