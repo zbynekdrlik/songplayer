@@ -96,18 +96,22 @@ type Row<'a> = (i64, &'a str, i64, i64, Option<&'a str>);
 async fn pool_with(rows: &[Row<'_>]) -> SqlitePool {
     let pool = crate::db::create_memory_pool().await.unwrap();
     crate::db::run_migrations(&pool).await.unwrap();
-    sqlx::query(
-        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
-         VALUES (1, 'p', 'u', 'SP-test', 1)",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
     for (id, youtube_id, has_lyrics, dub, source) in rows {
+        // Each row in a playlist of its own: two rows of one video (a dub on
+        // another playlist's row) cannot share one (UNIQUE playlist + video).
+        sqlx::query(
+            "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+             VALUES (?, 'p', 'u', 'SP-test', 1)",
+        )
+        .bind(*id)
+        .execute(&pool)
+        .await
+        .unwrap();
         sqlx::query(
             "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
-             dub_requested, lyrics_source) VALUES (?, 1, ?, 1, ?, ?, ?)",
+             dub_requested, lyrics_source) VALUES (?, ?, ?, 1, ?, ?, ?)",
         )
+        .bind(*id)
         .bind(*id)
         .bind(*youtube_id)
         .bind(*has_lyrics)
