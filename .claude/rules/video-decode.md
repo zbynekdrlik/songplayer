@@ -643,9 +643,12 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
   - let go at once when a song opens with the precondition off (no idle
     fill runs while songs keep playing), and when the pipeline ends;
   - a producer whose ring died (a lost device, an abandoned key) is
-    dropped at the next open, and the next one is made only
+    dropped at the next open. A G open asks it (`Lease::take` →
+    `lost()`): the WARN `… was lost`, and the next one is made only
     `PRODUCER_REBUILD_BACKOFF` (30 s) later, a failed build likewise;
-    meanwhile the songs open in the base mode;
+    meanwhile the songs open in the base mode. An S open
+    (`release_at_open`) lets it go like a live one, with no WARN and
+    no backoff, and the next G open makes a new one at once;
   - it is built on the pipeline's paced EMIT thread
     (`PipelineGpu::song_mode()`, at the song's open, before the decode
     feed attaches; the consumer fills those boundaries, so no hole, only
@@ -687,8 +690,8 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
   changed kind): a ring full past `RING_WAIT` (100 ms), a dead ring, a
   refused picture, a lost producer device (a retired producer is no
   failure: its surfaces are read back, above). A lost device kills the ring
-  (`GpuError::removed`), so the pipeline's next song drops the producer and
-  waits the 30 s backoff.
+  (`GpuError::removed`), so the pipeline's next song drops the producer:
+  a G song waits the 30 s backoff, an S song lets it go with neither.
 - **sp-server** (`gpu_resident.rs`, `paced_producer.rs`):
   - a ring frame becomes `Picture::Gpu` (`to_paced_frame`);
   - the producer reports each change of the frames' kind (`KindChange`:
@@ -873,10 +876,19 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
        Blank → G keeps the ring and its count). After an S block's
        PATCH retired it, the pipeline's next open drops it: an S open
        lets it go and its row goes, a G open makes a new ring at 0 at
-       once. After its ring died, the next G open gets none
-       (`Leased::Lost`: its row goes, the song decodes in the base
-       mode), and a new ring at 0 comes only at the first G open
-       after the 30 s backoff (`Leased::Waiting` until then).
+       once. After its ring died, it depends on the next open: a G
+       open gets none (`Leased::Lost`: the WARN, its row goes, the
+       song decodes in the base mode) and a new ring at 0 comes only
+       at the first G open after the 30 s backoff (`Leased::Waiting`
+       until then); an S open lets it go like a live one, with no
+       WARN and no backoff, and the next G open makes a new ring at
+       once (`Made`, its INFO). On that G → S path a death the reads
+       missed shows only by its effects: a mid-stream +1 (the rule
+       above), `gpu.abandoned`, or a display-driver reset in the log.
+       The same holds for a G ring's `full` in a G → S switch of one
+       playlist between its end read and step 1's retire (the S
+       open removes the row before the S start read): a `full` +1 is
+       always a decode error, which the mid-stream rule judges G's.
 
        A gate-3 failure during the A/B stops it and turns
        `video_decode` back to `software` the same day (NDI stays on
@@ -912,8 +924,13 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
      - **the main A/B** (`video_decode` gpu vs software: the sides G and
        S), by plan §7's fixed protocol:
        - preconditions: record the build, the settings, HAGS, Arena's
-         uptime (no Arena restart inside a take), the heavy children and
-         the background hold (`GET /api/v1/background-hold`). #251's two
+         uptime (no Arena restart inside a take), the heavy children,
+         the background hold (`GET /api/v1/background-hold`), and the
+         program's source (`GET /api/v1/program` `source`) at the
+         take's very start, before any cut (the automatic take's
+         arming cut included): every take's `finally` cuts back to it
+         (`POST /api/v1/program/cut`), right after `video_decode` is
+         put back (the order in the driver's guards below). #251's two
          wall levers (`gpu-max.md`, "Arena loses its OWN frames") keep ONE
          value for the whole take, read per block as in gate 1 (the size
          as `max.width` / `height`, the hand-off as its stored value in
@@ -956,9 +973,10 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          reported, and the hold is armed again, PATCH, one cut, the read
          back, or the automatic take ends through its `finally`) and
          checks
-         per block that the A/B songs' files are unchanged; no
-         `deploy-pp` runs during it (PP's peer gate fails on SNV's hold,
-         503 `background-hold`). When it ends, a `finally` (like Arena's
+         per block that the A/B songs' files are unchanged; a
+         queued `deploy-pp` ends it through its `finally` first (PP's
+         peer gate fails on SNV's hold, 503 `background-hold`; the
+         driver's guards below). When it ends, a `finally` (like Arena's
          changes) puts back the values found (`""` for one that was not
          stored), one PATCH each, in this order: `max_resolution` first
          (then `max_height` reads 1440 again), `video_upgrade_enabled`,
@@ -1030,15 +1048,34 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          - a driver started through a scheduled task deletes the task
            in the same turn it starts it, its `Next Run Time` read
            back gone;
-         - before the first block, the values the `finally` will put
-           back are checked against the operator's setup (the
-           program on the operator's own source, never a test's
-           Blank; no Arena group soloed; no test change left): any
-           other value stops the A/B, reported;
-         - before every block, the driver confirms no SNV deploy or
-           E2E run is queued or in progress (`gh run list` on the
-           repo); one that starts mid-take drops that block, and the
-           A/B waits until its E2E has ended. A block whose Arena
+         - ONCE, before the A/B's first block, the values the
+           `finally` will put back (the program's recorded source,
+           Arena's clips and settings) are checked against the
+           operator's setup (the program on the operator's own
+           source, never a test's Blank; no Arena group soloed; no
+           test change left): any other value stops the A/B,
+           reported. Every later take restores these first, checked
+           values (never a reload's state after an Arena restart;
+           the operator's overlays still never restored);
+         - at each block's start and its take's end, no SNV deploy
+           is pending: no ci.yml run for dev or main queued or in
+           progress (one in progress reaches its deploy job about
+           15 min in), read by the main session on dev1 (`gh run
+           list`) before it gives the driver each block's go, or by
+           the driver itself through the public repo's REST runs list
+           (unauthenticated, one read per block within its 60 an
+           hour) and the SNV runner's `Runner.Worker` process. A
+           pending deploy is never held: the A/B YIELDS. The driver
+           runs the take's `finally` before the deploy job starts
+           (`video_decode` = `software` first, the program cut back,
+           Arena's test changes undone, an automatic take's cap, then
+           the upgrade switch, then the hold), waits until the
+           deploy's E2E has ended, and starts a NEW take (the new
+           build's preconditions, never pooled with the blocks
+           before). A block a deploy cut is dropped, never a dead
+           stretch; a queued `deploy-pp` ends an automatic take the
+           same way before PP's peer gate meets SNV's hold. A block
+           whose Arena
            content anyone else changed is
          dropped, and the A/B is read per Arena content. Each Arena
          content gets its own Blank blocks, interleaved with its G and S
@@ -1588,10 +1625,10 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
 
   Throughout: while `video_decode` = `gpu` is set on SNV,
   `post-deploy-preview.spec.ts` and `post-deploy-owner-path.spec.ts` find
-  no live preview on a GPU-decoded song (none before P3b): no deploy
-  during the A/B window, and switch it back before one (`video_decode`
-  first); the 72 h run's deploy policy is above; never on PP before P3b
-  (above).
+  no live preview on a GPU-decoded song (none before P3b): a deploy is
+  never held for the A/B; the A/B yields to it, its `finally` switching
+  `video_decode` back first (the driver's guards above); the 72 h run's
+  deploy policy is above; never on PP before P3b (above).
 
 ## Tests and gates
 
