@@ -877,9 +877,11 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          `RELEASE_SCENE` / `HOLD_SCENE`), and a dashboard cut names its
          playlist's scene: so the take plays none of its contents from
          ytslow or yt90s, reads `GET /api/v1/background-hold` `held` true
-         in every block (a block where it is false is dropped, and the
-         hold is armed again, PATCH, one cut, the read back, or the
-         automatic take ends through its `finally`) and checks
+         in every block (a block where it is false is dropped and the
+         download worker's lines since the last `held` true read are
+         reported, and the hold is armed again, PATCH, one cut, the read
+         back, or the automatic take ends through its `finally`) and
+         checks
          per block that the A/B songs' files are unchanged; no
          `deploy-pp` runs during it (PP's peer gate fails on SNV's hold,
          503 `background-hold`). When it ends, a `finally` (like Arena's
@@ -1118,9 +1120,11 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
             - that WARN with the count +0, then the ERROR `paced
               producer: decode error`: the software reopen itself
               failed, and the song ENDS there (the producer marks its
-              end, the next song follows; no error event, no
-              `open_failures`): a lost song, reported as one though gate
-              3's counter reads +0;
+              end, `Ended`; no error event, no `open_failures`; then
+              what the playlist's mode does: Continuous plays its next
+              song, Loop the same song with a new mark, Single plays
+              black with no new item): a lost song, reported as one
+              though gate 3's counter reads +0;
             - the producer's WARN `the song's pictures changed kind
               mid-song (… or its producer retired)` with the count +0
               and no `mf_reader` decode-error WARN: a retire when the
@@ -1141,13 +1145,22 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          -2 with no `transition.active` and no pipeline's `transport` is
          `Playing` (the engine pauses the outgoing playlist only after its
          fade's hold). EVERY block's take (G, S and Blank alike) runs 45 s
-         and only its last 40 s are analysed (a margin). At a content
-         block's end `on_air_item` (its item and `started_at_utc_ns`)
-         must still be the one the take started on, else the block is
-         dropped and reported: a song that ended inside the take (step
-         8's failed reopen, a `FrameAlloc`, an audio-side decode error:
-         each only the ERROR `paced producer: decode error`, then
-         `Ended`).
+         and only its last 40 s are analysed (a margin). A content
+         block reads `on_air_item` at its take's START and at its END
+         (for a clip before + 60 s, where the 60 s loop re-marks), and
+         the block is dropped and reported unless, at the end: the item
+         is the same, its `started_at_utc_ns` within one slot of the
+         start's (a replay from 0 can move it by part of a slot), its
+         `position_ms` grown by about the take's 45 s, and its
+         `frame_utc_ns` within about 1 s of the read. An ended song
+         leaves `on_air_item` as it was (a boundary with no item frame
+         keeps it): only the still-advancing position tells it apart,
+         a Single-mode playlist showing black for the rest of the take
+         included. Any content block whose log since its restart holds
+         the ERROR `paced producer: decode error` is dropped and
+         reported too: step 8's failed reopen, a `FrameAlloc`, an
+         audio-side decode error, each of which ends its song with that
+         ERROR, then `Ended` (no error event).
          `gpu.gpu_sides_per_s` and `max.upload_mb_s` are rates over the
          last 30 s (`UPLOAD_RATE_SPAN`), so they confirm a side only 30 s
          after the restart: read them at the block's end, never as its
