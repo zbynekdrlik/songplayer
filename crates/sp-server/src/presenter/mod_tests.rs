@@ -282,3 +282,51 @@ async fn the_stage_display_gets_the_next_line_after_the_repeats() {
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(received(&mock).await.len(), 3);
 }
+
+// ── #283: the stage display goes blank with the wall ────────────────────────
+
+/// Where the wall is blank `sync_line` clears the stage display ONCE (an
+/// empty payload, the song's name too), keeps that as the pushed key, and
+/// pushes the next line again; a line goes through `maybe_push_line`.
+#[tokio::test]
+async fn sync_line_clears_the_stage_display_once_where_the_wall_is_blank() {
+    let mock = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/stage"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&mock)
+        .await;
+    let client = Arc::new(PresenterClient::new(format!("{}/api/stage", mock.uri())));
+    let sync = |seen, l| sync_line(Some(&client), seen, l, "Song", "Artist");
+
+    let seen = sync(None, Some(lines("Come on", "", "No tak", "")));
+    assert_eq!(seen, Some(lines("Come on", "", "No tak", "")));
+    wait_for_pushes(&mock, 1).await;
+    let seen = sync(seen, None);
+    assert_eq!(seen, Some(PushedLine::default()), "the clear is the key");
+    let bodies = wait_for_pushes(&mock, 2).await;
+    assert_eq!(
+        bodies[1],
+        serde_json::to_value(PresenterPayload::empty()).unwrap()
+    );
+    let seen = sync(seen, None);
+    assert_eq!(seen, Some(PushedLine::default()));
+    let seen = sync(seen, Some(lines("Come on", "", "No tak", "")));
+    let bodies = wait_for_pushes(&mock, 3).await;
+    assert_eq!(bodies[2]["currentText"], "Come on", "the line again");
+    assert_eq!(seen, Some(lines("Come on", "", "No tak", "")));
+    // Exactly three: the second blank pushed nothing (a "not yet" window
+    // that only errs in the safe direction).
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(received(&mock).await.len(), 3);
+}
+
+/// Without a client nothing is pushed and the key is kept, blank or not.
+#[test]
+fn sync_line_without_a_client_keeps_the_key() {
+    let seen = Some(lines("a", "", "b", ""));
+    assert_eq!(sync_line(None, seen.clone(), None, "Song", ""), seen);
+    assert_eq!(sync_line(None, None, None, "Song", ""), None);
+    let l = lines("c", "", "d", "");
+    assert_eq!(sync_line(None, seen.clone(), Some(l), "Song", ""), seen);
+}

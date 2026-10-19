@@ -67,6 +67,13 @@ loaded track (in `LyricsState::with_lead_and_offset`; `new` delegates to it).
   ×4: the 4th repeat carries the line after the repeats; release 0.69.0
   review, `a_repeated_line_is_pushed_again_when_its_next_line_changes`). A
   dedup on the current line alone left the stage display's "next" stale.
+  **#283: where the wall is blank the stage display goes blank too**
+  (`presenter::sync_line`, every position update): before the first line,
+  in a break's blank stretch and after the last line's hide, ONE clear
+  (`push_empty`), kept as a pushed `PresenterLines::default()`, so the next
+  line is pushed again. Before, a `None` from `presenter_lines` pushed
+  nothing and the last line stayed ("No tak." 45 s past its hide, SNV
+  18.10.2026; `tests_wall_owner.rs::the_stage_display_is_cleared_when_the_wall_s_line_goes`).
   Presenter (its issue 799) picks per stage layout what to show; SongPlayer
   has no language setting for it. Read back on the box with Presenter's
   `GET /stage/snapshot?layout=api` (`current.main` = the EN,

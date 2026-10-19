@@ -111,6 +111,30 @@ pub fn maybe_push_line(
     Some(lines)
 }
 
+/// #283: the stage display at a position: the plan's `lines` through
+/// [`maybe_push_line`], or, where the wall is blank (`None`: before the
+/// first line, a break's blank stretch, after the last line's hide), ONE
+/// clear ([`push_empty`]), remembered as a pushed `PresenterLines::default()`
+/// so a later blank position pushes nothing more and the next line is
+/// pushed again. Without a client nothing is pushed and the key is kept.
+pub fn sync_line(
+    client: Option<&Arc<PresenterClient>>,
+    last_seen: Option<PushedLine>,
+    lines: Option<PresenterLines>,
+    song: &str,
+    artist: &str,
+) -> Option<PushedLine> {
+    let Some(lines) = lines else {
+        let cleared = PushedLine::default();
+        if client.is_none() || last_seen.as_ref() == Some(&cleared) {
+            return last_seen;
+        }
+        push_empty(client, "the wall is blank");
+        return Some(cleared);
+    };
+    maybe_push_line(client, last_seen, lines, song, artist)
+}
+
 /// Clear the stage display (`PresenterPayload::empty`), fire-and-forget like
 /// [`maybe_push_line`]; `why` names the caller in the failure's WARN. No-op
 /// when `client` is None (push disabled).

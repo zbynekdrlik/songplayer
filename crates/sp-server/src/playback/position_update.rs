@@ -137,9 +137,10 @@ impl super::PlaybackEngine {
             }
         }
 
-        // Presenter — fire-and-forget. `maybe_push_line` is idempotent on an
+        // Presenter — fire-and-forget. `sync_line` is idempotent on an
         // identical payload (#222: compares the current + next lines, EN + SK,
-        // against the `last_seen` arg we pass, the pre-call snapshot).
+        // against the `last_seen` arg we pass, the pre-call snapshot) and
+        // (#283) clears the stage display once where the wall is blank.
         let pp = match self.pipelines.get_mut(&playlist_id) {
             Some(pp) => pp,
             None => return,
@@ -148,15 +149,13 @@ impl super::PlaybackEngine {
             Some(l) => l,
             None => return,
         };
-        if let Some(lines) = lyrics.presenter_lines(position_ms) {
-            pp.last_presenter_text = crate::presenter::maybe_push_line(
-                self.presenter_client.as_ref(),
-                pp.last_presenter_text.take(),
-                lines,
-                &pp.cached_song,
-                &pp.cached_artist,
-            );
-        }
+        pp.last_presenter_text = crate::presenter::sync_line(
+            self.presenter_client.as_ref(),
+            pp.last_presenter_text.take(),
+            lyrics.presenter_lines(position_ms),
+            &pp.cached_song,
+            &pp.cached_artist,
+        );
     }
 
     /// Periodic dashboard `NowPlaying` rebroadcast. Throttled to
