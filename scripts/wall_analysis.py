@@ -621,7 +621,11 @@ def distinct_boundaries(runs: list[Boundary], steps: list[Step], n_frames: int) 
     the capture did not see (``unverified``) (#279: a back adds nothing, and
     a capture that is dead or freezes counts every picture it did not
     show, where ``lost_boundaries`` sees only skips between two readings
-    and counts the step out of a back as one)."""
+    and counts the step out of a back as one). Away from a loop seam: the
+    new play's open hold (``loop_seams.hold_s``) repeats pictures, and a
+    back across the seam reads as one more loop. A run is one picture
+    within ``SAME_PICTURE`` of its FIRST reading, as ``boundaries``
+    groups it."""
     positions = []
     loops = 0
     for n, run in enumerate(runs):
