@@ -959,28 +959,41 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          readings carry a receive cost too) is #251's queued
          `recv2_ab` (comment 6271531140): read its result before the
          take;
-       - the metrics, every take analysed over the same 40 s. A take
-         whose captured region shows no moving content (about one
-         distinct picture per 40 s, or `wall_frames.py` exit 4, which
-         says only "no strip decoded": `test-item-burn.md` names
-         Arena's clip on another source, MAX off with the clip on MAX,
-         the clip not on air; also a black output, or an Arena layer
-         covering the strips; the report names which) is never read as
-         0 backs, and is decided as follows:
-         - DROPPED, and reported, only when Arena failed to output what
-           it composes: the output black or still while Arena's own
-           composition monitor shows the composition MOVING (#251
-           comment 6273568431: the `Display` output black, the monitor
-           showing SongPlayer's song, `GET /api/v1/wall` `ok`), or the
-           clip not on air / MAX off (a setup error: fix, run again);
-         - else, on SongPlayer's content region, it is that SIDE's
-           result: an output as still as its composition is what
-           SongPlayer sent, so its missing pictures are counted (below),
-           a G-only freeze being the strongest "worse" there is;
-         - an Arena clip region still with its composition (the clip
-           stopped), or a floor block's dead region (a Blank block's
-           test sender or Arena clip), is dropped and reported, the
-           sender or clip restarted: it is no SongPlayer side.
+       - the metrics, every take analysed over the same 40 s:
+         - **a dead region** (about one distinct picture per 40 s, or
+           `wall_frames.py` exit 4: nothing decoded, its `undecoded`
+           naming which reading failed) is never read as 0 backs.
+           Right after the take, never during it (ONE capture per
+           take, below), the driver records why: Arena's composition
+           (REST, read only: each layer's clip and source, connected or
+           bypassed) and two dxcam grabs about 2 s apart of the wall
+           output (`Output[1]`) and of Arena's composition preview on
+           the primary (`Output[0]`), as #251 comment 6273568431 did.
+           Then:
+           - a SETUP cause drops the block, reported, fixed, run
+             again: the receiving clip's source not the block's feed
+             (a clip left on the test sender after a (B) block), the
+             clip the region shows (that one, or the Arena-native
+             clip) not connected, MAX off (`max.state` `off`), the
+             test sender not running (a (B) block), or a connected,
+             not bypassed clip on a layer above the region's own
+             layer (an Arena content whose layers
+             cover a region cannot be read there: that content's
+             blocks of the region are reported, not judged);
+           - with the setup right, the region is that SIDE's result,
+             its missing pictures counted (below; a freeze confined to
+             one side's blocks is the strongest "worse" there is),
+             unless the same region is dead too in the next block of
+             the OTHER side under the same content and feed (decided
+             once that block has run): then Arena's output is dead
+             whatever SongPlayer sends (#251
+             comment 6273568431: the `Display` output black while the
+             composition preview showed the song, `GET /api/v1/wall`
+             `ok`), both blocks are dropped and reported, and the
+             output is fixed before the take goes on;
+           - a Blank block's dead region (the test sender's or the
+             Arena clip's) is no SongPlayer side: dropped, reported,
+             fixed;
          - the backs: exact jumps back per 40 s and one-refresh runs
            (`wall_frames.py` / `wall_analysis.py`, `--refresh-hz 60`, for
            `wall-25` / `wall-30`; `wall_cadence.py`'s `exact_backs` for the
@@ -991,13 +1004,16 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
            judder is frames missing, which a count of backs never sees):
            the content's reference rate × 40 s minus its distinct FORWARD
            pictures (`wall_cadence.py`; for `wall-25` / `wall-30` the
-           frame reader's `lost_boundaries`, with `lost_frames` and
-           `unverified.boundaries` reported beside it: on a blended
-           `wall-25` a skipped boundary often loses no clip frame; but
-           `lost_boundaries` counts only skips BETWEEN two readings, so
-           a frame-clip take that is dead, or freezes to its end (a
-           frozen tail), counts the reference minus the distinct
-           boundaries it showed, `boundaries` in the same report), never
+           frame reader's `distinct_boundaries`: each picture counted
+           once however often it is re-shown, so a dead take or a
+           frozen tail counts every picture it did not show,
+           `test-item-burn.md`; `lost_boundaries`, `lost_frames` and
+           `unverified.boundaries` reported beside it, never as the
+           count: `lost_boundaries` sees only skips between two
+           readings and counts the step out of every back as one, and
+           on a blended `wall-25` a skipped boundary often loses no
+           clip frame; an unverified boundary counts as missing, the
+           same for both sides), never
            the raw count, which re-shows inflate (#251's Part 2 read
            ~1 200-1 370 per 40 s for 30 fps songs). The reference is what
            the content shows on the wall. For SongPlayer's content it is
@@ -1174,7 +1190,9 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          -2 with no `transition.active` and no pipeline's `transport` is
          `Playing` (the engine pauses the outgoing playlist only after its
          fade's hold). EVERY block's take (G, S and Blank alike) runs 45 s
-         and only its last 40 s are analysed (a margin). A content
+         and only its last 40 s are analysed (a margin; a reader with
+         no span option, `wall_frames.py`, captures only those 40 s:
+         `--seconds 40` from the take's + 5 s). A content
          block reads `on_air_item` at its take's START and at its END
          (for a clip before + 60 s, where the 60 s loop re-marks), and
          the block is dropped and reported unless, at the end: the item

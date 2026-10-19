@@ -6,7 +6,8 @@ analysis behind ``wall_frames.py``.
 each was on screen for (another count than the wall's refresh rate gives
 is judder; with capture times a stall that held a picture shows here too,
 at the capture's edges as well; a wall that stopped presenting is
-``frozen``), lost frames, lost boundaries, jumps back, cadence errors,
+``frozen``), the distinct pictures shown (a re-show counted once), lost
+frames, lost boundaries, jumps back, cadence errors,
 loops, and the blend weights against the pacer's rule for the clip's fps on
 SongPlayer's 30 fps grid (``.claude/rules/genlock.md``: 25 on 30 = plain,
 213, 170, 128, 85, 42), at the grid phase fitted per play. What the capture
@@ -515,6 +516,7 @@ def analyse(
         "decoded": decoded,
         "undecoded": dict(Counter(r.status for r in readings if not r.ok)),
         "boundaries": len(runs),
+        "distinct_boundaries": distinct_boundaries(runs, steps, n_frames),
         "pictures_per_boundary": {
             str(k): v for k, v in sorted(Counter(b.pictures for b in runs).items())
         },
@@ -608,6 +610,28 @@ def frames_seen(runs: list[Boundary], steps: list[Step], n_frames: int) -> set[i
         if r.next_index is not None:
             seen.add(r.next_index + loops * n_frames)
     return seen
+
+
+def distinct_boundaries(runs: list[Boundary], steps: list[Step], n_frames: int) -> int:
+    """The distinct pictures the boundaries showed, numbered on across the
+    clip's loops: a run within ``SAME_PICTURE`` of a picture shown before
+    (a jump back re-shows one, and so can the steps after it) is that
+    picture again, never a new one. The pictures the program's boundaries
+    should have shown, minus this, are the ones the wall did not show or
+    the capture did not see (``unverified``) (#279: a back adds nothing, and
+    a capture that is dead or freezes counts every picture it did not
+    show, where ``lost_boundaries`` sees only skips between two readings
+    and counts the step out of a back as one)."""
+    positions = []
+    loops = 0
+    for n, run in enumerate(runs):
+        if n and steps[n - 1].wrapped:
+            loops += 1
+        positions.append(run.reading.position() + loops * n_frames)
+    positions.sort()
+    return sum(
+        k == 0 or v - positions[k - 1] > SAME_PICTURE for k, v in enumerate(positions)
+    )
 
 
 def frame_losses(
