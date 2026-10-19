@@ -2059,6 +2059,32 @@ Neither the mutex hold nor the texture size moves it; what does is open
 (`recv2_ab.ps1`: SongPlayer's FHD `SP-program` and an independent sender,
 `spout_test_sender.py`, received instead).
 
+**ANY receive, not SongPlayer's sender** (`recv3_ab.ps1`, `recv4b_ab.ps1`,
+19.10.2026, #251 comments 6275818478 / 6276709434). An independent SpoutGL
+sender (`diag\wall-bridge\spout_test_sender.py`, `black` sends an all-black
+picture) costs Arena the same ~45–55 % on the wall as `SP-program-MAX` or
+the FHD `SP-program`:
+- the sender's rate does not matter: 1 picture/s reads like 30/s, so the
+  cost is the receive being active every frame, not each copy;
+- Arena's own Composition Monitor in its UI keeps ~1140–1168 of ~1200
+  while the wall reads 520–720: the pictures are lost between Arena's
+  composition and the Advanced Output's `Display` window on the RTX's
+  Surround output, not in SongPlayer. Read it with
+  `diag\wall-bridge\cadence_out.py 0 100 1400 2200 1660 40` (dxcam output 0
+  = the primary, the VDD through the RTX); the wall is output 1;
+- in the normal state (L4/L5 receiving MAX with a song playing) the wall
+  read 1201 pictures in 40 s, 1196 runs of 2 (20:35Z): SongPlayer's moving
+  picture was clean; the loss shows on Arena's own content under a
+  receive;
+- Arena reports `FPS 60.0` throughout ("Show FPS & Stats" in its layout).
+  PresentMon 2.6.0 (`diag\tools\PresentMon-2.6.0-x64.exe --process_name
+  Arena.exe --output_file x.csv --timed 20 --terminate_after_timed`, ETW,
+  read only) sees three Arena swapchains at 60 presents/s, Composed: Flip,
+  every present displayed; the sync-1 one carries ~14.6 ms of GPU work per
+  16.7 ms frame.
+- A SongPlayer-side change cannot fix this; never ship one "for #251"
+  without a wall measurement that moves.
+
 **The size switch:** `program_max_size` = `WxH` (even sides, 640..=3840 ×
 360..=2160; anything else = the canvas 3840×2160), read with MAX's settings
 (`program_max_phase.rs`); a change drops MAX's sender, then its target, and
