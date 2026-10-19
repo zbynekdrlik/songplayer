@@ -857,8 +857,11 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          and automatic is a take of its own: the design's ≈ 132 vs ≈ 298
          MB/s, and #282 found the cap moves the wall's backs 10–15×).
          `max_resolution` is also the DOWNLOAD cap (#282): for an
-         automatic take switch `video_upgrade_enabled` off and check per
-         block that the A/B songs' files are unchanged; when it ends, put
+         automatic take switch `video_upgrade_enabled` off, arm #230's
+         background hold to the take's end (`background_hold_until_ms`,
+         UTC ms, `background-hold.md`: no new download fetches a ≤ 2160
+         file that would stay after the take) and check per block that
+         the A/B songs' files are unchanged; when it ends, put
          `max_resolution` and `video_upgrade_enabled` back to the values
          found (a `finally`, like Arena's changes) and confirm
          `max_height` reads 1440 again. A take at another
@@ -997,8 +1000,8 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
            region with one tool, so the Arena clip's region is read in
            blocks of its own, interleaved with the others under the
            same levers;
-       - **the block budget**: interleaved one-minute blocks (a switch
-         and a 45 s take), every block type spread over whole ~45 min
+       - **the block budget**: interleaved blocks of about a minute (a
+         switch and a 45 s take, below), every block type spread over whole ~45 min
          drift cycles (like `fhd_ab2.ps1`), then the first side again;
          never a conclusion from a short take. Plan §7's ≥ 46 blocks were
          one drift cycle with one content per side; judged at ≥ 5 blocks
@@ -1024,22 +1027,33 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          (`WaitingForScene` + `SceneOn` → `SelectAndPlay`), while a
          playlist already `Playing` keeps its song through the ON. Hold
          `program_transition` / `program_transition_ms` at one value for
-         the take, recorded with the settings. Then
-         start the block's take once the restarted item is on air again
-         (`GET /api/v1/program` `on_air_item` names it with a
+         the take, recorded with the settings. Then a content block's
+         45 s take starts at a FIXED lead on the content's own clock:
+         `started_at_utc_ns` + 10 s (recorded; it fits the slowest
+         cut-over, the fade + the hold + one 5 s heartbeat, and a 60 s
+         clip ends after the take, + 55 s), so every analysed span runs
+         + 15 s to + 55 s into its content, whichever block came before.
+         By that instant all of these must hold, else the block is
+         dropped and run again: the restarted item is on air (`GET
+         /api/v1/program` `on_air_item` names it with a
          `started_at_utc_ns` later than the restart request: a fresh
          mark; `post-deploy-wall-frames.spec.ts`'s check of the row and
          `position_ms` alone passes on the OLD play when two blocks in a
          row share a content; a 60 s clip's own loop landing between the
-         request and the restart's first frame is a fresh mark too, which
-         starts the take at most one pre-roll early, inside the dropped
-         first 5 s) AND the `status.video_decode.pipelines[]` row whose
-         `playlist_id` is `on_air_item.playlist_id` reads its side (G:
-         `gpu_decoding` true; S: false or no row) AND the cut is over, as
-         a Blank block waits: no `transition.active` and the outgoing
-         playlist's `transport` no longer `Playing` (`on_air_item`
-         follows a fade's incoming side from its first mixed boundary,
-         and the outgoing playlist is paused only after its hold).
+         request and the restart's first frame is a fresh mark too, at
+         most one pre-roll early); the `status.video_decode.pipelines[]`
+         row whose `playlist_id` is `on_air_item.playlist_id` reads its
+         side (G: `gpu_decoding` true; S: false or no row); the cut is
+         over, as a Blank block waits: no `transition.active` and the
+         outgoing playlist's `transport` no longer `Playing` (read on its
+         `/api/v1/ndi/health` row, refreshed at the pipeline's 5 s
+         heartbeat; `on_air_item` follows a fade's incoming side from its
+         first mixed boundary, and the outgoing playlist is paused only
+         after its hold). A G block whose row still reads false 30 s
+         after its restart is a failed G open (the producer's WARN `gpu
+         resident: no producer device yet` / `… was lost` / `… could not
+         be made`: the song decodes as before), reported, never
+         measured.
          `gpu_decoding` alone is a level, and only that row says
          anything: it can read the side before the new song's first
          frame (a G row stays true until `song_ended`), and another
@@ -1053,13 +1067,13 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          and no pipeline's `transport` is `Playing` (the engine pauses
          the outgoing playlist only after its fade's hold). EVERY block's
          take (G, S and Blank alike) runs 45 s and only its last 40 s are
-         analysed, so every analysed span is 40 s at the same offset into
-         its content, past each side's own transient.
+         analysed, past each side's own transient.
          `gpu.gpu_sides_per_s` and `max.upload_mb_s` are rates over the
          last 30 s (`UPLOAD_RATE_SPAN`), so they confirm a side only 30 s
          after the restart: read them at the block's end, never as its
-         start. A block is its switch plus a 45 s take: a switch over 15 s
-         runs the block past its minute, never shortens its take. The
+         start. A block is its switch (the PATCH's poll, the restart, the
+         cut, the 10 s lead) plus a 45 s take, about 65 s; a slow switch
+         runs the block longer, never shortens its take. The
          switch holds the producer's build: a G song whose producer was
          retired or let go since its pipeline's last G open (any S
          block's PATCH retires EVERY pipeline's producer within one
