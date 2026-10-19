@@ -98,8 +98,8 @@ pub fn payload_for(
     })
 }
 
-/// Line-change push helper used by the playback engine hot path. Spawns a
-/// fire-and-forget `tokio::spawn(client.push(...))` when `payload_for` has a
+/// Line-change push helper used by the playback engine hot path. Queues a
+/// fire-and-forget push (`PresenterClient::send`, in order) when `payload_for` has a
 /// payload (a line or the song's title changed), and returns the new `last_seen`
 /// for the caller to persist. No-op when `client` is None (push disabled).
 #[cfg_attr(test, mutants::skip)] // spawn glue; `payload_for` is the tested decision
@@ -120,12 +120,7 @@ pub fn maybe_push_line(
         lines,
         song: payload.current_song.clone(),
     };
-    let client = client.clone();
-    tokio::spawn(async move {
-        if let Err(e) = client.push(payload).await {
-            tracing::warn!(?e, "presenter push failed (non-fatal)");
-        }
-    });
+    client.send(payload, "a line or the title");
     Some(pushed)
 }
 
@@ -148,20 +143,14 @@ pub fn sync_line(
     maybe_push_line(client, last_seen, lines.unwrap_or_default(), song, artist)
 }
 
-/// Clear the stage display (`PresenterPayload::empty`), fire-and-forget like
+/// Clear the stage display (`PresenterPayload::empty`), queued like
 /// [`maybe_push_line`]; `why` names the caller in the failure's WARN. No-op
 /// when `client` is None (push disabled).
-#[cfg_attr(test, mutants::skip)] // spawn glue; the engine tests see the push
+#[cfg_attr(test, mutants::skip)] // queue glue; the engine tests see the push
 pub fn push_empty(client: Option<&Arc<PresenterClient>>, why: &'static str) {
-    let Some(client) = client else {
-        return;
-    };
-    let client = client.clone();
-    tokio::spawn(async move {
-        if let Err(e) = client.push(PresenterPayload::empty()).await {
-            tracing::warn!(?e, why, "presenter clear failed (non-fatal)");
-        }
-    });
+    if let Some(client) = client {
+        client.send(PresenterPayload::empty(), why);
+    }
 }
 
 #[cfg(test)]

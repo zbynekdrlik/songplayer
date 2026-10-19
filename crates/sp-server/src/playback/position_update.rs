@@ -145,12 +145,14 @@ impl super::PlaybackEngine {
             .lyrics_state
             .as_ref()
             .and_then(|l| l.presenter_lines(position_ms));
+        let last_seen = pp.last_presenter_text.take();
+        let (song, artist) = pp.stage_title();
         pp.last_presenter_text = crate::presenter::sync_line(
             self.presenter_client.as_ref(),
-            pp.last_presenter_text.take(),
+            last_seen,
             lines,
-            &pp.cached_song,
-            &pp.cached_artist,
+            song,
+            artist,
         );
     }
 

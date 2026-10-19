@@ -607,3 +607,69 @@ async fn a_song_with_no_lyrics_sends_its_title_to_the_stage_display() {
     let got = stage.received_requests().await.unwrap_or_default();
     assert_eq!(got.len(), 1, "the same title is not pushed again");
 }
+
+/// #281 review: a song played again (Loop, the same song picked again) gets
+/// its title back on the stage display after the song-end clear: every
+/// Play forgets the Presenter's dedup key (`begin_play`), so the same title
+/// is pushed again.
+#[tokio::test]
+async fn a_song_played_again_is_pushed_again_with_its_title() {
+    let (mut engine, _rx) = two_on_air(9).await;
+    let stage = presenter(&mut engine).await;
+    engine.pipelines.get_mut(&9).unwrap().lyrics_state = None;
+    engine.dispatch_lyrics_if_changed(9, 60_000);
+    assert!(is_title_only(&pushes(&stage, 1).await[0], "Later - Artist"));
+    engine.clear_lyrics_display(9); // the song's end
+    assert!(is_cleared(&pushes(&stage, 2).await[1]));
+
+    engine.pipelines.get_mut(&9).unwrap().begin_play(0); // Loop's replay
+    play(&mut engine, 9, 44, Window::Due); // … and its `Started`
+    engine.dispatch_lyrics_if_changed(9, 60_000);
+
+    let bodies = pushes(&stage, 3).await;
+    assert!(
+        is_title_only(&bodies[2], "Later - Artist"),
+        "the title again: {bodies:?}"
+    );
+}
+
+/// #281 review: a new owner whose song has not started yet (a Play sent,
+/// no `Started`: its title clock is gone) shows no title, never the title
+/// of the song it played before.
+#[tokio::test]
+async fn a_new_owner_whose_song_has_not_started_shows_no_title() {
+    let (mut engine, _rx) = two_on_air(7).await;
+    let stage = presenter(&mut engine).await;
+    engine.dispatch_lyrics_if_changed(7, 60_000);
+    assert!(pushes(&stage, 1).await[0].contains("gamma"));
+    engine.pipelines.get_mut(&9).unwrap().begin_play(0); // its next song
+    engine.on_air.publish(on_air(&[7, 9]), Some(9));
+
+    engine.handle_scene_change(9, true).await;
+
+    let bodies = pushes(&stage, 2).await;
+    assert!(
+        is_cleared(&bodies[1]),
+        "no title before `Started`: {bodies:?}"
+    );
+}
+
+/// #281 review: a Position queued before a pause never brings the paused
+/// song's title back after the pause cleared the stage display.
+#[tokio::test]
+async fn a_paused_song_s_title_is_not_pushed_again() {
+    let (mut engine, _rx) = two_on_air(9).await;
+    let stage = presenter(&mut engine).await;
+    engine.dispatch_lyrics_if_changed(9, 60_000);
+    assert!(pushes(&stage, 1).await[0].contains("delta"));
+    let nine = engine.pipelines.get_mut(&9).unwrap();
+    nine.paused_at = Some((44, 60_000)); // the pause: its position kept,
+    nine.lyrics_state = None; // its lyrics dropped,
+    engine.clear_lyrics_display(9); // the display cleared
+    assert!(is_cleared(&pushes(&stage, 2).await[1]));
+
+    engine.dispatch_lyrics_if_changed(9, 60_500);
+
+    let bodies = pushes(&stage, 3).await;
+    assert!(is_cleared(&bodies[2]), "no title while paused: {bodies:?}");
+}

@@ -169,8 +169,10 @@ impl PlaybackEngine {
 
     /// The Presenter's stage display once `playlist_id` owns the wall: its
     /// line at its last reported position, or (#281) its song's title with
-    /// no line where it has none (no lyrics, a blank position); cleared when
-    /// it plays nothing. So the old owner's last line never stays there.
+    /// no line where it has none (no lyrics, a blank position; the title only
+    /// once the song started and while it is not paused, `stage_title`);
+    /// cleared when it plays nothing. So the old owner's last line never
+    /// stays there.
     fn resync_presenter(&mut self, playlist_id: i64) {
         let client = self.presenter_client.as_ref();
         let Some(pp) = self.pipelines.get_mut(&playlist_id) else {
@@ -182,7 +184,7 @@ impl PlaybackEngine {
                     .lyrics_state
                     .as_ref()
                     .and_then(|lyrics| lyrics.presenter_lines(pp.cached_position_ms));
-                let (song, artist) = (&pp.cached_song, &pp.cached_artist);
+                let (song, artist) = pp.stage_title();
                 crate::presenter::sync_line(client, None, lines, song, artist)
             }
             _ => {
