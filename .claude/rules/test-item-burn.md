@@ -398,6 +398,14 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
     with no body.
 - **The verdict** is `e2e/wall-frames-gate.ts::wallFramesFailures`, unit
   tests in the mock suite (`wall-frames-gate.spec.ts`).
+- **"decoded 0" names what covers the clip** (19.10.2026: the operator's
+  layers left connected after the 18.10 service — L20's NDI background,
+  logos, texts — covered the strips, two CI runs red with no SongPlayer
+  fault): on exit 4 the spec reads Arena's composition (read only,
+  `RESOLUME_REST_URL`) and adds `Arena layers above SongPlayer's clip: L<n>
+  '<clip>', …` (`coveringLayers`: every connected, not bypassed clip on a
+  layer above the highest one receiving `SP-program-MAX`). It never clears
+  them: the composition is the operator's.
   - Only exit 0 with verdict `clean` passes.
   - `defects` names every counter: judder (`refreshes.uneven` of `judged`),
     jumps back, lost frames and boundaries, cadence, weights, frozen.

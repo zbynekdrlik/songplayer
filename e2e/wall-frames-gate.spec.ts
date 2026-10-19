@@ -13,7 +13,9 @@ import {
   EXIT_INCOMPLETE,
   EXIT_NOTHING_DECODED,
   EXIT_USAGE,
+  ArenaLayer,
   WallFramesReport,
+  coveringLayers,
   wallFramesFailures,
 } from "./wall-frames-gate";
 
@@ -151,4 +153,37 @@ test("an unknown exit with a clean report fails", () => {
   expect(wallFramesFailures("wall-30", 9, clean())).toEqual([
     "wall-30: the reader exited 9 with the verdict clean",
   ]);
+});
+
+/** One Arena layer with `clips` as [name, connected, description]. */
+function layer(clips: Array<[string, boolean, string]>, bypassed = false): ArenaLayer {
+  return {
+    bypassed: { value: bypassed },
+    clips: clips.map(([name, on, description]) => ({
+      name: { value: name },
+      connected: { value: on ? "Connected" : "Disconnected" },
+      video: { description },
+    })),
+  };
+}
+
+test("the layers drawn above the MAX clip are named, bypassed ones left out (#272)", () => {
+  const layers = [
+    layer([["Botanical", false, "Botanical.mov"]]),
+    layer([["Yt music", true, "SP-program-MAX"]]),
+    layer([["Yt music", true, "SP-program-MAX"]]),
+    layer([["Text Block", true, "Text Block"], ["vers", false, "Text Block"]]),
+    layer([["holubica_B", true, "holubica_B.png"]], true),
+    layer([["SNV BG", true, "NDI Source"]]),
+    layer([]),
+  ];
+  expect(coveringLayers(layers)).toEqual(["L4 'Text Block'", "L6 'SNV BG'"]);
+});
+
+test("nothing above the MAX clip, or no MAX clip at all, is said as such (#272)", () => {
+  expect(coveringLayers([layer([["Blank", true, "Blank"]]), layer([["Yt music", true, "SP-program-MAX"]])])).toEqual([]);
+  expect(coveringLayers([layer([["Yt music", false, "SP-program-MAX"]]), layer([["Text", true, "Text Block"]])])).toEqual([
+    "no connected Arena clip receives SP-program-MAX",
+  ]);
+  expect(coveringLayers([])).toEqual(["no connected Arena clip receives SP-program-MAX"]);
 });

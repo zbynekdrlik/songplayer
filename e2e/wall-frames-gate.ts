@@ -132,3 +132,50 @@ function incomplete(where: string, report: WallFramesReport): string {
   }
   return `${where} the measurement is INCOMPLETE (not judder, not clean): ${parts.join(", ")}`;
 }
+
+/** A layer of Arena's composition as `GET /api/v1/composition` lists it
+ *  (only the fields the gate reads; Arena's own REST, read only). */
+export interface ArenaLayer {
+  bypassed?: { value?: boolean };
+  clips?: Array<{
+    name?: { value?: string };
+    connected?: { value?: string };
+    video?: { description?: string } | null;
+  }>;
+}
+
+/** The Spout sender Arena's wall clip receives (`SPOUT_SENDER_NAME`). */
+export const MAX_SENDER = "SP-program-MAX";
+
+/**
+ * Why a take decoded nothing, read from Arena's composition (#272, 19.10.2026:
+ * the operator's layers left on after a service covered the clip): the
+ * connected clips of every layer drawn ABOVE the highest layer whose
+ * connected clip receives `SP-program-MAX` (Arena numbers layers from 1 at
+ * the bottom; a higher one draws on top), as `L<n> '<clip>'`, a bypassed
+ * layer left out. With no layer receiving it, that alone is the reason. The
+ * gate only names them: the composition is the operator's, never cleared.
+ */
+export function coveringLayers(layers: ArenaLayer[]): string[] {
+  const connected = (layer: ArenaLayer) =>
+    (layer.clips ?? []).filter((clip) => clip.connected?.value === "Connected");
+  let wall = -1;
+  layers.forEach((layer, i) => {
+    if (connected(layer).some((clip) => (clip.video?.description ?? "").includes(MAX_SENDER))) {
+      wall = i;
+    }
+  });
+  if (wall < 0) {
+    return [`no connected Arena clip receives ${MAX_SENDER}`];
+  }
+  const above: string[] = [];
+  layers.forEach((layer, i) => {
+    if (i <= wall || layer.bypassed?.value === true) {
+      return;
+    }
+    for (const clip of connected(layer)) {
+      above.push(`L${i + 1} '${clip.name?.value ?? ""}'`);
+    }
+  });
+  return above;
+}

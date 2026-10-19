@@ -28,7 +28,13 @@
 import { test, expect, APIRequestContext } from "@playwright/test";
 import { spawnSync } from "child_process";
 import * as path from "path";
-import { WallFramesReport, wallFramesFailures } from "./wall-frames-gate";
+import {
+  ArenaLayer,
+  EXIT_NOTHING_DECODED,
+  WallFramesReport,
+  coveringLayers,
+  wallFramesFailures,
+} from "./wall-frames-gate";
 
 /** The e2e venv's Python (numpy + dxcam, ci.yml "Prepare the A/V gate's own Python"). */
 const PYTHON =
@@ -126,6 +132,23 @@ function take(fps: number): { code: number | null; report: WallFramesReport | nu
   return { code: run.status, report, stderr: `${run.error ?? ""}${run.stderr ?? ""}` };
 }
 
+/** Arena's REST (read only), the URL `post-deploy.spec.ts` reads. */
+const ARENA_COMPOSITION =
+  process.env.RESOLUME_REST_URL || "http://127.0.0.1:8090/api/v1/composition";
+
+/** #272 (19.10.2026): what covers the clip when nothing was decoded, from
+ *  Arena's composition (`coveringLayers`); never changes it. */
+async function whatCovers(): Promise<string> {
+  try {
+    const resp = await fetch(ARENA_COMPOSITION, { signal: AbortSignal.timeout(5000) });
+    const composition = (await resp.json()) as { layers?: ArenaLayer[] };
+    const above = coveringLayers(composition.layers ?? []);
+    return above.length > 0 ? above.join(", ") : "none";
+  } catch (err) {
+    return `Arena's composition could not be read (${err})`;
+  }
+}
+
 test.describe.configure({ mode: "serial" });
 
 test.describe("the LED wall shows every frame, in order, on its cadence (#272)", () => {
@@ -180,6 +203,9 @@ test.describe("the LED wall shows every frame, in order, on its cadence (#272)",
         console.log(`wall frames ${clip.name} stderr: ${result.stderr.trim().slice(0, 2000)}`);
       }
       failures.push(...wallFramesFailures(clip.name, result.code, result.report));
+      if (result.code === EXIT_NOTHING_DECODED) {
+        failures.push(`${clip.name}: Arena layers above SongPlayer's clip: ${await whatCovers()}`);
+      }
     }
     expect(failures, "the wall output must show every clip frame, in order, on its cadence").toEqual(
       [],
