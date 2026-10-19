@@ -755,7 +755,9 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
   1. **The deploy at the default** (`video_decode` = `software`,
      `program_ndi_source` = `cpu`): every existing gate holds, and the wall
      is measured an hour after the E2E against an hour before
-     (`gpu-max.md`, "Judging a deploy on the wall"): this build changes
+     (`gpu-max.md`, "Judging a deploy on the wall", and since #251's
+     19.10 finding its "Arena loses its OWN frames": the pictures of the
+     content against its own rate next to the backs): this build changes
      the `program-max` thread at the default too (the standby black
      composed as Black, the same pixels; every compose's
      `record_compose`; the `gpu` read's window clone, the default-path
@@ -824,7 +826,12 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
        S), by plan §7's fixed protocol:
        - preconditions: record the build, the settings, HAGS, Arena's
          uptime (no Arena restart inside a take), the heavy children and
-         the background hold (`GET /api/v1/background-hold`); only the
+         the background hold (`GET /api/v1/background-hold`). #251's two
+         wall levers, `program_max_spout_send` and `program_max_size`
+         (`gpu-max.md`, "Arena loses its OWN frames"), keep ONE value for
+         the whole take (`max.width` / `height` read per block; a take at
+         another value is a take of its own, never mixed into this one);
+         only the
          on-program pipeline decodes: judge strays by every pipeline's
          `transport` and pause them (`video_decode.pipelines[]` lists
          only the pipelines that decode GPU-resident or hold a producer,
@@ -870,6 +877,14 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          `wall_analysis.py`, `--refresh-hz 60`) and one-refresh runs,
          each block binned by the offer AND the compose phase after the
          primary vblank (`max.send_phase_us_*`, `compose_phase_us_*`);
+         and, since #251's 19.10 finding (comment 6270228777: the room's
+         judder was MISSING frames, Arena's own 30 fps clip at 538-746
+         of 1200 per 40 s while a layer receives `SP-program-MAX`, with
+         few backs), the pictures per 40 s of the content against its
+         own rate (`wall_cadence.py`), for SongPlayer's content and for
+         an Arena-native clip on one layer while another receives MAX
+         (#251's Part 1; that clip, like feed (B), is an Arena change the
+         main session arranges with the owner first);
        - interleaved one-minute blocks over ≥ 46 blocks (a whole ~45 min
          drift cycle, every side's blocks spread over it, like
          `fhd_ab2.ps1`), then the first side again; never a conclusion
@@ -901,8 +916,10 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          worse than S;
        - **"worse"** (gate 4's revert): a phase bin whose G mean is over
          S's by more than one standard deviation of S's blocks in that
-         bin, judged only where each side has ≥ 5 blocks in the bin
-         (fewer: reported, not judged). This is the lane's reading of
+         bin, or whose G mean of pictures per 40 s is under S's by more
+         than one standard deviation of S's, judged only where each side
+         has ≥ 5 blocks in the bin (fewer: reported, not judged). This is
+         the lane's reading of
          plan §7's "a worse A/B"; the main session may set another test
          before the take;
        - before the 72 h run, which runs `gpu` during services: the
