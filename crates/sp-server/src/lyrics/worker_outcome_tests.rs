@@ -1,7 +1,7 @@
 //! #144 (ROZHODNUTÉ 5905945274): a failed or empty re-run never darkens a
 //! song the wall already serves. The two failure exits of the lyrics worker
-//! (`fail_song`, the `Err` arm of `process_next`; `quarantine_empty_transcript`,
-//! the g35t base tier's empty transcript) are driven directly on a real
+//! (`fail_song`, the `Err` arm of `process_next`; `quarantine_no_lyrics`,
+//! the g35t base tier's empty or too sparse transcript) are driven directly on a real
 //! in-memory DB and a real cache dir.
 //!
 //! A row serves lyrics when `has_lyrics = 1` AND its `<yt>_lyrics.json`
@@ -216,7 +216,7 @@ async fn an_empty_transcript_keeps_the_lyrics_the_wall_serves() {
     std::fs::write(rig.lyrics_file("yt_served02"), SERVED_BYTES).unwrap();
 
     rig.worker
-        .quarantine_empty_transcript(2, "yt_served02")
+        .quarantine_no_lyrics(2, "yt_served02", "empty_transcript", None)
         .await;
 
     // A first attempt: `retry_backoff(1)` = 5 min.
@@ -251,7 +251,7 @@ async fn an_empty_transcript_never_deletes_the_file_a_sibling_row_serves() {
     std::fs::write(rig.lyrics_file("yt_shared05"), SERVED_BYTES).unwrap();
 
     rig.worker
-        .quarantine_empty_transcript(5, "yt_shared05")
+        .quarantine_no_lyrics(5, "yt_shared05", "empty_transcript", None)
         .await;
 
     assert_eq!(
@@ -474,7 +474,7 @@ async fn an_empty_transcript_on_an_unserved_song_quarantines_it_as_asr_gap() {
     std::fs::write(rig.lyrics_file("yt_unserved4"), SERVED_BYTES).unwrap();
 
     rig.worker
-        .quarantine_empty_transcript(4, "yt_unserved4")
+        .quarantine_no_lyrics(4, "yt_unserved4", "empty_transcript", None)
         .await;
 
     assert_eq!(
@@ -569,4 +569,151 @@ async fn a_failed_upgrade_of_a_served_full_mix_row_waits_a_day() {
         next.is_none(),
         "a failed upgrade must wait out the once-a-day gate: {next:?}"
     );
+}
+
+// --- #283: a transcript too sparse to be lyrics ---
+
+/// A song of four minutes: 20 words is exactly five a minute.
+const SONG_MS: i64 = 240_000;
+
+/// `n` sung words, one a second from 10 s, as the transcript gives them.
+fn sung(n: u64) -> Vec<crate::lyrics::g35t_client::AsrWord> {
+    (0..n)
+        .map(|i| crate::lyrics::g35t_client::AsrWord {
+            text: "sing".to_string(),
+            start_ms: 10_000 + i * 1_000,
+            end_ms: 10_500 + i * 1_000,
+        })
+        .collect()
+}
+
+/// Writes a served `<yt>_lyrics.json` of `lines` lines of four words each,
+/// and returns its bytes.
+fn served_track(rig: &Rig, youtube_id: &str, lines: u64) -> Vec<u8> {
+    let track = sp_core::lyrics::LyricsTrack {
+        version: LYRICS_PIPELINE_VERSION,
+        source: SERVED_SOURCE.to_string(),
+        language_source: "en".into(),
+        language_translation: "sk".into(),
+        lines: (0..lines)
+            .map(|i| sp_core::lyrics::LyricsLine {
+                start_ms: i * 5_000,
+                end_ms: i * 5_000 + 4_000,
+                en: "we lift your name".into(),
+                sk: None,
+                words: None,
+            })
+            .collect(),
+        register: None,
+    };
+    let bytes = serde_json::to_vec(&track).unwrap();
+    std::fs::write(rig.lyrics_file(youtube_id), &bytes).unwrap();
+    bytes
+}
+
+/// The base tier on the song's one transcript (given, so nothing is sent):
+/// whether it ended the song without a track.
+async fn base_tier_quarantined(rig: &Rig, id: i64, youtube_id: &str, words: u64) -> bool {
+    let outcome = rig
+        .worker
+        .run_g35t_transcript_branch(
+            None,
+            None,
+            Some(sung(words)),
+            &[],
+            id,
+            youtube_id,
+            "Song",
+            "Artist",
+            0,
+            Some(SONG_MS),
+        )
+        .await
+        .unwrap();
+    matches!(
+        outcome,
+        crate::lyrics::worker_g35t::G35tOutcome::Quarantined
+    )
+}
+
+/// 242's case (#283): a transcript of a few shouts over the whole song is a
+/// failed transcription. A song with no lyrics served is quarantined as
+/// `asr_gap`, never given a track of the shouts.
+#[tokio::test]
+async fn a_sparse_transcript_of_an_unserved_song_quarantines_it_as_asr_gap() {
+    let rig = rig().await;
+    queued_song(&rig, 11, "yt_sparse011", 0, 0).await;
+
+    assert!(
+        base_tier_quarantined(&rig, 11, "yt_sparse011", 16).await,
+        "16 words in 4 minutes is no track"
+    );
+    assert_eq!(
+        row(&rig.pool, 11).await,
+        (0, Some("asr_gap".to_string()), 0, 0),
+    );
+    assert!(!rig.lyrics_file("yt_sparse011").exists());
+}
+
+/// A served track of real lyrics survives a sparse re-run, like any failed
+/// re-run (#144): only the attempt is recorded.
+#[tokio::test]
+async fn a_sparse_rerun_keeps_a_served_track_of_real_lyrics() {
+    let rig = rig().await;
+    queued_song(&rig, 12, "yt_sparse012", 1, 0).await;
+    let served = served_track(&rig, "yt_sparse012", 30);
+
+    assert!(base_tier_quarantined(&rig, 12, "yt_sparse012", 16).await);
+    let (has_lyrics, source, _, attempts) = row(&rig.pool, 12).await;
+    assert_eq!(
+        (has_lyrics, source.as_deref(), attempts),
+        (1, Some(SERVED_SOURCE), 1),
+        "120 words in 4 minutes are lyrics: kept, the attempt recorded"
+    );
+    assert_eq!(
+        std::fs::read(rig.lyrics_file("yt_sparse012")).unwrap(),
+        served
+    );
+}
+
+/// What 242 served — its five shouts — is not kept over a sparse re-run:
+/// the song is quarantined as `asr_gap` and the file goes.
+#[tokio::test]
+async fn a_sparse_rerun_quarantines_a_served_track_of_only_shouts() {
+    let rig = rig().await;
+    queued_song(&rig, 13, "yt_sparse013", 1, 0).await;
+    served_track(&rig, "yt_sparse013", 4);
+
+    assert!(base_tier_quarantined(&rig, 13, "yt_sparse013", 16).await);
+    assert_eq!(
+        row(&rig.pool, 13).await,
+        (0, Some("asr_gap".to_string()), 0, 0),
+        "16 served words in 4 minutes are no lyrics"
+    );
+    assert!(!rig.lyrics_file("yt_sparse013").exists());
+}
+
+/// The same for an EMPTY re-run: a served track of only shouts is not kept.
+#[tokio::test]
+async fn an_empty_rerun_quarantines_a_served_track_of_only_shouts() {
+    let rig = rig().await;
+    queued_song(&rig, 14, "yt_sparse014", 1, 0).await;
+    served_track(&rig, "yt_sparse014", 4);
+
+    assert!(base_tier_quarantined(&rig, 14, "yt_sparse014", 0).await);
+    assert_eq!(
+        row(&rig.pool, 14).await,
+        (0, Some("asr_gap".to_string()), 0, 0),
+    );
+    assert!(!rig.lyrics_file("yt_sparse014").exists());
+}
+
+/// Five words a minute is a track: the base tier ships it.
+#[tokio::test]
+async fn a_transcript_of_five_words_a_minute_is_a_track() {
+    let rig = rig().await;
+    queued_song(&rig, 15, "yt_sparse015", 0, 0).await;
+
+    assert!(!base_tier_quarantined(&rig, 15, "yt_sparse015", 20).await);
+    assert_eq!(row(&rig.pool, 15).await.1, None, "nothing written");
 }

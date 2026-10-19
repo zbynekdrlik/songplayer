@@ -238,3 +238,60 @@ fn build_track_some_on_real_words() {
     assert!(!t.lines.is_empty());
     assert!(t.lines.iter().all(|l| l.sk.is_none() && l.words.is_none()));
 }
+
+// --- #283: a track too sparse to be lyrics ---
+
+/// Four minutes: 20 words is exactly five a minute.
+const FOUR_MIN_MS: i64 = 240_000;
+
+#[test]
+fn a_track_under_five_words_a_minute_is_sparse() {
+    assert!(is_sparse(19, Some(FOUR_MIN_MS)), "4.75 a minute");
+    assert!(
+        !is_sparse(20, Some(FOUR_MIN_MS)),
+        "exactly 5 a minute is lyrics"
+    );
+    assert!(!is_sparse(21, Some(FOUR_MIN_MS)));
+    assert!(is_sparse(0, Some(FOUR_MIN_MS)));
+}
+
+#[test]
+fn song_242s_eight_shouts_are_sparse() {
+    // 8 words over its 254.7 s vocal: 1.9 a minute (#283).
+    assert!(is_sparse(8, Some(254_700)));
+}
+
+#[test]
+fn a_song_of_unknown_length_is_not_judged() {
+    assert!(!is_sparse(0, None));
+    assert!(!is_sparse(3, Some(-1)), "a negative length is no length");
+    assert!(!is_sparse(0, Some(0)), "nor is a zero one");
+}
+
+#[test]
+fn track_words_counts_the_english_words_of_every_line() {
+    let en_line = |en: &str| sp_core::lyrics::LyricsLine {
+        start_ms: 0,
+        end_ms: 1,
+        en: en.into(),
+        sk: Some("slová navyše".into()),
+        words: None,
+    };
+    let track = sp_core::lyrics::LyricsTrack {
+        version: 22,
+        source: SOURCE_G35T.into(),
+        language_source: "en".into(),
+        language_translation: "sk".into(),
+        lines: vec![
+            en_line("Yeah."),
+            en_line("Come  on."),
+            en_line(" come on, now "),
+        ],
+        register: None,
+    };
+    assert_eq!(
+        track_words(&track),
+        6,
+        "1 + 2 + 3: the English only, whatever the spacing"
+    );
+}
