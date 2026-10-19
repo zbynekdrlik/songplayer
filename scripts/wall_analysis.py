@@ -881,14 +881,48 @@ def weight_residual_q8(
     return 256 * best
 
 
+def still_span(times: list[float], timing: Timing) -> tuple[float, float | None]:
+    """The longest span with no new picture (s), the capture's own edges
+    included (``span``: dxcam's first and last poll), and the blind span of
+    the picture that ended it (s), ``None`` when the capture's end did.
+    #279's A/B reads a held output from it: polls on and nothing presented
+    end the span with a picture seen at once; a starved capture ends it with
+    a picture as blind as the span."""
+    if not times and timing.span is None:
+        return 0.0, None
+    start, end = timing.span or (times[0], times[-1])
+    blind = timing.blind or [math.inf] * len(times)
+    edges = [start, *times]
+    spans: list[tuple[float, float | None]] = [
+        (b - a, blind[k]) for k, (a, b) in enumerate(zip(edges[:-1], edges[1:]))
+    ]
+    spans.append((end - edges[-1], None))
+    return max(spans, key=lambda s: s[0])
+
+
+def still_report(times: list[float], timing: Timing) -> dict:
+    """``still_ms_max`` and ``still_end_blind_ms`` (``still_span``, ms)."""
+    still, ender = still_span(times, timing)
+    known = ender is not None and math.isfinite(ender)
+    return {
+        "still_ms_max": round(still * 1000, 3),
+        "still_end_blind_ms": round(ender * 1000, 3) if known else None,
+    }
+
+
 def capture_report(times: list[float], timing: Timing) -> dict:
     """The capture's own cadence: the interval between pictures (ms), how
     far one instant may be off (ms), the pictures after a span it can have
-    missed a whole refresh in (``blind_pictures``), and the longest blind
-    span (ms)."""
+    missed a whole refresh in (``blind_pictures``), the longest blind span
+    (ms), and the longest span with no new picture (``still_report``)."""
     gaps = [(b - a) * 1000 for a, b in zip(times[:-1], times[1:])]
     if not gaps:
-        return {"interval_ms_p50": None, "interval_ms_max": None, "blind_pictures": 0}
+        return {
+            "interval_ms_p50": None,
+            "interval_ms_max": None,
+            "blind_pictures": 0,
+            **still_report(times, timing),
+        }
     assert timing.blind is not None
     spans = [x for x in timing.blind[1:] if math.isfinite(x)]
     blind = (
@@ -900,6 +934,7 @@ def capture_report(times: list[float], timing: Timing) -> dict:
         "time_error_ms": round(timing.error * 1000, 4),
         "blind_pictures": blind,
         "blind_ms_max": round(max(spans, default=0.0) * 1000, 3),
+        **still_report(times, timing),
     }
 
 
