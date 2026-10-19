@@ -587,12 +587,12 @@ fn sung(n: u64) -> Vec<crate::lyrics::g35t_client::AsrWord> {
         .collect()
 }
 
-/// Writes a served `<yt>_lyrics.json` of `lines` lines of four words each,
-/// and returns its bytes.
-fn served_track(rig: &Rig, youtube_id: &str, lines: u64) -> Vec<u8> {
+/// Writes a served `<yt>_lyrics.json` from `source` of `lines` lines of four
+/// words each, and returns its bytes.
+fn served_track(rig: &Rig, youtube_id: &str, lines: u64, source: &str) -> Vec<u8> {
     let track = sp_core::lyrics::LyricsTrack {
         version: LYRICS_PIPELINE_VERSION,
-        source: SERVED_SOURCE.to_string(),
+        source: source.to_string(),
         language_source: "en".into(),
         language_translation: "sk".into(),
         lines: (0..lines)
@@ -661,7 +661,7 @@ async fn a_sparse_transcript_of_an_unserved_song_quarantines_it_as_asr_gap() {
 async fn a_sparse_rerun_keeps_a_served_track_of_real_lyrics() {
     let rig = rig().await;
     queued_song(&rig, 12, "yt_sparse012", 1, 0).await;
-    let served = served_track(&rig, "yt_sparse012", 30);
+    let served = served_track(&rig, "yt_sparse012", 30, SERVED_SOURCE);
 
     assert!(base_tier_quarantined(&rig, 12, "yt_sparse012", 16).await);
     let (has_lyrics, source, _, attempts) = row(&rig.pool, 12).await;
@@ -682,7 +682,7 @@ async fn a_sparse_rerun_keeps_a_served_track_of_real_lyrics() {
 async fn a_sparse_rerun_quarantines_a_served_track_of_only_shouts() {
     let rig = rig().await;
     queued_song(&rig, 13, "yt_sparse013", 1, 0).await;
-    served_track(&rig, "yt_sparse013", 4);
+    served_track(&rig, "yt_sparse013", 4, SERVED_SOURCE);
 
     assert!(base_tier_quarantined(&rig, 13, "yt_sparse013", 16).await);
     assert_eq!(
@@ -698,7 +698,7 @@ async fn a_sparse_rerun_quarantines_a_served_track_of_only_shouts() {
 async fn an_empty_rerun_quarantines_a_served_track_of_only_shouts() {
     let rig = rig().await;
     queued_song(&rig, 14, "yt_sparse014", 1, 0).await;
-    served_track(&rig, "yt_sparse014", 4);
+    served_track(&rig, "yt_sparse014", 4, SERVED_SOURCE);
 
     assert!(base_tier_quarantined(&rig, 14, "yt_sparse014", 0).await);
     assert_eq!(
@@ -706,6 +706,28 @@ async fn an_empty_rerun_quarantines_a_served_track_of_only_shouts() {
         (0, Some("asr_gap".to_string()), 0, 0),
     );
     assert!(!rig.lyrics_file("yt_sparse014").exists());
+}
+
+/// Only a transcript's own track is judged: a short served track of a TEXT
+/// (a ★ track, the operator's override) is kept over a sparse re-run like any
+/// served lyrics, however few its words.
+#[tokio::test]
+async fn a_sparse_rerun_keeps_a_short_served_track_of_a_text() {
+    let rig = rig().await;
+    queued_song(&rig, 16, "yt_sparse016", 1, 0).await;
+    for source in ["lrclib+mtl@rev1/g35t-ok", "override"] {
+        let served = served_track(&rig, "yt_sparse016", 4, source);
+        assert!(base_tier_quarantined(&rig, 16, "yt_sparse016", 16).await);
+        assert_eq!(
+            row(&rig.pool, 16).await.0,
+            1,
+            "{source}: 16 words of a text are its lyrics: kept"
+        );
+        assert_eq!(
+            std::fs::read(rig.lyrics_file("yt_sparse016")).unwrap(),
+            served
+        );
+    }
 }
 
 /// Five words a minute is a track: the base tier ships it.
