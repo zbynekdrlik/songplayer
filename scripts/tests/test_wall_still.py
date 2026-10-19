@@ -3,8 +3,9 @@
 ``capture.held_ms_max``): the longest span with no new picture, the
 capture's own edges included, and the longest its own polls saw the output
 hold. An empty dxcam poll proves nothing new was presented, so a span is
-held but for the blind span of the picture that ended it; a starved
-capture's span holds little; the capture's end holds whole.
+held but for the blind span of the picture that ended it and the acquire
+window of the one that began it; a starved capture's span holds little;
+the capture's end holds whole but for that window.
 """
 
 from __future__ import annotations

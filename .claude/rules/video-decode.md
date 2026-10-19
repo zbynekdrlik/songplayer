@@ -809,17 +809,32 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
        (each a ring side drawn BLACK on the wall or NDI; WARP never runs
        the keyed mutexes against real NVDEC surfaces, so only the box
        proves them) and every pipeline's `ring.full` (`ring.dead`
-       stays false): G's OWN failures, which only G has (its ring and
-       the compositor's draw of it); `video_decode.mid_stream_fallbacks`
+       stays false; a ring restarts at 0 with each producer and its
+       row goes when the producer is released, so both are read as
+       values at each G block's end read): G's OWN failures, which
+       only G has (its ring and the compositor's draw of it);
+       `video_decode.mid_stream_fallbacks`
        and `open_fallbacks` (a fall back is the software decode this
        file bans while SNV plays to a room); and at the 1440 cap
        `video_decode.scale_refusals` (a 4K song that opened unscaled on
-       either side). The two fall-back counters are process-wide and
-       grow on S's own D3D11 reader too (SNV's S is a hardware reader,
-       one code path): a +1 is judged per block by the `mf_reader`
-       WARN since its restart (step 8): in a G block it fails this
-       gate, in an S block it is a fall back of the default path,
-       reported, never G's;
+       either side). The two fall-back counters are process-wide: every
+       reader in the hardware mode feeds them, S's own D3D11 reader
+       (SNV's S is a hardware reader, one code path), the outgoing
+       playlist's song during a cut, and the background jobs' readers
+       (the video upgrade's facts, the #277 repair, the download
+       check open in that mode too, `video-upgrade.md`). So a +1 is
+       judged by the reader its WARN names (`file`, the open fall
+       back of step 7 or the mid-stream one of step 8): G's, failing
+       this gate, only when that file is the block's own content in
+       a G block whose per-song INFO since the restart (`paced
+       producer: the song's pictures`, its `playlist_id`) reads
+       `path="gpu_resident"`; an S block's own content falling back
+       is a fall back of the default path, reported and that block
+       never measured; any other reader's (a Blank block's included)
+       is reported, never G's. A gate-3 failure during the A/B stops
+       it and turns `video_decode` back to `software` the same day,
+       like "worse" (gate 4): the A/B resumes only once its cause is
+       fixed (the lane's reading of plan §7);
      - NDI / A/V / max gates again with `video_decode` = `gpu`: the A/V
        gate, `max-gate`, cg OBS's `genlock-fifo audit`, `ndi.repeats` /
        `readback_late` +0;
@@ -908,11 +923,15 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          not in this build, a P4 note);
        - content, fixed: `wall-25` (blend) and `wall-30` (#272), Blank
          (the floor), one named 4K AV1 catalog song and one 1440p VP9
-         song, each song's frame rate logged, each song (and the Arena
-         clip) checked on its file to hold no picture over 1 s in the
-         analysed span, + 15 s to + 55 s (ffmpeg's `freezedetect`,
-         `d=1`): a still shot of its own would read as a hold on both
-         sides (the dead-stretch rule below). A Blank block has EVERY
+         song, each song's frame rate logged. Each song is checked on
+         its file to hold no picture over 1 s in the analysed span,
+         + 15 s to + 55 s, and the Arena clip over its WHOLE loop, its
+         seam included (Arena loops it on its own clock, never re-cued
+         per block): ffmpeg's `freezedetect` with `d=1` and its noise
+         `n` set to `wall_cadence.py`'s own same-picture threshold (the
+         default −60 dB passes a near-still shot that reader holds). A
+         still shot of their own would read as a hold on both sides
+         (the dead-stretch rule below). A Blank block has EVERY
          pipeline paused (no `transport` `Playing`): an off-program
          GPU-resident pipeline still decodes and copies, which would lift
          G's floor alone;
