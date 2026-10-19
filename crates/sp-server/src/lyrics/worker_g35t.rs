@@ -105,9 +105,8 @@ impl LyricsWorker {
         // #283: a transcript too sparse to be lyrics (242's eight shouts over
         // 4¼ minutes) is a failed transcription, never a track.
         let track = build_track(&words, LYRICS_PIPELINE_VERSION);
-        let sparse = track
-            .as_ref()
-            .is_some_and(|t| is_sparse(track_words(t), song_ms));
+        let track_n = track.as_ref().map_or(0, track_words);
+        let sparse = track.is_some() && is_sparse(track_n, song_ms);
 
         // Audit sidecar: dump the word count so operators can inspect coverage
         // without parsing tracing logs (mirrors the old asr_path audit).
@@ -119,6 +118,7 @@ impl LyricsWorker {
                 (Some(_), false) => "lines",
             },
             "g35t_word_count": words.len(),
+            "track_words": track_n,
             "song_ms": song_ms,
         });
         if let Ok(bytes) = serde_json::to_vec_pretty(&audit) {
@@ -129,7 +129,7 @@ impl LyricsWorker {
             Some(_) if sparse => {
                 let reason = format!(
                     "sparse_transcript: {} words in {} s",
-                    words.len(),
+                    track_n,
                     song_ms.unwrap_or(0) / 1000
                 );
                 self.quarantine_no_lyrics(video_id, youtube_id, &reason, song_ms)

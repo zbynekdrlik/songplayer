@@ -213,18 +213,21 @@ impl LyricsWorker {
         }
     }
 
-    /// #283: whether the `<yt>_lyrics.json` the video has is itself too
-    /// sparse to be lyrics (242 served five shouts, `Yeah. / Come on.`, for
-    /// a sung song). Such a track is never kept over a failed transcript. A
-    /// missing or unreadable file, or a song of unknown length, is not judged.
+    /// #283: whether the `<yt>_lyrics.json` the video has is a transcript's
+    /// own track (the g35t base tier's sources) that is itself too sparse to
+    /// be lyrics (242 served five shouts, `Yeah. / Come on.`, for a sung
+    /// song). Such a track is never kept over a failed transcript. A track of
+    /// a text (★, the operator's override) is lyrics however short; a missing
+    /// or unreadable file, or a song of unknown length, is not judged.
     async fn serves_only_shouts(&self, youtube_id: &str, song_ms: Option<i64>) -> bool {
-        use crate::lyrics::g35t_transcript::{is_sparse, track_words};
+        use crate::lyrics::g35t_transcript::{SOURCE_G35T, is_sparse, track_words};
         let file = self.cache_dir.join(format!("{youtube_id}_lyrics.json"));
         let Ok(text) = tokio::fs::read_to_string(&file).await else {
             return false;
         };
-        serde_json::from_str::<sp_core::lyrics::LyricsTrack>(&text)
-            .is_ok_and(|track| is_sparse(track_words(&track), song_ms))
+        serde_json::from_str::<sp_core::lyrics::LyricsTrack>(&text).is_ok_and(|track| {
+            track.source.starts_with(SOURCE_G35T) && is_sparse(track_words(&track), song_ms)
+        })
     }
 
     /// Stamp an over-cap row (#144) `unsupported_source`, log it, clear the
