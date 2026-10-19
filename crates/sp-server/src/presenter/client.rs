@@ -29,6 +29,13 @@ fn retry_wait(first: Duration, failures: u32) -> Duration {
     first.saturating_mul(1 << doublings).min(RETRY_MAX)
 }
 
+/// #281: one more failed attempt after `failures` in a row: the new count
+/// and the wait before the payload is sent again.
+fn after_failure(failures: u32, first: Duration) -> (u32, Duration) {
+    let failures = failures.saturating_add(1);
+    (failures, retry_wait(first, failures))
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum PresenterError {
     #[error("presenter push timed out after {0:?}")]
@@ -132,8 +139,8 @@ async fn run_queue(client: PresenterClient, mut latest: watch::Receiver<Option<Q
             let Err(e) = client.push(payload).await else {
                 break;
             };
-            failures += 1;
-            let wait = retry_wait(client.retry_first, failures);
+            let (count, wait) = after_failure(failures, client.retry_first);
+            failures = count;
             tracing::warn!(
                 ?e,
                 why,
@@ -303,5 +310,14 @@ mod tests {
         assert_eq!(retry_wait(s(3), 2), s(6));
         assert_eq!(retry_wait(s(1), u32::MAX), s(60));
         assert_eq!((RETRY_FIRST, RETRY_MAX), (s(1), s(60)));
+    }
+
+    #[test]
+    fn each_failure_counts_and_waits_longer() {
+        let s = Duration::from_secs;
+        assert_eq!(after_failure(0, s(1)), (1, s(1)));
+        assert_eq!(after_failure(1, s(1)), (2, s(2)));
+        assert_eq!(after_failure(2, s(1)), (3, s(4)));
+        assert_eq!(after_failure(u32::MAX, s(1)), (u32::MAX, s(60)));
     }
 }
