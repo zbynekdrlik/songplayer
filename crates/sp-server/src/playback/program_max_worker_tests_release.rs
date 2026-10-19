@@ -143,6 +143,7 @@ fn a_changed_size_makes_max_anew_at_it() {
     {
         let log = gpu.log();
         assert_eq!(log.targets_added, [MAX_TARGET, fhd_sized]);
+        assert_eq!(log.max_sender_targets, [MAX_TARGET, fhd_sized]);
         assert_eq!(log.drops, ["sender"], "the old sender, once");
         assert_eq!(
             (log.targets_removed, log.senders_built, log.sent),
@@ -203,4 +204,5 @@ fn a_size_change_in_a_backoff_waits_it_out() {
         ]
     );
     assert_eq!((log.senders_built, log.sent), (2, 1));
+    assert_eq!(log.max_sender_targets[1].width, 1920, "the new sender's");
 }
