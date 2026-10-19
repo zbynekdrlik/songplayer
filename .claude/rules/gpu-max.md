@@ -2113,7 +2113,10 @@ Add; SongPlayer on Blank.
 | MAX on, **no Arena layer receiving it** (L5 cleared) | 1201–1202 |
 | MAX on, L5 receiving it | 562–723 |
 
-The hand-off to a receiving Arena is the cause. Since 0.82.0 (PP, no
+The receive costs it: with no layer receiving MAX, a running SongPlayer
+loses nothing. What in the receive costs it is open: the first suspect,
+the hand-off, is ruled out below (#251 comment 6270228777), and so is the
+size (6271531140). That first suspect: since 0.82.0 (PP, no
 reports) the shim's `SendSynced` holds Spout's texture-access mutex while
 it spins for the GPU copy, and every receiver takes that mutex to read.
 

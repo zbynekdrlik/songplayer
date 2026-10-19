@@ -842,9 +842,14 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          wall levers (`gpu-max.md`, "Arena loses its OWN frames") keep ONE
          value for the whole take, read per block as in gate 1 (the size
          as `max.width` / `height`, the hand-off as its stored value in
-         `GET /api/v1/settings`, its default as in gate 1); a take at
-         another value is a take of its
-         own, never mixed into this one. Only the on-program pipeline
+         `GET /api/v1/settings`, its default as in gate 1); so does the
+         decode cap (`max_resolution`, read per block as
+         `status.video_decode.max_height`; production on SNV is 1440,
+         where the 4K song opens scaled to 2560×1440, and automatic is a
+         take of its own: the design's ≈ 132 vs ≈ 298 MB/s, and #282 found
+         the cap moves the wall's backs 10–15×). A take at another value
+         of any of the three is a take of its own, never mixed into this
+         one. Only the on-program pipeline
          decodes: judge strays by every pipeline's `transport` and pause
          them (`video_decode.pipelines[]` lists only the pipelines that
          decode GPU-resident or hold a producer, and its `gpu_decoding`
@@ -903,7 +908,8 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          receives `SP-program-MAX` under (B), while SongPlayer still
          decodes and composes, so (B) is the control that shows
          SongPlayer's decode load without the receive. The acceptance and
-         "worse" judge (A); (B)'s Blank blocks supply the backs' floor
+         "worse" judge (A); (B)'s Blank blocks supply SongPlayer's backs'
+         floor
          below, and (B)'s G / S blocks are reported only. Whether
          receiving ANY Spout sender costs Arena frames (so (B)'s clip
          readings carry a receive cost too) is #251's queued
@@ -946,7 +952,8 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
            layer receiving `SP-program-MAX` (never blended Add over
            SongPlayer's picture), while that layer shows the block's G or
            S content: in the clip's blocks always the 4K song (the
-           heaviest S upload), the same on both sides (on Blank G and S
+           A/B's 4K content, at the take's cap), the same on both sides
+           (on Blank G and S
            send the same black: a Blank block is a floor, never a side).
            Under (B) they read the test sender's pictures (its own rate)
            and the Arena clip;
@@ -994,15 +1001,21 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          wait at least one 5 s poll, restart the content (`POST
          /api/v1/test-item/start {"clip"}`, or play the song again), and
          start the block's take once the restarted item is on air again
-         (`GET /api/v1/program` `on_air_item` names it with its
-         `position_ms` running from the restart, as
-         `post-deploy-wall-frames.spec.ts` waits) AND
+         (`GET /api/v1/program` `on_air_item` names it with a
+         `started_at_utc_ns` later than the restart request: a fresh
+         mark; `post-deploy-wall-frames.spec.ts`'s check of the row and
+         `position_ms` alone passes on the OLD play when two blocks in a
+         row share a content) AND
          `status.video_decode.pipelines[].gpu_decoding` reads its side
          (G: true; S: false or no row). `gpu_decoding` alone is a level:
          it can read the side before the new song's first frame (a G row
          stays true until `song_ended`). A Blank block PATCHes nothing
-         (it keeps the block before's `video_decode`), pauses every
-         pipeline and opens no song. EVERY block's
+         (it keeps the block before's `video_decode`): it cuts the
+         program to Blank (source -2, SongPlayer's own black) and pauses
+         every pipeline, opening no song, and its take starts once `GET
+         /api/v1/program` reads `source` -2 with no `transition.active`
+         and no pipeline's `transport` is `Playing` (the engine pauses
+         the outgoing playlist only after its fade's hold). EVERY block's
          take (G, S and Blank alike) runs 45 s and only its last 40 s are
          analysed, so every analysed span is 40 s at the same offset into
          its content, past each side's own transient.
@@ -1016,14 +1029,15 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          block's PATCH retires EVERY pipeline's producer within one
          poll, `precondition_changed`) builds a new one at its open, on
          the emit thread, before `gpu_decoding` flips
-         (`PipelineGpu::song_mode`). The transients the first 5 s hold,
-         logged as facts, never used as a trigger: the new ring slots
-         made at the first copies (`ring.slots`); the compositor
-         re-opens a ring's slots it closed after 90 undrawn composes
-         (`ring_state::OPENED_IDLE_COMPOSES`, 3 s: `gpu.gpu_opens` grows
-         at nearly every G block); an S song after a G one lets the
-         retired producer go on the emit thread at its open
-         (`release_at_open`);
+         (`PipelineGpu::song_mode`), and an S song after a G one lets
+         the retired producer go there too (`release_at_open`, in
+         `decode_mode_with`, before the pre-roll). The transients the
+         first 5 s hold, logged as facts, never used as a trigger: the
+         new ring slots made at the first copies (`ring.slots`); the
+         compositor re-opens a ring's slots it closed after 90 undrawn
+         composes (`ring_state::OPENED_IDLE_COMPOSES`, 3 s:
+         `gpu.gpu_opens` grows at nearly every G block), and closes an
+         old ring's slots up to 3 s after their last draw;
        - alongside: `max.upload_mb_s`, `ndi.repeats`,
          `ndi.readback_us_p99` (the plan's `readback_mb_s` is not in this
          build), Arena's CPU and FPS, and cg OBS's `genlock-fifo audit`;
