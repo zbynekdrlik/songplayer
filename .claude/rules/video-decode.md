@@ -6,9 +6,10 @@ paths:
   - "crates/sp-gpu/src/win/video_device.rs"
   - "crates/sp-gpu/tests/video_device.rs"
   - "crates/sp-server/src/playback/video_decode*.rs"
-  - "crates/sp-server/src/playback/pipeline_paced.rs"
+  - "crates/sp-server/src/playback/pipeline_paced*.rs"
   - "crates/sp-server/src/playback/gpu_resident*.rs"
   - "crates/sp-gpu/src/win/producer.rs"
+  - "crates/sp-server/src/playback/paced_producer*.rs"
 ---
 
 # The Media Foundation video reader: software and opt-in hardware decode (#223 S3b)
@@ -741,7 +742,9 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
   - sp-gpu `tests/ring.rs` (a producer copies a slice and counts it; a
     retired producer says so, its ring alive);
   - sp-server `gpu_resident_tests.rs` (incl. a producer made while the
-    settings task stops `gpu`: retired at its open, `take_for_open`),
+    settings task stops `gpu`: retired at its open, `take_for_open`; the
+    release at an open while `gpu` does not take effect and the idle
+    release, each leaving no row: `release_at_open`, `release_when_idle`),
     `paced_producer_tests_gpu.rs`, `video_decode_tests.rs`.
 
   WARP refuses the video device, so the D3D decode path into the ring
@@ -814,19 +817,24 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          retired)`, `mid_stream_fallbacks` +0,
          `pipelines[].gpu_decoding` false, NDI showing the picture within
          ~5 s of MAX's switch, and no loss in the audio fault ledger for
-         that song;
-     - **the main A/B** (`video_decode` gpu vs software), by plan §7's
-       fixed protocol:
+         that song; the next song (in the base mode) lets the producer
+         go at its open (`gpu_resident::release_at_open`): its
+         `pipelines[]` row and its `vram_mb` are gone;
+     - **the main A/B** (`video_decode` gpu vs software: the sides G and
+       S), by plan §7's fixed protocol:
        - preconditions: record the build, the settings, HAGS, Arena's
-         uptime (no Arena restart inside a take) and the heavy children;
-         only the on-program pipeline decodes: judge strays by every
-         pipeline's `transport` and pause them (`video_decode.pipelines[]`
-         lists only the pipelines that decode GPU-resident or hold a
-         producer, and its `gpu_decoding` stays true through a pause: the
-         plan's `pipelines[].decoding` is not in this build, a P4 note);
+         uptime (no Arena restart inside a take), the heavy children and
+         the background hold (`GET /api/v1/background-hold`); only the
+         on-program pipeline decodes: judge strays by every pipeline's
+         `transport` and pause them (`video_decode.pipelines[]` lists
+         only the pipelines that decode GPU-resident or hold a producer,
+         and its `gpu_decoding` stays true through a pause: the plan's
+         `pipelines[].decoding` is not in this build, a P4 note);
        - content, fixed: `wall-25` (blend) and `wall-30` (#272), Blank
          (the floor), one named 4K AV1 catalog song and one 1440p VP9
-         song;
+         song. A Blank block has EVERY pipeline paused (no `transport`
+         `Playing`): an off-program GPU-resident pipeline still decodes
+         and copies, which would lift G's floor alone;
        - **Arena's own content is the other load** (the 18.10 service, #251
          comment 6263579491: the wall jumped back up to 48 times per 40 s
          with SongPlayer on Blank, `max.upload_mb_s` 0, while Arena played
@@ -837,36 +845,52 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          ≈ 2 150-2 310 in the half hour that juddered on Blank, ≈ 1 200
          after it; which content made the difference is not known).
          Nothing here triggers an Arena clip (the operator's Stream Deck
-         alone runs them): a
-         block whose Arena content changed is dropped, and the A/B is
-         read per Arena content. Each Arena content gets its own
-         SongPlayer Blank blocks, interleaved with the A and B blocks:
-         SongPlayer's share is a side's bin minus the Blank bin under the
-         SAME Arena content, never against a Blank taken under another;
-       - per block also: `nvidia-smi` PCIe link width (x8 of x16 on SNV
-         since 18.10) and its rx / tx throughput, and MAX's
-         `compose_late` / `slot_repicks` deltas;
+         alone runs them): a block whose Arena content changed is
+         dropped, and the A/B is read per Arena content. Each Arena
+         content gets its own Blank blocks, interleaved with its G and S
+         blocks: SongPlayer's share is a side's bin minus the Blank bin
+         under the SAME Arena content, never against a Blank taken under
+         another. Each Arena content needs its own whole drift cycle (the
+         ≥ 46 blocks below); a content the take did not cover that long
+         is reported, not judged;
+       - per block also: `nvidia-smi --query-gpu=utilization.gpu,
+         utilization.memory,utilization.decoder,memory.used,
+         pcie.link.width.current` and `nvidia-smi dmon -s t` (the PCIe rx
+         / tx; the link is x8 of x16 on SNV since 18.10), MAX's
+         `compose_late` / `slot_repicks` deltas, the heavy children and
+         the background hold (a job that starts inside a block drops the
+         block);
        - feeds: (A) the operator's clip on `SP-program-MAX`, and (B) the
          independent Spout sender `spout_test_sender.py` on the clip,
-         the control that isolates SongPlayer's own disturbance;
+         the control that isolates SongPlayer's own disturbance. (B)
+         re-points the operator's clip to that sender (#251's method,
+         comment 6212436810): an Arena change the main session arranges
+         with the owner first, never a script's;
        - the metric: exact jumps back per 40 s (`wall_frames.py` /
          `wall_analysis.py`, `--refresh-hz 60`) and one-refresh runs,
          each block binned by the offer AND the compose phase after the
          primary vblank (`max.send_phase_us_*`, `compose_phase_us_*`);
        - interleaved one-minute blocks over ≥ 46 blocks (a whole ~45 min
-         drift cycle per side, like `fhd_ab2.ps1`), then A again; never a
-         conclusion from a short take;
+         drift cycle, every side's blocks spread over it, like
+         `fhd_ab2.ps1`), then the first side again; never a conclusion
+         from a short take;
        - **a block's procedure** (review round 7): a PATCH alone does not
          switch the decode path. `video_decode` = `gpu` applies at the
          NEXT song's open, while `software` retires the producers within
          one 5 s poll, so the two directions differ. Each block: PATCH,
          wait at least one 5 s poll, restart the content (`POST
          /api/v1/test-item/start {"clip"}`, or play the song again), and
-         count the block only once `status.video_decode.pipelines[]
-         .gpu_decoding`, `gpu.gpu_sides_per_s` and `max.upload_mb_s` read
-         its side. Each gpu block after a software one rebuilds the
-         producer device on the emit thread and makes new ring slots:
-         drop that block's head, or report it apart;
+         start the block's 40 s take once `status.video_decode.pipelines[]
+         .gpu_decoding` reads its side (G: true; S: false or no row; the
+         producer reports a song's first frame at once).
+         `gpu.gpu_sides_per_s` and `max.upload_mb_s` are rates over the
+         last 30 s (`UPLOAD_RATE_SPAN`), so they confirm a side only 30 s
+         after the restart: read them at the block's end, never as its
+         start. A block whose switch took over 20 s is lengthened, never
+         its take shortened. Each G block after an S one rebuilds the
+         producer device on the emit thread and makes new ring slots
+         (`gpu.gpu_opens` and `ring.slots` grow): drop that take's first
+         5 s, or report it apart;
        - alongside: `max.upload_mb_s`, `ndi.repeats`,
          `ndi.readback_us_p99` (the plan's `readback_mb_s` is not in this
          build), Arena's CPU and FPS, and cg OBS's `genlock-fifo audit`;
@@ -874,19 +898,27 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          `wall-30` and the 4K song, every phase bin within the Blank band
          (+ one standard deviation of Blank) of the same Arena content
          (0–3 per 40 s with no Arena loop playing, plan §7), and no bin
-         worse than the software side;
+         worse than S;
+       - **"worse"** (gate 4's revert): a phase bin whose G mean is over
+         S's by more than one standard deviation of S's blocks in that
+         bin, judged only where each side has ≥ 5 blocks in the bin
+         (fewer: reported, not judged). This is the lane's reading of
+         plan §7's "a worse A/B"; the main session may set another test
+         before the take;
        - before the 72 h run, which runs `gpu` during services: the
          main session decides the two follow-up candidates above (the
          drop race; a ring killed on a healthy device, reopened in
          software);
        - then the 72 h continuous monitor (`wall_monitor5.py`, plan §9
-         P3a) on normal services; the table and the raw log paths go on
-         #279.
-  4. **A worse A/B is reverted the same day** ("worse" = any phase bin
-     over the software side's; `video_decode` back to `software` first,
-     then NDI: the rollback order above). A side no worse than software
-     but outside the acceptance band is no revert: P3a's end state is not
-     reached, recorded on #279 for the main session to decide.
+         P3a) on normal services, each sample logged with Arena's
+         composition and playing clips, SongPlayer's program source
+         (Blank, or which song) and the side, and read per Arena content
+         like the A/B; the table and the raw log paths go on #279.
+  4. **A worse A/B is reverted the same day** ("worse" as defined above;
+     `video_decode` back to `software` first, then NDI: the rollback order
+     above). A side no worse than software but outside the acceptance band
+     is no revert: P3a's end state is not reached, recorded on #279 for the
+     main session to decide.
 
   Throughout: while `video_decode` = `gpu` is set on SNV,
   `post-deploy-preview.spec.ts` and `post-deploy-owner-path.spec.ts` find

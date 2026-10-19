@@ -379,22 +379,34 @@ async fn the_status_route_carries_the_video_decode_block() {
 }
 
 /// #279 P3a: `video_decode` = `gpu` takes effect only while NDI comes from
-/// the GPU; each setting alone is a change the task applies.
+/// the GPU; each setting alone is a change the task applies. On a table of
+/// its own (review round 7): its switch-off retires producers, and the
+/// process-wide table holds other tests'.
 #[tokio::test]
 async fn video_decode_takes_effect_only_while_ndi_comes_from_the_gpu() {
     let pool = settings_pool().await;
     let setting = HwDecodeSetting::default();
+    let table = Pipelines::empty();
     assert_eq!(setting.video_decode(), VideoDecode::Software);
     assert_eq!(setting.resident(), Resident::Off);
     set_setting(&pool, "video_decode", "gpu").await.unwrap();
-    assert!(apply_setting(&pool, &setting).await, "video_decode alone");
+    assert!(
+        apply_setting_to(&pool, &setting, &table).await,
+        "video_decode alone"
+    );
     assert_eq!(setting.video_decode(), VideoDecode::Gpu);
     assert_eq!(setting.resident(), Resident::Blocked("ndi_source_cpu"));
-    assert!(!apply_setting(&pool, &setting).await, "nothing new");
+    assert!(
+        !apply_setting_to(&pool, &setting, &table).await,
+        "nothing new"
+    );
     set_setting(&pool, "program_ndi_source", "gpu")
         .await
         .unwrap();
-    assert!(apply_setting(&pool, &setting).await, "the NDI source alone");
+    assert!(
+        apply_setting_to(&pool, &setting, &table).await,
+        "the NDI source alone"
+    );
     assert_eq!(setting.resident(), Resident::On);
     assert_eq!(
         setting.mode(),
@@ -404,7 +416,7 @@ async fn video_decode_takes_effect_only_while_ndi_comes_from_the_gpu() {
     set_setting(&pool, "video_decode", "software")
         .await
         .unwrap();
-    assert!(apply_setting(&pool, &setting).await);
+    assert!(apply_setting_to(&pool, &setting, &table).await);
     assert_eq!(setting.resident(), Resident::Off);
 }
 

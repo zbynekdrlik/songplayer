@@ -371,6 +371,39 @@ pub fn take_for_open<T: Producer>(
     leased
 }
 
+/// A song of playlist `playlist_id` opens while `gpu` does not take effect
+/// (review round 7): the producer is for GPU-resident songs, so `lease`
+/// lets it go now (no idle fill runs while songs keep playing) and its row
+/// in `table` forgets it, so no later retire scan or status read finds it;
+/// whether one was held.
+pub fn release_at_open<T: Producer>(
+    lease: &mut Lease<T>,
+    table: &Pipelines,
+    playlist_id: i64,
+) -> bool {
+    if !lease.release() {
+        return false;
+    }
+    table.set_producer::<T>(playlist_id, None);
+    true
+}
+
+/// Playlist `playlist_id`'s pipeline is idle at `now` (review round 7):
+/// [`Lease::release_idle`], and a producer let go leaves its row in
+/// `table`; whether it was let go.
+pub fn release_when_idle<T: Producer>(
+    lease: &mut Lease<T>,
+    table: &Pipelines,
+    playlist_id: i64,
+    now: Instant,
+) -> bool {
+    if !lease.release_idle(now) {
+        return false;
+    }
+    table.set_producer::<T>(playlist_id, None);
+    true
+}
+
 /// A pipeline's GPU-resident side: its lease, and its row in the table
 /// (forgotten when the pipeline ends: this lives in its `PipelineOutput`).
 #[derive(Debug)]
@@ -418,15 +451,12 @@ impl PipelineGpu {
     ) -> DecodeMode {
         let base = setting.mode();
         if setting.resident() != Resident::On {
-            // The producer is for GPU-resident songs: one opened otherwise
-            // lets it go, or it would stay while songs keep playing.
-            if self.lease.release() {
+            if release_at_open(&mut self.lease, pipelines(), self.playlist_id) {
                 info!(
                     playlist_id = self.playlist_id,
                     "gpu resident: the producer device let go - video_decode=gpu does not take \
                      effect (#279 P3a)"
                 );
-                pipelines().set_producer::<ProducerGpu>(self.playlist_id, None);
             }
             return base;
         }
@@ -446,18 +476,18 @@ impl PipelineGpu {
     }
 
     /// The pipeline is idle at `now`: let go of the producer once it was
-    /// idle long enough ([`Lease::release_idle`]); the idle fill asks at its
+    /// idle long enough ([`release_when_idle`]); the idle fill asks at its
     /// heartbeats. Glue: off Windows no `ProducerGpu` can be made, so no
-    /// Linux test can hold one here; the decision is [`Lease::release_idle`]'s.
+    /// Linux test can hold one here; the decision and the row are
+    /// [`release_when_idle`]'s, tested over a fake producer.
     #[cfg_attr(test, mutants::skip)]
     pub fn release_idle(&mut self, now: Instant) {
-        if self.lease.release_idle(now) {
+        if release_when_idle(&mut self.lease, pipelines(), self.playlist_id, now) {
             info!(
                 playlist_id = self.playlist_id,
                 "gpu resident: the producer device let go - no GPU-resident song for 10 min \
                  (#279 P3a)"
             );
-            pipelines().set_producer::<ProducerGpu>(self.playlist_id, None);
         }
     }
 }

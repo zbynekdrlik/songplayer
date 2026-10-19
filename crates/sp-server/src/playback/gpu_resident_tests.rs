@@ -16,7 +16,8 @@ use sp_gpu::RingStats;
 use super::{
     BLOCKED_NDI_CPU, Lease, Leased, PRODUCER_IDLE_RELEASE, PRODUCER_REBUILD_BACKOFF, PipelineGpu,
     Pipelines, Producer, Resident, ResidentLog, RingStatus, note_song_path, pipelines,
-    precondition_changed, resident_log, retires, song_ended, take_for_open,
+    precondition_changed, release_at_open, release_when_idle, resident_log, retires, song_ended,
+    take_for_open,
 };
 use crate::playback::video_decode::HwDecodeSetting;
 
@@ -535,6 +536,57 @@ fn a_producer_taken_while_gpu_holds_is_the_songs_and_a_later_scan_retires_it() {
         "the row held it"
     );
     assert!(producer.retired());
+}
+
+/// Review round 7: a song opened while `gpu` does not take effect lets the
+/// producer go at once, and its row forgets it (no later scan retires it,
+/// the status lists no ring), even while the last song's reader still
+/// holds the producer; once, then nothing is held.
+#[test]
+fn a_song_opened_while_gpu_does_not_take_effect_lets_the_producer_go() {
+    let table = Pipelines::empty();
+    let mut lease = Lease::<Fake>::default();
+    let leased = take_for_open(&mut lease, &table, 1, Instant::now(), made, || Resident::On);
+    let reader = leased.producer().cloned().expect("made");
+    drop(leased);
+    assert_eq!(table.status().len(), 1, "its row holds it");
+    assert!(release_at_open(&mut lease, &table, 1), "let go");
+    assert!(lease.held().is_none());
+    let rows = table.status();
+    assert!(rows.is_empty(), "the row forgot it: {rows:?}");
+    assert_eq!(table.retire_producers(), 0, "no scan finds it");
+    assert!(!reader.retired());
+    assert!(
+        !release_at_open(&mut lease, &table, 1),
+        "nothing held: once"
+    );
+}
+
+/// Review round 7: an idle pipeline lets its producer go 10 min after it
+/// went idle, and its row forgets it, even while a reader still holds the
+/// producer.
+#[test]
+fn an_idle_release_leaves_no_row_behind() {
+    let table = Pipelines::empty();
+    let mut lease = Lease::<Fake>::default();
+    let t0 = Instant::now();
+    let leased = take_for_open(&mut lease, &table, 1, t0, made, || Resident::On);
+    let reader = leased.producer().cloned().expect("made");
+    drop(leased);
+    assert!(
+        !release_when_idle(&mut lease, &table, 1, t0),
+        "idle from here"
+    );
+    let almost = t0 + PRODUCER_IDLE_RELEASE - Duration::from_millis(1);
+    assert!(!release_when_idle(&mut lease, &table, 1, almost));
+    assert_eq!(table.status().len(), 1, "still held");
+    let at = t0 + PRODUCER_IDLE_RELEASE;
+    assert!(release_when_idle(&mut lease, &table, 1, at), "let go");
+    assert!(lease.held().is_none());
+    let rows = table.status();
+    assert!(rows.is_empty(), "the row forgot it: {rows:?}");
+    assert_eq!(table.retire_producers(), 0, "no scan finds it");
+    assert!(!reader.retired());
 }
 
 /// Review round 1: a song's end leaves its row decoding nothing.
