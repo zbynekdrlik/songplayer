@@ -2130,8 +2130,12 @@ before the wait, a frame announced only once copied).
   (`program_max_worker_tests_fhd.rs`).
 
 The hand-off mode changed nothing (#251 comment 6270228777: every mode
-lost ~45–50 % of the clip's frames), so the next lever is the size Arena
-receives (#251 comment 6270237157):
+lost ~45–50 % of the clip's frames), so the next lever tried was the size
+Arena receives (#251 comment 6270237157). It changed nothing either (#251
+comment 6271531140: 3840×2160 a mean 632, 1920×1080 a mean 652 of 1 200
+per 40 s): the receive itself costs Arena half its frames while
+SongPlayer sends, and `recv2_ab` (queued there) tells whether any Spout
+sender's receive does. Both settings stay, at their defaults:
 
 **The size:** `program_max_size` = `WxH` (trimmed; even sides, the width
 640..=3840, the height 360..=2160; anything else, absent included, is the
