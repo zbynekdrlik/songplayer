@@ -243,7 +243,8 @@ pub struct MaxStatus {
     /// `running`, `off`, `unsupported`, `quiesced` (#243 follow-up, while
     /// a quiesce holds) or `error: <why>` ([`state_label`]).
     pub state: String,
-    /// The fixed canvas: 3840×2160.
+    /// MAX's target: 3840×2160 unless `program_max_size` names another
+    /// (#251).
     pub width: u32,
     pub height: u32,
     /// Boundaries composed and sent to Spout.
@@ -361,6 +362,8 @@ struct Queue {
     ndi: NdiSource,
     /// #251: the setting `program_max_spout_send`, as last applied.
     spout_send: SpoutSend,
+    /// #251: the setting `program_max_size`, as last applied.
+    max_size: (u32, u32),
     /// A `program-max` thread takes jobs.
     consumer: bool,
     stop: bool,
@@ -519,6 +522,7 @@ impl MaxOut {
                 fhd_enabled: false,
                 ndi: NdiSource::Cpu,
                 spout_send: SpoutSend::Synced,
+                max_size: phase::DEFAULT_MAX_SIZE,
                 consumer: false,
                 stop: false,
                 quiesced_until: None,
@@ -794,13 +798,13 @@ impl MaxOut {
     /// The telemetry. The windows are copied under the lock and sorted
     /// after it, so the thread's next record never waits for a sort.
     pub fn status(&self) -> MaxStatus {
-        let (enabled, coalesced, phases, fhd_enabled) = {
+        let (enabled, coalesced, phases, (fhd_enabled, (width, height))) = {
             let queue = self.lock_queue();
             (
                 queue.enabled,
                 queue.coalesced,
                 (queue.vblank_phase_us, queue.compose_phase_us),
-                queue.fhd_enabled,
+                (queue.fhd_enabled, queue.max_size),
             )
         };
         let (vblank_phase_us, compose_phase_us) = phases;
@@ -848,8 +852,8 @@ impl MaxOut {
         MaxStatus {
             enabled,
             state: state_label(&phase, enabled),
-            width: CANVAS_WIDTH,
-            height: CANVAS_HEIGHT,
+            width,
+            height,
             submitted,
             coalesced,
             failed,

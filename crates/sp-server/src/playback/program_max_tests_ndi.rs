@@ -11,7 +11,10 @@ use std::time::Duration;
 
 use sp_core::config::{NdiSource, SpoutSend};
 
-use super::{apply_phase_settings, load_ndi_source, load_spout_send};
+use super::{
+    DEFAULT_MAX_SIZE, SETTING_PROGRAM_MAX_SIZE, apply_phase_settings, load_max_size,
+    load_ndi_source, load_spout_send, program_max_size,
+};
 use crate::playback::program_max::{MaxJob, MaxNext, MaxOut};
 
 fn black(stamp: i64) -> MaxJob {
@@ -179,4 +182,67 @@ async fn the_spout_hand_off_setting_is_read_and_applied_with_max_s() {
         .unwrap();
     apply_phase_settings(&pool, &max).await;
     assert_eq!(max.spout_send(), SpoutSend::Synced, "and back");
+}
+
+/// #251 (19.10.2026): MAX's size is the canvas unless the setting names
+/// `WxH` with each side even, the width 640..=3840 and the height
+/// 360..=2160 (trimmed).
+#[test]
+fn the_max_size_is_the_canvas_unless_the_setting_names_another() {
+    assert_eq!(SETTING_PROGRAM_MAX_SIZE, "program_max_size");
+    assert_eq!(DEFAULT_MAX_SIZE, (3840, 2160));
+    assert_eq!(program_max_size(None), (3840, 2160), "no setting");
+    assert_eq!(program_max_size(Some("1920x1080")), (1920, 1080));
+    assert_eq!(
+        program_max_size(Some(" 2580x1080\n")),
+        (2580, 1080),
+        "trimmed"
+    );
+    assert_eq!(
+        program_max_size(Some("640x360")),
+        (640, 360),
+        "the smallest"
+    );
+    assert_eq!(
+        program_max_size(Some("3840x2160")),
+        (3840, 2160),
+        "the largest"
+    );
+    for other in [
+        "",
+        "1920",
+        "1920x",
+        "x1080",
+        "1920X1080",
+        "1920 x 1080",
+        "-1920x1080",
+        "638x360",
+        "640x358",
+        "3842x2160",
+        "3840x2162",
+        "1921x1080",
+        "1920x1081",
+        "1920x1080x2",
+    ] {
+        assert_eq!(program_max_size(Some(other)), (3840, 2160), "{other:?}");
+    }
+}
+
+/// #251: `program_max_size` is read and applied with MAX's other settings.
+#[tokio::test]
+async fn the_max_size_setting_is_read_and_applied_with_max_s() {
+    use crate::db::models::set_setting;
+    let pool = settings_pool().await;
+    assert_eq!(load_max_size(&pool).await.unwrap(), (3840, 2160));
+    let max = MaxOut::new();
+    assert_eq!(max.max_size(), (3840, 2160), "before any read");
+    set_setting(&pool, "program_max_size", "1920x1080")
+        .await
+        .unwrap();
+    apply_phase_settings(&pool, &max).await;
+    assert_eq!(max.max_size(), (1920, 1080), "applied");
+    assert_eq!((max.status().width, max.status().height), (1920, 1080));
+    set_setting(&pool, "program_max_size", "").await.unwrap();
+    apply_phase_settings(&pool, &max).await;
+    assert_eq!(max.max_size(), (3840, 2160), "and back");
 }

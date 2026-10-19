@@ -11,7 +11,9 @@
 //! #279 P1b: so is `program_ndi_source` (NDI `SP-program` from the GPU
 //! readback, `ndi_feed.rs`), with the queue's rules it drives. #251
 //! (19.10.2026): so is `program_max_spout_send`, how both senders hand each
-//! frame to Spout (the worker gives it to them before every send).
+//! frame to Spout (the worker gives it to them before every send), and
+//! `program_max_size`, the size of MAX's target (the worker makes the
+//! target and its sender anew at a changed size).
 
 use std::time::Duration;
 
@@ -22,11 +24,42 @@ use sp_core::config::{
     program_max_compose_phase_us, program_max_spout_send, program_max_vblank_phase_us,
     program_ndi_source, program_video_quiet_from_us, program_video_quiet_to_us,
 };
+use sp_gpu::{CANVAS_HEIGHT, CANVAS_WIDTH};
 use sqlx::SqlitePool;
 use tracing::{info, warn};
 
 use super::{MaxOut, Queue, fhd_off_reason};
 use crate::playback::ndi_feed::NdiStatus;
+
+/// #251 (19.10.2026): the size of `SP-program-MAX`'s target, `WxH`.
+/// Measured on SNV: while Arena receives the 3840×2160 MAX, its own 30 fps
+/// clip lost 38–58 % of its frames on the wall, the same with every Spout
+/// hand-off (`program_max_spout_send`); Arena's composition is 2580×360.
+/// Read with MAX's settings every 5 s, no restart; for the wall's A/B.
+pub const SETTING_PROGRAM_MAX_SIZE: &str = "program_max_size";
+
+/// MAX's size unless the setting names another: the canvas, 3840×2160.
+pub const DEFAULT_MAX_SIZE: (u32, u32) = (CANVAS_WIDTH, CANVAS_HEIGHT);
+
+/// #251: a stored `program_max_size`: `WxH` (trimmed), each side even, the
+/// width 640..=3840 and the height 360..=2160; anything else, absent
+/// included, is [`DEFAULT_MAX_SIZE`], so a deploy changes nothing.
+pub fn program_max_size(raw: Option<&str>) -> (u32, u32) {
+    let size = raw
+        .and_then(|raw| raw.trim().split_once('x'))
+        .and_then(|(w, h)| Some((w.parse::<u32>().ok()?, h.parse::<u32>().ok()?)));
+    match size {
+        Some((w, h))
+            if (640..=CANVAS_WIDTH).contains(&w)
+                && (360..=CANVAS_HEIGHT).contains(&h)
+                && w.is_multiple_of(2)
+                && h.is_multiple_of(2) =>
+        {
+            (w, h)
+        }
+        _ => DEFAULT_MAX_SIZE,
+    }
+}
 
 /// #279 P1b: who wants the compositor, from ONE read of the queue
 /// (`MaxOut::wants`): MAX's output (its setting), the FHD Spout sender (its
@@ -122,6 +155,19 @@ impl MaxOut {
         self.lock_queue().spout_send
     }
 
+    /// #251: apply `program_max_size`; returns whether it changed.
+    pub fn set_max_size(&self, size: (u32, u32)) -> bool {
+        let mut queue = self.lock_queue();
+        let changed = queue.max_size != size;
+        queue.max_size = size;
+        changed
+    }
+
+    /// #251: `program_max_size`, as last applied.
+    pub fn max_size(&self) -> (u32, u32) {
+        self.lock_queue().max_size
+    }
+
     /// #279 P1b: who wants the compositor ([`Wants`]), read under one lock.
     pub fn wants(&self) -> Wants {
         self.lock_queue().wants()
@@ -143,6 +189,12 @@ pub async fn load_ndi_source(pool: &SqlitePool) -> Result<NdiSource, sqlx::Error
 pub async fn load_spout_send(pool: &SqlitePool) -> Result<SpoutSend, sqlx::Error> {
     let raw = crate::db::models::get_setting(pool, SETTING_PROGRAM_MAX_SPOUT_SEND).await?;
     Ok(program_max_spout_send(raw.as_deref()))
+}
+
+/// #251: read `program_max_size` ([`program_max_size`]'s rule).
+pub async fn load_max_size(pool: &SqlitePool) -> Result<(u32, u32), sqlx::Error> {
+    let raw = crate::db::models::get_setting(pool, SETTING_PROGRAM_MAX_SIZE).await?;
+    Ok(program_max_size(raw.as_deref()))
 }
 
 /// Read `program_max_vblank_phase_ms`, µs (`sp_core::config`'s rule).
@@ -213,6 +265,14 @@ pub(super) async fn apply_phase_settings(pool: &SqlitePool, max: &MaxOut) {
             }
         }
         Err(e) => warn!(%e, "program max: reading the Spout hand-off setting failed"),
+    }
+    match load_max_size(pool).await {
+        Ok((width, height)) => {
+            if max.set_max_size((width, height)) {
+                info!(width, height, "program max: size applied");
+            }
+        }
+        Err(e) => warn!(%e, "program max: reading the size setting failed"),
     }
 }
 

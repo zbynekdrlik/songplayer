@@ -83,7 +83,7 @@
 
 use std::time::{Duration, Instant};
 
-use sp_gpu::{ComposeStats, GpuError, MAX_TARGET, SpoutSendStats, TargetId, VblankGrid};
+use sp_gpu::{ComposeStats, GpuError, MAX_TARGET, SpoutSendStats, Target, TargetId, VblankGrid};
 use tracing::{info, warn};
 
 use crate::playback::program_max::{MaxJob, MaxNext, MaxOut, Wants};
@@ -104,6 +104,8 @@ pub use gate::{LogGate, LogLine, MAX_LOG_EVERY_100NS, elapsed_100ns};
 #[path = "program_max_ndi.rs"]
 mod ndi;
 pub use ndi::PassLine;
+#[path = "program_max_release.rs"]
+mod release;
 
 /// How long the thread waits before it builds again after a refused sender,
 /// a failed build or a second lost device in a row ("a few seconds", the
@@ -204,6 +206,8 @@ pub struct MaxWorker<'a, G: MaxGpu> {
     // (they hold references into its device and its targets).
     /// MAX's sender and its target (#279 P1b), only while wanted.
     max: Output<G::Sender>,
+    /// #251: the size and fit MAX's target was added at (`program_max_size`).
+    max_built: Target,
     /// #239: the `SP-program` sender, only while wanted.
     fhd: Output<G::Sender>,
     device: Device<G::Compositor>,
@@ -268,6 +272,7 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
             out,
             gpu,
             max: Output::new(),
+            max_built: MAX_TARGET,
             fhd: Output::new(),
             device: Device {
                 compositor: None,
@@ -348,6 +353,7 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         if !wants.max && (self.max.sender.is_some() || self.max.retry_at.is_some()) {
             self.release_max();
         }
+        self.resize_max();
         if !wants.any() {
             // Taken just before a setting left nothing wanting the
             // compositor: nothing built for it, the next step releases.
@@ -621,10 +627,15 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     /// #279 P1b: MAX's target on the compositor (unless it holds it
     /// already), then the sender `SP-program-MAX` of it.
     fn make_max(&mut self) -> Result<(), GpuError> {
+        let wanted = self.max_target();
         let compositor = self.device.compositor.as_mut().ok_or(NO_COMPOSITOR)?;
         let target = match self.max.target {
             Some(target) => target,
-            None => *self.max.target.insert(compositor.add_target(MAX_TARGET)?),
+            None => {
+                let target = compositor.add_target(wanted)?;
+                self.max_built = wanted;
+                *self.max.target.insert(target)
+            }
         };
         self.max.sender = Some(self.gpu.sender(compositor, target)?);
         Ok(())
@@ -849,68 +860,6 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         })?;
         self.device.lost_unsent = false;
         Ok((drawn.fhd_draw_us, send))
-    }
-
-    /// Nothing wants the compositor (MAX off and NDI on the CPU), or the
-    /// thread stops: drop both senders (Spout unregisters the names), then
-    /// the compositor, and forget every backoff; the UYVY pass's log says
-    /// off at `now`. NDI's read-back pictures are the `SP-program` sender's
-    /// to let go (#279 P1b review round 5: it may still flush the held pair).
-    pub fn release(&mut self, now: Instant) {
-        if self.holds_gpu() {
-            info!("program max: the Spout senders and the compositor are released");
-        }
-        self.pass_released(now);
-        self.drop_gpu();
-        self.device.retry_at = None;
-        self.max.retry_at = None;
-        self.fhd.retry_at = None;
-        self.ids.forget();
-        self.list.forget(self.out);
-    }
-
-    /// #243 follow-up: a deploy is about to kill the process: drop both
-    /// senders (Spout unregisters them) and the compositor, stop the list
-    /// sentinel, and report `quiesced`. Nothing is offered while the
-    /// quiesce holds, so no Spout call runs and the kill can never leave a
-    /// Spout lock abandoned.
-    pub fn quiesce(&mut self) {
-        self.release(Instant::now());
-        self.list.stop(self.out);
-        self.out.record_quiesced();
-        info!("program max: quiesced - no Spout call while the quiesce holds");
-    }
-
-    /// #243 follow-up: the quiesce expired and the process is still alive
-    /// (the deploy did not kill it): serve again; the next job builds the
-    /// senders.
-    pub fn resume(&mut self) {
-        self.out.record_resumed();
-        warn!(
-            "program max: the quiesce expired - the process was not stopped; the Spout senders resume"
-        );
-    }
-
-    /// #239: drop the FHD sender (Spout unregisters `SP-program`) and forget
-    /// its backoff: it was switched off, or MAX is off.
-    fn release_fhd(&mut self) {
-        if self.fhd.sender.is_some() {
-            info!("program max: the SP-program Spout sender is released");
-        }
-        self.drop_fhd();
-        self.fhd.retry_at = None;
-    }
-
-    /// #279 P1b: MAX is off while NDI keeps the compositor: drop MAX's
-    /// sender and its target (nothing is drawn for it), forget its backoff.
-    fn release_max(&mut self) {
-        if self.max.sender.is_some() {
-            info!(
-                "program max: the SP-program-MAX Spout sender is released, its target no longer drawn"
-            );
-        }
-        self.drop_max();
-        self.max.retry_at = None;
     }
 }
 
