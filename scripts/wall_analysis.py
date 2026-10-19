@@ -52,6 +52,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 
 import wall_clip as clip
+from wall_spans import still_report
 
 GRID_FPS = 30
 # The pacer's dead band (`BLEND_DEAD_BAND_100NS`, 2 ms): no blend that close
@@ -879,35 +880,6 @@ def weight_residual_q8(
         off = (position - float(shown)) % 1
         best = min(best, off, 1 - off)
     return 256 * best
-
-
-def still_span(times: list[float], timing: Timing) -> tuple[float, float | None]:
-    """The longest span with no new picture (s), the capture's own edges
-    included (``span``: dxcam's first and last poll), and the blind span of
-    the picture that ended it (s), ``None`` when the capture's end did.
-    #279's A/B reads a held output from it: polls on and nothing presented
-    end the span with a picture seen at once; a starved capture ends it with
-    a picture as blind as the span."""
-    if not times and timing.span is None:
-        return 0.0, None
-    start, end = timing.span or (times[0], times[-1])
-    blind = timing.blind or [math.inf] * len(times)
-    edges = [start, *times]
-    spans: list[tuple[float, float | None]] = [
-        (b - a, blind[k]) for k, (a, b) in enumerate(zip(edges[:-1], edges[1:]))
-    ]
-    spans.append((end - edges[-1], None))
-    return max(spans, key=lambda s: s[0])
-
-
-def still_report(times: list[float], timing: Timing) -> dict:
-    """``still_ms_max`` and ``still_end_blind_ms`` (``still_span``, ms)."""
-    still, ender = still_span(times, timing)
-    known = ender is not None and math.isfinite(ender)
-    return {
-        "still_ms_max": round(still * 1000, 3),
-        "still_end_blind_ms": round(ender * 1000, 3) if known else None,
-    }
 
 
 def capture_report(times: list[float], timing: Timing) -> dict:

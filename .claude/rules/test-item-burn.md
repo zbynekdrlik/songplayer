@@ -12,6 +12,7 @@ paths:
   - "scripts/wall_clip.py"
   - "scripts/wall_frames.py"
   - "scripts/wall_analysis.py"
+  - "scripts/wall_spans.py"
   - "scripts/tests/test_wall_clip.py"
   - "scripts/tests/test_wall_*.py"
   - "scripts/tests/wall_fakes.py"
@@ -172,7 +173,8 @@ MEASURED with frame ids, never judged by eye. Design record: #272 comment
 glue and the CLI; `wall_analysis.py` is the pure analysis of a run of
 readings (`analyse`, the pacer's rule, the capture's timing). Run it from
 the repo checkout's `scripts/` (on the box: the runner's checkout): it
-imports `wall_clip`, `wall_analysis` and `av_sync_check` (with its
+imports `wall_clip`, `wall_analysis` (with `wall_spans`) and
+`av_sync_check` (with its
 `av_sync_drift` / `av_sync_warp`).
 
 
@@ -204,15 +206,18 @@ imports `wall_clip`, `wall_analysis` and `av_sync_check` (with its
   pacer's `BLEND_DEAD_BAND_100NS`, read from `pacer_blend.rs` by a test.
   Review rounds 1–2: `test_every_grid_phase_…` sweeps 512 phases per frame
   through the program's byte blend at 24 / 25 fps (and 30): clean.
-- `capture.still_ms_max` / `still_end_blind_ms` (#279 P3a's A/B,
-  `still_span`): the longest span with no new picture, the capture's
-  first and last poll included (a hold at either end counts), and the
-  blind span of the picture that ended it, `null` when the capture's
-  end did. Polls on and nothing presented end it with a picture seen
-  at once (about 1 ms); a starved capture with a picture as blind as
-  the span. `blind_ms_max` and `interval_ms_max` stay take-wide and
-  between pictures only. Tests `test_wall_still.py`; hand mutants 23 of
-  23 killed.
+- `capture.still_ms_max` / `held_ms_max` (#279 P3a's A/B,
+  `scripts/wall_spans.py`, imported by `wall_analysis.capture_report`):
+  the longest span with no new picture, the capture's first and last
+  poll included, and the longest its own polls saw the output HOLD. An
+  empty dxcam poll proves nothing new was presented, so a span holds
+  but for the blind span of the picture that ended it (that picture
+  can have come anywhere in it), and the capture's end holds whole (its
+  last poll found nothing new). A starved capture reads a long still
+  span that holds little; a hold reads in both, whatever else the take
+  saw. `blind_ms_max` and `interval_ms_max` stay take-wide and between
+  pictures only. Tests `test_wall_still.py`; hand mutants 28 of 28
+  killed.
 - `distinct_boundaries` (#279 P3a's A/B, `video-decode.md`): the distinct
   pictures the boundaries showed, numbered on across the clip's loops, a
   run within `SAME_PICTURE` of a picture shown before counted once
@@ -529,7 +534,7 @@ a 12 ms lag, a wall that stopped, a wrong or missing `--refresh-hz`, a bad
 `scripts/tests/wall_fakes.py` (the clip's frames, the program's byte blend,
 the pacer's readings, the wall's refreshes as a camera samples them, a
 simulated dxcam capture), all numpy-only for CI's Eval Checks job, whose
-ruff lists name the three scripts. Hand mutants of `wall_frames.py` / `wall_analysis.py` (every
+ruff lists name the four scripts (`wall_spans.py` too). Hand mutants of `wall_frames.py` / `wall_analysis.py` (every
 threshold, guard, bound and exit code; a scratch harness on dev1, not CI)
 were run after each review round and the tests extended until none
 survived; an equivalent one is removed from the code instead.

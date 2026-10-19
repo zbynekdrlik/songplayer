@@ -961,13 +961,16 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          The acceptance and "worse" judge (A); (B)'s Blank blocks
          supply SongPlayer's backs' floor below, and (B)'s G / S blocks
          are reported only. The cost is paid every frame whatever the
-         sender sends, not per received copy, and it lies between
-         Arena's composition and the wall output (#251 comment
-         6276425317, `recv4_ab`: one black picture a second 656 on the
-         wall, against 600–680 at 30 a second; Arena's own composition
-         monitor read 1166 of the same take): so (B) carries it at
-         whatever rate the test sender sends. Read #251's newer
-         results (`recv4b_ab`, MAX with both reads) before the take;
+         sender sends, not per received copy, and it lies mostly
+         between Arena's composition and the wall output (#251
+         comments 6276425317 and 6276709434, `recv4_ab` / `recv4b_ab`,
+         8 + 8 takes: on the wall a black sender at one picture a
+         second 546–656, at 30 a second 548–723, MAX on Blank 522 /
+         587, no receive 1201; Arena's own composition monitor
+         1140–1168 under a receive against 1199–1201 with none): so
+         (B) carries it at whatever rate the test sender sends. Read
+         any newer #251 result (its next lane measures how Arena
+         presents its output window) before the take;
        - the metrics, every take analysed over the same 40 s:
          - **every block's setup**, read at its take's start and end
            (Arena's composition, REST, read only, and `max.state`):
@@ -1024,32 +1027,35 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
              `pictures_per_boundary` with a key over 60; when the output
              presents nothing new (Arena's render hung, a receive
              blocked: its `Display` window is the only one on the wall
-             output), as `capture.still_ms_max` over 1000: the longest
-             span with no new picture, the capture's first and last poll
-             included (`wall_analysis.still_span`), so a hold at either
-             end counts too. `capture.still_end_blind_ms` tells it from
-             a starved capture: under one refresh, the polls went on
-             (`poll_blind`) and the output held; over 1000, the capture
-             itself starved, its own failure, re-run like an exit 5;
-             null, the capture's end closed the span, a hold when the
-             evidence grabs show the output still or black, else re-run
-             like an exit 5. `wall_cadence.py`, a box script outside
-             this repo and the only reader of the songs and the Arena
-             clip, is extended before the take to report the same two
-             and its longest still run (as the 72 h run extends
-             `wall_monitor5.py`), each over 1 s a hold. Never a count of
+             output), as `capture.held_ms_max` over 1000: the longest
+             span the capture's own polls saw the output hold
+             (`wall_spans.still_spans`: an empty poll proves nothing new
+             was presented, so a span with no new picture holds but for
+             the blind span of the picture that ended it; the capture's
+             first and last poll are included, the end whole). A
+             `capture.still_ms_max` over 1000 with `held_ms_max` under
+             it is a capture that starved: its own failure, re-run like
+             an exit 5. `wall_cadence.py`, a box script outside this
+             repo and the only reader of the songs and the Arena clip,
+             is extended before the take to report its held span the
+             same way and its longest still run (as the 72 h run
+             extends `wall_monitor5.py`), each over 1 s a hold. Never a count of
              pictures: #251's receive loss alone reads 509–746 of
              1 200 (the missing pictures' floor, below);
-           - a content block whose end check finds its item stopped or
-             its position short (below).
+           - a content block whose end check finds its item stopped,
+             its position short, or `pacing.resyncs` grown (below).
 
            The evidence is recorded for EVERY take, so it is there when a
            take turns out dead. The block's counters are read at the
            take's START (with the `on_air_item` start read, after step
-           6's check) and at its END; the `/api/v1/ndi/health` row is a
-           5 s heartbeat's snapshot, so its end read waits until the
-           row's `last_heartbeat_ts` is past the take's end (a clip's
-           + 60 s bound holds for the `on_air_item` read only). Right after
+           6's check) and at its END. The `/api/v1/ndi/health` row is a
+           5 s heartbeat's snapshot, stamped `last_heartbeat_ts` on the
+           engine's own clock (mapped from its start, so never compared
+           with the driver's): each read takes the row, then re-reads it
+           until that stamp changes (≤ 5 s), so the start read is the
+           first heartbeat inside the take (its first, unanalysed 5 s)
+           and the end read the first after it (a clip's + 60 s bound
+           holds for the `on_air_item` read only). Right after
            the take, with its end reads and never during it (ONE
            capture per take, below), the driver takes:
            - two dxcam grabs about 2 s apart of the wall output
@@ -1067,39 +1073,20 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
            - the box's log since the restart: SongPlayer's WARN and
              ERROR lines, a display-driver reset, Arena's own lines.
 
-           A dead stretch is a SIDE's only when a cause only that side
-           has names it. Only G has its own parts: the picture ring and
-           the compositor's draw of it. Everything S runs, G runs too
-           (SNV's S decodes on D3D11 like G, a G fall back reopens in
-           S's software decode, and the audio and file reads are one
-           path), and #251's receive loss is the same on G, S and
-           Blank, so the side a stretch first landed in proves nothing
-           alone. G's own causes name a G block:
-           - `ring.full` grown, `ring.dead` turned true,
-             `gpu.km_acquire_timeouts` / `abandoned` / `open_failures`
-             grown;
-           - the lines `gpu resident: …`, `sp-gpu: a picture ring died
-             …`, `sp-gpu: a ring slot did not open on the compositor`,
-             and `paced producer: the song's pictures changed kind
-             mid-song …` (a GPU-resident song only).
-
-           No cause names S alone. Shared: a producer that fell behind
-           (`pacing.repeats` beyond the content's own share, read from S's
-           blocks of that content, none at 30 fps and a sixth of the
-           boundaries at 25 fps, beyond which the emit thread repeats
-           only on an empty queue; `audio.underruns_mid`), `ring.waits`
-           (a stalled program path fills the ring too),
-           `mid_stream_fallbacks` and the `mf_reader` lines (the D3D11
-           decoder), a stopped item or a short position (the item's
-           position comes from `SP-program`'s served boundaries, which
-           a stalled program path also stops), `pacing.resyncs`, and
-           `pacing.dropped` (it adds the submit side's coalescing to the
-           pacer's decimation). A block whose log holds the ERROR `paced
-           producer: decode error` is dropped whichever trigger fired
-           (the end check). The main session decides before the take
-           resumes:
-           - a G block with one of G's own causes: G's;
-           - otherwise an OTHER-SIDE test, once the region reads live
+           Which side a dead stretch first landed in proves nothing:
+           #251's receive loss is the same on G, S and Blank, most of
+           the decode path is shared (the file, the audio, the D3D11
+           decoder S also runs on SNV), and a display-driver reset can
+           kill G's ring where S's reader only falls back. G's own
+           failures are gate 3's verdict already, whatever the wall
+           showed: `gpu.km_acquire_timeouts`, `abandoned`,
+           `open_failures`, `mid_stream_fallbacks` and `open_fallbacks`
+           stay +0 over the A/B (gate 3). So the counters and lines above
+           are recorded, never used to name a side alone. A block whose
+           log holds the ERROR `paced producer: decode error` is dropped
+           whichever trigger fired (the end check). The main session
+           decides before the take resumes:
+           - an OTHER-SIDE test, once the region reads live
              again (the output brought back first, below): five blocks
              of each side alternated under the same content and feed,
              ordinary blocks of the take. A recurrence inside it is
@@ -1121,11 +1108,14 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
            step under the owner's ruling (#251 comment 6274074165:
            reload the saved Advanced Output, or restart Arena). It never
            changes the operator's screen setup itself (`wall.md`). An
-           Arena restart starts a new take (the preconditions). The
-           composition reloads its saved column, and the clips connected
-           outside it are dropped (#251 comment 6274680850: the
-           operator's overlays; its next takes ran with L5 receiving MAX
-           as reloaded). The new take checks the setup again: it
+           Arena restart starts a new take (the preconditions). What the
+           reload brings back varies: on 19.10 the composition reloaded
+           its saved column and dropped the operator's overlays (#251
+           comment 6274680850, L5 receiving MAX as reloaded), on 9.10 a
+           relaunch left most clips disconnected, the Spout clip
+           included (`gpu-max.md`; `wall.md`: no clip runs until the
+           operator presses a scene). The new take checks the setup
+           again: it
            reconnects the receiving clip only when the reload did not
            bring it back (an A/B test change, put back in the
            `finally`), reports the operator's dropped overlays and never

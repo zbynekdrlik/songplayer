@@ -2142,11 +2142,14 @@ Arena receives (#251 comment 6270237157). It changed nothing either (#251
 comment 6271531140: 3840×2160 a mean 632, 1920×1080 a mean 652 of 1 200
 per 40 s). `recv2_ab` (#251 comment 6274680850: MAX or FHD `SP-program`
 received = loss in 18 of 20 takes, no receive = clean) and `recv3_ab`
-(6275818478, above) then showed it is any Spout receive, and `recv4_ab`
-(6276425317) that it is paid every frame, not per received copy (one
-black picture a second: 656 on the wall), and lies between Arena's
-composition and the wall output (Arena's composition monitor read 1166
-of the same take). Both settings stay, at their defaults:
+(6275818478, above) then showed it is any Spout receive, and
+`recv4_ab` / `recv4b_ab` (6276425317, 6276709434: 8 + 8 takes) that it
+is paid every frame, not per received copy (a black sender at one
+picture a second 546–656 on the wall, at 30 a second 548–723, MAX on
+Blank 522 / 587, no receive 1201), and lies mostly between Arena's
+composition and the wall output (Arena's composition monitor 1140–1168
+under a receive, 1199–1201 with none). Both settings stay, at their
+defaults:
 
 **The size:** `program_max_size` = `WxH` (trimmed; even sides, the width
 640..=3840, the height 360..=2160; anything else, absent included, is the
