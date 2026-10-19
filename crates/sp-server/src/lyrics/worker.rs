@@ -555,6 +555,7 @@ impl LyricsWorker {
         if crate::lyrics::worker_outcome::exceeds_duration_cap(row.duration_ms) {
             return self.mark_over_cap(&row).await;
         }
+        crate::lyrics::full_artist::expand_lookup_artist(&self.pool, &mut row).await; // #283
 
         let started_at_unix_ms = chrono::Utc::now().timestamp_millis();
         let start_instant = std::time::Instant::now();

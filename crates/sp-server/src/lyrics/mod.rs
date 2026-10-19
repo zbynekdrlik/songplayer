@@ -9,6 +9,7 @@ pub mod claude_merge;
 pub mod cleanup_refusal; // #144: a content-filter refusal of a cleanup, remembered per text
 pub mod description_provider;
 pub mod display_plan;
+pub mod full_artist; // #283: the lookups ask for the artist in full
 pub mod g35t_client;
 pub mod g35t_probe; // #144: the live post-deploy probe of g35t (POST /api/v1/lyrics/g35t/probe)
 pub mod g35t_transcript;
