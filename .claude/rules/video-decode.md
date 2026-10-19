@@ -870,12 +870,15 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          per block that the A/B songs' files are unchanged; no
          `deploy-pp` runs during it (PP's peer gate fails on SNV's hold,
          503 `background-hold`). When it ends, a `finally` (like Arena's
-         changes) puts `max_resolution`, `video_upgrade_enabled` and
-         `background_hold_until_ms` back to the values found (`""` for
-         one that was not stored) and confirms `max_height` reads 1440
-         again. A take at another
-         value of any of the three is a take of its own, never mixed into
-         this one. Only the on-program pipeline
+         changes) puts back the values found (`""` for one that was not
+         stored), one PATCH each, in this order: `max_resolution` first
+         (then `max_height` reads 1440 again), `video_upgrade_enabled`,
+         and `background_hold_until_ms` LAST, so the hold never ends
+         while the cap is still automatic; each only while it still has
+         the take's own value (an operator's `sp-90s` press during the
+         take is a real hold, and stays). A take at another value of
+         either #251 lever or the cap is a take of its own, never mixed
+         into this one. Only the on-program pipeline
          decodes: judge strays by every pipeline's `transport` and pause
          them (`video_decode.pipelines[]` lists only the pipelines that
          decode GPU-resident or hold a producer, and its `gpu_decoding`
@@ -1025,9 +1028,10 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
        - **a block's procedure** (review rounds 7-17). A PATCH alone does
          not switch the decode path: `video_decode` = `gpu` applies at the
          NEXT song's open, while `software` retires the producers within
-         one 5 s poll. The take holds `program_transition` /
-         `program_transition_ms` at their defaults (a fade of 300 ms),
-         recorded with the settings. A content block (G or S):
+         one 5 s poll. The take never changes `program_transition` /
+         `program_transition_ms`: it records the values found, and runs
+         only with a fade of at most 4 s (the 10 s lead below; the
+         default is 300 ms). A content block (G or S):
          1. PATCH `video_decode`, wait at least one 5 s poll.
          2. Restart the content: `POST /api/v1/test-item/start {"clip"}`,
             or play the song again. A Play claims no program, so on a
@@ -1052,9 +1056,9 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
             clock, `started_at_utc_ns` + 10 s, so every analysed span runs
             + 15 s to + 55 s into its content whichever block came before
             (a 60 s clip ends after it). The lead fits the slowest
-            cut-over at the default fade: the fade, the outgoing
-            playlist's hold of up to 15 cue slots, one 5 s heartbeat
-            (≈ 5.8 s); a longer fade needs a lead of the fade + 6 s.
+            cut-over: the fade, the outgoing playlist's hold of up to 15
+            cue slots, one 5 s heartbeat (≈ 5.8 s at 300 ms; the fade
+            + 6 s at most, so a fade of up to 4 s).
          6. By that instant both must hold, else the block is dropped and
             run again (at most twice, a G re-run after the 30 s rebuild
             backoff): the `status.video_decode.pipelines[]` row whose
@@ -1081,8 +1085,17 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
             precondition (`gpu_resident_blocked`), the reader's open fall
             back (WARN `mf_reader: hardware decode did not open; this file
             decodes in software`, `open_fallbacks` +1: that song decodes in
-            SOFTWARE), or a picture in system memory (`mf_software` +1, the
-            producer's `path=ram` INFO).
+            SOFTWARE), or a picture in system memory (the producer's
+            `path=ram` INFO; `mf_software` +1 only on an unscaled open: a
+            scaled open, the 4K song at the 1440 cap, counts nothing
+            there, `decoder_path_visible`).
+         8. A G row that read true and then false is no failed open but a
+            MID-STREAM fall back (a ring full past `RING_WAIT`, a dead
+            ring, a refused picture, a lost device): WARN `mf_reader: a
+            decode error on the D3D11 path; this file goes on in
+            software`, the producer's WARN `the song's pictures changed
+            kind mid-song`, `mid_stream_fallbacks` +1, which fails gate
+            3's +0; the block is reported, never measured.
 
          A Blank block PATCHes nothing (it keeps the block before's
          `video_decode`): it cuts the program to Blank (source -2,
