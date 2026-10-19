@@ -822,18 +822,33 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
        (SNV's S is a hardware reader, one code path), the outgoing
        playlist's song during a cut, and the background jobs' readers
        (the video upgrade's facts, the #277 repair, the download
-       check open in that mode too, `video-upgrade.md`). So a +1 is
-       judged by the reader its WARN names (`file`, the open fall
-       back of step 7 or the mid-stream one of step 8): G's, failing
-       this gate, only when that file is the block's own content in
-       a G block whose per-song INFO since the restart (`paced
-       producer: the song's pictures`, its `playlist_id`) reads
-       `path="gpu_resident"`; an S block's own content falling back
-       is a fall back of the default path, reported and that block
-       never measured; any other reader's (a Blank block's included)
-       is reported, never G's. A gate-3 failure during the A/B stops
-       it and turns `video_decode` back to `software` the same day,
-       like "worse" (gate 4): the A/B resumes only once its cause is
+       check open in that mode too, `video-upgrade.md`; so every take
+       keeps `video_upgrade_enabled` off, put back in its `finally`,
+       as the automatic take does,
+       and the repair and the download check read only a failing or
+       a new file, never an A/B one). So a +1 is judged by the MODE
+       the reader of its WARN's `file` opened in, never by the per-
+       song `path` INFO (a G open that fell back, and a first copy
+       that failed, both log `path="ram"`):
+       - a mid-stream +1 (step 8's WARN) is G's when the last
+         `mf_reader: opened on the D3D11 path (hardware decode
+         requested)` INFO naming that `file` reads
+         `mode="gpu_resident"`, an outgoing song's during a cut
+         included;
+       - an open +1 (step 7's WARN) is G's when that file is a G
+         block's own content and no step-7 line since its restart
+         explains a base-mode open (a producer lost, not made or not
+         yet there, a retired producer's INFO,
+         `gpu_resident_blocked`);
+       - G's fails this gate; an S block's own content falling back
+         is a fall back of the default path, reported and that block
+         never measured; any other reader's (a Blank block's
+         included) is reported, never G's.
+
+       A gate-3 failure during the A/B stops it and turns
+       `video_decode` back to `software` the same day (NDI stays on
+       `gpu`, which passed gate 2 on its own; gate 4's full rollback
+       is for "worse"): the A/B resumes only once its cause is
        fixed (the lane's reading of plan §7);
      - NDI / A/V / max gates again with `video_decode` = `gpu`: the A/V
        gate, `max-gate`, cg OBS's `genlock-fifo audit`, `ndi.repeats` /
@@ -927,11 +942,16 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          its file to hold no picture over 1 s in the analysed span,
          + 15 s to + 55 s, and the Arena clip over its WHOLE loop, its
          seam included (Arena loops it on its own clock, never re-cued
-         per block): ffmpeg's `freezedetect` with `d=1` and its noise
-         `n` set to `wall_cadence.py`'s own same-picture threshold (the
-         default −60 dB passes a near-still shot that reader holds). A
-         still shot of their own would read as a hold on both sides
-         (the dead-stretch rule below). A Blank block has EVERY
+         per block). The check is `wall_cadence.py`'s own same-picture
+         comparison (extended as below) run over the file's decoded
+         frames in the region it reads, the clip's file looped once so
+         its last frame meets its first. ffmpeg is a coarser stand-in:
+         `-stream_loop 1 -i <file> -vf crop=<region>,extractplanes=y,
+         freezedetect=d=1:n=<that threshold as a ratio of full
+         scale>` (`n` is a normalised difference; its default −60 dB
+         passes a near-still shot the reader holds). A still shot of
+         their own would read as a hold on both sides (the
+         dead-stretch rule below). A Blank block has EVERY
          pipeline paused (no `transport` `Playing`): an off-program
          GPU-resident pipeline still decodes and copies, which would lift
          G's floor alone;
@@ -1101,10 +1121,12 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
            - the reader's stderr;
            - the block's counters: the on-program pipeline's
              `pacing.repeats` / `dropped` / `resyncs` and
-             `audio.underruns_mid` (`GET /api/v1/ndi/health`), its
-             `status.video_decode.pipelines[]` `ring.waits` /
-             `ring.full` / `ring.dead` (a bool), the process-wide
-             `status.video_decode.mid_stream_fallbacks`, and
+             `audio.underruns_mid` (`GET /api/v1/ndi/health`), EVERY
+             row of `status.video_decode.pipelines[]` (`ring.waits` /
+             `ring.full` / `ring.dead`, a bool: an outgoing G
+             pipeline's ring can fill in a cut), the process-wide
+             `status.video_decode.mid_stream_fallbacks` and
+             `open_fallbacks`, and
              `gpu.km_acquire_timeouts` / `abandoned` / `open_failures`;
            - the box's log since the restart: SongPlayer's WARN and
              ERROR lines, a display-driver reset, Arena's own lines.
@@ -1117,7 +1139,8 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
            failures are gate 3's verdict already, whatever the wall
            showed (`gpu.km_acquire_timeouts`, `abandoned`,
            `open_failures`, `ring.full`, `ring.dead` over the A/B; the
-           fall-back counters per block by their WARN). So the counters
+           fall-back counters by the mode of the reader their WARN
+           names, gate 3). So the counters
            and lines above
            are recorded, never used to name a side alone. A block whose
            log holds the ERROR `paced producer: decode error` is dropped
