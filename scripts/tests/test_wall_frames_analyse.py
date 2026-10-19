@@ -620,3 +620,18 @@ def test_distinct_boundaries_split_one_picture_from_two_at_same_picture():
         report = wa.analyse(readings, 30)
         assert report["boundaries"] == 41, weight
         assert report["distinct_boundaries"] == distinct, weight
+
+
+def test_distinct_boundaries_count_a_loop_from_the_step_that_wraps():
+    # A capture whose first step is the wrap: its second boundary is
+    # already the next loop's (59, 0..59, 0: 62 pictures).
+    readings = pacer_readings(30, Fraction(59), 62, frames=60)
+    report = wa.analyse(readings, 30, frames=60)
+    assert report["loops"] == 2 and report["distinct_boundaries"] == 62
+    # The loop starts at the wrap's own boundary: 55..59, 0..19, a jump back
+    # to 0 (a re-show in the same loop), then 20..29.
+    readings = pacer_readings(30, Fraction(55), 25, frames=60)
+    readings += pacer_readings(30, Fraction(0), 1, frames=60)
+    readings += pacer_readings(30, Fraction(20), 10, frames=60)
+    report = wa.analyse(readings, 30, frames=60)
+    assert report["jumps_back"] == 1 and report["distinct_boundaries"] == 35

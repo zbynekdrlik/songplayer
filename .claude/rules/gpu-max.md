@@ -2114,9 +2114,13 @@ Add; SongPlayer on Blank.
 | MAX on, L5 receiving it | 562–723 |
 
 The receive costs it: with no layer receiving MAX, a running SongPlayer
-loses nothing. What in the receive costs it is open: the first suspect,
-the hand-off, is ruled out below (#251 comment 6270228777), and so is the
-size (6271531140). That first suspect: since 0.82.0 (PP, no
+loses nothing. And ANY Spout receive costs it the same (#251 comment
+6275818478, `recv3_ab`: an all-black sender that is not SongPlayer's
+573–678, MAX 563–706, FHD `SP-program` 513–741, no receive 1198–1202 of
+~1 200 per 40 s), so the cause is Arena's Spout receive on SNV, not
+SongPlayer's sender, hand-off, size, content or uploads. The first
+suspect, the hand-off, was ruled out below (#251 comment 6270228777),
+and so was the size (6271531140). That first suspect: since 0.82.0 (PP, no
 reports) the shim's `SendSynced` holds Spout's texture-access mutex while
 it spins for the GPU copy, and every receiver takes that mutex to read.
 
@@ -2136,13 +2140,12 @@ The hand-off mode changed nothing (#251 comment 6270228777: every mode
 lost ~45–50 % of the clip's frames), so the next lever tried was the size
 Arena receives (#251 comment 6270237157). It changed nothing either (#251
 comment 6271531140: 3840×2160 a mean 632, 1920×1080 a mean 652 of 1 200
-per 40 s): the receive itself costs Arena half its frames while
-SongPlayer sends. `recv2_ab` (#251 comment 6274680850) found MAX or FHD
-`SP-program` received = loss in 18 of 20 takes, no receive = clean, but
-its independent sender's own picture changes add to the count, so
-whether any Spout sender's receive costs Arena frames waits on
-`recv3_ab` (an all-black test sender, queued there). Both settings stay,
-at their defaults:
+per 40 s). `recv2_ab` (#251 comment 6274680850: MAX or FHD `SP-program`
+received = loss in 18 of 20 takes, no receive = clean) and `recv3_ab`
+(6275818478, above) then showed it is any Spout receive. `recv4_ab`
+(queued there: one picture a second against 30) tells a cost per
+received copy from one paid every frame. Both settings stay, at their
+defaults:
 
 **The size:** `program_max_size` = `WxH` (trimmed; even sides, the width
 640..=3840, the height 360..=2160; anything else, absent included, is the
