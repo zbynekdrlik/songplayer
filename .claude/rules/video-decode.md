@@ -856,15 +856,24 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          unscaled, `hw_decode::scaled_open_safe`; name a 3840×2160 one),
          and automatic is a take of its own: the design's ≈ 132 vs ≈ 298
          MB/s, and #282 found the cap moves the wall's backs 10–15×).
-         `max_resolution` is also the DOWNLOAD cap (#282): for an
-         automatic take switch `video_upgrade_enabled` off, arm #230's
+         `max_resolution` is also the DOWNLOAD cap (#282), so an
+         automatic take, BEFORE it switches the cap: arms #230's
          background hold to the take's end (`background_hold_until_ms`,
          UTC ms, `background-hold.md`: no new download fetches a ≤ 2160
-         file that would stay after the take) and check per block that
-         the A/B songs' files are unchanged; when it ends, put
-         `max_resolution` and `video_upgrade_enabled` back to the values
-         found (a `finally`, like Arena's changes) and confirm
-         `max_height` reads 1440 again. A take at another
+         file that would stay after the take) and switches
+         `video_upgrade_enabled` off. A cut to `sp-slow` ends that hold
+         and one to `sp-90s` re-arms it for 4 h (`background_hold.rs`,
+         `RELEASE_SCENE` / `HOLD_SCENE`), and a dashboard cut names its
+         playlist's scene: so the take plays none of its contents from
+         ytslow or yt90s, reads `GET /api/v1/background-hold` `held` true
+         in every block (a block where it is false is dropped) and checks
+         per block that the A/B songs' files are unchanged; no
+         `deploy-pp` runs during it (PP's peer gate fails on SNV's hold,
+         503 `background-hold`). When it ends, a `finally` (like Arena's
+         changes) puts `max_resolution`, `video_upgrade_enabled` and
+         `background_hold_until_ms` back to the values found (`""` for
+         one that was not stored) and confirms `max_height` reads 1440
+         again. A take at another
          value of any of the three is a take of its own, never mixed into
          this one. Only the on-program pipeline
          decodes: judge strays by every pipeline's `transport` and pause
@@ -1001,93 +1010,108 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
            blocks of its own, interleaved with the others under the
            same levers;
        - **the block budget**: interleaved blocks of about a minute (a
-         switch and a 45 s take, below), every block type spread over whole ~45 min
+         switch and a 45 s take, below), every block type spread over
+         whole ~45 min
          drift cycles (like `fhd_ab2.ps1`), then the first side again;
          never a conclusion from a short take. Plan §7's ≥ 46 blocks were
          one drift cycle with one content per side; judged at ≥ 5 blocks
          a side per content, one Arena content takes about 60: (A)'s four
          SongPlayer contents × G / S × 5 = 40, the Arena clip's G / S
          × 5 = 10 and its (A) Blank 5, (B)'s Blank 5, plus (B)'s G / S
-         control. So each Arena content runs TWO drift cycles (≥ 90
-         blocks), or fewer SongPlayer contents per cycle; a content or a
+         control. So each Arena content runs TWO drift cycles (about 80
+         blocks of ~65 s), or fewer SongPlayer contents per cycle; a
+         content or a
          bin short of 5 blocks a side is reported, not judged;
-       - **a block's procedure** (review round 7): a PATCH alone does not
-         switch the decode path. `video_decode` = `gpu` applies at the
+       - **a block's procedure** (review rounds 7-17). A PATCH alone does
+         not switch the decode path: `video_decode` = `gpu` applies at the
          NEXT song's open, while `software` retires the producers within
-         one 5 s poll, so the two directions differ. Each block: PATCH,
-         wait at least one 5 s poll, restart the content (`POST
-         /api/v1/test-item/start {"clip"}`, or play the song again: a
-         Play claims no program, so on a playlist off program it plays
-         off program), then cut the program to the content's playlist
-         when it is not on program (`POST /api/v1/program/cut {"source":
-         <playlist id>}`: the test playlist for the clips; after a Blank
-         block, or between contents of different playlists), in that
-         order, as `post-deploy-wall-frames.spec.ts` does: cutting first
-         would let the paused playlist's ON pick a song of its own
-         (`WaitingForScene` + `SceneOn` → `SelectAndPlay`), while a
-         playlist already `Playing` keeps its song through the ON. Hold
-         `program_transition` / `program_transition_ms` at one value for
-         the take, recorded with the settings. Then a content block's
-         45 s take starts at a FIXED lead on the content's own clock:
-         `started_at_utc_ns` + 10 s (recorded; it fits the slowest
-         cut-over, the fade + the hold + one 5 s heartbeat, and a 60 s
-         clip ends after the take, + 55 s), so every analysed span runs
-         + 15 s to + 55 s into its content, whichever block came before.
-         By that instant all of these must hold, else the block is
-         dropped and run again: the restarted item is on air (`GET
-         /api/v1/program` `on_air_item` names it with a
-         `started_at_utc_ns` later than the restart request: a fresh
-         mark; `post-deploy-wall-frames.spec.ts`'s check of the row and
-         `position_ms` alone passes on the OLD play when two blocks in a
-         row share a content; a 60 s clip's own loop landing between the
-         request and the restart's first frame is a fresh mark too, at
-         most one pre-roll early); the `status.video_decode.pipelines[]`
-         row whose `playlist_id` is `on_air_item.playlist_id` reads its
-         side (G: `gpu_decoding` true; S: false or no row); the cut is
-         over, as a Blank block waits: no `transition.active` and the
-         outgoing playlist's `transport` no longer `Playing` (read on its
-         `/api/v1/ndi/health` row, refreshed at the pipeline's 5 s
-         heartbeat; `on_air_item` follows a fade's incoming side from its
-         first mixed boundary, and the outgoing playlist is paused only
-         after its hold). A G block whose row still reads false 30 s
-         after its restart is a failed G open (the producer's WARN `gpu
-         resident: no producer device yet` / `… was lost` / `… could not
-         be made`: the song decodes as before), reported, never
-         measured.
-         `gpu_decoding` alone is a level, and only that row says
-         anything: it can read the side before the new song's first
-         frame (a G row stays true until `song_ended`), and another
-         pipeline's row is stale (a paused pipeline keeps `true`:
-         `retire_producers` leaves the flag, and `song_ended` never runs
-         for a paused song). A Blank block PATCHes nothing
-         (it keeps the block before's `video_decode`): it cuts the
-         program to Blank (source -2, SongPlayer's own black) and pauses
-         every pipeline, opening no song, and its take starts once `GET
-         /api/v1/program` reads `source` -2 with no `transition.active`
-         and no pipeline's `transport` is `Playing` (the engine pauses
-         the outgoing playlist only after its fade's hold). EVERY block's
-         take (G, S and Blank alike) runs 45 s and only its last 40 s are
-         analysed, past each side's own transient.
+         one 5 s poll. The take holds `program_transition` /
+         `program_transition_ms` at their defaults (a fade of 300 ms),
+         recorded with the settings. A content block (G or S):
+         1. PATCH `video_decode`, wait at least one 5 s poll.
+         2. Restart the content: `POST /api/v1/test-item/start {"clip"}`,
+            or play the song again. A Play claims no program, so on a
+            playlist off program it plays off program.
+         3. Cut the program to the content's playlist when it is not on
+            program (`POST /api/v1/program/cut {"source": <playlist id>}`:
+            the test playlist for the clips; after a Blank block, or
+            between contents of different playlists). Restart first, then
+            cut, as `post-deploy-wall-frames.spec.ts` does: cutting first
+            would let the paused playlist's ON pick a song of its own
+            (`WaitingForScene` + `SceneOn` → `SelectAndPlay`), while a
+            playlist already `Playing` keeps its song through the ON.
+         4. Wait for the restart's FRESH mark: `GET /api/v1/program`
+            `on_air_item` names the item with a `started_at_utc_ns` later
+            than the restart request. The wall gate's check of the row and
+            `position_ms` alone passes on the OLD play when two blocks in a
+            row share a content; a 60 s clip's own loop landing between the
+            request and the restart is a fresh mark too, at most one
+            pre-roll early. No fresh mark within 30 s of the restart (a
+            refused cut, 409; a Play that never started) drops the block.
+         5. The 45 s take starts at a FIXED lead on the content's own
+            clock, `started_at_utc_ns` + 10 s, so every analysed span runs
+            + 15 s to + 55 s into its content whichever block came before
+            (a 60 s clip ends after it). The lead fits the slowest
+            cut-over at the default fade: the fade, the outgoing
+            playlist's hold of up to 15 cue slots, one 5 s heartbeat
+            (≈ 5.8 s); a longer fade needs a lead of the fade + 6 s.
+         6. By that instant both must hold, else the block is dropped and
+            run again (at most twice, a G re-run after the 30 s rebuild
+            backoff): the `status.video_decode.pipelines[]` row whose
+            `playlist_id` is `on_air_item.playlist_id` reads its side (G:
+            `gpu_decoding` true; S: false or no row), and the cut is over,
+            as a Blank block waits (no `transition.active`, the outgoing
+            playlist's `transport` no longer `Playing`, read on its
+            `/api/v1/ndi/health` row, refreshed at the pipeline's 5 s
+            heartbeat). `gpu_decoding` alone is a level, and only that row
+            says anything: it can read the side before the new song's
+            first frame (a G row stays true until `song_ended`), and
+            another pipeline's row is stale (a paused pipeline keeps
+            `true`: `retire_producers` leaves the flag, and `song_ended`
+            never runs for a paused song). `on_air_item` follows a fade's
+            incoming side from its first mixed boundary, and the outgoing
+            playlist is paused only after its hold.
+         7. A G block whose row is not true (false, or absent: a G open
+            that got no producer leaves no row) 30 s after its restart is a
+            FAILED G OPEN, checked before any re-run, reported, never
+            measured. Its cause is in the log: the producer's WARN `gpu
+            resident: the producer device was lost` / `… could not be
+            made`, its DEBUG `gpu resident: no producer device yet` (the
+            30 s rebuild backoff), a retired producer's INFO, a blocked
+            precondition (`gpu_resident_blocked`), the reader's open fall
+            back (WARN `mf_reader: hardware decode did not open; this file
+            decodes in software`, `open_fallbacks` +1: that song decodes in
+            SOFTWARE), or a picture in system memory (`mf_software` +1, the
+            producer's `path=ram` INFO).
+
+         A Blank block PATCHes nothing (it keeps the block before's
+         `video_decode`): it cuts the program to Blank (source -2,
+         SongPlayer's own black) and pauses every pipeline, opening no
+         song; its take starts once `GET /api/v1/program` reads `source`
+         -2 with no `transition.active` and no pipeline's `transport` is
+         `Playing` (the engine pauses the outgoing playlist only after its
+         fade's hold). EVERY block's take (G, S and Blank alike) runs 45 s
+         and only its last 40 s are analysed (a margin).
          `gpu.gpu_sides_per_s` and `max.upload_mb_s` are rates over the
          last 30 s (`UPLOAD_RATE_SPAN`), so they confirm a side only 30 s
          after the restart: read them at the block's end, never as its
          start. A block is its switch (the PATCH's poll, the restart, the
          cut, the 10 s lead) plus a 45 s take, about 65 s; a slow switch
-         runs the block longer, never shortens its take. The
-         switch holds the producer's build: a G song whose producer was
-         retired or let go since its pipeline's last G open (any S
-         block's PATCH retires EVERY pipeline's producer within one
-         poll, `precondition_changed`) builds a new one at its open, on
-         the emit thread, before `gpu_decoding` flips
-         (`PipelineGpu::song_mode`), and an S song after a G one lets
-         the retired producer go there too (`release_at_open`, in
-         `decode_mode_with`, before the pre-roll). The transients the
-         first 5 s hold, logged as facts, never used as a trigger: the
-         new ring slots made at the first copies (`ring.slots`); the
-         compositor re-opens a ring's slots it closed after 90 undrawn
-         composes (`ring_state::OPENED_IDLE_COMPOSES`, 3 s:
-         `gpu.gpu_opens` grows at nearly every G block), and closes an
-         old ring's slots up to 3 s after their last draw;
+         runs the block longer, never shortens its take. The switch holds
+         the producer's build: a G song whose producer was retired or let
+         go since its pipeline's last G open (any S block's PATCH retires
+         EVERY pipeline's producer within one poll,
+         `precondition_changed`) builds a new one at its open, on the emit
+         thread, before `gpu_decoding` flips (`PipelineGpu::song_mode`),
+         and an S song after a G one lets the retired producer go there
+         too (`release_at_open`, in `decode_mode_with`, before the
+         pre-roll). The transients the 10 s lead holds, logged as facts,
+         never used as a trigger: the new ring slots made at the first
+         copies (`ring.slots`); the compositor re-opening a ring's slots
+         it closed after 90 undrawn composes
+         (`ring_state::OPENED_IDLE_COMPOSES`, 3 s: `gpu.gpu_opens` grows at
+         nearly every G block), and closing an old ring's slots up to 3 s
+         after their last draw;
        - alongside: `max.upload_mb_s`, `ndi.repeats`,
          `ndi.readback_us_p99` (the plan's `readback_mb_s` is not in this
          build), Arena's CPU and FPS, and cg OBS's `genlock-fifo audit`;
