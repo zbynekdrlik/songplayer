@@ -755,16 +755,17 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
   once the one before held:**
   1. **The deploy at the default** (`video_decode` = `software`,
      `program_ndi_source` = `cpu`, and #251's two wall levers at their
-     defaults for BOTH hours: `program_max_size` and
-     `program_max_spout_send` unset, read before and after, the size as
-     `GET /api/v1/program` `max.width` / `height` = 3840×2160 and the
-     hand-off from `GET /api/v1/settings`, its only reading; a lever
-     moved between the two hours voids the comparison): every existing
-     gate holds, and the wall is measured an hour after the E2E against
-     an hour before
-     (`gpu-max.md`, "Judging a deploy on the wall", and since #251's
-     19.10 finding its "Arena loses its OWN frames": the pictures of the
-     content against its own rate next to the backs): this build changes
+     defaults for BOTH hours, read before and after: `program_max_size` as
+     `GET /api/v1/program` `max.width` / `height` = 3840×2160, and
+     `program_max_spout_send` as its STORED value in `GET /api/v1/settings`
+     (absent, `""` and `synced` are all the default; it is on no field of
+     `GET /api/v1/program`, and the INFO `program max: Spout hand-off
+     applied` marks when a change took effect, within one 5 s poll); a
+     lever moved between the two hours voids the comparison): every
+     existing gate holds, and the wall is measured an hour after the E2E
+     against an hour before (`gpu-max.md`, "Judging a deploy on the wall";
+     since #251's 19.10 finding the missing pictures next to the backs,
+     both read as in the main A/B below): this build changes
      the `program-max` thread at the default too (the standby black
      composed as Black, the same pixels; every compose's
      `record_compose`; the `gpu` read's window clone, the default-path
@@ -834,43 +835,49 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
        - preconditions: record the build, the settings, HAGS, Arena's
          uptime (no Arena restart inside a take), the heavy children and
          the background hold (`GET /api/v1/background-hold`). #251's two
-         wall levers, `program_max_spout_send` and `program_max_size`
-         (`gpu-max.md`, "Arena loses its OWN frames"), keep ONE value for
-         the whole take (read per block: the size as `GET /api/v1/program`
-         `max.width` / `height`, the hand-off from `GET /api/v1/settings`,
-         which is on no API field; a take at another value is a take of
-         its own, never mixed into this one);
-         only the
-         on-program pipeline decodes: judge strays by every pipeline's
-         `transport` and pause them (`video_decode.pipelines[]` lists
-         only the pipelines that decode GPU-resident or hold a producer,
-         and its `gpu_decoding` stays true through a pause: the plan's
-         `pipelines[].decoding` is not in this build, a P4 note);
+         wall levers (`gpu-max.md`, "Arena loses its OWN frames") keep ONE
+         value for the whole take, read per block as in gate 1 (the size
+         as `max.width` / `height`, the hand-off as its stored value in
+         `GET /api/v1/settings`); a take at another value is a take of its
+         own, never mixed into this one. Only the on-program pipeline
+         decodes: judge strays by every pipeline's `transport` and pause
+         them (`video_decode.pipelines[]` lists only the pipelines that
+         decode GPU-resident or hold a producer, and its `gpu_decoding`
+         stays true through a pause: the plan's `pipelines[].decoding` is
+         not in this build, a P4 note);
        - content, fixed: `wall-25` (blend) and `wall-30` (#272), Blank
          (the floor), one named 4K AV1 catalog song and one 1440p VP9
-         song. A Blank block has EVERY pipeline paused (no `transport`
-         `Playing`): an off-program GPU-resident pipeline still decodes
-         and copies, which would lift G's floor alone;
-       - **Arena's own content is the other load** (the 18.10 service, #251
-         comment 6263579491: the wall jumped back up to 48 times per 40 s
-         with SongPlayer on Blank, `max.upload_mb_s` 0, while Arena played
-         the operator's 4K DXV3 loops on L4, each ≈ 250 MB/s of texture
-         uploads). So every block records Arena's content: the
-         composition, the clips playing on each layer (name, codec, size,
-         rate) and the wall's distinct pictures per 40 s (18.10:
-         ≈ 2 150-2 310 in the half hour that juddered on Blank, ≈ 1 200
-         after it; which content made the difference is not known).
-         SongPlayer, CI and a script left running never trigger an Arena
-         clip (the operator's Stream Deck runs them); the A/B's own Arena
-         changes below are the main session's alone. A block whose Arena
-         content changed is dropped, and the A/B is read per Arena
-         content. Each Arena
+         song, each song's frame rate logged. A Blank block has EVERY
+         pipeline paused (no `transport` `Playing`): an off-program
+         GPU-resident pipeline still decodes and copies, which would lift
+         G's floor alone;
+       - **Arena's content is the other load.** The 18.10 service juddered
+         on two chains (#251 comment 6263579491, corrected by 6263853064):
+         SongPlayer's songs through `SP-program-MAX`, and, with SongPlayer
+         on Blank (`max.upload_mb_s` 0), the worship background from the
+         song notebook's own Resolume over NDI ("SNV BG", ≈ 57 then
+         ≈ 30 distinct pictures per second), up to 48 backs per 40 s. And
+         with SongPlayer running and a layer receiving `SP-program-MAX`,
+         Arena loses 38–58 % of its own clip's frames even on Blank (#251
+         comments 6264648133 and 6266710679): backs and missing pictures
+         were both seen. So every block records Arena's content: the
+         composition, every layer's clip or NDI source (name, codec, size,
+         rate) and the wall's distinct pictures per 40 s. SongPlayer, CI
+         and a script left running never trigger an Arena clip (the
+         operator's Stream Deck runs them). The A/B's own Arena changes
+         (feed (B), the Arena-native clip below) are the main session's
+         alone, allowed for tests on SNV's bridge Arena (#251 comment
+         6263953328), made only while the rig lease is free
+         (`lease_free.ps1`'s exit code, binding), every clip and setting
+         put back in a `finally` (`gpu-max.md`, "How to judge any wall
+         change"). A block whose Arena content anyone else changed is
+         dropped, and the A/B is read per Arena content. Each Arena
          content gets its own Blank blocks, interleaved with its G and S
-         blocks: SongPlayer's share is a side's bin minus the Blank bin
-         under the SAME Arena content, never against a Blank taken under
-         another. Each Arena content needs its own whole drift cycle (the
-         ≥ 46 blocks below); a content the take did not cover that long
-         is reported, not judged;
+         blocks: SongPlayer's share is a side's reading minus the Blank
+         reading under the SAME Arena content, never against a Blank taken
+         under another. Each Arena content needs its own whole drift cycle
+         (the ≥ 46 blocks below); a content the take did not cover that
+         long is reported, not judged;
        - per block also: `nvidia-smi --query-gpu=utilization.gpu,
          utilization.memory,utilization.decoder,memory.used,
          pcie.link.width.current` and `nvidia-smi dmon -s t` (the PCIe rx
@@ -879,36 +886,38 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          the background hold (a job that starts inside a block drops the
          block);
        - feeds: (A) the operator's clip on `SP-program-MAX`, and (B) the
-         independent Spout sender `spout_test_sender.py` on the clip,
-         the control that isolates SongPlayer's own disturbance. (B)
-         re-points the operator's clip to that sender (#251's method,
-         comment 6212436810): an Arena change on SNV's bridge Arena,
-         which the owner allowed for tests (#251 comment 6263953328),
-         made by the main session only, under the lease and `finally`
-         rule below;
-       - the metric: exact jumps back per 40 s (`wall_frames.py` /
-         `wall_analysis.py`, `--refresh-hz 60`) and one-refresh runs,
-         each block binned by the offer AND the compose phase after the
-         primary vblank (`max.send_phase_us_*`, `compose_phase_us_*`);
-         and, since #251's 19.10 finding (comment 6270228777: the room's
-         judder was MISSING frames, Arena's own 30 fps clip at 538-746
-         of 1200 per 40 s while a layer receives `SP-program-MAX`, with
-         few backs), the MISSING pictures per 40 s: the content's own
-         rate × 40 s minus its distinct FORWARD pictures
-         (`wall_cadence.py`; for `wall-25` / `wall-30` the frame reader's
-         own loss count), never the raw count, which re-shows inflate
-         (#251's Part 2 read ~1 200-1 370 per 40 s for 30 fps songs). It
-         is read for SongPlayer's content, and for an Arena-native clip
-         read in its OWN layer and screen region, apart from the layer
-         receiving `SP-program-MAX` (never blended Add over SongPlayer's
-         picture), while that receiving layer shows the block's G or S
-         content (on Blank G and S send the same black: a Blank block is
-         the floor, never a side). Setting up that clip is an Arena
-         change like feed (B): the main session's alone, allowed for
-         tests (#251 comment 6263953328), only while the rig lease is
-         free (`lease_free.ps1`'s exit code, binding), every clip and
-         setting put back in a `finally` (`gpu-max.md`, "How to judge
-         any wall change");
+         independent Spout sender `spout_test_sender.py` on the clip (#251's
+         method, comment 6212436810, an Arena change as above): nothing
+         receives `SP-program-MAX` under (B), while SongPlayer still
+         decodes and composes, so (B) is the control that shows
+         SongPlayer's decode load without the receive. The acceptance and
+         "worse" judge (A); (B) is reported beside it;
+       - the metrics, every take analysed over the same 40 s:
+         - the backs: exact jumps back per 40 s and one-refresh runs
+           (`wall_frames.py` / `wall_analysis.py`, `--refresh-hz 60`, for
+           `wall-25` / `wall-30`; `wall_cadence.py`'s `exact_backs` for the
+           songs and the Arena clip), each block binned by the offer AND
+           the compose phase after the primary vblank
+           (`max.send_phase_us_*`, `compose_phase_us_*`);
+         - the MISSING pictures (#251 comment 6264648133: the room's
+           judder is frames missing, which a count of backs never sees):
+           the content's reference rate × 40 s minus its distinct FORWARD
+           pictures (`wall_cadence.py`; for `wall-25` / `wall-30` the
+           frame reader's own loss count), never the raw count, which
+           re-shows inflate (#251's Part 2 read ~1 200-1 370 per 40 s for
+           30 fps songs). The reference is what the content shows on the
+           wall. For SongPlayer's content it is the program's own pictures:
+           1 200 per 40 s for a 30 fps source, a 20-25 fps one (blended,
+           `genlock.md` "BLENDED") and a 50 / 59.94 fps one, the source's
+           rate otherwise (a 15 fps source 600). For an Arena clip it is
+           its own rate (a 30 fps DXV loop 1 200);
+         - both are read for SongPlayer's content and for an Arena-native
+           clip read in its OWN layer and screen region, apart from the
+           layer receiving `SP-program-MAX` (never blended Add over
+           SongPlayer's picture), while that layer shows the block's G or
+           S content (on Blank G and S send the same black: a Blank block
+           is the floor, never a side). Under (B) they read the test
+           sender's pictures (its own rate) and the Arena clip;
        - interleaved one-minute blocks over ≥ 46 blocks (a whole ~45 min
          drift cycle, every side's blocks spread over it, like
          `fhd_ab2.ps1`), then the first side again; never a conclusion
@@ -919,7 +928,7 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          one 5 s poll, so the two directions differ. Each block: PATCH,
          wait at least one 5 s poll, restart the content (`POST
          /api/v1/test-item/start {"clip"}`, or play the song again), and
-         start the block's 40 s take once `status.video_decode.pipelines[]
+         start the block's take once `status.video_decode.pipelines[]
          .gpu_decoding` reads its side (G: true; S: false or no row; the
          producer reports a song's first frame at once).
          `gpu.gpu_sides_per_s` and `max.upload_mb_s` are rates over the
@@ -928,46 +937,64 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          start. A block whose switch took over 20 s is lengthened, never
          its take shortened. Each G block after an S one rebuilds the
          producer device on the emit thread and makes new ring slots
-         (`gpu.gpu_opens` and `ring.slots` grow): drop that take's first
-         5 s, or report it apart;
+         (`gpu.gpu_opens` and `ring.slots` grow): that take runs 45 s and
+         only its last 40 s are analysed, so every analysed span is 40 s;
        - alongside: `max.upload_mb_s`, `ndi.repeats`,
          `ndi.readback_us_p99` (the plan's `readback_mb_s` is not in this
          build), Arena's CPU and FPS, and cg OBS's `genlock-fifo audit`;
-       - **acceptance (P3a's end state):** for (A) with `wall-25`,
-         `wall-30` and the 4K song, every phase bin within the Blank band
-         (+ one standard deviation of Blank) of the same Arena content
-         (0–3 per 40 s with no Arena loop playing, plan §7), and no bin
-         worse than S. P3a can at best bring a side to that Blank floor
-         under the SAME MAX levers, and the floor is #251's: while a
-         layer receives `SP-program-MAX`, Arena loses about half of its
-         own clip's frames even with SongPlayer on Blank and
-         `max.upload_mb_s` 0 (538-746 of 1200 per 40 s, #251 comments
-         6266710679 and 6270228777), which no P3a side can lift
-         (`program_max_size` is #251's lever). So a met P3a acceptance
-         is never reported as the room's judder fixed;
-       - **"worse"** (gate 4's revert), either of:
+       - **acceptance (P3a's end state)**, for (A) under the same Arena
+         content and the same MAX levers:
+         - the backs of `wall-25`, `wall-30` and the 4K song: every phase
+           bin within Blank's band (Blank's mean + one standard deviation;
+           plan §7's rest measurements read 0–3 per 40 s on a quiet box);
+         - the Arena clip's missing pictures in G's blocks within its
+           Blank blocks' band (mean + one standard deviation) over the
+           cycle;
+         - no "worse" test below fires.
+
+         P3a can at best bring a side to that Blank floor, and the floor
+         is #251's: while a layer receives `SP-program-MAX`, Arena loses
+         38–58 % of its own clip's frames even with SongPlayer on Blank
+         and `max.upload_mb_s` 0 (509–746 of 1 200 per 40 s, #251
+         comments 6264648133 and 6266710679), which no P3a side can lift
+         (`program_max_size` is #251's lever). So a met P3a acceptance is
+         never reported as the room's judder fixed. This is the lane's
+         reading of plan §7; the main session may set another before the
+         take;
+       - **"worse"** (gate 4's revert), either of, judged for (A):
          - the backs: a phase bin whose G mean is over S's by more than
            one standard deviation of S's blocks in that bin, judged only
            where each side has ≥ 5 blocks in the bin. The ≥ 46 blocks of
            a cycle are shared by G, S and Blank, so size the bins (fewer,
            wider) until each holds ≥ 5 a side, or report the bin, not
            judged;
-         - the missing pictures (above): G's mean over S's by more than
-           one standard deviation of S's, judged per Arena content over
-           ALL of a side's blocks in the cycle (≥ 5 a side), never per
-           phase bin.
+         - the missing pictures: G's mean over S's by more than one
+           standard deviation of S's, per content (each SongPlayer content
+           and the Arena clip apart) under each Arena content, over ALL of
+           a side's blocks in the cycle (≥ 5 a side), never per phase bin.
 
          This is the lane's reading of plan §7's "a worse A/B"; the
          main session may set another test before the take;
-       - before the 72 h run, which runs `gpu` during services: the
-         main session decides the two follow-up candidates above (the
+       - before the 72 h run, which runs `gpu` during services, the main
+         session decides on #279: the two follow-up candidates above (the
          drop race; a ring killed on a healthy device, reopened in
-         software);
-       - then the 72 h continuous monitor (`wall_monitor5.py`, plan §9
-         P3a) on normal services, each sample logged with Arena's
-         composition and playing clips, SongPlayer's program source
-         (Blank, or which song) and the side, and read per Arena content
-         like the A/B; the table and the raw log paths go on #279.
+         software), and the run's deploy policy. Every dev push deploys to
+         SNV, whose `post-deploy-preview.spec.ts` and
+         `post-deploy-owner-path.spec.ts` fail on a GPU-decoded song before
+         P3b, and a 72 h deploy hold is a freeze the owner ruled out on
+         18.10 (green builds deploy). So the run comes after P3b, or runs
+         in segments: switched back (`video_decode` first) before each
+         deploy and on again after its E2E, the samples around it
+         excluded;
+       - then the 72 h continuous monitor (plan §9 P3a; its
+         `wall_monitor5.py` predates the missing pictures: extend it, or
+         run `wall_cadence.py` takes) on normal services. Each sample
+         logs the backs and the missing pictures, Arena's composition and
+         its playing clips or NDI sources, the worship NDI stream's own
+         frame timing at SNV (#251 comment 6263853064), SongPlayer's
+         program source (Blank, or which song) and the side. It is read
+         per Arena content like the A/B; the table and the raw log paths
+         go on #279.
   4. **A worse A/B is reverted the same day** ("worse" as defined above;
      `video_decode` back to `software` first, then NDI: the rollback order
      above). A side no worse than software but outside the acceptance band
@@ -978,7 +1005,8 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
   `post-deploy-preview.spec.ts` and `post-deploy-owner-path.spec.ts` find
   no live preview on a GPU-decoded song (none before P3b): no deploy
   during the A/B window, and switch it back before one (`video_decode`
-  first); never on PP before P3b (above).
+  first); the 72 h run's deploy policy is above; never on PP before P3b
+  (above).
 
 ## Tests and gates
 

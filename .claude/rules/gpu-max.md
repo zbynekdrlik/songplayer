@@ -21,7 +21,9 @@ paths:
 # The `SP-program-MAX` GPU compositor and Spout sender: `crates/sp-gpu` (#223 S1a, S1b) and its runtime wiring (S2)
 
 Design: #223 revision 3, R3-2 (comment 5979609879). `SP-program-MAX` is a
-FIXED 3840×2160 canvas (owner, 3.10.2026: "4k", "both outputs static"). A 4K
+FIXED 3840×2160 canvas (owner, 3.10.2026: "4k", "both outputs static"; since
+#251 the runtime `program_max_size` can set another for the wall's A/B,
+"Arena loses its OWN frames" below). A 4K
 fade costs ~40–45 ms on the CPU, over the 33.3 ms slot, so MAX is composed on
 the GPU. This crate is the compositor (device, upload, draw, readback) and,
 since S1b, its Spout sender (below); S2 wires both into the program output
@@ -104,7 +106,9 @@ below).
     every later compose; `remove_target(id)` stops it (never the
     primary). sp-server's production compositor's primary is
     `FHD_TARGET` and it adds `MAX_TARGET` while MAX is on (#279 P1b; #251
-    step 2 added `FHD_TARGET` to MAX's). The ids and
+    step 2 added `FHD_TARGET` to MAX's; since #251's `program_max_size`
+    MAX's target is `max_target()`, 3840×2160 unless the setting names
+    another). The ids and
     the draw order (primary first, then as added; an id never reused) are
     the pure `targets.rs` `Targets<T>`, which `win/mod.rs` holds its
     targets in.
@@ -1086,9 +1090,10 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   Toggle it with `PATCH /api/v1/settings {"program_max_enabled": "false"}`
   (a flat body; `api/program_tests_max.rs` saves it through the router and
   reads it back); no restart.
-- `GET /api/v1/program` (and the cut answer) → `max {enabled, state, width:
-  3840, height: 2160, submitted, coalesced, failed, upload_us_p99,
-  draw_us_p99, send_us_p99, upload_mb_s, uploads_per_s (#279 P0, below),
+- `GET /api/v1/program` (and the cut answer) → `max {enabled, state, width,
+  height (the applied `program_max_size`, 3840×2160 by default),
+  submitted, coalesced, failed, upload_us_p99, draw_us_p99, send_us_p99,
+  upload_mb_s, uploads_per_s (#279 P0, below),
   send_at_us_p50/p99/max, send_late,
   vblank_output, vblank_state, vblank_tracking, vblank_period_ns, vblank_phase_us,
   compose_phase_us, send_off_grid, send_phase_us_p50/p99,
@@ -1546,8 +1551,9 @@ nothing on air (default `cpu`).
 
 - The production compositor's PRIMARY target is the FHD program
   (`SpoutGpu::compositor` = `Compositor::with_size` of `FHD_TARGET`),
-  there for the compositor's life. MAX's 3840×2160 target is ADDED
-  (`add_target(MAX_TARGET)`, `MaxWorker::make_max`) only while MAX is
+  there for the compositor's life. MAX's target (3840×2160 unless
+  `program_max_size`, #251) is ADDED (`add_target` of `max_target()`,
+  `MaxWorker::make_max`) only while MAX is
   wanted, with its sender `SpoutSender::for_target(&c, max,
   SPOUT_SENDER_NAME)`, and taken off with it (`drop_max`: the sender
   first, then `remove_target`). The FHD Spout sender is `new_fhd(&c,
@@ -2138,8 +2144,10 @@ canvas 3840×2160, `program_max_phase::program_max_size`).
   the same boundary's build adds the target at the new size (`MAX_FIT`,
   filling its width) with a new sender.
 - `GET /api/v1/program` `max.width` / `height` report the applied size. The
-  hand-off mode is on no API field: read `program_max_spout_send` from `GET
-  /api/v1/settings`.
+  hand-off mode is on no field of `GET /api/v1/program`: `GET
+  /api/v1/settings` shows its STORED value (absent, `""` and `synced` are
+  all the default), applied within one 5 s poll (the INFO `program max:
+  Spout hand-off applied` marks a change).
 - The post-deploy MAX gate (`e2e/max-gate.ts`) requires 3840×2160, so an
   A/B value left set fails the next deploy's E2E.
 
