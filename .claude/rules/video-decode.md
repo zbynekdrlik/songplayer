@@ -536,8 +536,11 @@ default:
 - each `/api/v1/ndi/health` row takes the table's lock to read
   `gpu_decoded`; the idle heartbeat calls `release_idle` (nothing to let
   go without a producer);
-- the log lines: the reader's open INFO names `mode`, and the bench's
-  start line logs `mode` where it logged `hw`.
+- the log lines: the reader's open INFO names `mode`, the bench's start
+  line logs `mode` where it logged `hw`, and the settings task's INFO
+  (`settings applied`) also fires on a `program_ndi_source` change (gate
+  2's flip logs it);
+- the bench's report carries `gpu_resident` and `ring` (`diag-bench.md`).
 
 **Never set `video_decode` = `gpu` on PP before P3b** (the design's
 shared-benefit line: PP's preview gate keeps software until then). A
@@ -561,9 +564,8 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
 - **When `gpu` stops taking effect** (switched off, or `program_ndi_source`
   back to `cpu`; review rounds 1-2; an addition to the design, which
   applies `video_decode` at each song's open: needed, or NDI would show
-  the playing song black on the canvas, and the main session ratifies it
-  on #279), the settings task retires every live
-  producer (`gpu_resident::precondition_changed` →
+  the playing song black on the canvas), the settings task retires every
+  live producer (`gpu_resident::precondition_changed` →
   `Pipelines::retire_producers` → `ProducerGpu::retire`): a song playing
   GPU-resident reads its pictures back from its next one, the GPU decoder
   going on (`mf_reader_resident.rs`: a retired producer's surfaces take
@@ -620,6 +622,12 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
 - **The decode cap** (review round 1): `gpu` in effect takes the hardware
   decode's cap (`max_resolution` automatic = 2160) even with
   `video_hw_decode` off (`load_settings`: `hw || Resident::On`).
+- **The deliberate additions to the design, for the main session to
+  ratify on #279 in one ROZHODNUTÉ** (review rounds 1-7): the mid-song
+  retire (above); the idle release counted from the pipeline going idle
+  (its idle fill's first heartbeat since the last open, so a long song
+  never counts as idle); the producer let go at once at an open while
+  `gpu` does not take effect; the decode cap `hw || Resident::On` (above).
 - **The producer** (`sp_gpu::ProducerGpu`, `gpu-max.md`) is ONE
   `VideoDevice` and the pipeline's 20-slot `PictureRing` on it, one per
   PIPELINE (`gpu_resident::PipelineGpu`, a `Lease`, in the pipeline's
@@ -644,7 +652,8 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
     thread instead. The cost falls only at a pipeline's first
     GPU-resident song, after a release, a backoff or a retire; moving
     the build onto the decode thread (and the drop off the emit thread)
-    is P4's.
+    is a follow-up candidate the lane returned to the main session (to
+    file, or add to P4's scope on #279).
 - **The open** (`open_with(path, GpuResident(p), cap)`): `HwSession`
   (`video/hw_session.rs`) resets its DXGI device manager to the
   PRODUCER's device (`HwDevice::Producer`) instead of a new
@@ -810,11 +819,33 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
        fixed protocol:
        - preconditions: record the build, the settings, HAGS, Arena's
          uptime (no Arena restart inside a take) and the heavy children;
-         only the on-program pipeline decodes (every pipeline's
-         `transport` and `video_decode.pipelines[]` read, strays paused);
+         only the on-program pipeline decodes: judge strays by every
+         pipeline's `transport` and pause them (`video_decode.pipelines[]`
+         lists only the pipelines that decode GPU-resident or hold a
+         producer, and its `gpu_decoding` stays true through a pause: the
+         plan's `pipelines[].decoding` is not in this build, a P4 note);
        - content, fixed: `wall-25` (blend) and `wall-30` (#272), Blank
          (the floor), one named 4K AV1 catalog song and one 1440p VP9
          song;
+       - **Arena's own content is the other load** (the 18.10 service, #251
+         comment 6263579491: the wall jumped back up to 48 times per 40 s
+         with SongPlayer on Blank, `max.upload_mb_s` 0, while Arena played
+         the operator's 4K DXV3 loops on L4, each ≈ 250 MB/s of texture
+         uploads). So every block records Arena's content: the
+         composition, the clips playing on each layer (name, codec, size,
+         rate) and the wall's distinct pictures per 40 s (18.10:
+         ≈ 2 150-2 310 in the half hour that juddered on Blank, ≈ 1 200
+         after it; which content made the difference is not known).
+         Nothing here triggers an Arena clip (the operator's Stream Deck
+         alone runs them): a
+         block whose Arena content changed is dropped, and the A/B is
+         read per Arena content. Each Arena content gets its own
+         SongPlayer Blank blocks, interleaved with the A and B blocks:
+         SongPlayer's share is a side's bin minus the Blank bin under the
+         SAME Arena content, never against a Blank taken under another;
+       - per block also: `nvidia-smi` PCIe link width (x8 of x16 on SNV
+         since 18.10) and its rx / tx throughput, and MAX's
+         `compose_late` / `slot_repicks` deltas;
        - feeds: (A) the operator's clip on `SP-program-MAX`, and (B) the
          independent Spout sender `spout_test_sender.py` on the clip,
          the control that isolates SongPlayer's own disturbance;
@@ -825,17 +856,37 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
        - interleaved one-minute blocks over ≥ 46 blocks (a whole ~45 min
          drift cycle per side, like `fhd_ab2.ps1`), then A again; never a
          conclusion from a short take;
+       - **a block's procedure** (review round 7): a PATCH alone does not
+         switch the decode path. `video_decode` = `gpu` applies at the
+         NEXT song's open, while `software` retires the producers within
+         one 5 s poll, so the two directions differ. Each block: PATCH,
+         wait at least one 5 s poll, restart the content (`POST
+         /api/v1/test-item/start {"clip"}`, or play the song again), and
+         count the block only once `status.video_decode.pipelines[]
+         .gpu_decoding`, `gpu.gpu_sides_per_s` and `max.upload_mb_s` read
+         its side. Each gpu block after a software one rebuilds the
+         producer device on the emit thread and makes new ring slots:
+         drop that block's head, or report it apart;
+       - alongside: `max.upload_mb_s`, `ndi.repeats`,
+         `ndi.readback_us_p99` (the plan's `readback_mb_s` is not in this
+         build), Arena's CPU and FPS, and cg OBS's `genlock-fifo audit`;
        - **acceptance (P3a's end state):** for (A) with `wall-25`,
          `wall-30` and the 4K song, every phase bin within the Blank band
-         (0–3 per 40 s, + one standard deviation of Blank), and no bin
+         (+ one standard deviation of Blank) of the same Arena content
+         (0–3 per 40 s with no Arena loop playing, plan §7), and no bin
          worse than the software side;
+       - before the 72 h run, which runs `gpu` during services: the
+         main session decides the two follow-up candidates above (the
+         drop race; a ring killed on a healthy device, reopened in
+         software);
        - then the 72 h continuous monitor (`wall_monitor5.py`, plan §9
          P3a) on normal services; the table and the raw log paths go on
          #279.
   4. **A worse A/B is reverted the same day** ("worse" = any phase bin
-     over the software side's, or outside the acceptance band above;
-     `video_decode` back to `software` first, then NDI: the rollback order
-     above).
+     over the software side's; `video_decode` back to `software` first,
+     then NDI: the rollback order above). A side no worse than software
+     but outside the acceptance band is no revert: P3a's end state is not
+     reached, recorded on #279 for the main session to decide.
 
   Throughout: while `video_decode` = `gpu` is set on SNV,
   `post-deploy-preview.spec.ts` and `post-deploy-owner-path.spec.ts` find

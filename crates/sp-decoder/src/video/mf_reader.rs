@@ -46,8 +46,8 @@
 //! exactly as after any decode error on the D3D path, and lets go of its
 //! session: the session's reference to the producer goes, the reader's
 //! `mode` keeps one to the song's end. The producer stays in its
-//! pipeline's lease, dropped at the next GPU-resident open only if its
-//! ring died.
+//! pipeline's lease, which decides its life (`gpu_resident::Lease`: a dead
+//! ring is dropped at the next GPU-resident open with the 30 s backoff).
 
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
