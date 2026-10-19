@@ -212,11 +212,13 @@ imports `wall_clip`, `wall_analysis` (with `wall_spans`) and
   poll included, and the longest its own polls saw the output HOLD. An
   empty dxcam poll proves nothing new was presented, so a span holds
   but for the blind span of the picture that ended it (that picture
-  can have come anywhere in it), and the capture's end holds whole (its
-  last poll found nothing new). A starved capture reads a long still
+  can have come anywhere in it) and the acquire window of the one that
+  began it (`Timing.late`: a present inside it IS that picture), and
+  the capture's end holds whole but for that window (its last poll
+  found nothing new). A starved capture reads a long still
   span that holds little; a hold reads in both, whatever else the take
   saw. `blind_ms_max` and `interval_ms_max` stay take-wide and between
-  pictures only. Tests `test_wall_still.py`; hand mutants 28 of 28
+  pictures only. Tests `test_wall_still.py`; hand mutants 37 of 37
   killed.
 - `distinct_boundaries` (#279 P3a's A/B, `video-decode.md`): the distinct
   pictures the boundaries showed, numbered on across the clip's loops, a

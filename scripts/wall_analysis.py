@@ -886,7 +886,9 @@ def capture_report(times: list[float], timing: Timing) -> dict:
     """The capture's own cadence: the interval between pictures (ms), how
     far one instant may be off (ms), the pictures after a span it can have
     missed a whole refresh in (``blind_pictures``), the longest blind span
-    (ms), and the longest span with no new picture (``still_report``)."""
+    (ms), and ``wall_spans.still_report``: the longest span with no new
+    picture (``still_ms_max``) and the longest the output surely held
+    (``held_ms_max``)."""
     gaps = [(b - a) * 1000 for a, b in zip(times[:-1], times[1:])]
     if not gaps:
         return {

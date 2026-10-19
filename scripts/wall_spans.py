@@ -6,9 +6,10 @@
 edges included (dxcam: its first and last poll). ``held_ms_max`` is the
 longest the output SURELY held: an empty dxcam poll proves nothing new was
 presented (``wall_frames.poll_blind``), so a span is held but for the blind
-span of the picture that ended it, and the capture's end whole. A hold over
-1 s with the polls on reads in both; a capture that starved reads a long
-still span that holds little.
+span of the picture that ended it and the acquire window of the one that
+began it (``Timing.late``), and the capture's end whole but for that window.
+A hold over 1 s with the polls on reads in both; a capture that starved
+reads a long still span that holds little.
 """
 
 from __future__ import annotations
@@ -25,18 +26,23 @@ def still_spans(times: list[float], timing: Timing) -> list[tuple[float, float]]
     (``span``: dxcam's first and last poll), with how much of it the output
     surely held: an empty poll proves nothing new was presented, and the
     picture that ended the span can have come anywhere in its blind span,
-    so the span less that blind span; the capture's end, whole (its last
-    poll found nothing new). A starved capture's span holds little."""
+    so the span less that blind span and less the acquire window of the
+    picture that began it; the capture's end, whole but for that window
+    (its last poll found nothing new). A starved capture's span holds
+    little."""
     if not times and timing.span is None:
         return []
     start, end = timing.span or (times[0], times[-1])
     blind = timing.blind or [math.inf] * len(times)
+    # dxcam stamps a poll before its grab (``Timing.late``): a present inside
+    # the picture before's acquire window IS that picture, never held.
+    late = [0.0, *(timing.late or [0.0] * len(times))]
     edges = [start, *times]
     spans = [
-        (b - a, max(0.0, b - a - blind[k]))
+        (b - a, max(0.0, b - a - blind[k] - late[k]))
         for k, (a, b) in enumerate(zip(edges[:-1], edges[1:]))
     ]
-    spans.append((end - edges[-1], end - edges[-1]))
+    spans.append((end - edges[-1], max(0.0, end - edges[-1] - late[-1])))
     return spans
 
 

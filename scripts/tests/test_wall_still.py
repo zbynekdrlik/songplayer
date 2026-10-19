@@ -37,7 +37,11 @@ def every_ms(start: float, end: float) -> list[float]:
     return [start + n / 1000 for n in range(round((end - start) * 1000) + 1)]
 
 
-def capture(presents: list[float], polls: list[float]) -> dict:
+def capture(
+    presents: list[float], polls: list[float], late: dict[int, float] | None = None
+) -> dict:
+    """``late``: picture index → its grab's acquire window after its stamp
+    (a preempted grab); every other grab acquires at its stamp."""
     times, blind = dxcam(presents, polls)
     readings = pacer_readings(30, Fraction(100), len(times), frames=1500, refreshes=1)
     report = wa.analyse(
@@ -48,6 +52,7 @@ def capture(presents: list[float], polls: list[float]) -> dict:
         span=(polls[0], polls[-1]),
         refresh_hz=60,
         min_boundaries=1,
+        late=[(late or {}).get(k, 0.0) for k in range(len(times))],
     )
     return report["capture"]
 
@@ -138,3 +143,29 @@ def test_still_spans_without_a_span_or_blind_spans():
         "held_ms_max": 1750.0,
     }
     assert math.isfinite(ws.still_report([0.0, 0.5, 1.75], timing)["held_ms_max"])
+
+
+def test_a_preempted_grab_holds_its_acquire_window_less():
+    # The picture before the 1.5 s hold acquired 40 ms after its stamp: a
+    # present in those 40 ms would have been that picture, never held.
+    presents = at_60_hz(0.0005, 60) + at_60_hz(2.5005, 60)
+    report = capture(presents, every_ms(0.0, 3.5), late={59: 0.04})
+    assert report["still_ms_max"] == pytest.approx(2501 - 984, abs=1)
+    assert report["held_ms_max"] == pytest.approx(2500 - 984 - 40, abs=1)
+    # The same at the capture's end: the tail less the last grab's window.
+    report = capture(at_60_hz(0.0005, 60), every_ms(0.0, 2.5), late={59: 0.03})
+    assert report["held_ms_max"] == pytest.approx(2500 - 984 - 30, abs=1)
+
+
+def test_still_spans_take_each_window_from_the_picture_that_began_the_span():
+    timing = wa.Timing(
+        [1.0, 2.0], [0.001, 0.001], None, False, (0.0, 2.5), 0.0, [0.04, 0.03]
+    )
+    spans = ws.still_spans([1.0, 2.0], timing)
+    assert spans == [
+        (1.0, pytest.approx(0.999)),
+        (1.0, pytest.approx(0.959)),
+        (0.5, pytest.approx(0.47)),
+    ]
+    short = wa.Timing([1.0], [0.001], None, False, (0.0, 1.01), 0.0, [0.05])
+    assert ws.still_spans([1.0], short)[-1] == (pytest.approx(0.01), 0.0)

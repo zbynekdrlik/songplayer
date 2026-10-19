@@ -808,11 +808,18 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
        `gpu.km_acquire_timeouts`, `gpu.abandoned`, `gpu.open_failures`
        (each a ring side drawn BLACK on the wall or NDI; WARP never runs
        the keyed mutexes against real NVDEC surfaces, so only the box
-       proves them), `video_decode.mid_stream_fallbacks` and
-       `open_fallbacks` (a fall back is the software decode this file
-       bans while SNV plays to a room), and at the 1440 cap
+       proves them) and every pipeline's `ring.full` (`ring.dead`
+       stays false): G's OWN failures, which only G has (its ring and
+       the compositor's draw of it); `video_decode.mid_stream_fallbacks`
+       and `open_fallbacks` (a fall back is the software decode this
+       file bans while SNV plays to a room); and at the 1440 cap
        `video_decode.scale_refusals` (a 4K song that opened unscaled on
-       either side);
+       either side). The two fall-back counters are process-wide and
+       grow on S's own D3D11 reader too (SNV's S is a hardware reader,
+       one code path): a +1 is judged per block by the `mf_reader`
+       WARN since its restart (step 8): in a G block it fails this
+       gate, in an S block it is a fall back of the default path,
+       reported, never G's;
      - NDI / A/V / max gates again with `video_decode` = `gpu`: the A/V
        gate, `max-gate`, cg OBS's `genlock-fifo audit`, `ndi.repeats` /
        `readback_late` +0;
@@ -901,7 +908,11 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          not in this build, a P4 note);
        - content, fixed: `wall-25` (blend) and `wall-30` (#272), Blank
          (the floor), one named 4K AV1 catalog song and one 1440p VP9
-         song, each song's frame rate logged. A Blank block has EVERY
+         song, each song's frame rate logged, each song (and the Arena
+         clip) checked on its file to hold no picture over 1 s in the
+         analysed span, + 15 s to + 55 s (ffmpeg's `freezedetect`,
+         `d=1`): a still shot of its own would read as a hold on both
+         sides (the dead-stretch rule below). A Blank block has EVERY
          pipeline paused (no `transport` `Playing`): an off-program
          GPU-resident pipeline still decodes and copies, which would lift
          G's floor alone;
@@ -1031,11 +1042,13 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
              span the capture's own polls saw the output hold
              (`wall_spans.still_spans`: an empty poll proves nothing new
              was presented, so a span with no new picture holds but for
-             the blind span of the picture that ended it; the capture's
-             first and last poll are included, the end whole). A
-             `capture.still_ms_max` over 1000 with `held_ms_max` under
-             it is a capture that starved: its own failure, re-run like
-             an exit 5. `wall_cadence.py`, a box script outside this
+             the blind span of the picture that ended it and the
+             acquire window of the one that began it; the capture's
+             first and last poll are included, the end whole but for
+             that window). A
+             `capture.still_ms_max` over 1000 with `held_ms_max` at most
+             1000 is a capture that starved: its own failure, re-run
+             like an exit 5. `wall_cadence.py`, a box script outside this
              repo and the only reader of the songs and the Arena clip,
              is extended before the take to report its held span the
              same way and its longest still run (as the 72 h run
@@ -1053,9 +1066,13 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
            engine's own clock (mapped from its start, so never compared
            with the driver's): each read takes the row, then re-reads it
            until that stamp changes (≤ 5 s), so the start read is the
-           first heartbeat inside the take (its first, unanalysed 5 s)
-           and the end read the first after it (a clip's + 60 s bound
-           holds for the `on_air_item` read only). Right after
+           first heartbeat inside the take (its first, unanalysed 5 s;
+           the reader runs as its own process from its own instant,
+           beside these re-reads) and the end read the first after it
+           (a clip's + 60 s bound holds for the `on_air_item` read
+           only). A stamp that does not change within two heartbeats
+           (10 s) is recorded as a stalled row, its block decided by
+           the end check. Right after
            the take, with its end reads and never during it (ONE
            capture per take, below), the driver takes:
            - two dxcam grabs about 2 s apart of the wall output
@@ -1079,25 +1096,30 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
            decoder S also runs on SNV), and a display-driver reset can
            kill G's ring where S's reader only falls back. G's own
            failures are gate 3's verdict already, whatever the wall
-           showed: `gpu.km_acquire_timeouts`, `abandoned`,
-           `open_failures`, `mid_stream_fallbacks` and `open_fallbacks`
-           stay +0 over the A/B (gate 3). So the counters and lines above
+           showed (`gpu.km_acquire_timeouts`, `abandoned`,
+           `open_failures`, `ring.full`, `ring.dead` over the A/B; the
+           fall-back counters per block by their WARN). So the counters
+           and lines above
            are recorded, never used to name a side alone. A block whose
            log holds the ERROR `paced producer: decode error` is dropped
            whichever trigger fired (the end check). The main session
            decides before the take resumes:
            - an OTHER-SIDE test, once the region reads live
              again (the output brought back first, below): five blocks
-             of each side alternated under the same content and feed,
-             ordinary blocks of the take. A recurrence inside it is
+             of each side alternated under the same content and feed
+             (for a stretch first seen in a Blank block: the G / S
+             blocks of the content read on that region, the Arena
+             clip's being its 4K-song blocks), ordinary blocks of the
+             take. A recurrence inside it is
              tallied, never a new STOP, and the output is brought back
              before the next test block; a stretch counts for the block
              it began in. It is G's when it recurs in at least two G
              blocks and in no S block, and S's in the mirror case. Its
              tally carries across an Arena restart (the attribution);
              its measurements do not (a new take);
-           - otherwise it is no side's: dropped and reported (Arena's,
-             or the room's), an Arena crash or restart included. A
+           - otherwise it is no side's for the A/B: dropped and
+             reported, an Arena crash or restart included (gate 3's
+             counters are judged on their own). A
              region that never reads live again, once bringing the
              output back was tried, ends the take, reported.
 
@@ -1355,13 +1377,15 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          metrics), never only dropped. A producer stall that ENDED
          inside the take passes the end check once the producer has
          caught up (until then the position reads short, with
-         `pacing.repeats` above the share and `resyncs` +0: the
+         `pacing.repeats` above the content's own share, read from S's
+         blocks of that content: none at 30 fps, a sixth of the
+         boundaries at 25 fps; and `resyncs` +0: the
          producer's, not the emit side's): while the queue is
          empty the emit thread repeats the last picture on time, and
          when frames return the pacer shows the newest due one and drops
          the rest (`pacer_prepare.rs`), so the position catches up and
-         `resyncs` stays +0. It shows as `pacing.repeats` above the
-         content's own share (the evidence, above), and on the wall as
+         `resyncs` stays +0. It shows as `pacing.repeats` above that
+         share (recorded with the evidence, above), and on the wall as
          a hold. Any content
          block whose log since its restart holds
          the ERROR `paced producer: decode error` is dropped and
