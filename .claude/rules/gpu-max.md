@@ -2089,7 +2089,17 @@ the FHD `SP-program`:
   Arena.exe --output_file x.csv --timed 20 --terminate_after_timed`, ETW,
   read only) sees three Arena swapchains at 60 presents/s, Composed: Flip,
   every present displayed; the sync-1 one carries ~14.6 ms of GPU work per
-  16.7 ms frame.
+  16.7 ms frame. A receive changes none of that (`pm_ab.ps1`, #251 comment
+  6279484457: 600 vs 285 wall pictures, the same presents, modes and GPU
+  times): Arena hands its output window a stale composition picture, the
+  loss is inside Arena, not in DWM / the driver / the flip;
+- minimizing Arena's UI window does not bring the wall back (`ui_min_ab.ps1`
+  v2: 254 / 205 / 292 / 375 of 600), so drawing the UI is not the cause.
+- **`Get-Process Arena`'s `MainWindowHandle` is the `Display` window — the
+  wall output**, not the UI. Never minimize / move / focus a window found
+  that way: take the UI ("Resolume Arena - …") by its own handle
+  (`EnumWindows` + `GetWindowText`) and check the title before acting
+  (v1 minimized the wall twice, 19.10.2026 ~23:06Z).
 - A SongPlayer-side change cannot fix this; never ship one "for #251"
   without a wall measurement that moves.
 
