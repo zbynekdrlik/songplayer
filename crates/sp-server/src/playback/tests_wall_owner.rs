@@ -531,3 +531,33 @@ async fn an_off_that_leaves_no_owner_blanks_the_stage_display_even_unflagged() {
         "7's line leaves the stage: {bodies:?}"
     );
 }
+
+/// #283: the owner's last line leaves the stage display when it leaves the
+/// wall. The plan hides it `HOLD_TAIL_MS` after its sung end (62 s + 3 s);
+/// at 70 s the wall is blank and the Presenter is cleared ONCE, so it never
+/// shows "No tak." 45 s past its hide (SNV, 18.10.2026). A later blank
+/// position pushes nothing more; the next line is pushed again.
+#[tokio::test]
+async fn the_stage_display_is_cleared_when_the_wall_s_line_goes() {
+    let (mut engine, mut rx) = two_on_air(9).await;
+    let stage = presenter(&mut engine).await;
+    engine.dispatch_lyrics_if_changed(9, 60_000);
+    assert!(pushes(&stage, 1).await[0].contains("delta"));
+
+    engine.dispatch_lyrics_if_changed(9, 70_000);
+    let bodies = pushes(&stage, 2).await;
+    assert!(is_cleared(&bodies[1]), "the line left: {bodies:?}");
+    assert!(
+        sent(&mut rx).iter().any(is_hide_subtitles),
+        "the wall went blank at the same position"
+    );
+
+    engine.dispatch_lyrics_if_changed(9, 71_000);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let got = stage.received_requests().await.unwrap_or_default();
+    assert_eq!(got.len(), 2, "a clear already pushed is not pushed again");
+
+    engine.dispatch_lyrics_if_changed(9, 60_500);
+    let bodies = pushes(&stage, 3).await;
+    assert!(bodies[2].contains("delta"), "the line again: {bodies:?}");
+}
