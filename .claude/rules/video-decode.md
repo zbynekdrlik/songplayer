@@ -795,11 +795,12 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
        song's window below) runs under the automatic take's arming and
        `finally` (the main A/B below: #230's hold armed and read back,
        `video_upgrade_enabled` off, the cap put back first, the hold
-       last), since automatic is also the DOWNLOAD cap; and the whole
-       gate, at both caps, runs with `video_upgrade_enabled` off, put
-       back in a `finally` (its check opens a song's file in the
-       hardware mode, which the fall-back rule below must not read as
-       the song's own reader);
+       last), since automatic is also the DOWNLOAD cap; and this gate's
+       +0 span (its window, its box-only checks and the A/B), at both
+       caps, runs with `video_upgrade_enabled` off, put back in a
+       `finally` before the 72 h run (its check opens a song's file in
+       the hardware mode, which the fall-back rule below must not read
+       as the song's own reader);
      - with a 4K song on program, at the cap and at automatic (the design
        says "a 4K song"): `GET /api/v1/program` `gpu.gpu_sides_per_s`
        about 30 for a song the pacer does not blend, up to two ring
@@ -817,9 +818,8 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
        (each a ring side drawn BLACK on the wall or NDI; WARP never runs
        the keyed mutexes against real NVDEC surfaces, so only the box
        proves them) and every pipeline's `ring.full` (`ring.dead`
-       stays false; both read at EVERY block's end read, `full` as
-       each row's change since that row's last read, below): G's OWN
-       failures, which
+       stays false; both read at every block's start AND end read,
+       below): G's OWN failures, which
        only G has (its ring and the compositor's draw of it);
        `video_decode.mid_stream_fallbacks`
        and `open_fallbacks` (a fall back is the software decode this
@@ -845,25 +845,38 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          cut (into any block, Blank included) too;
        - an open +1 (step 7's WARN) is G's when the song was opened
          while `gpu` took effect on its pipeline (the block it lands
-         in is a G block, or anywhere in this gate before the A/B,
-         its box-only checks included) and no step-7 line since that
-         open explains a base-mode open (a producer lost, not made
-         or not yet there, a retired producer's INFO,
+         in is a G block, or anywhere in this gate before the A/B
+         while `gpu_resident_blocked` reads null) and no step-7 line
+         since the song's open BEGAN explains a base-mode open (the
+         emit thread logs its lease line before the reader logs its
+         WARN: a producer lost, not made or not yet there, a retired
+         producer's INFO, the INFO `the producer device let go -
+         video_decode=gpu does not take effect`,
          `gpu_resident_blocked`);
        - G's fails this gate; an S block's own content falling back
          is a fall back of the default path, reported and that block
          never measured; a background job's reader is reported,
          never G's.
 
-       `ring.full` / `ring.dead` are read at EVERY block's end read
-       (every `pipelines[]` row, the evidence below), `full` as each
-       row's change since that row's last read: an outgoing G
-       pipeline's ring can fill in a cut into Blank, and a ring
-       restarts at 0 only with a new producer. A producer is kept
-       across songs (`Leased::Kept`: G → Blank → G keeps the ring and
-       its count); the pipeline's next open after an S block's PATCH
-       retired it, or after its ring died, drops it: an S open lets
-       it go and its row goes, a G open makes a new ring at 0.
+       `ring.full` / `ring.dead` are read at every block's START and
+       END read (every `pipelines[]` row, the evidence below), `full`
+       at each as the change since that row's PREVIOUS read, so the
+       switch between two blocks (a cut, its fade and hold, the lead)
+       is read too: an outgoing G pipeline's ring can fill in a cut
+       into Blank, before that take's start. A ring restarts at 0
+       only with a new producer, so a row whose producer was made
+       since its previous read (the INFO `gpu resident: the
+       pipeline's producer device made`, its `playlist_id`) counts
+       its whole `full`, and a WARN `gpu resident: the producer
+       device was lost` counts as a dead ring the reads may never
+       see. A producer is kept across songs (`Leased::Kept`: G →
+       Blank → G keeps the ring and its count). After an S block's
+       PATCH retired it, the pipeline's next open drops it: an S open
+       lets it go and its row goes, a G open makes a new ring at 0 at
+       once. After its ring died, the next G open gets none
+       (`Leased::Lost`: its row goes, the song decodes in the base
+       mode), and a new ring at 0 comes only at the first G open
+       after the 30 s backoff (`Leased::Waiting` until then).
 
        A gate-3 failure during the A/B stops it and turns
        `video_decode` back to `software` the same day (NDI stays on
@@ -1009,7 +1022,24 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          6263953328), made only while the rig lease is free
          (`lease_free.ps1`'s exit code, binding), every clip and setting
          put back in a `finally` (`gpu-max.md`, "How to judge any wall
-         change"). A block whose Arena content anyone else changed is
+         change"). Three guards from #251's incident (comment
+         6278634515: a `schtasks /sc once` trigger re-fired four A/B
+         scripts hours later, during a deploy's E2E, each taking the
+         one before's leftovers for the operator's state and
+         "restoring" them; SongPlayer's own E2E holds no lease):
+         - a driver started through a scheduled task deletes the task
+           in the same turn it starts it, its `Next Run Time` read
+           back gone;
+         - before the first block, the values the `finally` will put
+           back are checked against the operator's setup (the
+           program on the operator's own source, never a test's
+           Blank; no Arena group soloed; no test change left): any
+           other value stops the A/B, reported;
+         - before every block, the driver confirms no SNV deploy or
+           E2E run is queued or in progress (`gh run list` on the
+           repo); one that starts mid-take drops that block, and the
+           A/B waits until its E2E has ended. A block whose Arena
+           content anyone else changed is
          dropped, and the A/B is read per Arena content. Each Arena
          content gets its own Blank blocks, interleaved with its G and S
          blocks: SongPlayer's share is a side's reading minus the floor
