@@ -1073,7 +1073,9 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   (not Spout-specific); once reconnected through the REST API
   (`POST /composition/layers/<n>/clips/<c>/connect`), the Spout clip showed
   MAX at once. Before a relaunch, read the connected clips
-  (`ops\arena_layers.py`) so they can be restored.
+  (`ops\arena_layers.py`) to REPORT them, never to restore them
+  (`wall.md`: no clip runs until the operator presses a scene); a test
+  reconnects only its own clip and undoes that.
 - **A forced kill can leave Spout's list to a receiver for good** (#243
   follow-up, PP 12.10.2026): hence the deploy's quiesce, the list sentinel
   and `max.list_holder` ("Spout locks handed over abandoned" above).

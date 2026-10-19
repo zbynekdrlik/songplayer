@@ -643,7 +643,9 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
   - let go at once when a song opens with the precondition off (no idle
     fill runs while songs keep playing), and when the pipeline ends;
   - a producer whose ring died (a lost device, an abandoned key) is
-    dropped at the next open. A G open asks it (`Lease::take` →
+    dropped at the next open (a G open = a GPU-resident one, an S open =
+    one while `gpu` does not take effect; the A/B's sides below). A G
+    open asks it (`Lease::take` →
     `lost()`): the WARN `… was lost`, and the next one is made only
     `PRODUCER_REBUILD_BACKOFF` (30 s) later, a failed build likewise;
     meanwhile the songs open in the base mode. An S open
@@ -982,9 +984,9 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          back, or the automatic take ends through its `finally`) and
          checks
          per block that the A/B songs' files are unchanged; a
-         queued `deploy-pp` ends it through its `finally` first (PP's
-         peer gate fails on SNV's hold, 503 `background-hold`; the
-         driver's guards below). When it ends, a `finally` (like Arena's
+         `deploy-pp` run (guard 3's trigger below) ends it through its
+         `finally` first (PP's peer gate fails on SNV's hold, 503
+         `background-hold`). When it ends, a `finally` (like Arena's
          changes; the order in the driver's guards below, the cap
          before the program's cut back) puts back the values found
          (`""` for one that was not
@@ -1077,38 +1079,53 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
            song; a recorded `sp-90s` re-arms #230's hold, which then
            stays); one refused (409 / 404) is reported and left to the
            operator;
-         - no SNV deploy is pending: at each block's start, before
+         - the operator's cut is never overridden: the driver records
+           the source it last cut to, and at each block's start and
+           end read, and before the `finally`'s cut back, a program
+           `source` it did not cut means the operator took over: no
+           further cut, no cut back, no re-arm of the hold; the A/B
+           stops, reported (the cut-back counterpart of "each only
+           while it still has the take's own value");
+         - no deploy is pending (through the A/B and every gate-3
+           span run with `gpu` set): at each block's start, before
            an automatic take arms its hold, and at its take's end, no
            ci.yml `push` run of dev or main queued or in progress (it
-           reaches its deploy job 16–19 min in) and no `deploy-pp` run
-           whose deploy job has started, read by the main session on
-           dev1 (`gh run list`) before it gives the driver each
-           block's go, or by the driver itself through the public
-           repo's REST runs list (unauthenticated; a failed or
-           rate-limited read counts as a pending deploy). Through the
-           whole block the driver also polls SNV's `Runner.Worker`
-           process every few seconds (local, no limit: a job re-run
-           reaches SongPlayer within 1–2 min, a deploy or E2E job
-           spends ≥ 30 s on checkout, the lease gate and artifacts
-           first), and the main session re-runs or dispatches no SNV
-           job while a take runs. A pending deploy is never held: the
-           A/B YIELDS, its `finally` run at once in this order (the
-           same as every take's): `video_decode` = `software` and, in
-           an automatic take, the cap put back, then wait until `GET
-           /api/v1/status` reads `video_decode.video_decode` =
-           `software` and `max_height` = 1440 (a cut back opens a
-           song at the then-applied cap, and a cut to `sp-slow` ends
-           #230's hold, which must never end while the cap is
-           automatic); then the program cut back; then Arena's test
-           changes undone; then the upgrade switch; the hold last. It
-           waits until the deploy's E2E has ended and starts a NEW
-           take (the new build's preconditions, never pooled with the
-           blocks before). A block a deploy cut is dropped, never a
-           dead stretch, and ends its take; a deploy's E2E it ran
-           into is re-run and reported as the A/B's. A `deploy-pp`
-           ends an automatic take the same way before PP's peer gate
-           meets SNV's hold; after a main release, a new automatic
-           take waits until `deploy-pp`'s E2E has ended. A block
+           reaches its deploy job about 15–19 min in) and no
+           `deploy-pp` run queued or in progress that its `resolve`
+           job did not skip (its PP E2E starts 41–72 s after its
+           deploy job). The main session reads it on dev1 (`gh run
+           list`) before it gives the driver each block's go, or the
+           driver reads the public repo's REST runs list itself, one
+           unfiltered `/actions/runs` read per check (under the
+           unauthenticated 60 an hour); a failed read holds the next
+           block until a read succeeds. Through the whole block the
+           driver also polls SNV's `Runner.Worker` process every 2 s
+           or less (local, no limit): measured from a job's start,
+           an E2E job restarts SongPlayer at about + 18–21 s and a
+           deploy job kills it at about + 21–29 s, and a job re-run
+           gets there within a minute or two. The main session
+           re-runs or dispatches no SNV job, and no `deploy-pp`
+           during an automatic take, while a take runs. A pending
+           deploy is never held: the A/B YIELDS, its `finally` run at
+           once in this order (every take's): SongPlayer's writes
+           first — `video_decode` = `software` and, in an automatic
+           take, the cap put back, then a wait (bounded, 15 s) until
+           `GET /api/v1/status` reads `video_decode.video_decode` =
+           `software` and the `max_height` the restored
+           `max_resolution` gives (a cut back opens a song at the
+           then-applied cap, and a cut to `sp-slow` ends #230's hold,
+           which must never end while the cap is automatic), then the
+           program cut back (unless the operator took over), the
+           upgrade switch, the hold last of these — then Arena's test
+           changes. A write a restarting SongPlayer refused is retried
+           once its API answers again (long before the E2E's suite).
+           The driver then waits until the deploy's E2E has ended,
+           re-runs a deploy E2E its block ran into (reported as the
+           A/B's), and starts a NEW take (the new build's
+           preconditions, never pooled with the blocks before). A
+           block a deploy cut is dropped, never a dead stretch, and
+           ends its take. After a main release, a new automatic take
+           waits until `deploy-pp`'s E2E has ended. A block
            whose Arena
            content anyone else changed is
          dropped, and the A/B is read per Arena content. Each Arena
