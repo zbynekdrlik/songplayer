@@ -517,7 +517,8 @@ Design: #279 comment 6244390810 (`Design-by: main`), plan
 `video_hw_decode` paths above are as they were; what still runs at the
 default:
 
-- the producer's per-song INFO (`path=ram`) with its `codec()` read
+- the producer's per-song INFO (`path="ram"`: a string field, quoted by
+  the log's formatter) with its `codec()` read
   (`GetNativeMediaType`, which the bench has called on the box since
   #223 S0), and the table's row;
 - on the `program-max` thread (the timing-critical one): MAX's standby
@@ -858,9 +859,12 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
          MB/s, and #282 found the cap moves the wall's backs 10–15×).
          `max_resolution` is also the DOWNLOAD cap (#282), so an
          automatic take, BEFORE it switches the cap: arms #230's
-         background hold to the take's end (`background_hold_until_ms`,
-         UTC ms, `background-hold.md`: no new download fetches a ≤ 2160
-         file that would stay after the take) and switches
+         background hold well past the take's planned end, #230's own
+         4 h (`background_hold_until_ms`, UTC ms, `background-hold.md`:
+         no new download fetches a ≤ 2160 file that would stay after
+         the take; the watcher ends a hold at its time, so a take that
+         overran a tight end would lose it with the cap still automatic;
+         only the `finally` below ends it) and switches
          `video_upgrade_enabled` off. A cut to `sp-slow` ends that hold
          and one to `sp-90s` re-arms it for 4 h (`background_hold.rs`,
          `RELEASE_SCENE` / `HOLD_SCENE`), and a dashboard cut names its
@@ -1085,17 +1089,28 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
             precondition (`gpu_resident_blocked`), the reader's open fall
             back (WARN `mf_reader: hardware decode did not open; this file
             decodes in software`, `open_fallbacks` +1: that song decodes in
-            SOFTWARE), or a picture in system memory (the producer's
-            `path=ram` INFO; `mf_software` +1 only on an unscaled open: a
-            scaled open, the 4K song at the 1440 cap, counts nothing
-            there, `decoder_path_visible`).
-         8. A G row that read true and then false is no failed open but a
-            MID-STREAM fall back (a ring full past `RING_WAIT`, a dead
-            ring, a refused picture, a lost device): WARN `mf_reader: a
-            decode error on the D3D11 path; this file goes on in
-            software`, the producer's WARN `the song's pictures changed
-            kind mid-song`, `mid_stream_fallbacks` +1, which fails gate
-            3's +0; the block is reported, never measured.
+            SOFTWARE, and it fails gate 3's +0), or a picture in system
+            memory (the producer's per-song INFO `paced producer: the
+            song's pictures` with `path="ram"`; `mf_software` +1 only on
+            an unscaled open: a scaled open, the 4K song at the 1440 cap,
+            counts nothing there, `decoder_path_visible`).
+         8. Steps 7 and 8 are told apart by the COUNTERS and the log since
+            the restart, never by what a poll of the row happened to see:
+            - `mid_stream_fallbacks` +1, or the WARN `mf_reader: a decode
+              error on the D3D11 path; this file goes on in software`: a
+              MID-STREAM fall back (a ring full past `RING_WAIT`, a dead
+              ring, a refused picture, a lost device), whenever it came
+              (a first copy that failed reads like a failed open at the
+              poll, its `path="ram"` included); it fails gate 3's +0;
+            - that WARN with the count +0: the software reopen itself
+              failed, the song errors;
+            - a row true, then false, with the count +0 and the
+              producer's WARN `the song's pictures changed kind
+              mid-song (… or its producer retired)`: a retire, someone
+              changed `video_decode` or `program_ndi_source` under the
+              take, which voids it.
+
+            Each such block is reported, never measured.
 
          A Blank block PATCHes nothing (it keeps the block before's
          `video_decode`): it cuts the program to Blank (source -2,
