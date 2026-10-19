@@ -13,6 +13,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use sp_core::config::SpoutSend;
 use sp_gpu::{GpuError, MAX_TARGET, VblankGrid, VblankState};
 
 use super::tests::{
@@ -759,5 +760,32 @@ fn a_resume_reads_running_and_the_next_job_builds_both_senders_anew() {
         ),
         (2, 2, 2, 2),
         "built anew"
+    );
+}
+
+/// #251 (19.10.2026): both senders hand their frame to Spout the way
+/// `program_max_spout_send` says at that boundary, given to each before its
+/// send (the FHD sender from the boundary after its build).
+#[test]
+fn every_send_takes_the_spout_hand_off_set_at_its_boundary() {
+    let max = fhd_on();
+    let gpu = FakeGpu::default();
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    let t0 = Instant::now();
+    worker.serve(&black(1), t0);
+    assert!(max.set_spout_send(SpoutSend::Plain), "a change");
+    assert!(!max.set_spout_send(SpoutSend::Plain), "the same again");
+    worker.serve(&black(2), t0);
+    assert!(max.set_spout_send(SpoutSend::ReleaseThenWait));
+    worker.serve(&black(3), t0);
+    assert_eq!(
+        gpu.log().send_modes,
+        [
+            ("max", SpoutSend::Synced),
+            ("max", SpoutSend::Plain),
+            ("fhd", SpoutSend::Plain),
+            ("max", SpoutSend::ReleaseThenWait),
+            ("fhd", SpoutSend::ReleaseThenWait),
+        ]
     );
 }

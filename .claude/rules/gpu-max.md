@@ -2029,6 +2029,49 @@ behaviour change).
   worker (`program_max_worker_tests_gpu.rs`), a held ring frame's
   preview.
 
+## Arena loses its OWN frames while it receives `SP-program-MAX` (#251, 19.10.2026)
+
+The owner saw the wall judder through the 18.10 service, while every A/B
+since #282 read 0–2 `exact_backs`. The judder was **missing frames**, not
+backs, and it hit every layer: the worship NDI background, Arena's clips.
+
+Measured on SNV (`diag\wall-bridge\sp_onoff_ab.ps1`, `max_ab.ps1`,
+`recv_ab.ps1`). Setup: L4 = Arena's own clip "Botanical Calm 4K", 30 fps,
+1200 pictures per 40 s when clean; L5 receives `SP-program-MAX` with blend
+Add; SongPlayer on Blank.
+
+| Condition | `pictures` per 40 s |
+|---|---|
+| SongPlayer running | 538–746 |
+| SongPlayer stopped | 1200–1203 |
+| MAX on (FHD on or off) | 509–740 |
+| `program_max_enabled` false | 1201–1203 |
+| MAX on, **no Arena layer receiving it** (L5 cleared) | 1201–1202 |
+| MAX on, L5 receiving it | 562–723 |
+
+The hand-off to a receiving Arena is the cause. Since 0.82.0 (PP, no
+reports) the shim's `SendSynced` holds Spout's texture-access mutex while
+it spins for the GPU copy, and every receiver takes that mutex to read.
+
+**The switch:** `program_max_spout_send` = `synced` (default, unchanged) |
+`plain` (0.82.0's `SendTexture`) | `release_then_wait` (the mutex let go
+before the wait, a frame announced only once copied).
+- It is read with MAX's settings every 5 s (`apply_phase_settings`, an INFO
+  line on a change) and kept on MAX's queue (`MaxOut::spout_send`).
+- The worker gives it to both senders before every send
+  (`MaxSender::set_send_mode`), and the shim's mode is
+  `spout::shim_send_mode` (0 / 1 / 2, `kSend*` in `spout_shim.cpp`).
+- Tests: the parse (sp-core), the shim codes (sp-gpu), the apply
+  (`program_max_tests_ndi.rs`), and both senders per boundary
+  (`program_max_worker_tests_fhd.rs`).
+
+**How to judge any wall change from now on:**
+- count `pictures` against the content's own rate, next to the backs;
+- measure on NON-SongPlayer content too: an Arena clip on one layer while
+  another layer receives SongPlayer's Spout;
+- a test that switches the bridge Arena puts every clip and setting back in
+  a `finally` and honours the rig lease (`lease_free.ps1` exit code).
+
 ## HLSL at runtime
 
 `compose.hlsl` (`include_str!`) is compiled by `D3DCompile`

@@ -9,9 +9,9 @@
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
-use sp_core::config::NdiSource;
+use sp_core::config::{NdiSource, SpoutSend};
 
-use super::{apply_phase_settings, load_ndi_source};
+use super::{apply_phase_settings, load_ndi_source, load_spout_send};
 use crate::playback::program_max::{MaxJob, MaxNext, MaxOut};
 
 fn black(stamp: i64) -> MaxJob {
@@ -153,4 +153,30 @@ async fn the_ndi_source_setting_is_read_and_applied_with_max_s() {
         .unwrap();
     apply_phase_settings(&pool, &max).await;
     assert_eq!(max.ndi_source(), NdiSource::Cpu, "and back");
+}
+
+/// #251 (19.10.2026): `program_max_spout_send` is read with MAX's other
+/// settings and applied at once; unset is today's `synced`.
+#[tokio::test]
+async fn the_spout_hand_off_setting_is_read_and_applied_with_max_s() {
+    use crate::db::models::set_setting;
+    let pool = settings_pool().await;
+    assert_eq!(load_spout_send(&pool).await.unwrap(), SpoutSend::Synced);
+    let max = MaxOut::new();
+    assert_eq!(max.spout_send(), SpoutSend::Synced, "before any read");
+    set_setting(&pool, "program_max_spout_send", "release_then_wait")
+        .await
+        .unwrap();
+    apply_phase_settings(&pool, &max).await;
+    assert_eq!(max.spout_send(), SpoutSend::ReleaseThenWait, "applied");
+    set_setting(&pool, "program_max_spout_send", "plain")
+        .await
+        .unwrap();
+    apply_phase_settings(&pool, &max).await;
+    assert_eq!(max.spout_send(), SpoutSend::Plain, "changed");
+    set_setting(&pool, "program_max_spout_send", "")
+        .await
+        .unwrap();
+    apply_phase_settings(&pool, &max).await;
+    assert_eq!(max.spout_send(), SpoutSend::Synced, "and back");
 }

@@ -66,7 +66,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use sp_core::config::{
     DEFAULT_PROGRAM_MAX_COMPOSE_PHASE_US, DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US, NdiSource,
-    SETTING_PROGRAM_MAX_ENABLED, program_max_enabled,
+    SETTING_PROGRAM_MAX_ENABLED, SpoutSend, program_max_enabled,
 };
 use sp_gpu::{
     CANVAS_HEIGHT, CANVAS_WIDTH, ComposeStats, Nv12Picture, SPOUT_SENDER_NAME, Side,
@@ -359,6 +359,8 @@ struct Queue {
     fhd_enabled: bool,
     /// #279 P1b: the setting `program_ndi_source`, as last applied.
     ndi: NdiSource,
+    /// #251: the setting `program_max_spout_send`, as last applied.
+    spout_send: SpoutSend,
     /// A `program-max` thread takes jobs.
     consumer: bool,
     stop: bool,
@@ -516,6 +518,7 @@ impl MaxOut {
                 compose_phase_us: DEFAULT_PROGRAM_MAX_COMPOSE_PHASE_US,
                 fhd_enabled: false,
                 ndi: NdiSource::Cpu,
+                spout_send: SpoutSend::Synced,
                 consumer: false,
                 stop: false,
                 quiesced_until: None,

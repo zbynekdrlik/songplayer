@@ -9,14 +9,17 @@
 //! step 4: so is the `SP-program` video side's quiet window
 //! (`program_video_quiet_from_ms` / `_to_ms`, `program_video_quiet.rs`).
 //! #279 P1b: so is `program_ndi_source` (NDI `SP-program` from the GPU
-//! readback, `ndi_feed.rs`), with the queue's rules it drives.
+//! readback, `ndi_feed.rs`), with the queue's rules it drives. #251
+//! (19.10.2026): so is `program_max_spout_send`, how both senders hand each
+//! frame to Spout (the worker gives it to them before every send).
 
 use std::time::Duration;
 
 use sp_core::config::{
-    NdiSource, SETTING_PROGRAM_MAX_COMPOSE_PHASE_MS, SETTING_PROGRAM_MAX_VBLANK_PHASE_MS,
-    SETTING_PROGRAM_NDI_SOURCE, SETTING_PROGRAM_VIDEO_QUIET_FROM_MS,
-    SETTING_PROGRAM_VIDEO_QUIET_TO_MS, program_max_compose_phase_us, program_max_vblank_phase_us,
+    NdiSource, SETTING_PROGRAM_MAX_COMPOSE_PHASE_MS, SETTING_PROGRAM_MAX_SPOUT_SEND,
+    SETTING_PROGRAM_MAX_VBLANK_PHASE_MS, SETTING_PROGRAM_NDI_SOURCE,
+    SETTING_PROGRAM_VIDEO_QUIET_FROM_MS, SETTING_PROGRAM_VIDEO_QUIET_TO_MS, SpoutSend,
+    program_max_compose_phase_us, program_max_spout_send, program_max_vblank_phase_us,
     program_ndi_source, program_video_quiet_from_us, program_video_quiet_to_us,
 };
 use sqlx::SqlitePool;
@@ -106,6 +109,19 @@ impl MaxOut {
         self.lock_queue().ndi
     }
 
+    /// #251: apply `program_max_spout_send`; returns whether it changed.
+    pub fn set_spout_send(&self, mode: SpoutSend) -> bool {
+        let mut queue = self.lock_queue();
+        let changed = queue.spout_send != mode;
+        queue.spout_send = mode;
+        changed
+    }
+
+    /// #251: `program_max_spout_send`, as last applied.
+    pub fn spout_send(&self) -> SpoutSend {
+        self.lock_queue().spout_send
+    }
+
     /// #279 P1b: who wants the compositor ([`Wants`]), read under one lock.
     pub fn wants(&self) -> Wants {
         self.lock_queue().wants()
@@ -121,6 +137,12 @@ impl MaxOut {
 pub async fn load_ndi_source(pool: &SqlitePool) -> Result<NdiSource, sqlx::Error> {
     let raw = crate::db::models::get_setting(pool, SETTING_PROGRAM_NDI_SOURCE).await?;
     Ok(program_ndi_source(raw.as_deref()))
+}
+
+/// #251: read `program_max_spout_send` (`sp_core::config`'s rule).
+pub async fn load_spout_send(pool: &SqlitePool) -> Result<SpoutSend, sqlx::Error> {
+    let raw = crate::db::models::get_setting(pool, SETTING_PROGRAM_MAX_SPOUT_SEND).await?;
+    Ok(program_max_spout_send(raw.as_deref()))
 }
 
 /// Read `program_max_vblank_phase_ms`, µs (`sp_core::config`'s rule).
@@ -183,6 +205,14 @@ pub(super) async fn apply_phase_settings(pool: &SqlitePool, max: &MaxOut) {
             }
         }
         Err(e) => warn!(%e, "program output: reading the NDI source setting failed"),
+    }
+    match load_spout_send(pool).await {
+        Ok(mode) => {
+            if max.set_spout_send(mode) {
+                info!(mode = mode.as_str(), "program max: Spout hand-off applied");
+            }
+        }
+        Err(e) => warn!(%e, "program max: reading the Spout hand-off setting failed"),
     }
 }
 

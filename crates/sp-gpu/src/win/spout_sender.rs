@@ -22,7 +22,7 @@ use super::{Compositor, NO_TARGET, micros_since};
 use crate::error::GpuError;
 use crate::spout::{
     SENDER_NAMES_MAP, SPOUT_FHD_SENDER_NAME, SPOUT_SENDER_NAME, check_sender_name, lost_send_error,
-    map_mutex_name, status_result,
+    map_mutex_name, shim_send_mode, status_result,
 };
 use crate::spout_lock::access_mutex_name;
 use crate::spout_state::{
@@ -31,6 +31,7 @@ use crate::spout_state::{
 };
 use crate::stats::SpoutSendStats;
 use crate::targets::TargetId;
+use sp_core::config::SpoutSend;
 
 // `spout_shim.cpp`, built with the vendored SDK by build.rs.
 unsafe extern "C" {
@@ -46,6 +47,7 @@ unsafe extern "C" {
         texture: *mut c_void,
         done: *mut c_void,
         bound_ms: u64,
+        mode: c_int,
     ) -> c_int;
     fn spout_sender_relist(sender: *mut c_void) -> c_int;
     fn spout_sender_state(sender: *mut c_void, initialized: *mut c_int, name_matches: *mut c_int);
@@ -161,6 +163,9 @@ pub struct SpoutSender {
     /// GPU has done its copy into Spout's shared texture BEFORE Spout
     /// announces the frame (#251, the shim's `SendSynced`).
     copied: ID3D11Query,
+    /// #251 (19.10.2026): how each frame is handed to Spout around its
+    /// texture mutex (`program_max_spout_send`, set before every send).
+    mode: SpoutSend,
 }
 
 impl SpoutSender {
@@ -240,7 +245,13 @@ impl SpoutSender {
             device,
             texture,
             copied,
+            mode: SpoutSend::default(),
         })
+    }
+
+    /// #251: how the next sends hand their frame to Spout.
+    pub fn set_send_mode(&mut self, mode: SpoutSend) {
+        self.mode = mode;
     }
 
     /// The name the sender registers.
@@ -283,11 +294,12 @@ impl SpoutSender {
         let texture = self.texture.as_raw();
         let done = self.copied.as_raw();
         let bound_ms = super::pipeline::FRAME_WAIT_LIMIT.as_millis() as u64;
+        let mode = shim_send_mode(self.mode);
         // #223 follow-up + #251: the shim returns once the GPU has done the
         // copy (and only then announced it), so `send_us` is when Spout's
         // shared texture really holds the frame.
         let code = sdk(&self.name, || unsafe {
-            spout_sender_send_synced(raw, texture, done, bound_ms)
+            spout_sender_send_synced(raw, texture, done, bound_ms, mode)
         });
         let send_us = micros_since(start);
         unsafe { self.device.GetDeviceRemovedReason() }

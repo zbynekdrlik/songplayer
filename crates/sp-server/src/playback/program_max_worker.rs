@@ -808,6 +808,7 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         let Some(sender) = self.max.sender.as_mut() else {
             return Err(Skip::Failed(NO_SENDER));
         };
+        sender.set_send_mode(self.out.spout_send());
         let sent = send_at(self.clock.as_mut(), due.at, offered, || sender.send());
         let (send, timing) = sent.map_err(|error| {
             self.output_failed(Which::Max, &error, now, false);
@@ -838,6 +839,7 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         let Some(sender) = self.fhd.sender.as_mut() else {
             return Err(Skip::Failed(NO_SENDER));
         };
+        sender.set_send_mode(self.out.spout_send());
         let sent = send_at(self.clock.as_mut(), drawn.paced.0.at, offered, || {
             sender.send()
         });

@@ -13,6 +13,7 @@
 //! its sender ([`MaxGpu::sender`]). One compose uploads each picture once
 //! and draws every target.
 
+use sp_core::config::SpoutSend;
 use sp_gpu::{
     ComposeStats, Composition, FHD_TARGET, GpuError, SPOUT_SENDER_NAME, SpoutSendStats, Target,
     TargetId,
@@ -46,6 +47,9 @@ pub trait MaxCompositor {
 /// The Spout half: share a target as it is now.
 pub trait MaxSender {
     fn send(&mut self) -> Result<SpoutSendStats, GpuError>;
+    /// #251: how the next sends hand their frame to Spout
+    /// (`program_max_spout_send`); the worker sets it before every send.
+    fn set_send_mode(&mut self, _mode: SpoutSend) {}
     /// #239: the size Spout's registry lists the sender at (what a receiver
     /// opens); `None` before its first send went out or while the registry
     /// cannot be read.
@@ -168,6 +172,12 @@ impl MaxSender for sp_gpu::SpoutSender {
     #[cfg_attr(test, mutants::skip)]
     fn send(&mut self) -> Result<SpoutSendStats, GpuError> {
         sp_gpu::SpoutSender::send(self)
+    }
+
+    /// `mutants::skip`: as `compose`.
+    #[cfg_attr(test, mutants::skip)]
+    fn set_send_mode(&mut self, mode: SpoutSend) {
+        sp_gpu::SpoutSender::set_send_mode(self, mode);
     }
 
     /// Spout's registry entry of the sender's name, read as a receiver

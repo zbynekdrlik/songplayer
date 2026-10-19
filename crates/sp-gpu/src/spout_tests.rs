@@ -5,8 +5,8 @@
 use super::{
     HRESULT_FILE_NOT_FOUND, NAME_SLOT_LEN, SENDER_NAMES_MAP, SHARED_TEXTURE_INFO_LEN,
     SPOUT_FHD_SENDER_NAME, SPOUT_NAME_MAX_LEN, SPOUT_SENDER_NAME, SharedTextureInfo,
-    check_sender_name, is_not_found, lost_send_error, map_mutex_name, parse_sender_names, status,
-    status_result,
+    check_sender_name, is_not_found, lost_send_error, map_mutex_name, parse_sender_names,
+    shim_send_mode, status, status_result,
 };
 use crate::error::GpuError;
 
@@ -336,4 +336,14 @@ fn a_copy_not_done_in_time_is_a_timeout_and_other_lost_codes_name_the_shim() {
             "code {code}"
         );
     }
+}
+
+/// #251: each hand-off reaches the shim as its own code (the shim's
+/// `SyncedDX::SendSynced` reads 0, 1 and 2).
+#[test]
+fn each_spout_hand_off_has_its_own_shim_code() {
+    use sp_core::config::SpoutSend;
+    assert_eq!(shim_send_mode(SpoutSend::Synced), 0);
+    assert_eq!(shim_send_mode(SpoutSend::Plain), 1);
+    assert_eq!(shim_send_mode(SpoutSend::ReleaseThenWait), 2);
 }

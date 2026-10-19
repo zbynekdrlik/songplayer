@@ -16,6 +16,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+use sp_core::config::SpoutSend;
 use sp_gpu::{
     ComposeStats, Composition, FHD_TARGET, GpuError, MAX_TARGET, PictureError, Side,
     SpoutSendStats, Target, TargetId, Targets,
@@ -127,6 +128,8 @@ pub(crate) struct Log {
     pub composes: u32,
     pub uyvy_enabled: u32,
     pub uyvy_read: u32,
+    /// #251: each Spout hand-off a sender was given ("max" / "fhd").
+    pub send_modes: Vec<(&'static str, SpoutSend)>,
 }
 
 /// The fake GPU's next results; an empty queue answers `Ok`.
@@ -435,6 +438,11 @@ impl MaxCompositor for FakeCompositor {
 }
 
 impl MaxSender for FakeSender {
+    fn set_send_mode(&mut self, mode: SpoutSend) {
+        let which = if self.1 { "fhd" } else { "max" };
+        log_of(&self.0).send_modes.push((which, mode));
+    }
+
     fn send(&mut self) -> Result<SpoutSendStats, GpuError> {
         let fhd = self.1;
         let scripted = next_error(&self.0, |s| {

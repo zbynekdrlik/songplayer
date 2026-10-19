@@ -32,6 +32,14 @@ constexpr int kBadArgument = 5;
 // #251: the GPU did not finish the copy within the bound (or its query
 // failed): the frame was NOT announced (one lost frame).
 constexpr int kCopyNotDone = 6;
+// #251 (19.10.2026): SyncedDX::SendSynced's hand-off modes (sp-gpu
+// `spout.rs`'s `shim_send_mode`, which must match).
+constexpr int kSendSynced = 0;
+constexpr int kSendPlain = 1;
+constexpr int kSendReleaseThenWait = 2;
+static_assert(kSendSynced != kSendPlain && kSendPlain != kSendReleaseThenWait &&
+                  kSendSynced != kSendReleaseThenWait,
+              "the hand-off modes are distinct");
 
 // The longest name Spout can carry: a renamed sender `<name>_<n>` (up to 11
 // more bytes) gets `<name>_<n>_Count_Semaphore` (16 more) built in 256 bytes
@@ -52,8 +60,12 @@ class SyncedDX : public spoutDX {
     // 0 sent (or Spout skipped the copy: a receiver held the mutex over
     // 67 ms, as SendTexture), 3 no sender, 6 the copy not done within
     // `bound_ms` (not announced; the mutex is let go all the same). Throws
-    // what the SDK throws.
-    int SendSynced(ID3D11Texture2D* texture, ID3D11Query* done, unsigned long long bound_ms) {
+    // what the SDK throws. #251 (19.10.2026) `mode` (sp-gpu `spout.rs`'s
+    // `shim_send_mode`): kSendSynced waits for the copy holding the mutex,
+    // kSendPlain is SendTexture, kSendReleaseThenWait lets receivers in
+    // before the wait and announces only a done copy.
+    int SendSynced(ID3D11Texture2D* texture, ID3D11Query* done, unsigned long long bound_ms,
+                   int mode) {
         D3D11_TEXTURE2D_DESC desc;
         ZeroMemory(&desc, sizeof(desc));
         texture->GetDesc(&desc);
@@ -61,31 +73,51 @@ class SyncedDX : public spoutDX {
             !CheckSender(desc.Width, desc.Height, static_cast<DWORD>(desc.Format))) {
             return kFailed;
         }
-        int result = kOk;
-        if (frame.CheckTextureAccess(m_pSharedTexture)) {
-            m_pImmediateContext->CopyResource(m_pSharedTexture, texture);
-            m_pImmediateContext->End(done);
+        if (!frame.CheckTextureAccess(m_pSharedTexture)) {
+            return kOk;
+        }
+        m_pImmediateContext->CopyResource(m_pSharedTexture, texture);
+        if (mode == kSendPlain) {
+            // spoutDX's own SendTexture: announce now, never wait.
             m_pImmediateContext->Flush();
-            const unsigned long long start = GetTickCount64();
-            for (;;) {
-                BOOL finished = FALSE;
-                const UINT size = static_cast<UINT>(sizeof(finished));
-                const HRESULT hr = m_pImmediateContext->GetData(done, &finished, size, 0);
-                if (hr == S_OK && finished) {
-                    break;
-                }
-                if (FAILED(hr) || GetTickCount64() - start > bound_ms) {
-                    result = kCopyNotDone;
-                    break;
-                }
-                SwitchToThread();
-            }
-            if (result == kOk) {
-                frame.SetNewFrame();
-            }
+            frame.SetNewFrame();
+            frame.AllowTextureAccess(m_pSharedTexture);
+            return kOk;
+        }
+        m_pImmediateContext->End(done);
+        m_pImmediateContext->Flush();
+        if (mode == kSendReleaseThenWait) {
+            // #251 (19.10.2026): let receivers in before the wait, so none
+            // waits on this device's GPU queue; announce only a done copy.
+            frame.AllowTextureAccess(m_pSharedTexture);
+        }
+        int result = WaitDone(done, bound_ms);
+        if (result == kOk) {
+            frame.SetNewFrame();
+        }
+        if (mode != kSendReleaseThenWait) {
             frame.AllowTextureAccess(m_pSharedTexture);
         }
         return result;
+    }
+
+   private:
+    // Spins until the GPU has done the copy `done` follows: kOk, or
+    // kCopyNotDone past `bound_ms` (or a failed query).
+    int WaitDone(ID3D11Query* done, unsigned long long bound_ms) {
+        const unsigned long long start = GetTickCount64();
+        for (;;) {
+            BOOL finished = FALSE;
+            const UINT size = static_cast<UINT>(sizeof(finished));
+            const HRESULT hr = m_pImmediateContext->GetData(done, &finished, size, 0);
+            if (hr == S_OK && finished) {
+                return kOk;
+            }
+            if (FAILED(hr) || GetTickCount64() - start > bound_ms) {
+                return kCopyNotDone;
+            }
+            SwitchToThread();
+        }
     }
 };
 
@@ -183,13 +215,13 @@ int spout_sender_relist(void* handle) {
 // announce the frame; the first call registers the sender. 0 sent, 3 failed,
 // 4 exception, 6 the copy not done within the bound (not announced).
 int spout_sender_send_synced(void* handle, ID3D11Texture2D* texture, ID3D11Query* done,
-                             unsigned long long bound_ms) {
+                             unsigned long long bound_ms, int mode) {
     Sender* sender = static_cast<Sender*>(handle);
     if (sender == nullptr || texture == nullptr || done == nullptr) {
         return kBadArgument;
     }
     try {
-        return sender->dx.SendSynced(texture, done, bound_ms);
+        return sender->dx.SendSynced(texture, done, bound_ms, mode);
     } catch (...) {
         return kException;
     }
