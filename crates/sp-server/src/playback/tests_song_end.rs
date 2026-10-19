@@ -69,8 +69,9 @@ async fn presenter_empty_payload_on_song_end() {
     // spawns the empty-PUT.
     engine.handle_pipeline_event(77, PipelineEvent::Ended).await;
 
-    // The Presenter push is fire-and-forget (`tokio::spawn`) — wait up to
-    // 2 s for wiremock to record the call before assertions fire on drop.
+    // The Presenter push is fire-and-forget (`PresenterClient::send`, the
+    // client's own task) — wait up to 2 s for wiremock to record the call
+    // before assertions fire on drop.
     for _ in 0..20 {
         let recv = mock.received_requests().await;
         if let Some(reqs) = recv {

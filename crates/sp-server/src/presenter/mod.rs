@@ -98,11 +98,11 @@ pub fn payload_for(
     })
 }
 
-/// Line-change push helper used by the playback engine hot path. Queues a
-/// fire-and-forget push (`PresenterClient::send`, in order) when `payload_for` has a
+/// Line-change push helper used by the playback engine hot path. Hands a
+/// fire-and-forget push to `PresenterClient::send` (the newest wins) when `payload_for` has a
 /// payload (a line or the song's title changed), and returns the new `last_seen`
 /// for the caller to persist. No-op when `client` is None (push disabled).
-#[cfg_attr(test, mutants::skip)] // spawn glue; `payload_for` is the tested decision
+#[cfg_attr(test, mutants::skip)] // send glue; `payload_for` is the tested decision
 pub fn maybe_push_line(
     client: Option<&Arc<PresenterClient>>,
     last_seen: Option<PushedLine>,
@@ -143,7 +143,7 @@ pub fn sync_line(
     maybe_push_line(client, last_seen, lines.unwrap_or_default(), song, artist)
 }
 
-/// Clear the stage display (`PresenterPayload::empty`), queued like
+/// Clear the stage display (`PresenterPayload::empty`), sent like
 /// [`maybe_push_line`]; `why` names the caller in the failure's WARN. No-op
 /// when `client` is None (push disabled).
 #[cfg_attr(test, mutants::skip)] // queue glue; the engine tests see the push

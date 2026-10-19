@@ -84,6 +84,19 @@ loaded track (in `LyricsState::with_lead_and_offset`; `new` delegates to it).
   `a_song_with_no_lyrics_sends_its_title_to_the_stage_display`). Presenter
   already maps `currentSong` to its snapshot's `songName`; whether its
   translation text mode draws it is Presenter's call (presenter#867).
+  **The title is the song's only once it STARTED and while it is not
+  paused** (`PlaylistPipeline::stage_title`, review round 1): between a
+  Play and its `Started` the last song's `cached_song` is still set, and a
+  Position queued before a pause would bring the paused song's title back.
+  **Every Play forgets the dedup key** (`begin_play`): after the song-end
+  clear, a song played again (Loop, the same song picked again) is pushed
+  again. **Every push goes through `PresenterClient::send`**, never a
+  `tokio::spawn(client.push(..))`: one task per client sends the NEWEST
+  payload, one push at a time (spawned pushes could arrive the other way
+  round, a clear landing after the title sent after it), and a failed push
+  again after 1 s doubling to 60 s (`retry_wait`) until it goes or a newer
+  one replaces it — a song with no lyrics pushes its title once, and the
+  engine's dedup counts a failed push as sent.
   Presenter (its issue 799) picks per stage layout what to show; SongPlayer
   has no language setting for it. Read back on the box with Presenter's
   `GET /stage/snapshot?layout=api` (`current.main` = the EN,

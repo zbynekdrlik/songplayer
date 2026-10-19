@@ -99,10 +99,10 @@ impl PlaybackEngine {
     ///
     /// #221 review round 3: the stage display is re-synced to the wall owner
     /// too (`resync_presenter`), as at an owner's ON: that repeats the
-    /// owner's current line, or (review round 4) clears the stage display
-    /// while the owner is in a blank stretch, where its dispatch holds its
-    /// last line: the display goes blank like the wall until the owner's
-    /// next line.
+    /// owner's current line, or (review round 4) clears the stage display's
+    /// lines while the owner is in a blank stretch, where its dispatch holds
+    /// its last line: the display's lines go blank like the wall until the
+    /// owner's next line (#281: its song's title stays).
     pub(super) async fn wall_after_scene_off(&mut self) {
         let others_on_program = self
             .pipelines

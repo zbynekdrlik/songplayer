@@ -292,8 +292,9 @@ async fn the_stage_display_gets_the_next_line_after_the_repeats() {
         .await;
     let client = Arc::new(PresenterClient::new(format!("{}/api/stage", mock.uri())));
 
-    // A push is a spawned task (spawn order is not arrival order), so wait
-    // for each expected push before the next line: lines 1, 4 and 5 push.
+    // A push goes out on the client's own task, the newest payload only
+    // (#281), so wait for each expected push before the next line: lines 1,
+    // 4 and 5 push.
     let mut seen = None;
     for (i, l) in four_repeats_then_the_next_line().into_iter().enumerate() {
         seen = maybe_push_line(Some(&client), seen, l, "What A God", "");
