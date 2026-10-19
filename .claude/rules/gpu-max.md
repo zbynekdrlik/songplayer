@@ -2049,9 +2049,23 @@ Add; SongPlayer on Blank.
 | MAX on, **no Arena layer receiving it** (L5 cleared) | 1201–1202 |
 | MAX on, L5 receiving it | 562–723 |
 
-The hand-off to a receiving Arena is the cause. Since 0.82.0 (PP, no
-reports) the shim's `SendSynced` holds Spout's texture-access mutex while
-it spins for the GPU copy, and every receiver takes that mutex to read.
+A receiving Arena is the cause. The first suspect was the hand-off: since
+0.82.0 (PP, no reports) the shim's `SendSynced` holds Spout's texture-access
+mutex while it spins for the GPU copy, and every receiver takes that mutex
+to read. **Ruled out the same day** (`modes_ab.ps1`, `size_ab.ps1`): the
+three hand-offs (`send_us_p99` 0.2–2 ms) read 624 / 631 / 663 pictures, and
+a 1920×1080 MAX (`program_max_size`, below) reads 652 against the 4K's 632.
+Neither the mutex hold nor the texture size moves it; what does is open
+(`recv2_ab.ps1`: SongPlayer's FHD `SP-program` and an independent sender,
+`spout_test_sender.py`, received instead).
+
+**The size switch:** `program_max_size` = `WxH` (even sides, 640..=3840 ×
+360..=2160; anything else = the canvas 3840×2160), read with MAX's settings
+(`program_max_phase.rs`); a change drops MAX's sender, then its target, and
+the same boundary builds both at the new size (`program_max_release.rs::
+resize_max`; a change inside a refused sender's backoff keeps the backoff).
+`max.width/height` report it; the post-deploy MAX gate still requires
+3840×2160, so a forgotten A/B setting fails CI.
 
 **The switch:** `program_max_spout_send` = `synced` (default, unchanged) |
 `plain` (0.82.0's `SendTexture`) | `release_then_wait` (the mutex let go
