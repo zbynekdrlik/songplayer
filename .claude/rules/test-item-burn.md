@@ -121,11 +121,16 @@ MEASURED with frame ids, never judged by eye. Design record: #272 comment
 - **`test_item_clips.rs`: a pinned LIST** — `CLIPS` = camera-box's clip
   (`CAMERA_BOX`, the default; #228's row `measure-v01` unchanged), then
   `wall-24` / `wall-25` / `wall-30` (rows `wallclip-24/25/30`, files
-  `wall-clip-v1-{fps}fps-60s.mp4`, artist `SongPlayer`, 60 s). Each is a
+  `wall-clip-v2-{fps}fps-60s.mp4`, artist `SongPlayer`, 60 s). Each is a
   ROW of the one test playlist, never a playlist of its own (a scene in the
   catalog and an idle pipeline per clip on the boxes); `not_test_item!`
   goes by the playlist's kind, so every row stays out of every queue.
   sha256s are byte arrays, like camera-box's.
+- **Clip v2 keeps the rows** (20.10.2026): its song / title say v2, so its
+  cache names are new and the import records each row anew (`already`
+  keys on the cache names, so it never takes the v1 files for v2); the
+  next start's self-heal deletes the v1 pair as a superseded duplicate
+  (`scan_cache` keeps the newest pair of an id).
 - `import(file, clips)` imports a file as the listed clip whose sha256 it
   has, under that clip's names; `import_listed` takes each clip from the
   bench under its OWN file name (`absent` is no error; `wrong_file` names
@@ -150,22 +155,45 @@ MEASURED with frame ids, never judged by eye. Design record: #272 comment
 
 ### `scripts/wall_clip.py` (the generator, deterministic)
 
-- 20 equal cells across the frame: margin `W // 48`, cell
-  `(W − 2·margin) // 20` (184 px at 3840; any width that is a multiple of
-  960 keeps the same fractions, which the reader samples by); cells 0 / 19
-  black, 1 / 18 white (the references), 2–17 the index in reflected Gray
-  code, MSB first, white = 1. Two consecutive indices differ in ONE cell:
-  a 2-frame blend shows one grey cell whose level is the weight.
-- 8 bands; per band the strip at 10–40 % of its height, the digits
-  (`0037  25 FPS`, a 5×7 numpy font, inside the strip's inner cells) at
-  52–88 %. Any quarter of the height holds a whole strip row (pinned at
-  4K). No QR: `qrcode` is not in CI's eval env.
+- **Clip v2 (20.10.2026): read under ANY zoom of the width.** v1 had one
+  strip across the frame, its references at the clip's two edges; the
+  operator's mapping (SNV, 18.10.2026: the clip at ~2×, only its middle
+  half on the wall; his mapping is the truth, #259) put them off the wall:
+  "decoded 0" on every deploy (#272 comments 6281310892, 6281626609).
+- Cells of `W / 192` px (20 at 4K; a width that is a multiple of 960 is
+  the 4K layout scaled). Per band 9 self-contained COPIES of the strip side
+  by side, margins `W / 32`; a copy is 20 cells: 0 / 19 black, 1 / 18
+  white (its own references), 2–17 the index in reflected Gray code, MSB
+  first, white = 1. Two consecutive indices differ in ONE cell of each
+  copy: a 2-frame blend shows one grey cell whose level is the weight.
+- Any window of 40 cells holds a whole copy, so ANY quarter of the width
+  (48 cells) holds one at every offset, 8 cells (161 px at 4K) to spare
+  (pinned px by px).
+- **A static RULER over each copy's strip**: cells 0 / 19 white, 1–18
+  black, the same in every frame. The reader places a copy only by it.
+  With copies side by side the strip's own references are ambiguous: the
+  bit cells of 863 of the 1800 indices of a 30 fps clip also form the
+  `W B B W` of a junction at a wrong phase. No strip draws 18 black cells
+  between white ones (pinned for all 65 536 codes), and a ruler row fails
+  the strip check (its "black" references are white).
+- Per band, of its height: digits 6–30 %, ruler 40–48 %, strip 52–76 %;
+  any quarter of the height holds a whole band. A strip starts half a
+  ruler under its ruler; the digits end 10 % above a ruler and the next
+  band's start 30 % under a strip, so no other rows pair as a ruler and its
+  strip.
+- The digits (`0037  25 FPS`, a 5×7 numpy font, 4 px font pixels at 4K)
+  sit in each copy's bit cells, luma **80**: 40 over the background, under
+  the reader's 25 % contrast floor. At v1's 200, a 4× scaled glyph pair
+  read as a ruler over a strip: a false copy reading index 0. No QR:
+  `qrcode` is not in CI's eval env.
 - Raw yuv420p (luma 16 / 235 / background 40, chroma 128) into libx264 on
   ONE thread, `veryfast` crf 16, GOP = fps, no B-frames, BT.709 tv tags,
   plus a silent 48 kHz stereo AAC track (the import splits it as
   camera-box's), `+bitexact`, no metadata: the same ffmpeg gives the same
-  bytes (dev1 regenerated the 25 fps clip byte-identical). A changed
-  picture = bump `CLIP_VERSION` (new file names) and re-pin the sha256s.
+  bytes (dev1 regenerated the 25 fps clip byte-identical, v1 and v2). A
+  changed picture = bump `CLIP_VERSION` (new file names and song names)
+  and re-pin the sha256s and sizes in `test_item_clips.rs`. v2: 13 959 001
+  / 14 028 769 / 15 748 924 B (24 / 25 / 30 fps; v1 was ~4.3 MB).
 
 ### `scripts/wall_frames.py` (the reader) + `scripts/wall_analysis.py`
 
@@ -178,16 +206,39 @@ imports `wall_clip`, `wall_analysis` (with `wall_spans`) and
 `av_sync_drift` / `av_sync_warp`).
 
 
-- Per picture: 8 sampled columns per cell (`CELL_SAMPLES`, over the
-  central half, at the cells' fractions of `--x-range`;
-  `sample_columns` → `read_columns`), the rows whose references read black /
-  white with contrast > 25 % of full scale and every bit between them, a
-  run of ≥ 3 such rows = one strip; its core rows normalised by its own
-  references. One grey cell (level 0.04–0.96) → `(i, i + 1, w)`, `w` the
-  LATER frame's weight in Q8, rounded (the program's `FrameBlend` unit).
-  Never guessed: `no_strip`, `multi` (≥ 2 grey cells), `non_adjacent`,
-  `disagree` (the bands read positions more than `SAME_PICTURE` apart: a
-  torn picture).
+- **Finding the copies (`locate`, v2), wherever they sit, at any scale:**
+  - per row, bright vs dark at the row's LOCAL midpoint (`bright_mask`:
+    the lowest / highest level ±16 of 64 blocks around, a half-row window;
+    a dimmed clip beside a bright overlay still splits; a spread ≤ 25 % of
+    full scale is never bright);
+  - a dark run of 18 cells between two bars of ≥ ¾ cell is a candidate
+    (`ruler_candidates`: left edge, cell ≥ 2 px);
+  - candidates within half a cell and 5 % of a cell of a group's first are
+    one copy, standing for its middle candidate (`group_candidates`: one
+    row's own reading, so every sampled column lies inside the picture);
+  - a copy is kept only where, at its own columns, ruler rows sit right
+    above strip rows (`ruled_strip`: within the ruler's height + 2 rows).
+- **Reading (`read_columns`):** at each copy's 8 sampled columns per cell
+  (`CELL_SAMPLES`, over the central half; `Copy.columns`,
+  `sample_copies`), the rows whose references read black / white with
+  contrast > 25 % of full scale and every bit between them, a run of ≥ 3
+  such rows = one strip; its core rows normalised by its own references.
+  One grey cell (level 0.04–0.96) → `(i, i + 1, w)`, `w` the LATER frame's
+  weight in Q8, rounded (the program's `FrameBlend` unit). Never guessed:
+  `no_strip`, `multi` (≥ 2 grey cells), `non_adjacent`, `disagree` (the
+  copies and bands read positions more than `SAME_PICTURE` apart: a torn
+  picture).
+- **A capture locates ONCE, then reads every picture at those columns**
+  (as v1 read at `--x-range`'s, which v2 deletes). `clip_copies` keeps the
+  copies that read the picture as one with more than half of them (an
+  overlay drawing a false copy is left out; no majority = the next
+  picture). A recording: its first picture showing the clip (earlier ones
+  `no_strip`). dxcam: before its timed polls (`find_clip`, ≤ `LOCATE_S`
+  10 s; one look at a whole 7680×1080 output takes ~0.6 s on dev1); with no
+  `--region` it looks at the whole output, then grabs only the strip rows
+  (± a quarter) and columns (± a cell) of the largest set of copies whose
+  strips share rows (`capture_region`). Nothing found → exit 4, the reason
+  on stderr. The report's `located`: copies, `cell_px`, `region`.
 - **One picture = within `SAME_PICTURE`** (8 Q8 + the 0.04 level edge):
   the program's own 8-bit blend (`nv12_mix.rs`, `(f(256 − w) + tw + 128)
   >> 8` on 16 / 235) rounds a weight near 0 or 256 to either side of the
@@ -403,6 +454,11 @@ imports `wall_clip`, `wall_analysis` (with `wall_spans`) and
   clips reads back (also through `read_video`'s pts path: 1440 / 1500 /
   1800, clean); real decoded frames blended 25 on 30, cut to an SNV
   quarter band, ×4 and noised read 0, 214, 170, 127, 85, 41 (±1 Q8).
+  v2 (20.10.2026): every frame of the three v2 files reads back through
+  `read_video` (9 copies, 72 strips a picture); real decoded v2 frames
+  blended 25 on 30 through the program's byte blend, shown at 2× across
+  the middle half and a quarter of the height (bilinear), noised, read 0,
+  214, 171, 128, 84, 40 at three offsets.
 - The clip's song / artist go to the wall's title clip like any song's
   (nothing treats the test playlist apart there): a strip the title covers
   fails its reference check and the consensus takes the other bands; a
@@ -445,21 +501,22 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
   generator left out: it draws nothing). It never clears them: the
   composition is the operator's. Arena's read is tried twice, a second
   apart (a second read failed "fetch failed", CI 39345213643).
-  - **But "decoded 0" since 18.10.2026 is a ZOOM, not layers** (#272
+  - **"decoded 0" from 18.10.2026 was a ZOOM, not layers** (#272
     comment 6281310892): Arena shows the wall clip ~2× across the
-    composition's width (the operator's mapping), so only the clip's middle
-    half reaches the wall and each strip's reference cells (0/19 black,
-    1/18 white, at its edges) are off it. `strip_rows` then finds no strip
-    in any part of the width. Look before blaming layers: play `wall-30`,
-    grab output 1 once, view it (`diag\wall-bridge\strip_probe.ps1` +
-    `strip_find.py <scripts> 1 <png>`). The fix is a clip v2 that reads
-    under any zoom of its WIDTH, as it already does of its height.
+    composition's width (the operator's mapping), so only the clip's
+    middle half reached the wall and v1's reference cells were off it.
+    Clip v2 (20.10.2026) reads under any zoom of the width. Look before
+    blaming layers: play `wall-30`, grab output 1 once, view it
+    (`diag\wall-bridge\strip_probe.ps1`), and run `wall_frames.locate`
+    on it (the copies found, their cell).
   - Only exit 0 with verdict `clean` passes.
   - `defects` names every counter: judder (`refreshes.uneven` of `judged`),
     jumps back, lost frames and boundaries, cadence, weights, frozen.
   - `incomplete` (exit 3) fails as INCOMPLETE, never as judder or clean.
   - Exit 4 = the wall does not show SongPlayer's program (Arena's clip on
-    another source, MAX off with the clip on MAX, the clip not on air).
+    another source, MAX off with the clip on MAX, the clip not on air), or
+    no whole copy of the clip's strip and its ruler is in view (v2: the
+    reader's stderr says `no copy of the clip's strip found`).
   - Exit 5 = the capture failed.
 - **It is RED while the wall judders.** That is the point; never loosen it
   to make a deploy green.
@@ -469,15 +526,17 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
 - dxcam's output on SNV: `Output[1]` 7680×1080 (`Output[0]` is the 4K
   primary). Read it with `python -c "import dxcam;
   print(dxcam.output_info())"`.
-- **It grabs one strip band, never the whole output** (`SP_WALL_REGION`,
-  ci.yml: `0,160,7680,312`). A full 7680×1080 grab is too slow to time
-  each refresh: the reader exits 5 ("only 2 intervals timed within
-  1.67 ms"). At Arena's mapping on 16.10.2026 the wall clip's strips land
-  on rows 170–308, 315–332 (a cut band) and 715–880 of that output; the
-  band 160–312 polls at 16.6 ms with no blind picture. Find the rows
-  again after any change to Arena's wall mapping: one `camera.grab()` of
-  the output while a wall clip plays, then `wall_frames.strip_rows` on
-  `cell_profile(sample_columns(picture, (0, 1)))`.
+- **It grabs only the strip rows the reader found, never the whole
+  output** (v2: ci.yml sets no `SP_WALL_REGION`). The reader looks at the
+  whole output once, finds the copies and grabs their strip rows ± a
+  quarter and their columns ± a cell (`capture_region`; `located.region`
+  in the report and the spec's log line), so a change of Arena's wall
+  mapping needs no new rows. A full 7680×1080 grab is too slow to time each
+  refresh: the reader exits 5 ("only 2 intervals timed within 1.67 ms").
+  v1's band 160–312 (16.10.2026) polled at 16.6 ms; a v2 region at SNV's
+  2× is ~200 rows of ~4900 px (modelled on dev1, not yet measured on the
+  box). `SP_WALL_REGION` stays a manual override: it must then hold a
+  whole ruler and its strip.
 - **A manual measurement on the box checks the rig lease FIRST, and
   before each round** (17.10.2026: an overnight layer A/B cut SP-program
   and bypassed Arena layers for 6 min inside camera-box's 8 h av-soak,
@@ -507,12 +566,17 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
    item`.
 3. `GET /api/v1/test-item` → `imported: true`; `/api/v1/ndi/health` has an
    `SP-test` row.
-4. #272, the wall clips: copy `wall-clip-v1-{24,25,30}fps-60s.mp4` (dev1
-   `~/.claude/work-products/issue-272/`, sizes and sha256s in
-   `test_item_clips.rs`) into the same bench dir, then `POST
+4. #272, the wall clips: copy `wall-clip-v2-{24,25,30}fps-60s.mp4` (dev1
+   `~/.claude/work-products/issue-272/`, next to v1's; sizes and sha256s
+   in `test_item_clips.rs`) into the same bench dir, then `POST
    /api/v1/test-item/import` with NO body → 200, each listed clip
    `imported` / `already` (`absent` for a file not copied, never an
-   error); `GET /api/v1/test-item` → `clips[*].imported`.
+   error); `GET /api/v1/test-item` → `clips[*].imported`. The v1 files in
+   the bench dir are no listed clip any more (delete them by hand); the v1
+   cache pair goes at the next start (self-heal, a superseded duplicate).
+5. After the deploy that carries v2: the gate's log line names `located`
+   (copies, `cell_px`, region). SNV's wall at ~2× should show 3–4 whole
+   copies of ~40 px cells.
 
 ## Tests
 
@@ -538,7 +602,18 @@ post-deploy spec reads the list. The scripts: `scripts/tests/test_wall_clip.py`
 encode leaving no ffmpeg and no partial file) and
 `scripts/tests/test_wall_frames.py` (reading a picture: blends, bands, ×4 +
 noise, the band median, the named failures, the pacer's rule and its dead
-band tied to `pacer_blend.rs`), `test_wall_frames_analyse.py` (one sample
+band tied to `pacer_blend.rs`), `test_wall_locate.py` (v2: the clip read
+under 1×–3× of its width at offsets across it, a quarter of the width and
+height across every phase of the copies, blur, a dimmed clip beside a
+bright overlay, indices across the clip whole and 4× with no false copy, a
+copy placed by its ruler only — a covered ruler, an index-0 strip, the
+digits, a copy the capture cuts —, disagreeing copies and the majority a
+capture keeps, and every bound of `bright_mask`, `ruler_candidates`,
+`group_candidates`, `ruler_rows`, `ruled_strip`, `capture_region`,
+`find_clip`; hand mutants of the v2 code: 99 of 101 killed, the two left
+equivalent: `group_candidates`' look-back stop `>` for `>=` (a candidate
+that far can never match) and `clip_copies`' `<=` for `<` against
+`SAME_PICTURE`, as for `disagree`), `test_wall_frames_analyse.py` (one sample
 per refresh: every grid phase through the program's byte blend at 24 / 25
 / 30 fps, loops / losses / jumps / weights / unverified steps at 60 and
 50 Hz / judder / the song-end clamp at every phase, a loss at the seam, a hold over 1 s there / the
