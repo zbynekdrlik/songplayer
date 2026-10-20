@@ -19,6 +19,7 @@ fn picture(width: u32, height: u32, timestamp_ms: u64) -> DecodedVideoFrame {
         stride: width,
         timestamp_ms,
         pixel_format: PixelFormat::Nv12,
+        gpu: None,
     }
 }
 

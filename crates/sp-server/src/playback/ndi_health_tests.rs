@@ -713,5 +713,28 @@ fn mk_reported_snapshot(playlist_id: i64) -> PipelineHealthSnapshot {
         lock_reason: String::new(),
         transport: sp_core::playback::TransportState::Idle,
         open_failures: None,
+        gpu_decoded: false,
     }
+}
+
+/// #279 P3a: a row says whether its pipeline's song decodes on the GPU,
+/// read from the GPU-resident table at each read (the Player's preview
+/// slot needs no heartbeat to learn it).
+#[tokio::test]
+async fn a_health_row_says_whether_its_song_decodes_on_the_gpu() {
+    let (mut engine, registry) = fresh_engine().await;
+    let id = 27_906;
+    engine.ensure_pipeline(id, "SP-gpu");
+    engine.handle_health_snapshot(id, playing_event(Instant::now(), 0));
+    let row = |on: bool| {
+        let rows = registry.snapshots();
+        let row = rows.iter().find(|s| s.playlist_id == id).expect("a row");
+        assert_eq!(row.gpu_decoded, on);
+        serde_json::to_value(row).unwrap()["gpu_decoded"].clone()
+    };
+    assert_eq!(row(false), serde_json::json!(false));
+    crate::playback::gpu_resident::pipelines().set_gpu_decoding(id, true);
+    assert_eq!(row(true), serde_json::json!(true), "read at the read");
+    crate::playback::gpu_resident::pipelines().forget(id);
+    assert_eq!(row(false), serde_json::json!(false));
 }

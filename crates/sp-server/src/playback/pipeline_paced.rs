@@ -177,7 +177,8 @@ fn ended_early(
 /// [`DecodeProducer`] (`paced_producer.rs`, Linux-tested) — off the
 /// time-critical emit/submit path (`preview.md`). Exits on a Stop from the
 /// consumer, dropping the decoder on this thread. #223 S3b: the reader opens in
-/// the `video_hw_decode` mode applied when the song opens (`video_decode.rs`);
+/// `mode` (`video_hw_decode`'s as applied when the song opens, or #279 P3a
+/// GPU-resident on the pipeline's producer: `gpu_resident::PipelineGpu`);
 /// #282: under the decode cap applied then (`max_resolution`), so a picture
 /// larger than the cap's box is decoded scaled.
 #[cfg_attr(test, mutants::skip)]
@@ -191,16 +192,21 @@ fn run_decode_producer(
     taps: crate::playback::preview::preview_stream::DecodeTaps,
     playlist_id: i64,
     event_tx: tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
+    mode: sp_decoder::DecodeMode,
 ) {
     use sp_decoder::MediaFoundationVideoReader;
 
-    // #223 S3b: `video_hw_decode` as applied now; a change applies from the
-    // next song. The reader falls back to software on its own (WARN).
+    // #223 S3b: a change of the mode applies from the next song. The reader
+    // falls back to software on its own (WARN).
     // #282: the decode cap too (a refused scaled open plays unscaled, WARN).
     let decode = crate::playback::video_decode::global();
     let cap = Some(decode.max_height());
-    let video_reader = match MediaFoundationVideoReader::open_with(&video_path, decode.mode(), cap)
-    {
+    // #279 P3a: the producer's ring, for the song's INFO line.
+    let producer = match &mode {
+        sp_decoder::DecodeMode::GpuResident(producer) => Some(Arc::clone(producer)),
+        _ => None,
+    };
+    let video_reader = match MediaFoundationVideoReader::open_with(&video_path, mode, cap) {
         Ok(v) => v,
         Err(e) => {
             let _ = open_tx.send(Err(format!(
@@ -210,6 +216,7 @@ fn run_decode_producer(
             return;
         }
     };
+    let codec = video_reader.codec();
     // #14/#186: karaoke-aware audio source (plain mix or live StemMixReader with mix fallback).
     let audio_stream = match crate::stems::reader::open_audio_stream(
         &audio_path,
@@ -268,21 +275,35 @@ fn run_decode_producer(
         // #15/#178: each item is offered to BOTH preview taps here, on the
         // PRODUCER thread. No viewer => a couple of relaxed atomic loads.
         match items.next_item(&mut decoder, &taps) {
-            Ok(Some(item)) => match shared.producer_push(item, items.epoch()) {
-                ProducerAction::Continue => {}
-                ProducerAction::Seek {
-                    position_ms,
-                    epoch: new_epoch,
-                } => producer_seek(
-                    &mut decoder,
-                    &mut items,
-                    position_ms,
-                    new_epoch,
-                    &event_tx,
-                    playlist_id,
-                ),
-                ProducerAction::Stop => return,
-            },
+            Ok(Some(item)) => {
+                // #279 P3a: the song's first frame's kind, and a fall back.
+                if let Some(kind) = items.take_kind_change() {
+                    let ring = producer.as_ref().map(|p| p.stats());
+                    crate::playback::gpu_resident::note_song_path(
+                        playlist_id,
+                        kind.gpu,
+                        kind.first,
+                        codec.as_deref(),
+                        kind.size,
+                        ring,
+                    );
+                }
+                match shared.producer_push(item, items.epoch()) {
+                    ProducerAction::Continue => {}
+                    ProducerAction::Seek {
+                        position_ms,
+                        epoch: new_epoch,
+                    } => producer_seek(
+                        &mut decoder,
+                        &mut items,
+                        position_ms,
+                        new_epoch,
+                        &event_tx,
+                        playlist_id,
+                    ),
+                    ProducerAction::Stop => return,
+                }
+            }
             Ok(None) => {
                 // #277: the picture stopped long before the video's own
                 // duration: the song FAILED (`early_end.rs`), never ended.
@@ -367,6 +388,50 @@ fn producer_drain_wait(
     }
 }
 
+/// What a song's decode producer opens (`spawn_producer`).
+struct SongInput<'a> {
+    video_path: &'a std::path::Path,
+    audio_path: &'a std::path::Path,
+    start_position_ms: Option<u64>,
+    playlist_id: i64,
+}
+
+/// Spawn the song's decode producer (`run_decode_producer`) on its own
+/// decode thread: it owns the decoder on its STA thread and fills the
+/// bounded look-ahead queue. The bench's decode thread starts the same way
+/// (#223 S0); the producer reports each seek's real position (#217,
+/// `Seeked`).
+#[cfg_attr(test, mutants::skip)]
+fn spawn_producer(
+    song: &SongInput<'_>,
+    shared: &Arc<SharedQueue<QueuedFrame>>,
+    open_tx: crossbeam_channel::Sender<Result<(u64, f32, u64), String>>,
+    taps: &crate::playback::preview::preview_stream::DecodeTaps,
+    event_tx: &tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
+    mode: sp_decoder::DecodeMode,
+) -> std::thread::JoinHandle<()> {
+    let shared = shared.clone();
+    let taps = taps.clone();
+    let video_path = song.video_path.to_path_buf();
+    let audio_path = song.audio_path.to_path_buf();
+    let event_tx = event_tx.clone();
+    let (start_position_ms, playlist_id) = (song.start_position_ms, song.playlist_id);
+    spawn_decode_thread(format!("paced-decode-{playlist_id}"), move || {
+        run_decode_producer(
+            video_path,
+            audio_path,
+            start_position_ms,
+            shared,
+            open_tx,
+            taps,
+            playlist_id,
+            event_tx,
+            mode,
+        );
+    })
+    .expect("spawn paced decode producer thread")
+}
+
 /// Boundary-paced EMIT loop (#147 producer/consumer split). The command / event
 /// contract of the deleted SDK-clocked `decode_and_send`, but the cadence is the wall-clock grid
 /// and the decode happens on a dedicated producer thread ([`run_decode_producer`])
@@ -395,28 +460,15 @@ pub(crate) fn decode_and_send_paced(
     // fills the bounded look-ahead queue.
     let shared: Arc<SharedQueue<QueuedFrame>> = Arc::new(SharedQueue::new(DECODE_QUEUE_BOUND));
     let (open_tx, open_rx) = crossbeam_channel::bounded::<Result<(u64, f32, u64), String>>(1);
-    let producer = {
-        let shared = shared.clone();
-        let taps = taps.clone();
-        let video_path = video_path.to_path_buf();
-        let audio_path = audio_path.to_path_buf();
-        // #217: the producer reports each seek's real position (`Seeked`).
-        let event_tx = event_tx.clone();
-        // The bench's decode thread starts the same way (#223 S0).
-        spawn_decode_thread(format!("paced-decode-{playlist_id}"), move || {
-            run_decode_producer(
-                video_path,
-                audio_path,
-                start_position_ms,
-                shared,
-                open_tx,
-                taps,
-                playlist_id,
-                event_tx,
-            );
-        })
-        .expect("spawn paced decode producer thread")
+    // #279 P3a: GPU-resident when `video_decode` = gpu takes effect.
+    let mode = output.gpu().song_mode();
+    let song = SongInput {
+        video_path,
+        audio_path,
+        start_position_ms,
+        playlist_id,
     };
+    let producer = spawn_producer(&song, &shared, open_tx, taps, event_tx, mode);
 
     // The pre-roll's standby black (#147 song-start hole): the SAME cached NV12
     // black as the idle fill.
@@ -776,5 +828,6 @@ pub(crate) fn decode_and_send_paced(
     // next push — so the join completes within ~one decode.
     shared.stop();
     let _ = producer.join();
+    crate::playback::gpu_resident::song_ended(playlist_id); // #279 P3a
     result
 }

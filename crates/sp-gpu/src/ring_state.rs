@@ -119,6 +119,12 @@ impl SizeClass {
             height: even(height),
         }
     }
+
+    /// The bytes its texture holds in VRAM (#279 P3a): NV12, a luma byte a
+    /// pixel and a U/V pair per 2×2 (`sp_core::nv12::nv12_len`).
+    pub fn bytes(self) -> u64 {
+        sp_core::nv12::nv12_len(self.width, self.height) as u64
+    }
 }
 
 /// `x` rounded up to even (`u32::MAX` stays: saturated).
@@ -360,6 +366,12 @@ impl RingState {
     /// How many slots a frame refers to.
     pub fn in_use(&self) -> usize {
         self.slots.iter().flatten().filter(|s| s.in_use).count()
+    }
+
+    /// The VRAM every slot's texture holds (#279 P3a: the ring's
+    /// `vram_mb`).
+    pub fn vram_bytes(&self) -> u64 {
+        self.slots.iter().flatten().map(|s| s.class.bytes()).sum()
     }
 
     /// Whether the ring is dead.

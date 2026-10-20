@@ -72,6 +72,7 @@ impl VideoStream for Video {
             stride: 4,
             timestamp_ms: ms,
             pixel_format: PixelFormat::Nv12,
+            gpu: None,
         }))
     }
     fn width(&self) -> u32 {
@@ -214,6 +215,7 @@ fn a_frame_and_its_audio_go_out_on_the_songs_origin() {
         stride: 4,
         timestamp_ms: 1_400,
         pixel_format: PixelFormat::Nv12,
+        gpu: None,
     };
     let frame = to_paced_frame(video, vec![chunk(1_350), chunk(900)], 1_000);
     assert_eq!(frame.pts_ns, 400_000_000);
@@ -246,6 +248,7 @@ fn a_frame_and_its_audio_go_out_on_the_songs_origin() {
         stride: 4,
         timestamp_ms: 900,
         pixel_format: PixelFormat::Nv12,
+        gpu: None,
     };
     assert_eq!(to_paced_frame(early, Vec::new(), 1_000).pts_ns, 0);
 }
@@ -478,3 +481,7 @@ fn a_held_ring_frame_gives_the_preview_its_audio_only_and_is_counted() {
 /// #277: an early end of the video (a child module over these mocks).
 #[path = "paced_producer_tests_early.rs"]
 mod early;
+
+/// #279 P3a: GPU-resident frames (a child module over these mocks).
+#[path = "paced_producer_tests_gpu.rs"]
+mod gpu;

@@ -62,6 +62,7 @@ fn video_frame_fields() {
         stride: 1920 * 4,
         timestamp_ms: 42,
         pixel_format: PixelFormat::Nv12,
+        gpu: None,
     };
     assert_eq!(frame.width, 1920);
     assert_eq!(frame.height, 1080);
@@ -79,6 +80,7 @@ fn video_frame_clone() {
         stride: 8,
         timestamp_ms: 100,
         pixel_format: PixelFormat::Nv12,
+        gpu: None,
     };
     let cloned = frame.clone();
     assert_eq!(cloned.data, frame.data);
@@ -94,6 +96,7 @@ fn video_frame_debug() {
         stride: 0,
         timestamp_ms: 0,
         pixel_format: PixelFormat::Nv12,
+        gpu: None,
     };
     let dbg = format!("{frame:?}");
     assert!(dbg.contains("DecodedVideoFrame"));

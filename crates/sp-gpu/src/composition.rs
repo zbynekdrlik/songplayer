@@ -314,6 +314,14 @@ impl<'a> Composition<'a> {
             .collect()
     }
 
+    /// #279 P3a: how many CPU pictures it draws (`uploads().len()`, with no
+    /// allocation: the `program-max` thread counts them every compose).
+    pub fn cpu_sides(&self) -> usize {
+        self.sides()
+            .filter(|(_, side, _)| side.cpu().is_some())
+            .count()
+    }
+
     /// #279 P2: the ring frames it draws, in draw order, each ring slot
     /// ONCE (both sides of a fade may show the same slot): what one compose
     /// opens and acquires.

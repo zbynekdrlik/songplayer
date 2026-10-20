@@ -9,7 +9,7 @@ use sp_gpu::probe::{
 use sp_gpu::{AdapterInfo, GpuError};
 
 use super::{AdapterJson, BenchAsk, ProbeAnswer, ProbeOutcome, ask, run};
-use crate::diag::decode_bench::DecodeBench;
+use crate::diag::decode_bench::{BenchMode, DecodeBench};
 
 const GIB: u64 = 1024 * 1024 * 1024;
 
@@ -58,23 +58,40 @@ fn probe(roundtrip: Result<(), ProbeError>, vram: Result<Vram, ProbeError>) -> G
 
 #[test]
 fn a_probe_asks_nothing_else_and_a_decode_run_names_its_file_and_seconds() {
-    assert_eq!(ask(true, None, None, false), Ok(BenchAsk::Probe));
-    let refused = Err("a probe takes no file, seconds or hw");
-    assert_eq!(ask(true, Some("x.mp4"), None, false), refused);
-    assert_eq!(ask(true, None, Some(5), false), refused);
-    assert_eq!(ask(true, None, None, true), refused);
-    assert_eq!(
-        ask(false, Some("x.mp4"), Some(5), true),
+    assert_eq!(ask(true, None, None, false, false), Ok(BenchAsk::Probe));
+    let refused = Err("a probe takes no file, seconds, hw or resident");
+    assert_eq!(ask(true, Some("x.mp4"), None, false, false), refused);
+    assert_eq!(ask(true, None, Some(5), false, false), refused);
+    assert_eq!(ask(true, None, None, true, false), refused);
+    assert_eq!(ask(true, None, None, false, true), refused);
+    let decode = |mode| -> Result<BenchAsk<'static>, &'static str> {
         Ok(BenchAsk::Decode {
             file: "x.mp4",
             seconds: 5,
-            hw: true,
+            mode,
         })
+    };
+    assert_eq!(
+        ask(false, Some("x.mp4"), Some(5), false, false),
+        decode(BenchMode::Software)
     );
+    assert_eq!(
+        ask(false, Some("x.mp4"), Some(5), true, false),
+        decode(BenchMode::Hardware)
+    );
+    // #279 P3a: a GPU-resident run, never together with hw.
+    assert_eq!(
+        ask(false, Some("x.mp4"), Some(5), false, true),
+        decode(BenchMode::Resident)
+    );
+    let two = Err("hw and resident are two modes: send one of them");
+    assert_eq!(ask(false, Some("x.mp4"), Some(5), true, true), two);
+    assert_eq!(ask(false, None, None, true, true), two);
     let missing = Err("file and seconds are required (or \"probe\": true)");
-    assert_eq!(ask(false, Some("x.mp4"), None, false), missing);
-    assert_eq!(ask(false, None, Some(5), false), missing);
-    assert_eq!(ask(false, None, None, false), missing);
+    assert_eq!(ask(false, Some("x.mp4"), None, false, false), missing);
+    assert_eq!(ask(false, None, Some(5), false, false), missing);
+    assert_eq!(ask(false, None, None, false, false), missing);
+    assert_eq!(ask(false, None, None, false, true), missing);
 }
 
 #[test]

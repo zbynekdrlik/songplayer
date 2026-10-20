@@ -6,12 +6,26 @@
 //! labelled by allocation here. The two kinds number apart and may share a
 //! value: the compositor's residency compares the uploaded pictures' ids
 //! alone, and opens ring slots by `sp_gpu::SlotKey`.
+//!
+//! #279 P3a: a CPU picture that is the standby black
+//! (`SharedFrame::is_standby_black`: a pipeline's idle, pre-roll or fill
+//! black) is composed as `Composition::Black` (a fade's black side as a
+//! missing side): no upload, no id. The compositor clears to black, so the
+//! picture is the same.
 
 use sp_gpu::{Composition, Side};
 
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::picture::Picture;
 use crate::playback::program_max::{MaxJob, MaxPicture};
+
+/// #279 P3a: whether `picture` is the standby black (drawn as black).
+fn is_black(picture: &MaxPicture) -> bool {
+    picture
+        .video
+        .cpu()
+        .is_some_and(SharedFrame::is_standby_black)
+}
 
 /// The ids of the pictures the compositor is given. `sp-gpu` skips the
 /// upload of a picture whose id its slot already holds, so an id must never
@@ -33,6 +47,7 @@ impl PictureIds {
         let mut labelled = Vec::with_capacity(2);
         let composition = match job {
             MaxJob::Black { .. } => Composition::Black,
+            MaxJob::Picture { picture, .. } if is_black(picture) => Composition::Black,
             MaxJob::Picture { picture, .. } => {
                 Composition::Picture(self.label(&mut labelled, picture))
             }
@@ -42,8 +57,14 @@ impl PictureIds {
                 weight_q8,
                 ..
             } => Composition::Fade {
-                from: from.as_ref().map(|p| self.label(&mut labelled, p)),
-                to: to.as_ref().map(|p| self.label(&mut labelled, p)),
+                from: from
+                    .as_ref()
+                    .filter(|p| !is_black(p))
+                    .map(|p| self.label(&mut labelled, p)),
+                to: to
+                    .as_ref()
+                    .filter(|p| !is_black(p))
+                    .map(|p| self.label(&mut labelled, p)),
                 weight_q8: *weight_q8,
             },
         };

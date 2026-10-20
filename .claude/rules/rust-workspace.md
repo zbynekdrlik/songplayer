@@ -25,6 +25,14 @@ established split patterns:
   fields, fns and types, so the moved `impl <Type>` block needs no
   `pub(crate)` field. A method the parent calls is `pub(super)` there; a
   `pub fn` stays public API.
+- **A merge of dev that pushes a file over the cap** (#279 P3a round 8:
+  sp-core `config.rs` 974 on dev + the lane's 63 = 1037): move the LANE's
+  own new items into a child module re-exported from the file
+  (`config_video_decode.rs`, `pub use video_decode_setting::{…}`), so
+  dev's lines stay put and the next integration has no conflict surface;
+  and do the split INSIDE the merge commit (resolve, split, `wc -l`, then
+  commit), so no commit in the history is over the cap (a separate split
+  commit leaves the merge a red bisect stop).
 
 ## A function that starts returning a GUARD: move its callers in the same commit (#282 follow-up)
 
@@ -961,6 +969,19 @@ the test that kills each one BEFORE CI's mutation gate runs.
   (`self.finish_push("hide_title_now", result);`): no mutant, so pin its
   effect with a behaviour test (#217 addendum 2,
   `a_retried_hide_that_404s_leaves_no_stale_note_for_the_next_push`).
+  A table that holds a `Weak` hides such a missing clear: once the last
+  `Arc` drops, the stale row reads as gone anyway. The test of a release
+  that must forget its row keeps a strong ref (as a playing song's
+  reader does) and asserts the row is gone (#279 P3a review round 7,
+  `gpu_resident_tests.rs::a_song_opened_while_gpu_does_not_take_effect_lets_the_producer_go`).
+  A `mutants::skip` glue fn that also writes state moves that write
+  into a tested generic fn (`release_at_open` / `release_when_idle`
+  over the fake producer), leaving the glue only its log line.
+- **Resuming a stopped lane** (#279 P3a, 19.10.2026): its scratch dir
+  (`lane-<n>/edits/`) may hold anchor-asserted edit scripts written but
+  never applied (the stop came mid-round); read them before redoing the
+  round, and re-target their helper's worktree path (`ed.py`'s `WT`) to
+  the new worktree, since the old one is gone.
 - **A comment added INSIDE a fn body puts that whole fn in the diff's
   list** (#229 follow-up: one comment line in `pipeline_stub.rs`'s
   `run_loop_stub` listed `replace run_loop_stub with ()`). `--in-diff`

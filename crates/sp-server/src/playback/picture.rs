@@ -102,8 +102,7 @@ impl Picture {
         match self {
             Picture::Cpu(frame) => Some(frame),
             Picture::Gpu(frame) => {
-                let now_100ns = (misses.clock)();
-                misses.note(consumer, frame, now_100ns);
+                misses.note_now(consumer, frame);
                 None
             }
         }
@@ -179,6 +178,12 @@ impl Default for CpuMisses {
 }
 
 impl CpuMisses {
+    /// [`note`](Self::note) at the timeline's now (the misses' clock).
+    pub fn note_now(&mut self, consumer: CpuUse, frame: &GpuFrame) -> bool {
+        let now_100ns = (self.clock)();
+        self.note(consumer, frame, now_100ns)
+    }
+
     /// `frame` reached the CPU consumer `consumer` at `at_100ns` (the
     /// timeline): counted; a WARN at most once per
     /// [`CPU_MISS_WARN_EVERY_100NS`], with the misses held back since and

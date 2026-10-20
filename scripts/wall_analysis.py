@@ -6,7 +6,8 @@ analysis behind ``wall_frames.py``.
 each was on screen for (another count than the wall's refresh rate gives
 is judder; with capture times a stall that held a picture shows here too,
 at the capture's edges as well; a wall that stopped presenting is
-``frozen``), lost frames, lost boundaries, jumps back, cadence errors,
+``frozen``), the distinct pictures shown (a re-show counted once), lost
+frames, lost boundaries, jumps back, cadence errors,
 loops, and the blend weights against the pacer's rule for the clip's fps on
 SongPlayer's 30 fps grid (``.claude/rules/genlock.md``: 25 on 30 = plain,
 213, 170, 128, 85, 42), at the grid phase fitted per play. What the capture
@@ -51,6 +52,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 
 import wall_clip as clip
+from wall_spans import still_report
 
 GRID_FPS = 30
 # The pacer's dead band (`BLEND_DEAD_BAND_100NS`, 2 ms): no blend that close
@@ -515,6 +517,7 @@ def analyse(
         "decoded": decoded,
         "undecoded": dict(Counter(r.status for r in readings if not r.ok)),
         "boundaries": len(runs),
+        "distinct_boundaries": distinct_boundaries(runs, steps, n_frames),
         "pictures_per_boundary": {
             str(k): v for k, v in sorted(Counter(b.pictures for b in runs).items())
         },
@@ -608,6 +611,32 @@ def frames_seen(runs: list[Boundary], steps: list[Step], n_frames: int) -> set[i
         if r.next_index is not None:
             seen.add(r.next_index + loops * n_frames)
     return seen
+
+
+def distinct_boundaries(runs: list[Boundary], steps: list[Step], n_frames: int) -> int:
+    """The distinct pictures the boundaries showed, numbered on across the
+    clip's loops: a run within ``SAME_PICTURE`` of a picture shown before
+    (a jump back re-shows one, and so can the steps after it) is that
+    picture again, never a new one. The pictures the program's boundaries
+    should have shown, minus this, are the ones the wall did not show or
+    the capture did not see (``unverified``) (#279: a back adds nothing, and
+    a capture that is dead or freezes counts every picture it did not
+    show, where ``lost_boundaries`` sees only skips between two readings
+    and counts the step out of a back as one). Away from a loop seam: the
+    new play's open hold (``loop_seams.hold_s``) repeats pictures, and a
+    back across the seam reads as one more loop. A run is one picture
+    within ``SAME_PICTURE`` of its FIRST reading, as ``boundaries``
+    groups it."""
+    positions = []
+    loops = 0
+    for n, run in enumerate(runs):
+        if n and steps[n - 1].wrapped:
+            loops += 1
+        positions.append(run.reading.position() + loops * n_frames)
+    positions.sort()
+    return sum(
+        k == 0 or v - positions[k - 1] > SAME_PICTURE for k, v in enumerate(positions)
+    )
 
 
 def frame_losses(
@@ -856,11 +885,18 @@ def weight_residual_q8(
 def capture_report(times: list[float], timing: Timing) -> dict:
     """The capture's own cadence: the interval between pictures (ms), how
     far one instant may be off (ms), the pictures after a span it can have
-    missed a whole refresh in (``blind_pictures``), and the longest blind
-    span (ms)."""
+    missed a whole refresh in (``blind_pictures``), the longest blind span
+    (ms), and ``wall_spans.still_report``: the longest span with no new
+    picture (``still_ms_max``) and the longest the output surely held
+    (``held_ms_max``)."""
     gaps = [(b - a) * 1000 for a, b in zip(times[:-1], times[1:])]
     if not gaps:
-        return {"interval_ms_p50": None, "interval_ms_max": None, "blind_pictures": 0}
+        return {
+            "interval_ms_p50": None,
+            "interval_ms_max": None,
+            "blind_pictures": 0,
+            **still_report(times, timing),
+        }
     assert timing.blind is not None
     spans = [x for x in timing.blind[1:] if math.isfinite(x)]
     blind = (
@@ -872,6 +908,7 @@ def capture_report(times: list[float], timing: Timing) -> dict:
         "time_error_ms": round(timing.error * 1000, 4),
         "blind_pictures": blind,
         "blind_ms_max": round(max(spans, default=0.0) * 1000, 3),
+        **still_report(times, timing),
     }
 
 

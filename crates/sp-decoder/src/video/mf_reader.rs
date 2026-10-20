@@ -35,9 +35,23 @@
 //! WARN: never a dead song. A scaled picture lies in the video processor's
 //! texture, so it tells nothing of the decoder's own path
 //! (`hw_decode::decoder_path_visible`).
+//!
+//! #279 P3a: a `GpuResident` reader's session is its pipeline's producer
+//! device (`hw_session.rs`), and each picture in a DXGI surface is copied
+//! into the producer's ring instead of read back (the child module
+//! `mf_reader_resident.rs`, `dxgi_frame.rs::DxgiSurface::picture`): the
+//! frame carries `gpu` and no bytes. Once the producer is retired its
+//! pictures are read back as a `Hardware` reader's, on the same decoder. A
+//! copy that fails is a decode error, so the reader goes on in software
+//! exactly as after any decode error on the D3D path, and lets go of its
+//! session: the session's reference to the producer goes, the reader's
+//! `mode` keeps one to the song's end. The producer stays in its
+//! pipeline's lease, which decides its life (`gpu_resident::Lease`: a dead
+//! ring is dropped at the next GPU-resident open with the 30 s backoff).
 
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use tracing::{debug, info, warn};
 
@@ -71,6 +85,9 @@ use crate::types::{DecodedVideoFrame, PixelFormat};
 // the first picture's re-read, the tests' accessors), split for the cap.
 #[path = "mf_reader_scaled.rs"]
 mod scaled;
+// #279 P3a: a DXGI surface's picture copied into the ring or read back.
+#[path = "mf_reader_resident.rs"]
+mod resident;
 
 pub(super) const VIDEO_STREAM: u32 = MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32;
 
@@ -179,12 +196,17 @@ impl MediaFoundationVideoReader {
         max_height: Option<u32>,
     ) -> Result<Self, DecoderError> {
         com_startup()?;
-        match mode {
-            DecodeMode::Software => {
+        let device = match &mode {
+            DecodeMode::Software => None,
+            DecodeMode::Hardware => Some(HwDevice::Picked),
+            DecodeMode::GpuResident(producer) => Some(HwDevice::Producer(Arc::clone(producer))),
+        };
+        match device {
+            None => {
                 let opened = Self::create(path, None, max_height)?;
                 Ok(Self::from_opened(path, mode, opened, None, max_height))
             }
-            DecodeMode::Hardware => Self::open_hardware(path, HwDevice::Picked, max_height),
+            Some(device) => Self::open_hardware(path, mode, device, max_height),
         }
     }
 
@@ -197,11 +219,14 @@ impl MediaFoundationVideoReader {
     #[cfg_attr(test, mutants::skip)]
     pub fn open_hardware_on_warp(path: &Path) -> Result<Self, DecoderError> {
         com_startup()?;
-        Self::open_hardware(path, HwDevice::Warp, None)
+        Self::open_hardware(path, DecodeMode::Hardware, HwDevice::Warp, None)
     }
 
+    /// Open `path` on the D3D path in `mode` (`Hardware` or, #279 P3a,
+    /// `GpuResident`) on `device`, else in software (`FallbackStage::Open`).
     fn open_hardware(
         path: &Path,
+        mode: DecodeMode,
         device: HwDevice,
         max_height: Option<u32>,
     ) -> Result<Self, DecoderError> {
@@ -216,18 +241,16 @@ impl MediaFoundationVideoReader {
                 info!(
                     file = %path.display(),
                     adapter = session.adapter_name(),
+                    mode = mode.as_str(),
                     width = opened.width,
                     height = opened.height,
                     "mf_reader: opened on the D3D11 path (hardware decode requested)"
                 );
+                if session.producer().is_some() {
+                    hw_counters().resident_open();
+                }
                 let adapter = session.adapter_name().to_string();
-                let mut reader = Self::from_opened(
-                    path,
-                    DecodeMode::Hardware,
-                    opened,
-                    Some(session),
-                    max_height,
-                );
+                let mut reader = Self::from_opened(path, mode, opened, Some(session), max_height);
                 reader.adapter = Some(adapter);
                 reader.gate.arm();
                 Ok(reader)
@@ -244,8 +267,7 @@ impl MediaFoundationVideoReader {
                 );
                 let opened = Self::create(path, None, max_height)?;
                 hw_counters().fell_back(&fallback);
-                let mut reader =
-                    Self::from_opened(path, DecodeMode::Hardware, opened, None, max_height);
+                let mut reader = Self::from_opened(path, mode, opened, None, max_height);
                 reader.fallback = Some(fallback);
                 Ok(reader)
             }
@@ -477,7 +499,7 @@ impl MediaFoundationVideoReader {
 
     /// What the caller asked for (#223 S3b).
     pub fn decode_mode(&self) -> DecodeMode {
-        self.mode
+        self.mode.clone()
     }
 
     /// The path the last picture handed over really came out of (#223 S3b):
@@ -651,7 +673,8 @@ impl MediaFoundationVideoReader {
     }
 
     /// The next decoded picture the caller does not have yet, from a DXGI
-    /// surface on the D3D path or from a system-memory buffer (software).
+    /// surface on the D3D path (read back, or #279 P3a copied into the
+    /// producer's ring: `gpu`) or from a system-memory buffer (software).
     /// After a software reopen, the pictures `Resume` drops are dropped
     /// before any readback (each still costs its decode).
     fn read_picture(&mut self) -> Result<Option<DecodedVideoFrame>, DecoderError> {
@@ -669,17 +692,8 @@ impl MediaFoundationVideoReader {
         } else {
             None
         };
-        let (data, width, height, stride, path) = match surface {
-            Some(surface) => {
-                let media_type: IMFMediaType = unsafe {
-                    self.reader
-                        .GetCurrentMediaType(VIDEO_STREAM)
-                        .map_err(|e| DecoderError::ReadSample(e.to_string()))?
-                };
-                let (width, height) = visible_size(frame_size(&media_type), self.reference);
-                let picture = surface.read(width, height, self.scaled_from.is_some())?;
-                (picture.data, width, height, picture.stride, picture.path)
-            }
+        let (data, width, height, stride, path, gpu) = match surface {
+            Some(surface) => self.surface_picture(&surface)?,
             None => {
                 let buffer: IMFMediaBuffer = unsafe {
                     sample
@@ -687,7 +701,14 @@ impl MediaFoundationVideoReader {
                         .map_err(|e| DecoderError::BufferLock(e.to_string()))?
                 };
                 let (data, width, height, stride) = Self::lock_video_buffer(&buffer, &self.reader)?;
-                (data, width, height, stride, DecodePath::of_picture(None))
+                (
+                    data,
+                    width,
+                    height,
+                    stride,
+                    DecodePath::of_picture(None),
+                    None,
+                )
             }
         };
         self.observe(path);
@@ -704,6 +725,7 @@ impl MediaFoundationVideoReader {
             stride,
             timestamp_ms,
             pixel_format: PixelFormat::Nv12,
+            gpu,
         }))
     }
 

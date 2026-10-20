@@ -96,7 +96,7 @@ pub use phase::{
 };
 #[path = "program_max_upload.rs"]
 mod upload;
-pub use upload::UPLOAD_RATE_SPAN;
+pub use upload::{GpuStatus, UPLOAD_RATE_SPAN};
 
 /// How many MAX jobs wait for the `program-max` thread: two, then the oldest
 /// is dropped (coalesced) — revision 2's D4 hand-off.

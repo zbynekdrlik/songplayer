@@ -857,3 +857,12 @@ picture, as the paced idle black is FHD in production.
   call (e.g. `send_video_flush`) must keep the owning output alive past the assertion —
   a thread closure that drops it appends `send_destroy` after the flush. Return the output
   from the thread (`let _out = thread.join().unwrap();`).
+
+## The standby black is marked, so MAX draws it as Black (#279 P3a)
+
+A pipeline's ONE standby black (`frame_buf::BlackNv12`: the idle fill,
+the pre-roll, the consumer's fills) is built with
+`SharedFrame::standby_black` (`is_standby_black()`); the program offers it
+to MAX like any picture, and MAX composes it as Black (`gpu-max.md`, "The
+producer device, the GPU sides on the API, the standby black"). A decoded
+picture that happens to be black is not marked.

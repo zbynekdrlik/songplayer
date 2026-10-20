@@ -3,6 +3,8 @@
 
 use std::time::{Duration, Instant};
 
+use sp_gpu::ComposeStats;
+
 use super::{UPLOAD_RATE_SPAN, Uploads, per_second, tenth};
 use crate::playback::program_max::{MAX_STAT_WINDOW, MaxOut};
 
@@ -97,5 +99,55 @@ fn the_status_carries_the_rates() {
         (status.upload_mb_s, status.uploads_per_s),
         (155.5, 12.5),
         "one 4K picture after the first in 80 ms"
+    );
+}
+
+/// #279 P3a: a compose's sides by kind over the window, and its ring
+/// slots' failures summed since the start (every compose's, the ones that
+/// left the window included).
+#[test]
+fn a_compose_records_its_sides_and_its_slots_failures() {
+    let t0 = Instant::now();
+    let mut uploads = Uploads::default();
+    assert_eq!(uploads.side_rates(), (0.0, 0.0));
+    let fade = ComposeStats {
+        uploads: 1,
+        upload_bytes: 4_000_000,
+        gpu_sides: 1,
+        gpu_opens: 1,
+        km_acquire_timeouts: 1,
+        abandoned: 2,
+        open_failures: 3,
+        ..ComposeStats::default()
+    };
+    uploads.push_compose(t0, &fade, 1);
+    uploads.push_compose(t0 + SECOND, &fade, 1);
+    let two_rings = ComposeStats {
+        gpu_sides: 2,
+        ..ComposeStats::default()
+    };
+    uploads.push_compose(t0 + 2 * SECOND, &two_rings, 0);
+    assert_eq!(
+        uploads.side_rates(),
+        (1.5, 0.5),
+        "3 ring slots and 1 CPU picture after the first, in 2 s"
+    );
+    assert_eq!(uploads.rates(), (2.0, 0.5), "4 MB in 1 picture in 2 s");
+    let slots = uploads.slots;
+    assert_eq!(
+        (
+            slots.km_acquire_timeouts,
+            slots.abandoned,
+            slots.open_failures,
+            slots.gpu_opens
+        ),
+        (2, 4, 6, 2),
+        "two composes' failures, the first one's too"
+    );
+    uploads.push(t0 + 3 * SECOND, 0, 0);
+    assert_eq!(
+        uploads.side_rates(),
+        (1.0, 0.3),
+        "a plain upload record draws no side: 3 slots and 1 picture in 3 s"
     );
 }

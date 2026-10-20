@@ -12,6 +12,7 @@
 //! waits and frees are tested here.
 
 use std::any::Any;
+use std::collections::VecDeque;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -34,6 +35,19 @@ static NEXT_RING: AtomicU64 = AtomicU64::new(1);
 /// The id of the next frame handed over in this process.
 static NEXT_FRAME: AtomicU64 = AtomicU64::new(1);
 
+/// How many of the last copies into a slot `RingStats::copy_us_p99`
+/// covers (#279 P3a): 30 s of pictures at 30 a second.
+pub const COPY_WINDOW: usize = 900;
+
+/// The 99th percentile of `values` (nearest rank: the smallest value at or
+/// above 99 % of them); `None` for none.
+pub(crate) fn p99(values: &[u64]) -> Option<u64> {
+    let mut sorted = values.to_vec();
+    sorted.sort_unstable();
+    let rank = (sorted.len() * 99).div_ceil(100);
+    rank.checked_sub(1).and_then(|i| sorted.get(i).copied())
+}
+
 /// A ring's counters: what its pipeline reports (#279 P3a's
 /// `status.video_decode.pipelines[].ring`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
@@ -49,6 +63,14 @@ pub struct RingStats {
     pub full: u64,
     /// The ring is dead ([`GpuError::RingDead`]).
     pub dead: bool,
+    /// #279 P3a: the 99th percentile of the last [`COPY_WINDOW`] copies
+    /// into a slot, µs (the producer's whole `copy_from`: the ring's lock, a
+    /// wait for a free slot (each also counted in `waits`), a new slot's
+    /// texture, the key, the copy, its flush, the release); `None` before
+    /// the first.
+    pub copy_us_p99: Option<u64>,
+    /// #279 P3a: the VRAM the slots' textures hold, bytes.
+    pub vram_bytes: u64,
 }
 
 /// The slot a write got ([`RingCore::take`]).
@@ -74,6 +96,8 @@ pub(crate) struct RingCore {
     freed: Condvar,
     waits: AtomicU64,
     full: AtomicU64,
+    /// #279 P3a: the last copies' time into a slot, µs.
+    copies: Mutex<VecDeque<u64>>,
 }
 
 impl RingCore {
@@ -85,6 +109,7 @@ impl RingCore {
             freed: Condvar::new(),
             waits: AtomicU64::new(0),
             full: AtomicU64::new(0),
+            copies: Mutex::new(VecDeque::with_capacity(COPY_WINDOW)),
         })
     }
 
@@ -181,15 +206,48 @@ impl RingCore {
         self.lock().slot(slot)
     }
 
-    /// The ring's counters.
+    /// #279 P3a: a copy into a slot took `us` (its writer, the producer,
+    /// times it); the window keeps the last [`COPY_WINDOW`].
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(crate) fn record_copy(&self, us: u64) {
+        let mut copies = self.copies.lock().unwrap_or_else(|p| p.into_inner());
+        copies.push_back(us);
+        if copies.len() > COPY_WINDOW {
+            copies.pop_front();
+        }
+    }
+
+    /// How many copy times the window holds (tests).
+    #[cfg(test)]
+    pub(crate) fn copies_held(&self) -> usize {
+        self.copies.lock().unwrap_or_else(|p| p.into_inner()).len()
+    }
+
+    /// The ring's counters (the copy times read after the state's lock).
     pub(crate) fn stats(&self) -> RingStats {
         let state = self.lock();
+        let (slots, in_use, dead, vram_bytes) = (
+            state.made(),
+            state.in_use(),
+            state.is_dead(),
+            state.vram_bytes(),
+        );
+        drop(state);
+        let copies: Vec<u64> = self
+            .copies
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .copied()
+            .collect();
         RingStats {
-            slots: state.made(),
-            in_use: state.in_use(),
+            slots,
+            in_use,
             waits: self.waits.load(Ordering::Relaxed),
             full: self.full.load(Ordering::Relaxed),
-            dead: state.is_dead(),
+            dead,
+            copy_us_p99: p99(&copies),
+            vram_bytes,
         }
     }
 }

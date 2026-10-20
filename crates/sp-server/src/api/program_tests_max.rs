@@ -100,6 +100,18 @@ async fn get_program_reports_the_max_block() {
         json.get("vban").is_none(),
         "#233: the VBAN telemetry is outputs[i].vban"
     );
+    assert_eq!(
+        json["gpu"],
+        serde_json::json!({
+            "gpu_sides_per_s": 0.0,
+            "cpu_sides_per_s": 0.0,
+            "km_acquire_timeouts": 0,
+            "abandoned": 0,
+            "open_failures": 0,
+            "gpu_opens": 0,
+        }),
+        "#279 P3a: the compositor's sides, nothing composed yet"
+    );
 
     // An Arc of its own: the thread guard below must not borrow `state`,
     // which the cut call moves.
@@ -285,5 +297,37 @@ async fn the_fhd_setting_saves_through_the_settings_api_and_loads_back() {
     assert!(
         !load_fhd_enabled(&state.pool).await.unwrap(),
         "switched off"
+    );
+}
+
+/// #279 P3a: `gpu` on the program answer: the compositor's sides by kind
+/// over the window and the ring slots' failures since the start.
+#[tokio::test]
+async fn the_program_answer_carries_the_gpu_block() {
+    let state = test_state().await;
+    let max = state.program_bus.max().clone();
+    let compose = ComposeStats {
+        gpu_sides: 1,
+        gpu_opens: 1,
+        km_acquire_timeouts: 2,
+        abandoned: 1,
+        open_failures: 3,
+        ..ComposeStats::default()
+    };
+    let t0 = std::time::Instant::now();
+    max.record_compose(t0, &compose, 0);
+    max.record_compose(t0 + std::time::Duration::from_millis(100), &compose, 2);
+    let (status, json) = call(state, "GET", "/api/v1/program", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        json["gpu"],
+        serde_json::json!({
+            "gpu_sides_per_s": 10.0,
+            "cpu_sides_per_s": 20.0,
+            "km_acquire_timeouts": 4,
+            "abandoned": 2,
+            "open_failures": 6,
+            "gpu_opens": 2,
+        })
     );
 }

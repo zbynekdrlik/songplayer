@@ -24,6 +24,7 @@ impl MockVideo {
                 stride: 2,
                 timestamp_ms: ms,
                 pixel_format: crate::types::PixelFormat::Nv12,
+                gpu: None,
             })
             .collect::<VecDeque<_>>();
         let duration_ms = *ms_list.last().unwrap_or(&0);
@@ -551,6 +552,7 @@ impl VideoStream for SeekMockVideo {
             stride: 2,
             timestamp_ms: ts,
             pixel_format: crate::types::PixelFormat::Nv12,
+            gpu: None,
         });
         if out.is_some() {
             self.cursor += 1;

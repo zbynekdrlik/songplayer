@@ -48,10 +48,14 @@ async fn a_request_that_is_neither_a_probe_nor_a_whole_run_is_400() {
         r#"{"probe":true,"file":"x.mp4"}"#,
         r#"{"probe":true,"seconds":1}"#,
         r#"{"probe":true,"hw":true}"#,
+        r#"{"probe":true,"resident":true}"#,
     ] {
         let (status, text) = post(&state, body).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{body}: {text}");
-        assert_eq!(text, "a probe takes no file, seconds or hw", "{body}");
+        assert_eq!(
+            text, "a probe takes no file, seconds, hw or resident",
+            "{body}"
+        );
     }
     for body in [
         r#"{}"#,

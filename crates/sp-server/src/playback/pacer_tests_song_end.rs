@@ -92,6 +92,7 @@ impl VideoStream for Video {
             stride: 4,
             timestamp_ms: self.ms(k),
             pixel_format: PixelFormat::Nv12,
+            gpu: None,
         }))
     }
     fn width(&self) -> u32 {

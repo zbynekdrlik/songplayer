@@ -92,6 +92,13 @@
 //! size classes, back-pressure, keys, a lost device, the open slots) is
 //! the pure [`ring_state`]; [`FakeRing`] (doc-hidden) makes frames without
 //! textures, for the tests of every platform.
+//!
+//! #279 P3a: `ProducerGpu` is a pipeline's producer device (the picked
+//! adapter, the video API, multithread-protected: what Media Foundation
+//! decodes on) and its ring: sp-decoder's GPU-resident reader copies each
+//! decoded picture into a slot of it (`ProducerGpu::copy_from`, Windows;
+//! off Windows it cannot be built). [`RingStats`] carries the copies'
+//! p99 and the slots' VRAM.
 
 mod adapter;
 mod color;
@@ -136,7 +143,7 @@ pub use readback::{mapped_len, unpad_rows, unpad_rows_into};
 pub use residency::{Resident, Upload, swap_slots, upload_for};
 #[doc(hidden)]
 pub use ring::FAKE_HANDLE_BASE;
-pub use ring::{FakeRing, GpuFrame, RingStats};
+pub use ring::{COPY_WINDOW, FakeRing, GpuFrame, RingStats};
 pub use ring_state::{RING_CAPACITY, RING_WAIT, RingFormat, SizeClass, SlotKey};
 pub use spout::{
     NAME_SLOT_LEN, SENDER_NAMES_MAP, SHARED_TEXTURE_INFO_LEN, SPOUT_FHD_SENDER_NAME,
@@ -155,12 +162,12 @@ pub use vblank::{
 
 #[cfg(not(windows))]
 pub use stub::{
-    Compositor, ListSentinel, SpoutSender, VblankTracker, probe_gpu, spout_list_holder,
-    spout_sender_info, spout_sender_names,
+    Compositor, ListSentinel, ProducerGpu, SpoutSender, VblankTracker, probe_gpu,
+    spout_list_holder, spout_sender_info, spout_sender_names,
 };
 #[cfg(windows)]
 pub use win::{
-    Compositor, ListSentinel, PictureRing, SpoutSender, VblankTracker, VideoDevice, adapters,
-    mutex_holder, probe_gpu, probe_on_listed_adapter, probe_warp, read_shared_texture,
+    Compositor, ListSentinel, PictureRing, ProducerGpu, SpoutSender, VblankTracker, VideoDevice,
+    adapters, mutex_holder, probe_gpu, probe_on_listed_adapter, probe_warp, read_shared_texture,
     spout_list_holder, spout_sender_info, spout_sender_names,
 };

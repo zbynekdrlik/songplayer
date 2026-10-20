@@ -41,6 +41,44 @@ pub(crate) fn now_ms() -> u64 {
         .unwrap_or(0.0) as u64
 }
 
+/// #266: what playlist `pid`'s live-preview slot may do — ONE pure rule
+/// (`sp_core::player_view::preview_slot`): a preview is offered only while
+/// the pipeline DECODES a song (its own transport plays, #201, on program or
+/// off — preparing a dub on the Dabing page before cutting it in included).
+/// It read the scene-aware `state` (`Playing | WaitingForScene` + a song), so
+/// a PAUSED playlist off program offered a preview that could only stay
+/// black (the owner's ytslow at PP). A Memo (Rule 1): a position tick never
+/// re-runs the slot. #279 P3a: a song decoded GPU-resident (its health row's
+/// `gpu_decoded`, the 1 Hz poll) gives the preview taps no picture before
+/// P3b, so the slot says so (`player_view::gpu_preview`) instead of offering
+/// a preview that would stay black. Out of `Player` (review round 5), which
+/// is long.
+fn preview_slot_memo(
+    store: DashboardStore,
+    pid: i64,
+    state_known: Memo<bool>,
+    has_content: Memo<bool>,
+) -> Memo<player_view::PreviewSlot> {
+    let gpu_decoded = Memo::new(move |_| {
+        store
+            .ndi_health
+            .get()
+            .iter()
+            .any(|o| o.playlist_id == pid && o.gpu_decoded)
+    });
+    Memo::new(move |_| {
+        let (state, transport) = store
+            .now_playing
+            .get()
+            .get(&pid)
+            .map(|i| (i.state, i.transport))
+            .unwrap_or_default();
+        let slot =
+            player_view::preview_slot(state_known.get(), has_content.get(), state, transport);
+        player_view::gpu_preview(slot, gpu_decoded.get())
+    })
+}
+
 #[component]
 pub fn Player(playlist_id: i64) -> impl IntoView {
     let store = use_context::<DashboardStore>().expect("DashboardStore in context");
@@ -83,17 +121,8 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     // /pause. On/off-program shows only in the badge (the WS state, #225).
     let is_playing = Memo::new(move |_| matches!(transport(), TransportState::Playing));
 
-    // #266: what the live-preview slot may do — ONE pure rule
-    // (`sp_core::player_view::preview_slot`): a preview is offered only while
-    // the pipeline DECODES a song (its own transport plays, #201, on program
-    // or off — preparing a dub on the Dabing page before cutting it in
-    // included). It read the scene-aware `state` (`Playing | WaitingForScene`
-    // + a song), so a PAUSED playlist off program offered a preview that could
-    // only stay black (the owner's ytslow at PP). A Memo (Rule 1): a position
-    // tick never re-runs the slot.
-    let preview_slot = Memo::new(move |_| {
-        player_view::preview_slot(state_known.get(), has_content.get(), state(), transport())
-    });
+    // #266 / #279 P3a: what the live-preview slot may do (`preview_slot_memo`).
+    let preview_slot = preview_slot_memo(store, pid, state_known, has_content);
 
     // Playback-command errors (play / pause / skip / prev / seek / mode) surface
     // here as Slovak text and clear on the next successful command.

@@ -12,6 +12,7 @@ paths:
   - "scripts/wall_clip.py"
   - "scripts/wall_frames.py"
   - "scripts/wall_analysis.py"
+  - "scripts/wall_spans.py"
   - "scripts/tests/test_wall_clip.py"
   - "scripts/tests/test_wall_*.py"
   - "scripts/tests/wall_fakes.py"
@@ -172,7 +173,8 @@ MEASURED with frame ids, never judged by eye. Design record: #272 comment
 glue and the CLI; `wall_analysis.py` is the pure analysis of a run of
 readings (`analyse`, the pacer's rule, the capture's timing). Run it from
 the repo checkout's `scripts/` (on the box: the runner's checkout): it
-imports `wall_clip`, `wall_analysis` and `av_sync_check` (with its
+imports `wall_clip`, `wall_analysis` (with `wall_spans`) and
+`av_sync_check` (with its
 `av_sync_drift` / `av_sync_warp`).
 
 
@@ -204,6 +206,41 @@ imports `wall_clip`, `wall_analysis` and `av_sync_check` (with its
   pacer's `BLEND_DEAD_BAND_100NS`, read from `pacer_blend.rs` by a test.
   Review rounds 1–2: `test_every_grid_phase_…` sweeps 512 phases per frame
   through the program's byte blend at 24 / 25 fps (and 30): clean.
+- `capture.still_ms_max` / `held_ms_max` (#279 P3a's A/B,
+  `scripts/wall_spans.py`, imported by `wall_analysis.capture_report`):
+  the longest span with no new picture, the capture's first and last
+  poll included, and the longest its own polls saw the output HOLD. An
+  empty dxcam poll proves nothing new was presented, so a span holds
+  but for the blind span of the picture that ended it (that picture
+  can have come anywhere in it) and the acquire window of the one that
+  began it (`Timing.late`: a present inside it IS that picture), and
+  the capture's end holds whole but for that window (its last poll
+  found nothing new). A starved capture reads a long still
+  span that holds little; a hold reads in both, whatever else the take
+  saw. `blind_ms_max` and `interval_ms_max` stay take-wide and between
+  pictures only. Tests `test_wall_still.py`; hand mutants 37 of 37
+  killed.
+- `distinct_boundaries` (#279 P3a's A/B, `video-decode.md`): the distinct
+  pictures the boundaries showed, numbered on across the clip's loops, a
+  run within `SAME_PICTURE` of a picture shown before counted once
+  (`wall_analysis.distinct_boundaries`). The program's boundaries over the
+  capture (1 200 per 40 s on the grid; at a 24 / 25 fps loop seam the
+  clamp shows ONE picture for two boundaries) minus it are the pictures
+  the wall did not show or the capture did not see: a jump back re-shows a picture
+  and adds nothing, and a capture that is dead or freezes to its end
+  counts every picture it did not show. `boundaries` (one per run) counts
+  every re-show again, and `lost_boundaries` sees only skips between two
+  readings and counts the step out of a back as one too. A run is one
+  picture within `SAME_PICTURE` of its FIRST reading, as `boundaries`
+  groups it. It holds away from a loop seam: the new play's open hold
+  (`loop_seams.hold_s`) repeats pictures, and a back across the seam
+  reads as one more loop (the A/B's span holds no seam). Hand mutants of
+  it: 27 of 33 killed. The six left are equivalent: the loop label counted
+  down, scaled or subtracted (any label whose loops lie at least
+  `n_frames` apart); `>=` for `>`, since positions are multiples of 1/256
+  and `SAME_PICTURE` is 18.24/256; and `abs()` over a sorted difference.
+  The edge is pinned: weight 238 against the plain next frame is one
+  picture, 237 is two.
 - **What a clean verdict means (the owner's ruling, #272 comment
   6170760353):** the wall's judder is intermittent, so a clean verdict
   covers only the span captured. A short take (a post-deploy gate of N
@@ -494,7 +531,10 @@ band tied to `pacer_blend.rs`), `test_wall_frames_analyse.py` (one sample
 per refresh: every grid phase through the program's byte blend at 24 / 25
 / 30 fps, loops / losses / jumps / weights / unverified steps at 60 and
 50 Hz / judder / the song-end clamp at every phase, a loss at the seam, a hold over 1 s there / the
-300-boundary minimum / coverage), `test_wall_timing.py` (the brackets: a locked recording and dxcam on time exact, 120 / 240 fps cameras proving counts and finding judder, cameras too coarse — 60 / 59.94 / 50 / 30 fps on 60 Hz, 60 fps on 50 Hz, 120 fps on 144 Hz, 60 fps on 75 Hz — never calling judder and never calling it clean, `unresolved`, a stall at the start, middle and end, blind refreshes hiding one boundary per refresh at 60 and 50 Hz, `hidden_refreshes`, `unseen_refreshes`, `held_range`, a frozen wall (dxcam only), the judged share, the required rate; round 6: unreadable pictures after the last boundary, cameras' pts on 1/90000, 1/10000, 1/1000 and 1/600 timebases, a rate within its tolerance either way, judder a box stall hid from dxcam; round 7: a grab preempted 2–40 ms before its acquire, an impossible bracket, a locked capture ending on unreadable pictures, a camera exposure mixing two boundaries) and `test_wall_capture.py` (round 7: `--locked` checked, a rate that cannot be checked)
+300-boundary minimum / coverage / the distinct pictures: a re-show once, one
+picture read two ways, the `SAME_PICTURE` edge, a run grouped by its first
+reading, a frozen tail, a dead capture, across loops (from the wrap's own
+step), a skipped blended boundary), `test_wall_timing.py` (the brackets: a locked recording and dxcam on time exact, 120 / 240 fps cameras proving counts and finding judder, cameras too coarse — 60 / 59.94 / 50 / 30 fps on 60 Hz, 60 fps on 50 Hz, 120 fps on 144 Hz, 60 fps on 75 Hz — never calling judder and never calling it clean, `unresolved`, a stall at the start, middle and end, blind refreshes hiding one boundary per refresh at 60 and 50 Hz, `hidden_refreshes`, `unseen_refreshes`, `held_range`, a frozen wall (dxcam only), the judged share, the required rate; round 6: unreadable pictures after the last boundary, cameras' pts on 1/90000, 1/10000, 1/1000 and 1/600 timebases, a rate within its tolerance either way, judder a box stall hid from dxcam; round 7: a grab preempted 2–40 ms before its acquire, an impossible bracket, a locked capture ending on unreadable pictures, a camera exposure mixing two boundaries) `test_wall_capture.py` (round 7: `--locked` checked, a rate that cannot be checked) and `test_wall_still.py` (#279: the still span of a clean capture, of an output presenting nothing, of a starved capture, a still head and tail, one picture, no span or blind spans)
 (`av_sync_check.gray_video_args`, `showinfo_pts`, `read_video` against a
 stand-in ffmpeg — pts, a half frame, a failed exit, the kill when a read
 fails —, `poll_blind`, `check_present_rate`, `main`'s exit codes for a
@@ -504,7 +544,7 @@ a 12 ms lag, a wall that stopped, a wrong or missing `--refresh-hz`, a bad
 `scripts/tests/wall_fakes.py` (the clip's frames, the program's byte blend,
 the pacer's readings, the wall's refreshes as a camera samples them, a
 simulated dxcam capture), all numpy-only for CI's Eval Checks job, whose
-ruff lists name the three scripts. Hand mutants of `wall_frames.py` / `wall_analysis.py` (every
+ruff lists name the four scripts (`wall_spans.py` too). Hand mutants of `wall_frames.py` / `wall_analysis.py` (every
 threshold, guard, bound and exit code; a scratch harness on dev1, not CI)
 were run after each review round and the tests extended until none
 survived; an equivalent one is removed from the code instead.

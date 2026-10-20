@@ -15,6 +15,7 @@
 //! shape from PR #54.
 
 use crate::playback::clock_health::ClockHealth;
+use crate::playback::gpu_resident;
 use crate::playback::ndi_health_transport::transport_from_reported;
 // `PacingStats` lives in its own file (1000-line cap); re-exported so every
 // `ndi_health::PacingStats` path stays valid.
@@ -85,6 +86,11 @@ pub struct PipelineHealthSnapshot {
     /// heartbeat; `null` while none failed since the last song started. The
     /// dashboard's Player says why the program is black from it.
     pub open_failures: Option<sp_core::playback::OpenFailures>,
+    /// #279 P3a: the pipeline's song decodes GPU-resident (its pictures stay
+    /// on the GPU): the Player offers no preview of it before P3b. Read live
+    /// from `gpu_resident::pipelines()` at each read ([`NdiHealthRegistry::snapshots`]).
+    #[serde(default)]
+    pub gpu_decoded: bool,
 }
 
 /// Paced-audio telemetry (#148), surfaced on `GET /api/v1/ndi/health` as
@@ -247,7 +253,8 @@ impl NdiHealthRegistry {
     /// Snapshot every pipeline's most recent NDI health for the
     /// `/api/v1/ndi/health` endpoint. Returns one entry per pipeline that
     /// has reported at least one heartbeat. #229: a row's `open_failures`
-    /// carries the wait left until its retry, read now on this clock.
+    /// carries the wait left until its retry, read now on this clock; #279
+    /// P3a: its `gpu_decoded` the table's now.
     pub fn snapshots(&self) -> Vec<PipelineHealthSnapshot> {
         let now_ms = Utc::now().timestamp_millis();
         match self.snapshots.read() {
@@ -256,6 +263,7 @@ impl NdiHealthRegistry {
                 .cloned()
                 .map(|mut row| {
                     row.open_failures = row.open_failures.map(|f| f.read_at(now_ms));
+                    row.gpu_decoded = gpu_resident::pipelines().gpu_decoding(row.playlist_id);
                     row
                 })
                 .collect(),
@@ -419,6 +427,7 @@ impl crate::playback::PlaybackEngine {
             lock_state,
             lock_reason: lock_reason.to_string(),
             open_failures,
+            gpu_decoded: false,
         };
 
         health_log::log_health_snapshot(&snapshot, prev.as_ref(), scene_active, &loop_stats);

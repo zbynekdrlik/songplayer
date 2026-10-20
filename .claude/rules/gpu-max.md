@@ -11,6 +11,7 @@ paths:
   - "crates/sp-server/src/api/program_tests_ndi.rs"
   - "crates/sp-server/src/playback/picture*.rs"
   - "crates/sp-server/src/playback/pacer_tests_gpu.rs"
+  - "crates/sp-server/src/playback/frame_buf.rs"
   - "src-tauri/resources/THIRD-PARTY-NOTICES.txt"
   - "e2e/post-deploy-max.spec.ts"
   - "e2e/max-gate*.ts"
@@ -20,7 +21,9 @@ paths:
 # The `SP-program-MAX` GPU compositor and Spout sender: `crates/sp-gpu` (#223 S1a, S1b) and its runtime wiring (S2)
 
 Design: #223 revision 3, R3-2 (comment 5979609879). `SP-program-MAX` is a
-FIXED 3840×2160 canvas (owner, 3.10.2026: "4k", "both outputs static"). A 4K
+FIXED 3840×2160 canvas (owner, 3.10.2026: "4k", "both outputs static"; since
+#251 the runtime `program_max_size` can set another for the wall's A/B,
+"Arena loses its OWN frames" below). A 4K
 fade costs ~40–45 ms on the CPU, over the 33.3 ms slot, so MAX is composed on
 the GPU. This crate is the compositor (device, upload, draw, readback) and,
 since S1b, its Spout sender (below); S2 wires both into the program output
@@ -103,7 +106,9 @@ below).
     every later compose; `remove_target(id)` stops it (never the
     primary). sp-server's production compositor's primary is
     `FHD_TARGET` and it adds `MAX_TARGET` while MAX is on (#279 P1b; #251
-    step 2 added `FHD_TARGET` to MAX's). The ids and
+    step 2 added `FHD_TARGET` to MAX's; since #251's `program_max_size`
+    MAX's target is `max_target()`, 3840×2160 unless the setting names
+    another). The ids and
     the draw order (primary first, then as added; an id never reused) are
     the pure `targets.rs` `Targets<T>`, which `win/mod.rs` holds its
     targets in.
@@ -1076,7 +1081,10 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   (not Spout-specific); once reconnected through the REST API
   (`POST /composition/layers/<n>/clips/<c>/connect`), the Spout clip showed
   MAX at once. Before a relaunch, read the connected clips
-  (`ops\arena_layers.py`) so they can be restored.
+  (`ops\arena_layers.py`) to REPORT them, never to restore them
+  (`wall.md`: no clip runs until the operator presses a scene); a test
+  reconnects only the clip it tests (the A/B's receiving clip included)
+  and undoes that.
 - **A forced kill can leave Spout's list to a receiver for good** (#243
   follow-up, PP 12.10.2026): hence the deploy's quiesce, the list sentinel
   and `max.list_holder` ("Spout locks handed over abandoned" above).
@@ -1093,9 +1101,10 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   Toggle it with `PATCH /api/v1/settings {"program_max_enabled": "false"}`
   (a flat body; `api/program_tests_max.rs` saves it through the router and
   reads it back); no restart.
-- `GET /api/v1/program` (and the cut answer) → `max {enabled, state, width:
-  3840, height: 2160, submitted, coalesced, failed, upload_us_p99,
-  draw_us_p99, send_us_p99, upload_mb_s, uploads_per_s (#279 P0, below),
+- `GET /api/v1/program` (and the cut answer) → `max {enabled, state, width,
+  height (the applied `program_max_size`, 3840×2160 by default),
+  submitted, coalesced, failed, upload_us_p99, draw_us_p99, send_us_p99,
+  upload_mb_s, uploads_per_s (#279 P0, below),
   send_at_us_p50/p99/max, send_late,
   vblank_output, vblank_state, vblank_tracking, vblank_period_ns, vblank_phase_us,
   compose_phase_us, send_off_grid, send_phase_us_p50/p99,
@@ -1360,7 +1369,8 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   stride's padding not counted; 0 when every picture was resident). The
   worker records it with `uploads` for EVERY compose that ran, at the
   instant it served the boundary (`MaxWorker::draw` →
-  `MaxOut::record_uploads`, `program_max_upload.rs`, a child of
+  `MaxOut::record_compose` since #279 P3a; `record_uploads` is the tests'
+  plain upload record), `program_max_upload.rs`, a child of
   `program_max.rs`): a boundary whose Spout send then failed moved its
   bytes all the same; a failed compose is not counted. `max.upload_mb_s`
   (10^6 bytes) and `max.uploads_per_s` = everything after the oldest of
@@ -1552,8 +1562,9 @@ nothing on air (default `cpu`).
 
 - The production compositor's PRIMARY target is the FHD program
   (`SpoutGpu::compositor` = `Compositor::with_size` of `FHD_TARGET`),
-  there for the compositor's life. MAX's 3840×2160 target is ADDED
-  (`add_target(MAX_TARGET)`, `MaxWorker::make_max`) only while MAX is
+  there for the compositor's life. MAX's target (3840×2160 unless
+  `program_max_size`, #251) is ADDED (`add_target` of `max_target()`,
+  `MaxWorker::make_max`) only while MAX is
   wanted, with its sender `SpoutSender::for_target(&c, max,
   SPOUT_SENDER_NAME)`, and taken off with it (`drop_max`: the sender
   first, then `remove_target`). The FHD Spout sender is `new_fhd(&c,
@@ -2010,11 +2021,10 @@ behaviour change).
   panic (`ProgramOutput::canvas_misses` is the tests' view,
   `DecodeProducer::preview_misses`). The standby blacks stay
   CPU. Tests read CPU bytes through the test-only `Picture::expect_cpu`.
-- Not on the API yet: `ComposeStats::{gpu_sides, gpu_opens,
-  km_acquire_timeouts, abandoned, open_failures}`, `RingStats` and the
-  CPU misses (P3a's telemetry: nothing writes a ring before it, so they
-  read 0 until then; the ring's death and the misses WARN meanwhile).
-  `RING_CAPACITY` = `pipeline_paced::DECODE_QUEUE_BOUND` + 8 is pinned by
+- #279 P3a puts the slots' counts on `GET /api/v1/program` `gpu` and
+  each pipeline's `RingStats` on `status.video_decode.pipelines` (the
+  next section); the CPU misses stay WARNs (rate-limited) and the ring's
+  death a WARN. `RING_CAPACITY` = `pipeline_paced::DECODE_QUEUE_BOUND` + 8 is pinned by
   a Windows test (`picture_tests.rs`).
 - **Tests.** sp-gpu: `ring_state_tests.rs`, `ring_tests.rs` (a write
   waits for a drop, threads with a safe-direction window), the `Side` /
@@ -2036,6 +2046,63 @@ behaviour change).
   `ProgramOutput`'s MAX offer and canvas miss, `PictureIds` and the
   worker (`program_max_worker_tests_gpu.rs`), a held ring frame's
   preview.
+
+## The producer device, the GPU sides on the API, the standby black (#279 P3a)
+
+Design: #279 comment 6244390810. The decode side (the setting, the lease,
+the copy) is `video-decode.md` "GPU-resident decode".
+
+- **`ProducerGpu`** (`win/producer.rs`; off Windows an uninhabited struct
+  whose `new` is `Unsupported`):
+  - one `VideoDevice` (`pick_adapter`, the video API,
+    multithread-protected) and one `PictureRing` on it, behind a `Mutex`;
+    `new_warp` (doc-hidden, tests) is a WARP device WITHOUT the video API
+    (WARP refuses it);
+  - `copy_from(source, subresource, visible)` is the ring's copy, timed
+    into `RingCore::record_copy` (the WHOLE call: the ring's lock, a wait
+    for a free slot, a new slot's texture, the key, the copy, its flush,
+    the release), then `GetDeviceRemovedReason`: a removed device kills the
+    ring ("the producer device was lost", its HRESULT) and returns
+    `GpuError::removed`;
+  - `ring_dead()` asks the device too (review round 1): Media Foundation's
+    decoder can meet a removed device first (its read fails, the reader
+    reopens in software and no copy runs), and the ring dies there then, so
+    the pipeline's next song still builds a new producer;
+  - `retire()` / `retired()` (review rounds 1-2): the reader asks
+    `retired()` before each copy, so a retired producer's songs read their
+    pictures back from their next one (the GPU decoder goes on: no reopen,
+    no gap); its ring and the frames in it stay valid (the compositor draws
+    them to their last drop). sp-server retires every producer when
+    `video_decode` = `gpu` stops taking effect and replaces a retired one
+    at the pipeline's next GPU-resident song (`video-decode.md`);
+  - `stats()` reads the ring's core without the ring's lock; `adapter()`,
+    `device()`.
+- **`RingStats`** adds `copy_us_p99` (`ring::p99`, nearest rank, over the
+  last `COPY_WINDOW` = 900 copies, `None` before the first; each copy's
+  whole `copy_from`, a slot's wait included, which `waits` counts too) and
+  `vram_bytes` (`RingState::vram_bytes`: every made slot's NV12 bytes,
+  `SizeClass::bytes`).
+- **`GET /api/v1/program` → `gpu`** (`program_max_upload.rs` `GpuStatus`,
+  `MaxOut::gpu_status`; each compose recorded by
+  `MaxOut::record_compose` from `MaxWorker::draw`):
+  - over the upload window (the last 900 composes within 30 s):
+    `gpu_sides_per_s` (ring slots drawn in place) and `cpu_sides_per_s`
+    (CPU pictures drawn, uploaded or resident: `Composition::cpu_sides`,
+    `uploads()`'s count with no allocation on the `program-max` thread);
+  - since the start (`ComposeStats`): `km_acquire_timeouts`, `abandoned`,
+    `open_failures`, `gpu_opens`;
+  - the mock serves zeros.
+- **A pipeline's standby black composes as Black** (`frame_buf.rs`
+  `SharedFrame::standby_black` / `is_standby_black`, marked by
+  `BlackNv12`; `program_max_ids.rs::is_black`): a boundary whose picture
+  is that black is `Composition::Black` (no upload, no draw), and a fade
+  side of it is `None` (black). Before, MAX uploaded and drew the black
+  of an idle playlist on program.
+- **Tests:** `ring_tests.rs` / `ring_state_tests.rs` (the p99, the copies
+  counted, the VRAM); WARP `tests/ring.rs` (a producer copies a slice into
+  its ring and counts it; the production producer takes the picked
+  adapter or none); `program_max_upload_tests.rs`,
+  `program_max_worker_tests_gpu.rs`, `api/program_tests_max.rs`.
 
 ## Arena loses its OWN frames while it receives `SP-program-MAX` (#251, 19.10.2026)
 
@@ -2100,6 +2167,12 @@ the FHD `SP-program`:
   that way: take the UI ("Resolume Arena - …") by its own handle
   (`EnumWindows` + `GetWindowText`) and check the title before acting
   (v1 minimized the wall twice, 19.10.2026 ~23:06Z).
+- **Any LIVE input, not only Spout** (`ndi_ab.ps1`, `gen_ab.ps1`, #251
+  comment 6279611039): an NDI input on L5 costs the same (205 / 294 of 600
+  per 20 s, Spout 250 / 281), while Arena's own non-live Blank generator on
+  the same layer costs nothing (601 / 601). Arena's "DMA Textures"
+  preference (`config.xml` `Texture Path`, Force ON vs the legacy
+  Autodetect) does not move it either (6279828121).
 - A SongPlayer-side change cannot fix this; never ship one "for #251"
   without a wall measurement that moves.
 
@@ -2123,8 +2196,44 @@ before the wait, a frame announced only once copied).
   (`program_max_tests_ndi.rs`), and both senders per boundary
   (`program_max_worker_tests_fhd.rs`).
 
+The hand-off mode changed nothing (#251 comment 6270228777: every mode
+lost ~45–50 % of the clip's frames), so the next lever tried was the size
+Arena receives (#251 comment 6270237157). It changed nothing either (#251
+comment 6271531140: 3840×2160 a mean 632, 1920×1080 a mean 652 of 1 200
+per 40 s). `recv2_ab` (#251 comment 6274680850: MAX or FHD `SP-program`
+received = loss in 18 of 20 takes, no receive = clean) and `recv3_ab`
+(6275818478, above) then showed it is any Spout receive, and
+`recv4_ab` / `recv4b_ab` (6276425317, 6276709434: 8 + 8 takes) that it
+is paid every frame, not per received copy (a black sender at one
+picture a second 546–656 on the wall, at 30 a second 548–723, MAX on
+Blank 522 / 587, no receive 1201), and lies mostly between Arena's
+composition and the wall output (Arena's composition monitor 1140–1168
+under a receive, 1199–1201 with none). Both settings stay, at their
+defaults:
+
+**The size:** `program_max_size` = `WxH` (trimmed; even sides, the width
+640..=3840, the height 360..=2160; anything else, absent included, is the
+canvas 3840×2160, `program_max_phase::program_max_size`).
+- It is read with MAX's settings every 5 s (`apply_phase_settings`, an INFO
+  line on a change) and kept on MAX's queue (`MaxOut::max_size`).
+- At each boundary the worker (`program_max_release.rs::resize_max`, a
+  child of `program_max_worker.rs`) compares it with the size MAX's target
+  was added at; on a difference it drops MAX's sender, then the target, and
+  the same boundary's build adds the target at the new size (`MAX_FIT`,
+  filling its width) with a new sender.
+- `GET /api/v1/program` `max.width` / `height` report the applied size. The
+  hand-off mode is on no field of `GET /api/v1/program`: `GET
+  /api/v1/settings` shows its STORED value (anything but exactly `plain`
+  or `release_then_wait`, trimmed, is the default `synced`), applied
+  within one 5 s poll (the INFO `program max: Spout hand-off applied`
+  names the applied `mode` at a change).
+- The post-deploy MAX gate (`e2e/max-gate.ts`) requires 3840×2160, so an
+  A/B value left set fails the next deploy's E2E.
+
 **How to judge any wall change from now on:**
-- count `pictures` against the content's own rate, next to the backs;
+- count the MISSING pictures (the distinct forward pictures against what
+  the content shows on the wall, never the raw count: `video-decode.md`,
+  the main A/B's metrics), next to the backs;
 - measure on NON-SongPlayer content too: an Arena clip on one layer while
   another layer receives SongPlayer's Spout;
 - a test that switches the bridge Arena puts every clip and setting back in

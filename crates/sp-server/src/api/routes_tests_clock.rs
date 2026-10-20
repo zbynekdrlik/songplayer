@@ -47,6 +47,7 @@ async fn ndi_health_endpoint_includes_clock() {
         lock_reason: "pacing disabled".to_string(),
         transport: sp_core::playback::TransportState::Idle,
         open_failures: None,
+        gpu_decoded: false,
     });
 
     let resp = app(state)
@@ -112,6 +113,7 @@ async fn ndi_health_endpoint_includes_open_failures() {
             retry_in_ms: None,
             on_program: true,
         }),
+        gpu_decoded: false,
     });
 
     let resp = app(state)

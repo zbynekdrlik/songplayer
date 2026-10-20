@@ -432,6 +432,7 @@ fn snapshot(
         lock_reason: String::new(),
         transport: sp_core::playback::TransportState::Idle,
         open_failures: None,
+        gpu_decoded: false,
     }
 }
 

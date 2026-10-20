@@ -7,16 +7,21 @@
 //! touches the process value ([`global`]); every other test has its own.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use sp_core::config::{NdiSource, VideoDecode};
 use sp_decoder::{DecodeMode, HwDecodeStats};
+use sp_gpu::RingStats;
 use tokio::sync::broadcast;
 
 use super::{
-    HwDecodeSetting, VIDEO_DECODE_SETTINGS_POLL, VideoDecodeStatus, apply_setting, global,
-    load_hw_decode, load_max_height, run_settings_task, start, status, status_of,
+    HwDecodeSetting, VIDEO_DECODE_SETTINGS_POLL, VideoDecodeStatus, apply_setting,
+    apply_setting_to, global, load_hw_decode, load_max_height, run_settings_task, start, status,
+    status_of,
 };
 use crate::db::models::set_setting;
+use crate::playback::gpu_resident::{PipelineDecode, Pipelines, Producer, Resident, RingStatus};
 
 async fn settings_pool() -> sqlx::SqlitePool {
     let pool = crate::db::create_memory_pool().await.unwrap();
@@ -209,9 +214,19 @@ fn the_status_carries_the_setting_and_the_counters() {
         last_fallback: Some("mid-stream: device removed".into()),
         scaled_opens: 9,
         scale_refusals: 3,
+        resident_opens: 4,
     };
+    let rows = vec![PipelineDecode {
+        playlist_id: 5,
+        gpu_decoding: true,
+        ring: Some(RingStatus {
+            slots: 20,
+            vram_mb: 249,
+            ..RingStatus::default()
+        }),
+    }];
     assert_eq!(
-        status_of(&setting, stats),
+        status_of(&setting, stats, rows.clone()),
         VideoDecodeStatus {
             hw_decode: true,
             hw_requested: 7,
@@ -224,8 +239,22 @@ fn the_status_carries_the_setting_and_the_counters() {
             max_height: 1080,
             scaled_opens: 9,
             scale_refusals: 3,
+            video_decode: "software".into(),
+            gpu_resident_opens: 4,
+            gpu_resident_blocked: None,
+            pipelines: rows,
         }
     );
+    setting.set_video_decode(VideoDecode::Gpu);
+    let blocked = status_of(&setting, HwDecodeStats::default(), Vec::new());
+    assert_eq!(blocked.video_decode, "gpu");
+    assert_eq!(
+        blocked.gpu_resident_blocked.as_deref(),
+        Some("ndi_source_cpu")
+    );
+    setting.set_ndi_source(NdiSource::Gpu);
+    let on = status_of(&setting, HwDecodeStats::default(), Vec::new());
+    assert_eq!(on.gpu_resident_blocked, None, "it takes effect");
 }
 
 #[test]
@@ -248,6 +277,22 @@ fn the_status_serializes_to_the_documented_json() {
         max_height: 1080,
         scaled_opens: 6,
         scale_refusals: 2,
+        video_decode: "gpu".into(),
+        gpu_resident_opens: 5,
+        gpu_resident_blocked: Some("ndi_source_cpu".into()),
+        pipelines: vec![PipelineDecode {
+            playlist_id: 7,
+            gpu_decoding: true,
+            ring: Some(RingStatus {
+                slots: 20,
+                in_use: 12,
+                waits: 1,
+                full: 0,
+                dead: false,
+                copy_us_p99: Some(380),
+                vram_mb: 249,
+            }),
+        }],
     })
     .unwrap();
     assert_eq!(json["hw_decode"], true);
@@ -261,6 +306,24 @@ fn the_status_serializes_to_the_documented_json() {
     assert_eq!(json["max_height"], 1080);
     assert_eq!(json["scaled_opens"], 6);
     assert_eq!(json["scale_refusals"], 2);
+    // #279 P3a.
+    assert_eq!(json["video_decode"], "gpu");
+    assert_eq!(json["gpu_resident_opens"], 5);
+    assert_eq!(json["gpu_resident_blocked"], "ndi_source_cpu");
+    let row = &json["pipelines"][0];
+    assert_eq!(row["playlist_id"], 7);
+    assert_eq!(row["gpu_decoding"], true);
+    for (key, value) in [
+        ("slots", 20),
+        ("in_use", 12),
+        ("waits", 1),
+        ("full", 0),
+        ("copy_us_p99", 380),
+        ("vram_mb", 249),
+    ] {
+        assert_eq!(row["ring"][key], value, "{key}");
+    }
+    assert_eq!(row["ring"]["dead"], false);
     // A block from an older build, missing keys: each reads as its zero.
     let old: VideoDecodeStatus = serde_json::from_str(r#"{"hw_decode": true}"#).unwrap();
     assert_eq!(
@@ -307,7 +370,141 @@ async fn the_status_route_carries_the_video_decode_block() {
         "max_height",
         "scaled_opens",
         "scale_refusals",
+        "gpu_resident_opens",
     ] {
         assert!(block[key].is_u64(), "{key}: {json}");
     }
+    assert!(block["video_decode"].is_string(), "{json}");
+    assert!(block["pipelines"].is_array(), "{json}");
+}
+
+/// #279 P3a: `video_decode` = `gpu` takes effect only while NDI comes from
+/// the GPU; each setting alone is a change the task applies. On a table of
+/// its own (review round 7): its switch-off retires producers, and the
+/// process-wide table holds other tests'.
+#[tokio::test]
+async fn video_decode_takes_effect_only_while_ndi_comes_from_the_gpu() {
+    let pool = settings_pool().await;
+    let setting = HwDecodeSetting::default();
+    let table = Pipelines::empty();
+    assert_eq!(setting.video_decode(), VideoDecode::Software);
+    assert_eq!(setting.resident(), Resident::Off);
+    set_setting(&pool, "video_decode", "gpu").await.unwrap();
+    assert!(
+        apply_setting_to(&pool, &setting, &table).await,
+        "video_decode alone"
+    );
+    assert_eq!(setting.video_decode(), VideoDecode::Gpu);
+    assert_eq!(setting.resident(), Resident::Blocked("ndi_source_cpu"));
+    assert!(
+        !apply_setting_to(&pool, &setting, &table).await,
+        "nothing new"
+    );
+    set_setting(&pool, "program_ndi_source", "gpu")
+        .await
+        .unwrap();
+    assert!(
+        apply_setting_to(&pool, &setting, &table).await,
+        "the NDI source alone"
+    );
+    assert_eq!(setting.resident(), Resident::On);
+    assert_eq!(
+        setting.mode(),
+        DecodeMode::Software,
+        "the base mode unchanged"
+    );
+    set_setting(&pool, "video_decode", "software")
+        .await
+        .unwrap();
+    assert!(apply_setting_to(&pool, &setting, &table).await);
+    assert_eq!(setting.resident(), Resident::Off);
+}
+
+#[test]
+fn the_setting_says_whether_each_value_changed() {
+    let setting = HwDecodeSetting::default();
+    assert!(
+        !setting.set_video_decode(VideoDecode::Software),
+        "the default"
+    );
+    assert!(setting.set_video_decode(VideoDecode::Gpu));
+    assert!(!setting.set_video_decode(VideoDecode::Gpu));
+    assert!(!setting.set_ndi_source(NdiSource::Cpu), "the default");
+    assert!(setting.set_ndi_source(NdiSource::Gpu));
+    assert!(!setting.set_ndi_source(NdiSource::Gpu));
+    assert_eq!(setting.resident(), Resident::On);
+    assert!(setting.set_ndi_source(NdiSource::Cpu));
+    assert_eq!(setting.resident(), Resident::Blocked("ndi_source_cpu"));
+    assert!(setting.set_video_decode(VideoDecode::Software));
+    assert_eq!(setting.resident(), Resident::Off);
+}
+
+/// Review round 1: a GPU-resident song decodes on the GPU, so `gpu` in
+/// effect takes the hardware decode's cap (automatic = 2160) even with
+/// `video_hw_decode` off; blocked, the software cap (1440) stays.
+#[tokio::test]
+async fn gpu_in_effect_takes_the_hardware_cap() {
+    let pool = settings_pool().await;
+    let setting = HwDecodeSetting::default();
+    apply_setting(&pool, &setting).await;
+    assert_eq!(setting.max_height(), 1440, "software, automatic");
+    set_setting(&pool, "video_decode", "gpu").await.unwrap();
+    apply_setting(&pool, &setting).await;
+    assert_eq!(setting.max_height(), 1440, "gpu blocked: decoded as before");
+    set_setting(&pool, "program_ndi_source", "gpu")
+        .await
+        .unwrap();
+    assert!(apply_setting(&pool, &setting).await);
+    assert_eq!(setting.resident(), Resident::On);
+    assert_eq!(setting.max_height(), 2160, "gpu in effect: the GPU's cap");
+    set_setting(&pool, "max_resolution", "1080").await.unwrap();
+    apply_setting(&pool, &setting).await;
+    assert_eq!(setting.max_height(), 1080, "a set cap holds");
+}
+
+/// A producer the settings task can retire (`gpu_resident::Producer`).
+#[derive(Default)]
+struct Retirable(AtomicBool);
+
+impl Producer for Retirable {
+    fn lost(&self) -> bool {
+        false
+    }
+
+    fn ring(&self) -> RingStats {
+        RingStats::default()
+    }
+
+    fn retire(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    fn retired(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
+}
+
+/// Review round 2: the settings task retires the producers when `gpu`
+/// stops taking effect (here NDI back on the canvas), never when it starts
+/// (a table of the test's own: the process's is untouched).
+#[tokio::test]
+async fn the_task_retires_the_producers_when_gpu_stops_taking_effect() {
+    let pool = settings_pool().await;
+    let setting = HwDecodeSetting::default();
+    let table = Pipelines::empty();
+    let producer = Arc::new(Retirable::default());
+    table.set_producer(1, Some(&producer));
+    set_setting(&pool, "video_decode", "gpu").await.unwrap();
+    set_setting(&pool, "program_ndi_source", "gpu")
+        .await
+        .unwrap();
+    assert!(apply_setting_to(&pool, &setting, &table).await);
+    assert_eq!(setting.resident(), Resident::On);
+    assert!(!producer.retired(), "gpu taking effect retires nothing");
+    set_setting(&pool, "program_ndi_source", "cpu")
+        .await
+        .unwrap();
+    assert!(apply_setting_to(&pool, &setting, &table).await);
+    assert_eq!(setting.resident(), Resident::Blocked("ndi_source_cpu"));
+    assert!(producer.retired(), "NDI back on the canvas: retired");
 }

@@ -421,6 +421,7 @@ fn sample_snapshot() -> crate::playback::ndi_health::PipelineHealthSnapshot {
         lock_reason: "late > 25 % of slots in 60 s".to_string(),
         transport: sp_core::playback::TransportState::Idle,
         open_failures: None,
+        gpu_decoded: false,
     }
 }
 

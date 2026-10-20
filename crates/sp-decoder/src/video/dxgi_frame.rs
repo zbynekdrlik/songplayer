@@ -22,9 +22,21 @@
 //! `read_texture_as_decoded_sample` (doc-hidden) runs this readback on a
 //! texture the caller made, wrapped the way a decoder wraps its output: the
 //! Windows CI test of the layout, where no GPU decoder exists.
+//!
+//! #279 P3a: `DxgiSurface::picture` chooses by `hw_decode::SurfaceUse`.
+//! On a GPU-resident reader whose producer is not retired the picture is
+//! not read back: [`DxgiSurface::copy_into`] copies the slice the decoder
+//! wrote (`GetResource` + `GetSubresourceIndex`) into a slot of the
+//! pipeline's ring (`sp_gpu::ProducerGpu::copy_from`). A retired
+//! producer's picture takes the readback above, as a `Hardware` reader's.
+//! `copy_texture_as_decoded_sample` (doc-hidden) runs that same choice on
+//! a slice of a texture array the caller made, the Windows CI test of
+//! both.
 
 use std::ffi::c_void;
 
+use sp_core::nv12::nv12_chroma_row;
+use sp_gpu::{GpuFrame, ProducerGpu};
 use windows::Win32::Foundation::FALSE;
 use windows::Win32::Graphics::Direct3D11::{D3D11_TEXTURE2D_DESC, ID3D11Texture2D};
 use windows::Win32::Media::MediaFoundation::{
@@ -34,7 +46,7 @@ use windows::Win32::Media::MediaFoundation::{
 use windows::core::Interface;
 
 use crate::error::DecoderError;
-use crate::hw_decode::{DecodePath, SurfaceLayout, mapped_from_scanline0};
+use crate::hw_decode::{DecodePath, SurfaceLayout, SurfaceUse, mapped_from_scanline0};
 
 /// A picture read back out of a DXGI surface.
 #[derive(Debug)]
@@ -46,6 +58,21 @@ pub struct DxgiPicture {
     /// Whether the texture was a decoder's output (`D3D11_BIND_DECODER`),
     /// or the video processor's of a scaled open (#282).
     pub path: DecodePath,
+}
+
+/// #279 P3a: a DXGI surface's picture as the reader hands it over
+/// (`DxgiSurface::picture`).
+#[derive(Debug)]
+pub struct Surfaced {
+    /// The packed NV12 bytes (read back); empty for a ring frame.
+    pub data: Vec<u8>,
+    /// Their row stride; for a ring frame one chroma row, as a CPU picture
+    /// of that size would have.
+    pub stride: u32,
+    /// As [`DxgiPicture::path`].
+    pub path: DecodePath,
+    /// The ring slot it was copied into; `None` when read back.
+    pub gpu: Option<GpuFrame>,
 }
 
 /// A sample's picture in a DXGI surface: its one buffer, as a media buffer
@@ -85,10 +112,75 @@ impl DxgiSurface {
     ) -> Result<DxgiPicture, DecoderError> {
         read_picture(&self.buffer, &self.dxgi, width, height, scaled)
     }
+
+    /// #279 P3a: the `width`×`height` picture as the reader hands it over:
+    /// copied into `producer`'s ring when [`SurfaceUse::of`] says so (a
+    /// GPU-resident reader whose producer is not retired), else read back.
+    pub(super) fn picture(
+        &self,
+        producer: Option<&ProducerGpu>,
+        width: u32,
+        height: u32,
+        scaled: bool,
+    ) -> Result<Surfaced, DecoderError> {
+        let retired = producer.is_some_and(|p| p.retired());
+        match (SurfaceUse::of(producer.is_some(), retired), producer) {
+            (SurfaceUse::Ring, Some(producer)) => {
+                let (frame, path) = self.copy_into(producer, width, height, scaled)?;
+                Ok(Surfaced {
+                    data: Vec::new(),
+                    // A chroma row of a picture this wide fits a `u32` (≤ 16384).
+                    stride: nv12_chroma_row(width) as u32,
+                    path,
+                    gpu: Some(frame),
+                })
+            }
+            _ => {
+                let read = self.read(width, height, scaled)?;
+                Ok(Surfaced {
+                    data: read.data,
+                    stride: read.stride,
+                    path: read.path,
+                    gpu: None,
+                })
+            }
+        }
+    }
+
+    /// #279 P3a: copy the `width`×`height` picture into a slot of
+    /// `producer`'s ring instead of reading it back (the texture and the
+    /// slice the decoder wrote: `GetResource`, `GetSubresourceIndex`), and
+    /// say where it came from (`scaled`: the file was opened scaled to the
+    /// decode cap, #282). A refused picture, a ring full past its bound or
+    /// dead, or a lost producer device is a decode error (`BufferLock`):
+    /// the reader then reopens the file in software (`FallbackGate`).
+    pub(super) fn copy_into(
+        &self,
+        producer: &ProducerGpu,
+        width: u32,
+        height: u32,
+        scaled: bool,
+    ) -> Result<(GpuFrame, DecodePath), DecoderError> {
+        let (texture, desc) = surface_texture(&self.dxgi)?;
+        let subresource = unsafe { self.dxgi.GetSubresourceIndex() }.map_err(|e| {
+            DecoderError::BufferLock(format!("IMFDXGIBuffer::GetSubresourceIndex: {e}"))
+        })?;
+        let frame = producer
+            .copy_from(&texture, subresource, (width, height))
+            .map_err(|e| DecoderError::BufferLock(format!("GPU ring: {e}")))?;
+        Ok((frame, DecodePath::of_surface(desc.BindFlags, scaled)))
+    }
 }
 
 /// The texture behind a DXGI buffer: its rows, its format, its bind flags.
 fn surface_desc(dxgi: &IMFDXGIBuffer) -> Result<D3D11_TEXTURE2D_DESC, DecoderError> {
+    surface_texture(dxgi).map(|(_, desc)| desc)
+}
+
+/// The texture behind a DXGI buffer and its description.
+fn surface_texture(
+    dxgi: &IMFDXGIBuffer,
+) -> Result<(ID3D11Texture2D, D3D11_TEXTURE2D_DESC), DecoderError> {
     let mut raw: *mut c_void = std::ptr::null_mut();
     unsafe { dxgi.GetResource(&ID3D11Texture2D::IID, &mut raw) }
         .map_err(|e| DecoderError::BufferLock(format!("IMFDXGIBuffer::GetResource: {e}")))?;
@@ -102,7 +194,7 @@ fn surface_desc(dxgi: &IMFDXGIBuffer) -> Result<D3D11_TEXTURE2D_DESC, DecoderErr
     let texture = unsafe { ID3D11Texture2D::from_raw(raw) };
     let mut desc = D3D11_TEXTURE2D_DESC::default();
     unsafe { texture.GetDesc(&mut desc) };
-    Ok(desc)
+    Ok((texture, desc))
 }
 
 /// Unlocks a `Lock2DSize` on every path out.
@@ -194,4 +286,35 @@ pub fn read_texture_as_decoded_sample(
         DecoderError::BufferLock("the wrapped texture is not a DXGI surface".into())
     })?;
     surface.read(width, height, false)
+}
+
+/// #279 P3a: hand subresource `subresource` of `texture` (a texture of
+/// `producer`'s device: a decoder's array, made by the caller) over as a
+/// `width`×`height` picture, wrapped the way a DXVA decoder wraps its
+/// output (`MFCreateDXGISurfaceBuffer` of that subresource in an
+/// `MFCreateSample` sample): the same `DxgiSurface::of` +
+/// `DxgiSurface::picture` a GPU-resident reader's picture takes, so
+/// copied into `producer`'s ring, or read back once `producer` is retired.
+/// For the Windows CI test of the path (no GPU decoder there); not for
+/// production.
+#[doc(hidden)]
+pub fn copy_texture_as_decoded_sample(
+    producer: &ProducerGpu,
+    texture: &ID3D11Texture2D,
+    subresource: u32,
+    width: u32,
+    height: u32,
+) -> Result<Surfaced, DecoderError> {
+    super::mf_reader::com_startup()?;
+    let buffer =
+        unsafe { MFCreateDXGISurfaceBuffer(&ID3D11Texture2D::IID, texture, subresource, FALSE) }
+            .map_err(|e| DecoderError::BufferLock(format!("MFCreateDXGISurfaceBuffer: {e}")))?;
+    let sample = unsafe { MFCreateSample() }
+        .map_err(|e| DecoderError::BufferLock(format!("MFCreateSample: {e}")))?;
+    unsafe { sample.AddBuffer(&buffer) }
+        .map_err(|e| DecoderError::BufferLock(format!("IMFSample::AddBuffer: {e}")))?;
+    let surface = DxgiSurface::of(&sample)?.ok_or_else(|| {
+        DecoderError::BufferLock("the wrapped texture is not a DXGI surface".into())
+    })?;
+    surface.picture(Some(producer), width, height, false)
 }

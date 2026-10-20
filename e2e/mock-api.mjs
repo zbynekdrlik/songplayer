@@ -1844,6 +1844,8 @@ app.post("/__mock/ui-usage-reset", (_req, res) => {
 // states via `POST /__mock/ndi-health` (`POST /__mock/ndi-health-reset` puts
 // the default back). #229: every row carries `open_failures` (`null` while no
 // video failed to open since the last song started), as the server's does.
+// #279 P3a: and `gpu_decoded` (its song decodes GPU-resident: the Player
+// offers no live preview of it, `player-gpu-preview.spec.ts`).
 //
 // Default fixture exercises the three badges at once:
 //   - SP-worship   → LOCKED   (live, clock ok)
@@ -1874,6 +1876,7 @@ const NDI_HEALTH_DEFAULT = [
     },
     audio: { underruns: 0 },
     open_failures: null,
+    gpu_decoded: false,
   },
   {
     ndi_name: "SP-background",
@@ -1895,6 +1898,7 @@ const NDI_HEALTH_DEFAULT = [
     },
     audio: { underruns: 0 },
     open_failures: null,
+    gpu_decoded: false,
   },
   {
     ndi_name: "SP-live",
@@ -1916,6 +1920,7 @@ const NDI_HEALTH_DEFAULT = [
     },
     audio: { underruns: 0 },
     open_failures: null,
+    gpu_decoded: false,
   },
 ];
 
@@ -2124,6 +2129,16 @@ function programBody() {
       switches: 0,
       readback_us_p99: 0,
       uyvy_us_p99: 0,
+    },
+    // #279 P3a: the compositor's sides (mirrors `program_max::GpuStatus`);
+    // the mock composes nothing.
+    gpu: {
+      gpu_sides_per_s: 0,
+      cpu_sides_per_s: 0,
+      km_acquire_timeouts: 0,
+      abandoned: 0,
+      open_failures: 0,
+      gpu_opens: 0,
     },
   };
 }
