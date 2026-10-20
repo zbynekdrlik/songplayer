@@ -2193,6 +2193,21 @@ the FHD `SP-program`:
   (`Presets\Advanced Output\<preset>.xml` + `Preferences\AdvancedOutput.xml`),
   and put it back the same way; a Save & Close may rewrite a param's
   `default` attribute, never its value.
+- **THE CAUSE (20.10.2026, #251): the second Advanced Output screen "dummy".**
+  - The screen: a Virtual Output 2580×360 with one slice "fullsize", created 7.10.2026 10:40:17Z (its uniqueId), 36 s before SongPlayer's MAX clips. No clip reads it.
+  - With it, a live input (Spout or NDI) costs the Display window 55–65 % of the pictures: 205–262 of 600 per 20 s. Without it, the same A/B (`diag\wall-bridge\ao_dummy_ab.ps1`: preset copied aside, the node removed, Arena restarted, ALWAYS put back) reads 571–589 with a live input and 600 without one.
+  - PP's Arena has one screen.
+  - Ruled out first, each by the same A/B:
+    - HAGS;
+    - the NVIDIA driver 617.42 / 566.36;
+    - the display layout;
+    - Process Lasso and Sunshine;
+    - SongPlayer stopped;
+    - Arena 7.27.1;
+    - DMA textures;
+    - the NVIDIA GL present method (Arena presents through its own DXGI swapchains).
+  - Removing the screen is the owner's / operator's call (#259 rule); `ao_dummy_remove.ps1` does it with a backup.
+  - Lesson: when a live input hurts only one site, diff the sites' Arena OUTPUT setup (every Advanced Output screen and device) before the PC, the driver and the GPU.
 - **Restarting Arena on SNV:** the operator's `NL_STARTUP.ahk` (AutoHotkey)
   relaunches Arena within ~1 s of its end. A script that changes Arena's
   config must write it BEFORE the kill (a kill writes nothing back), wait
