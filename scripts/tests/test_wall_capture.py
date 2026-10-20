@@ -1,7 +1,8 @@
 """Tests for scripts/wall_frames.py's capture glue and CLI (#272): the
 video read through ``av_sync_check``'s command line and readers, a stand-in
 ffmpeg, dxcam's polls (``poll_blind``, ``check_present_rate``), and
-``main``'s exit codes for a video and a simulated dxcam capture.
+``main``'s exit codes for a video and a simulated dxcam capture (v2: the
+copies found once per capture, and a capture that finds none).
 """
 
 from __future__ import annotations
@@ -11,10 +12,12 @@ import math
 import time
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 import av_sync_check
 import wall_analysis as wa
+import wall_clip as clip
 import wall_frames as wf
 from wall_fakes import dxcam_capture, frame
 
@@ -44,7 +47,7 @@ def test_a_video_is_read_frame_by_frame_as_stored_with_its_pts():
 
 
 def test_main_reads_a_video_and_exits_by_the_verdict(monkeypatch, capsys):
-    clean = [wf.read_frame(frame(n, 30, 480, 270)) for n in range(30)]
+    clean = [wf.read_frame(frame(n, 30)) for n in range(30)]
     times = [n / 30 for n in range(30)]
     videos = {
         "clean.mp4": (clean, times),
@@ -54,11 +57,11 @@ def test_main_reads_a_video_and_exits_by_the_verdict(monkeypatch, capsys):
         "pal.mp4": (clean[:25], [n / 25 for n in range(25)]),
     }
 
-    def fake_video(path, width, x_range):
-        assert width == 480 and x_range == (0.0, 1.0)
+    def fake_video(path, width):
+        assert width == 480
         if path.name == "broken.mp4":
             raise RuntimeError("ffmpeg exited 1 reading broken.mp4: Invalid data")
-        return videos[path.name]
+        return (*videos[path.name], None)
 
     monkeypatch.setattr(wf, "read_video", fake_video)
     base = ["--fps", "30", "--grid-fps", "30", "--width", "480"]
@@ -119,12 +122,12 @@ def test_showinfo_pts_are_read_the_av_gate_s_way():
 
 
 def fake_ffmpeg(directory: Path, frames: bytes, pts: list[str], tail: str) -> str:
-    """A stand-in ffmpeg: the size probe (``-f null``) answers 480x270; the
+    """A stand-in ffmpeg: the size probe (``-f null``) answers 960x540; the
     read writes ``frames`` to stdout and a showinfo line per ``pts`` to
     stderr, then runs ``tail``."""
     (directory / "frames.raw").write_bytes(frames)
     info = "".join(
-        f"[Parsed_showinfo_0 @ 0x1] n:{n} pts:{n} pts_time:{p} s:480x270\n"
+        f"[Parsed_showinfo_0 @ 0x1] n:{n} pts:{n} pts_time:{p} s:960x540\n"
         for n, p in enumerate(pts)
     )
     (directory / "pts.txt").write_text(info)
@@ -132,7 +135,7 @@ def fake_ffmpeg(directory: Path, frames: bytes, pts: list[str], tail: str) -> st
     script.write_text(
         "#!/bin/sh\n"
         'case " $* " in *" -f null "*)\n'
-        "  echo '[Parsed_showinfo_0 @ 0x1] n:0 pts:0 pts_time:0 s:480x270' >&2\n"
+        "  echo '[Parsed_showinfo_0 @ 0x1] n:0 pts:0 pts_time:0 s:960x540' >&2\n"
         "  exit 0;;\n"
         "esac\n"
         f"cat '{directory}/pts.txt' >&2\n"
@@ -143,27 +146,65 @@ def fake_ffmpeg(directory: Path, frames: bytes, pts: list[str], tail: str) -> st
 
 
 def test_read_video_reads_each_stored_frame_with_its_pts(tmp_path):
-    pictures = [frame(n, 30, 480, 270) for n in (7, 8, 9)]
+    pictures = [frame(n, 30) for n in (7, 8, 9)]
     raw = b"".join(p.tobytes() for p in pictures)
     ffmpeg = fake_ffmpeg(tmp_path, raw, ["0", "0.0333", "0.0667"], "exit 0\n")
-    readings, times = wf.read_video(tmp_path / "rec.mp4", None, (0.0, 1.0), ffmpeg)
+    readings, times, located = wf.read_video(tmp_path / "rec.mp4", None, ffmpeg)
     assert [r.index for r in readings] == [7, 8, 9]
+    assert [r.strips for r in readings] == [clip.BANDS * clip.COPIES] * 3
     assert times == [0.0, 0.0333, 0.0667]
+    assert located.report() == {"copies": 9, "cell_px": 5.0, "region": None}
     # A half frame at the end is not a picture; the pts then disagree.
     ffmpeg = fake_ffmpeg(tmp_path, raw[:-100], ["0", "0.0333", "0.0667"], "")
     with pytest.raises(RuntimeError, match="read 2 pictures but 3 pts"):
-        wf.read_video(tmp_path / "rec.mp4", None, (0.0, 1.0), ffmpeg)
+        wf.read_video(tmp_path / "rec.mp4", None, ffmpeg)
     ffmpeg = fake_ffmpeg(tmp_path, raw, ["0", "0.0333", "0.0667"], "exit 1\n")
     with pytest.raises(RuntimeError, match="ffmpeg exited 1"):
-        wf.read_video(tmp_path / "rec.mp4", None, (0.0, 1.0), ffmpeg)
+        wf.read_video(tmp_path / "rec.mp4", None, ffmpeg)
 
 
-def test_read_video_kills_ffmpeg_when_the_read_fails(tmp_path):
-    raw = frame(7, 30, 480, 270).tobytes()
+def test_read_video_finds_the_copies_on_the_first_picture_that_shows_them(tmp_path):
+    blank = np.full((540, 960), clip.Y_BACKGROUND, dtype=np.uint8)
+    pictures = [blank, frame(7, 30), blank, frame(9, 30)]
+    raw = b"".join(p.tobytes() for p in pictures)
+    pts = ["0", "0.0333", "0.0667", "0.1"]
+    ffmpeg = fake_ffmpeg(tmp_path, raw, pts, "exit 0\n")
+    readings, _, located = wf.read_video(tmp_path / "rec.mp4", None, ffmpeg)
+    assert [(r.status, r.index) for r in readings] == [
+        ("no_strip", None),
+        ("ok", 7),
+        ("no_strip", None),
+        ("ok", 9),
+    ]
+    assert located.report()["copies"] == 9
+    # Located ONCE: a later picture is read at the copies found on the first
+    # (its rulers covered, its strips still read), never looked for again.
+    lay = clip.layout(960, 540)
+    covered = frame(8, 30).copy()
+    for y0, y1 in lay.rulers:
+        covered[y0:y1] = clip.Y_BACKGROUND
+    assert wf.read_frame(covered).status == "no_strip"
+    raw = frame(7, 30).tobytes() + covered.tobytes()
+    ffmpeg = fake_ffmpeg(tmp_path, raw, pts[:2], "exit 0\n")
+    readings, _, _ = wf.read_video(tmp_path / "rec.mp4", None, ffmpeg)
+    assert [r.index for r in readings] == [7, 8]
+    # A recording that never shows the clip: nothing located.
+    ffmpeg = fake_ffmpeg(tmp_path, blank.tobytes() * 2, pts[:2], "exit 0\n")
+    readings, _, located = wf.read_video(tmp_path / "rec.mp4", None, ffmpeg)
+    assert [r.status for r in readings] == ["no_strip"] * 2 and located is None
+
+
+def test_read_video_kills_ffmpeg_when_the_read_fails(tmp_path, monkeypatch):
+    raw = frame(7, 30).tobytes()
     ffmpeg = fake_ffmpeg(tmp_path, raw, ["0"], "exec sleep 30\n")
+
+    def broken(picture):
+        raise ValueError("a read that fails")
+
+    monkeypatch.setattr(wf, "clip_copies", broken)
     began = time.monotonic()
-    with pytest.raises(ValueError, match="outside the capture"):
-        wf.read_video(tmp_path / "rec.mp4", None, (0.5, 1.5), ffmpeg)
+    with pytest.raises(ValueError, match="a read that fails"):
+        wf.read_video(tmp_path / "rec.mp4", None, ffmpeg)
     assert time.monotonic() - began < 10, "ffmpeg was waited for, not killed"
 
 
@@ -191,8 +232,8 @@ def test_main_reads_a_dxcam_capture_by_its_polls(monkeypatch, capsys):
     }
     asked = []
 
-    def fake_dxcam(output, region, seconds, x_range):
-        assert (output, seconds, x_range) == (1, 2.0, (0.0, 1.0))
+    def fake_dxcam(output, region, seconds):
+        assert (output, seconds) == (1, 2.0)
         assert region in (None, (0, 0, 64, 32))
         return captures[asked[-1]]
 
@@ -219,8 +260,9 @@ def test_main_reads_a_dxcam_capture_by_its_polls(monkeypatch, capsys):
     assert wf.main(args) == 5
     assert "60 Hz refresh rate cannot be checked" in capsys.readouterr().err
     # Every acquire window 2 ms: no picture is timed to a tenth of a refresh.
-    times, sampled, polls, _ = dxcam_capture()
-    captures["windows"] = (times, sampled, polls, [t + 0.002 for t in times])
+    times, sampled, polls, _, located = dxcam_capture()
+    windows = [t + 0.002 for t in times]
+    captures["windows"] = (times, sampled, polls, windows, located)
     asked.append("windows")
     assert wf.main(args) == 5
     assert "cannot be checked" in capsys.readouterr().err
@@ -242,6 +284,18 @@ def test_main_reads_a_dxcam_capture_by_its_polls(monkeypatch, capsys):
         assert reports[name]["lost_boundaries"] == 0, name
     assert reports["late"]["unverified"]["boundaries"] == 1
     assert reports["stopped"]["refreshes"]["uneven_samples"] == [58]
+    assert reports["clean"]["located"] == {"copies": 9, "cell_px": 5.0, "region": None}
+    # No copy of the clip found on the output: nothing captured, nothing
+    # decoded (exit 4, the reason on stderr), never a failed capture.
+    captures["none"] = ([], [], [], [], None)
+    asked.append("none")
+    assert wf.main([*args, "--region", "0,0,64,32"]) == 4
+    out = capsys.readouterr()
+    assert (
+        json.loads(out.out)["decoded"] == 0 and json.loads(out.out)["located"] is None
+    )
+    assert "no copy of the clip's strip found on output 1 in 10 s" in out.err
+    assert "(region (0, 0, 64, 32))" in out.err
 
 
 def test_a_dxcam_picture_s_blind_span_is_since_the_poll_before_it():
@@ -303,7 +357,7 @@ def test_main_refuses_a_locked_video_that_is_no_recording_of_the_wall(
 ):
     readings = [wa.Reading("ok", 0, None, 0, 8)] * 240
     times = [n / 120 for n in range(240)]
-    monkeypatch.setattr(wf, "read_video", lambda *_: (readings, times))
+    monkeypatch.setattr(wf, "read_video", lambda *_: (readings, times, None))
     args = ["--fps", "30", "--video", "rec.mp4", "--refresh-hz", "60", "--locked"]
     assert wf.main(args) == 5
     assert "not a recording of the wall's own signal" in capsys.readouterr().err

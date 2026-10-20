@@ -10,6 +10,8 @@ channels, a clip that spans only part of the capture's width. Cases:
   weight of the later one (whichever way its grey cell flips);
 * any quarter-height band, and SNV's x4-scaled band with noise, still read;
   the bands agree on their median;
+* the copies are found where the clip sits in the capture (v2: by their
+  rulers, ``test_wall_locate.py`` tests the search under any zoom);
 * what cannot be read is named, never guessed: no strip, two grey cells, a
   grey cell between codes that are not neighbours, a torn picture;
 * the pacer's rule: 25 on 30 = plain, 213, 170, 128, 85, 42; 24 on 30 =
@@ -42,7 +44,7 @@ from wall_fakes import (
 
 def test_a_clean_frame_reads_its_index_in_every_band():
     reading = wf.read_frame(frame(1234))
-    assert reading == wa.Reading("ok", 1234, None, 0, clip.BANDS)
+    assert reading == wa.Reading("ok", 1234, None, 0, clip.BANDS * clip.COPIES)
     assert reading.position() == 1234
 
 
@@ -92,13 +94,16 @@ def test_a_grey_capture_in_colour_reads_the_same():
         assert wf.read_frame(capture) == expected
 
 
-def test_a_clip_spanning_part_of_the_capture_reads_with_its_x_range():
+def test_a_clip_spanning_part_of_the_capture_is_found_where_it_sits():
     picture = frame(321)
     side = np.full((picture.shape[0], 480), clip.Y_BACKGROUND, dtype=np.uint8)
     capture = np.hstack([side, picture, side])
-    reading = wf.read_frame(capture, x_range=(480 / 1920, 1440 / 1920))
+    reading = wf.read_frame(capture)
     assert (reading.status, reading.index) == ("ok", 321)
-    assert not wf.read_frame(capture).ok, "read on the wrong columns"
+    lay = clip.layout(960, 540)
+    copies = wf.locate(capture)
+    assert [c.x0 for c in copies] == [480 + x for x in lay.copies]
+    assert {c.cell for c in copies} == {lay.cell}
 
 
 def test_a_picture_with_no_strip_is_named():
@@ -126,7 +131,8 @@ def test_a_torn_picture_disagrees():
     torn = frame(100).copy()
     torn[270:] = frame(300)[270:]
     reading = wf.read_frame(torn)
-    assert reading.status == "disagree" and reading.strips == clip.BANDS
+    assert reading.status == "disagree"
+    assert reading.strips == clip.BANDS * clip.COPIES
     # Half a frame apart (a blend over a plain picture) is torn too.
     torn = frame(100).copy()
     torn[270:] = blend(frame(100), frame(101), 0.5)[270:]
@@ -160,11 +166,13 @@ def test_luma_is_the_mean_of_the_colour_channels():
 
 
 def strip_cell(picture: np.ndarray, k: int, value: int) -> np.ndarray:
-    """``picture`` with cell ``k`` of every strip painted ``value``."""
+    """``picture`` with cell ``k`` of every copy's strip painted ``value``."""
     lay = clip.layout(picture.shape[1], picture.shape[0])
     out = picture.copy()
-    for y0, y1 in lay.strips:
-        out[y0:y1, lay.cell_edges[k] : lay.cell_edges[k + 1]] = value
+    for copy in range(clip.COPIES):
+        edges = lay.cell_edges(copy)
+        for y0, y1 in lay.strips:
+            out[y0:y1, edges[k] : edges[k + 1]] = value
     return out
 
 
@@ -233,9 +241,7 @@ def test_pictures_blended_by_the_rule_read_back_to_the_rule():
         position = k * step
         index = int(position)
         q8 = wa.blend_q8(position, 25)
-        picture = blend(
-            frame(index, 25, 480, 270), frame(index + 1, 25, 480, 270), q8 / 256
-        )
+        picture = blend(frame(index, 25), frame(index + 1, 25), q8 / 256)
         readings.append(wf.read_frame(picture))
     report = wa.analyse(readings, 25, refresh_hz=30)
     assert report["boundaries"] == 22
@@ -247,24 +253,43 @@ def test_pictures_blended_by_the_rule_read_back_to_the_rule():
 
 
 def test_the_sampled_columns_sit_inside_each_cell():
-    for width, x_range in ((3840, (0.0, 1.0)), (7680, (0.25, 0.75)), (480, (0, 1))):
-        columns = wf.cell_columns(width, x_range)
-        assert columns.shape == (clip.CELLS * wf.CELL_SAMPLES,)
-        x0 = x_range[0] * width
-        span = (x_range[1] - x_range[0]) * width
-        edges = clip.cell_fractions()
+    for x0, size in ((120.0, 20.0), (1037.25, 41.5), (3.0, 2.0), (0.4, 7.3)):
+        columns = wf.Copy(x0, size, (0, 0)).columns()
+        assert columns.shape == (wf.COPY_COLUMNS,) == (clip.CELLS * wf.CELL_SAMPLES,)
         for k in range(clip.CELLS):
             cell = columns[k * wf.CELL_SAMPLES : (k + 1) * wf.CELL_SAMPLES]
-            left = x0 + span * edges[k]
-            right = x0 + span * edges[k + 1]
-            quarter = (right - left) / 4
-            eighth = (right - left) / 2 / wf.CELL_SAMPLES
-            assert (cell >= left + quarter - 1).all(), (width, k)
-            assert (cell <= right - quarter).all(), (width, k)
-            assert cell[0] <= left + quarter + eighth, (width, k)
-            assert cell[-1] >= right - quarter - eighth - 1, (width, k)
-    with pytest.raises(ValueError):
-        wf.cell_columns(960, (0.5, 1.5))
+            left = x0 + size * k
+            right = left + size
+            quarter = size / 4
+            eighth = size / 2 / wf.CELL_SAMPLES
+            assert (cell >= left + quarter - 1).all(), (x0, size, k)
+            assert (cell <= right - quarter).all(), (x0, size, k)
+            assert cell[0] <= left + quarter + eighth, (x0, size, k)
+            assert cell[-1] >= right - quarter - eighth - 1, (x0, size, k)
+            assert (np.diff(cell) >= 0).all()
+    # Each sample at the middle of its eighth of the core: a 20 px cell from
+    # 120 samples 125.625, 126.875, ... 134.375.
+    columns = wf.Copy(120.0, 20.0, (0, 0)).columns()
+    assert columns[: wf.CELL_SAMPLES].tolist() == [
+        125,
+        126,
+        128,
+        129,
+        130,
+        131,
+        133,
+        134,
+    ]
+    assert columns[-wf.CELL_SAMPLES :].tolist() == [
+        505,
+        506,
+        508,
+        509,
+        510,
+        511,
+        513,
+        514,
+    ]
 
 
 def test_the_bands_agree_on_their_median():

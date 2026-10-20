@@ -422,9 +422,16 @@ fn the_clip_list_is_camera_box_s_clip_then_the_wall_clips() {
     for (clip, fps) in [(WALL_24, 24), (WALL_25, 25), (WALL_30, 30)] {
         assert_eq!(clip.fps, fps);
         assert_eq!(clip.name, format!("wall-{fps}"));
-        assert_eq!(clip.file, format!("wall-clip-v1-{fps}fps-60s.mp4"));
+        assert_eq!(clip.file, format!("wall-clip-v2-{fps}fps-60s.mp4"));
+        // The row stays (`wallclip-{fps}`): the v2 import records it anew.
         assert_eq!(clip.youtube_id, format!("wallclip-{fps}"));
-        assert_eq!(clip.song, format!("Wall clip v1 {fps} fps"));
+        // A v2 song name, so the cache names differ from v1's and the
+        // import's `already` check never takes the v1 files for v2.
+        assert_eq!(clip.song, format!("Wall clip v2 {fps} fps"));
+        assert_eq!(
+            clip.title,
+            format!("SongPlayer wall clip v2, {fps} fps (60 s)")
+        );
         assert_eq!(clip.artist, WALL_ARTIST);
         assert_eq!(clip.duration_ms, WALL_DURATION_MS);
     }
@@ -444,14 +451,15 @@ fn the_clip_list_is_camera_box_s_clip_then_the_wall_clips() {
     assert_eq!(unique(CLIPS.iter().map(Clip::sha256_hex).collect()), 4);
 }
 
-/// The wall clips' pins are the files `scripts/wall_clip.py` made on dev1
-/// (14.10.2026, #272 comment 6164962209).
+/// The wall clips' pins are the clip v2 files `scripts/wall_clip.py` made on
+/// dev1 (20.10.2026, #272: copies across the width under rulers, read under
+/// any zoom of it), byte-identical on a second run.
 #[test]
 fn the_wall_clips_are_pinned_to_the_generated_files() {
     let pins = [
-        (WALL_24, "0b2540f1", "eb6a5488"),
-        (WALL_25, "7b00c161", "c538c355"),
-        (WALL_30, "789dfdbe", "39b3652c"),
+        (WALL_24, "7e7eaa4a", "a5a12df0"),
+        (WALL_25, "7a9bdc6b", "4dac9d70"),
+        (WALL_30, "f2134902", "49d3128d"),
     ];
     for (clip, head, tail) in pins {
         let sha = clip.sha256_hex();
@@ -476,11 +484,11 @@ fn every_clip_has_its_own_cache_names() {
     let (video, audio) = final_paths(cache, &WALL_25);
     assert_eq!(
         video.file_name().unwrap(),
-        "Wall clip v1 25 fps_SongPlayer_wallclip-25_normalized_video.mp4"
+        "Wall clip v2 25 fps_SongPlayer_wallclip-25_normalized_video.mp4"
     );
     assert_eq!(
         audio.file_name().unwrap(),
-        "Wall clip v1 25 fps_SongPlayer_wallclip-25_normalized_audio.flac"
+        "Wall clip v2 25 fps_SongPlayer_wallclip-25_normalized_audio.flac"
     );
     let (video_tmp, audio_tmp) = temp_paths(cache, &WALL_25);
     assert_eq!(

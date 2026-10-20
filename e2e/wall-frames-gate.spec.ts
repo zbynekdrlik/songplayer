@@ -121,6 +121,10 @@ test("nothing decoded = the wall does not show SongPlayer's program", () => {
   const failures = wallFramesFailures("wall-30", EXIT_NOTHING_DECODED, null);
   expect(failures).toHaveLength(1);
   expect(failures[0]).toContain("does not show SongPlayer's program");
+  // #272 v2: the reader also exits 4 when it finds no copy of the clip.
+  expect(failures[0]).toContain("no whole copy of the clip's strip and its ruler is in view");
+  const report = { ...clean(), decoded: 0, located: null };
+  expect(wallFramesFailures("wall-30", EXIT_NOTHING_DECODED, report)).toEqual(failures);
 });
 
 test("a failed capture fails with no verdict", () => {
