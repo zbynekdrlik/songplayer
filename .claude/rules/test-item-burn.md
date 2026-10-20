@@ -655,3 +655,15 @@ ruff lists name the wall scripts (`wall_clip.py`, `wall_frames.py`,
 threshold, guard, bound and exit code; a scratch harness on dev1, not CI)
 were run after each review round and the tests extended until none
 survived; an equivalent one is removed from the code instead.
+
+Two gotchas of that harness and of editing these scripts (#272 v2):
+- A harness that runs the tests on a COPY of `scripts/` must also copy
+  `crates/sp-server/src/playback/pacer_blend.rs` to the same place
+  relative to it: `test_the_reader_s_dead_band_is_the_pacer_s` reads it
+  through `parents[2]`, and without it every mutant reads as killed.
+  Run its pytest with `-x` and 4 workers; count the results (a pool cut
+  short by a timeout prints no line for the mutants it never ran).
+- `wall_frames.py::time_acquire` holds a pre-existing `except
+  AttributeError: pass`. The airuleset pre-write hook refuses a whole-file
+  Write that contains it: change the file with Edit, or splice the new
+  parts around the untouched functions with an anchor-asserted script.
