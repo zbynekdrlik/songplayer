@@ -187,3 +187,15 @@ test("nothing above the MAX clip, or no MAX clip at all, is said as such (#272)"
   ]);
   expect(coveringLayers([])).toEqual(["no connected Arena clip receives SP-program-MAX"]);
 });
+
+test("Arena's Blank generator draws nothing, so a Blank clip above the MAX clip is not named (#272)", () => {
+  // SNV, 20.10.2026: L17-19 hold Arena's Blank generator, connected, and the
+  // gate named them as covering the clip ("L17 'Blank', L18 'Blank', ...").
+  const layers = [
+    layer([["Yt music", true, "SP-program-MAX"]]),
+    layer([["Blank", true, "Blank"]]),
+    layer([["Blank", true, "Blank\nGenerator"]]),
+    layer([["SNV BG", true, "NDI Source"]]),
+  ];
+  expect(coveringLayers(layers)).toEqual(["L4 'SNV BG'"]);
+});
