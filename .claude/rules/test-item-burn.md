@@ -441,8 +441,19 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
   fault): on exit 4 the spec reads Arena's composition (read only,
   `RESOLUME_REST_URL`) and adds `Arena layers above SongPlayer's clip: L<n>
   '<clip>', …` (`coveringLayers`: every connected, not bypassed clip on a
-  layer above the highest one receiving `SP-program-MAX`). It never clears
-  them: the composition is the operator's.
+  layer above the highest one receiving `SP-program-MAX`, Arena's Blank
+  generator left out: it draws nothing). It never clears them: the
+  composition is the operator's. Arena's read is tried twice, a second
+  apart (a second read failed "fetch failed", CI 39345213643).
+  - **But "decoded 0" since 18.10.2026 is a ZOOM, not layers** (#272
+    comment 6281310892): Arena shows the wall clip ~2× across the
+    composition's width (the operator's mapping), so only the clip's middle
+    half reaches the wall and each strip's reference cells (0/19 black,
+    1/18 white, at its edges) are off it. `strip_rows` then finds no strip
+    in any part of the width. Look before blaming layers: play `wall-30`,
+    grab output 1 once, view it (`diag\wall-bridge\strip_probe.ps1` +
+    `strip_find.py <scripts> 1 <png>`). The fix is a clip v2 that reads
+    under any zoom of its WIDTH, as it already does of its height.
   - Only exit 0 with verdict `clean` passes.
   - `defects` names every counter: judder (`refreshes.uneven` of `judged`),
     jumps back, lost frames and boundaries, cadence, weights, frozen.

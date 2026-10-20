@@ -2173,6 +2173,23 @@ the FHD `SP-program`:
   the same layer costs nothing (601 / 601). Arena's "DMA Textures"
   preference (`config.xml` `Texture Path`, Force ON vs the legacy
   Autodetect) does not move it either (6279828121).
+- **Arena's SPOUT output keeps what its Display window loses**
+  (`comp_ab.ps1`, 6281387776): under the same live input, minutes apart,
+  the wall read 301 of 600 while a receiver of Arena's composition Spout
+  output (`spout_recv_count.py`) read 602 distinct pictures (601–603 in all
+  four takes). The loss is intermittent (another take under the same input
+  read 602). It supports the #259 bridge (Arena's wall screen → a `Spout`
+  output device → SongPlayer's presenter). But Arena's *composition output
+  sharing* itself made the cadence uneven (odd runs ~10 → ~200 per 20 s,
+  1- / 3-frame pictures), so measure an Advanced Output `Spout` device, on
+  count AND cadence, before building on it.
+- **Restarting Arena on SNV:** the operator's `NL_STARTUP.ahk` (AutoHotkey)
+  relaunches Arena within ~1 s of its end. A script that changes Arena's
+  config must write it BEFORE the kill (a kill writes nothing back), wait
+  only for the OLD process id, then reconnect the normal clips through REST
+  whoever relaunched it (`diag\wall-bridge\arena_tex.ps1`). A script that
+  waited for "no Arena" read the relaunched one as a hung exit and left
+  SongPlayer's L4/L5 disconnected ~2–3 min (20.10.2026 01:34Z).
 - A SongPlayer-side change cannot fix this; never ship one "for #251"
   without a wall measurement that moves.
 
