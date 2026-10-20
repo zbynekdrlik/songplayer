@@ -251,7 +251,7 @@ def test_names_and_counts():
     assert clip.frame_count(30, 60) == 1800
 
 
-def test_a_size_must_keep_the_cell_fractions():
+def test_a_size_must_be_whole_cells():
     assert clip.parse_size("3840x2160") == (3840, 2160)
     assert clip.parse_size("1920X1080") == (1920, 1080)
     for bad in ("1000x500", "1920x1081", "0x0"):

@@ -34,6 +34,7 @@ import pytest
 import wall_clip as clip
 import wall_analysis as wa
 import wall_frames as wf
+import wall_locate as wl
 from wall_fakes import (
     blend,
     flips_up,
@@ -101,7 +102,7 @@ def test_a_clip_spanning_part_of_the_capture_is_found_where_it_sits():
     reading = wf.read_frame(capture)
     assert (reading.status, reading.index) == ("ok", 321)
     lay = clip.layout(960, 540)
-    copies = wf.locate(capture)
+    copies = wl.locate(capture)
     assert [c.x0 for c in copies] == [480 + x for x in lay.copies]
     assert {c.cell for c in copies} == {lay.cell}
 
@@ -157,12 +158,12 @@ def test_decode_levels_reads_plain_and_blended_strips():
 def test_luma_is_the_mean_of_the_colour_channels():
     rgb = np.zeros((2, 2, 3), dtype=np.uint8)
     rgb[:, :] = (30, 60, 90)
-    assert (wf.to_luma(rgb) == 60).all()
+    assert (wl.to_luma(rgb) == 60).all()
     bgra = np.dstack([rgb, np.full((2, 2), 255, dtype=np.uint8)])
-    assert (wf.to_luma(bgra) == 60).all(), "alpha is not luma"
-    assert wf.to_luma(rgb[:, :, :1]).shape == (2, 2)
+    assert (wl.to_luma(bgra) == 60).all(), "alpha is not luma"
+    assert wl.to_luma(rgb[:, :, :1]).shape == (2, 2)
     with pytest.raises(ValueError):
-        wf.to_luma(np.zeros(4))
+        wl.to_luma(np.zeros(4))
 
 
 def strip_cell(picture: np.ndarray, k: int, value: int) -> np.ndarray:
@@ -254,14 +255,14 @@ def test_pictures_blended_by_the_rule_read_back_to_the_rule():
 
 def test_the_sampled_columns_sit_inside_each_cell():
     for x0, size in ((120.0, 20.0), (1037.25, 41.5), (3.0, 2.0), (0.4, 7.3)):
-        columns = wf.Copy(x0, size, (0, 0)).columns()
-        assert columns.shape == (wf.COPY_COLUMNS,) == (clip.CELLS * wf.CELL_SAMPLES,)
+        columns = wl.Copy(x0, size, ()).columns()
+        assert columns.shape == (clip.CELLS * wl.CELL_SAMPLES,)
         for k in range(clip.CELLS):
-            cell = columns[k * wf.CELL_SAMPLES : (k + 1) * wf.CELL_SAMPLES]
+            cell = columns[k * wl.CELL_SAMPLES : (k + 1) * wl.CELL_SAMPLES]
             left = x0 + size * k
             right = left + size
             quarter = size / 4
-            eighth = size / 2 / wf.CELL_SAMPLES
+            eighth = size / 2 / wl.CELL_SAMPLES
             assert (cell >= left + quarter - 1).all(), (x0, size, k)
             assert (cell <= right - quarter).all(), (x0, size, k)
             assert cell[0] <= left + quarter + eighth, (x0, size, k)
@@ -269,8 +270,8 @@ def test_the_sampled_columns_sit_inside_each_cell():
             assert (np.diff(cell) >= 0).all()
     # Each sample at the middle of its eighth of the core: a 20 px cell from
     # 120 samples 125.625, 126.875, ... 134.375.
-    columns = wf.Copy(120.0, 20.0, (0, 0)).columns()
-    assert columns[: wf.CELL_SAMPLES].tolist() == [
+    columns = wl.Copy(120.0, 20.0, ()).columns()
+    assert columns[: wl.CELL_SAMPLES].tolist() == [
         125,
         126,
         128,
@@ -280,7 +281,7 @@ def test_the_sampled_columns_sit_inside_each_cell():
         133,
         134,
     ]
-    assert columns[-wf.CELL_SAMPLES :].tolist() == [
+    assert columns[-wl.CELL_SAMPLES :].tolist() == [
         505,
         506,
         508,

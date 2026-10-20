@@ -16,6 +16,7 @@ import numpy as np
 import wall_clip as clip
 import wall_analysis as wa
 import wall_frames as wf
+import wall_locate as wl
 
 
 @functools.lru_cache(maxsize=None)
@@ -202,7 +203,7 @@ def dxcam_capture(
             seen = newest
             times.append(t)
             ended.append(taken)
-            sampled.append(wf.sample_copies(frame(presents[newest][1], 30), copies))
+            sampled.append(wl.cell_sums(frame(presents[newest][1], 30), copies))
             t = max(t + grab - 0.001, taken)
         t += 0.001
         if late and late[0] <= t < late[1]:

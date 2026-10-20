@@ -11,6 +11,7 @@ paths:
   - "e2e/post-deploy-test-item.spec.ts"
   - "scripts/wall_clip.py"
   - "scripts/wall_frames.py"
+  - "scripts/wall_locate.py"
   - "scripts/wall_analysis.py"
   - "scripts/wall_spans.py"
   - "scripts/tests/test_wall_clip.py"
@@ -195,15 +196,16 @@ MEASURED with frame ids, never judged by eye. Design record: #272 comment
   and re-pin the sha256s and sizes in `test_item_clips.rs`. v2: 13 959 001
   / 14 028 769 / 15 748 924 B (24 / 25 / 30 fps; v1 was ~4.3 MB).
 
-### `scripts/wall_frames.py` (the reader) + `scripts/wall_analysis.py`
+### `scripts/wall_frames.py` (the reader) + `wall_locate.py` + `wall_analysis.py`
 
-`wall_frames.py` reads each picture (`read_frame`) and holds the capture
-glue and the CLI; `wall_analysis.py` is the pure analysis of a run of
-readings (`analyse`, the pacer's rule, the capture's timing). Run it from
-the repo checkout's `scripts/` (on the box: the runner's checkout): it
-imports `wall_clip`, `wall_analysis` (with `wall_spans`) and
-`av_sync_check` (with its
-`av_sync_drift` / `av_sync_warp`).
+`wall_locate.py` is the pure search (where the copies sit, `locate`, and
+what a capture grabs, `capture_region`); `wall_frames.py` reads each
+picture (`read_frame`, `read_sums`) and holds the capture glue and the CLI;
+`wall_analysis.py` is the pure analysis of a run of readings (`analyse`,
+the pacer's rule, the capture's timing). Run it from the repo checkout's
+`scripts/` (on the box: the runner's checkout): it imports `wall_clip`,
+`wall_locate`, `wall_analysis` (with `wall_spans`) and `av_sync_check`
+(with its `av_sync_drift` / `av_sync_warp`).
 
 
 - **Finding the copies (`locate`, v2), wherever they sit, at any scale:**
@@ -216,11 +218,16 @@ imports `wall_clip`, `wall_analysis` (with `wall_spans`) and
   - candidates within half a cell and 5 % of a cell of a group's first are
     one copy, standing for its middle candidate (`group_candidates`: one
     row's own reading, so every sampled column lies inside the picture);
-  - a copy is kept only where, at its own columns, ruler rows sit right
-    above strip rows (`ruled_strip`: within the ruler's height + 2 rows).
-- **Reading (`read_columns`):** at each copy's 8 sampled columns per cell
-  (`CELL_SAMPLES`, over the central half; `Copy.columns`,
-  `sample_copies`), the rows whose references read black / white with
+  - a copy is kept only where, at its own columns, strip rows sit right
+    under ruler rows (`ruled_strips`: within the ruler's height + 2 rows),
+    and it keeps those strips (`Copy.strips`): only they are ever read for
+    it. Review round 1: SNV's output is made of slices, and another slice
+    cut in a few rows under the strip put a second strip into the grabbed
+    rows: read for every copy, a clean wall read `disagree`.
+- **Reading (`read_sums`):** each copy's cells' sums per row (`cell_sums`:
+  its 8 sampled columns per cell, `CELL_SAMPLES`, over the central half,
+  summed, exact in uint16), in the rows of its own strips, the rows whose
+  references read black / white with
   contrast > 25 % of full scale and every bit between them, a run of ≥ 3
   such rows = one strip; its core rows normalised by its own references.
   One grey cell (level 0.04–0.96) → `(i, i + 1, w)`, `w` the LATER frame's
@@ -228,17 +235,23 @@ imports `wall_clip`, `wall_analysis` (with `wall_spans`) and
   `no_strip`, `multi` (≥ 2 grey cells), `non_adjacent`, `disagree` (the
   copies and bands read positions more than `SAME_PICTURE` apart: a torn
   picture).
-- **A capture locates ONCE, then reads every picture at those columns**
-  (as v1 read at `--x-range`'s, which v2 deletes). `clip_copies` keeps the
-  copies that read the picture as one with more than half of them (an
-  overlay drawing a false copy is left out; no majority = the next
-  picture). A recording: its first picture showing the clip (earlier ones
-  `no_strip`). dxcam: before its timed polls (`find_clip`, ≤ `LOCATE_S`
-  10 s; one look at a whole 7680×1080 output takes ~0.6 s on dev1); with no
-  `--region` it looks at the whole output, then grabs only the strip rows
-  (± a quarter) and columns (± a cell) of the largest set of copies whose
-  strips share rows (`capture_region`). Nothing found → exit 4, the reason
-  on stderr. The report's `located`: copies, `cell_px`, `region`.
+- **A capture locates ONCE, then keeps only each picture's cell sums**
+  (as v1 read at `--x-range`'s columns, which v2 deletes). `clip_copies`
+  keeps the copies that read the picture as one with more than half of
+  them (an overlay drawing a false copy is left out; no majority = another
+  picture).
+  - A recording: looked at on every `LOCATE_EVERY` (15th) picture from the
+    first, and on its last, until found, at most `LOCATE_TRIES` (40) times
+    (a look takes 0.1–3 s); the pictures since the look before are read at
+    the copies found (`no_strip` if none were). Nothing found → exit 4, the
+    reason on stderr.
+  - dxcam: before its timed polls (`find_clip`, ≤ `LOCATE_S` 10 s; one look
+    at a whole 7680×1080 output takes ~0.6 s on dev1), on the whole output
+    or in `--region` (an AREA to look in), then it grabs only the strip
+    rows (± a quarter) and columns (± a cell) of the largest set of strips
+    sharing rows, at most `MAX_COPIES` (4) copies, the middle ones
+    (`capture_region`). Nothing found → exit 4, the reason on stderr.
+  - The report's `located`: copies, `cell_px`, `region`.
 - **One picture = within `SAME_PICTURE`** (8 Q8 + the 0.04 level edge):
   the program's own 8-bit blend (`nv12_mix.rs`, `(f(256 − w) + tw + 128)
   >> 8` on 16 / 235) rounds a weight near 0 or 256 to either side of the
@@ -447,9 +460,10 @@ imports `wall_clip`, `wall_analysis` (with `wall_spans`) and
   so dxcam 0.3+ never loads OpenCV — dxcam 0.0.5 imports it at module load
   whatever the colour, so the venv needs dxcam ≥ 0.3 or `opencv-python`:
   the main session checks the box): every poll timed, only each picture's
-  sampled columns kept as luma (~170 KB at 1080 rows, ~345 KB at 2160) and
-  decoded after the capture, an empty poll sleeps 1 ms (Python 3.11+ sleeps
-  on a high-resolution timer there). `--fps` takes 24 / 25 / 30.
+  cell sums kept (20 uint16 a row per copy, ≤ 4 copies: ~31 KB a picture at
+  SNV's ~194 rows, ~75 MB a 40 s take; v2 at first kept 160 columns a copy,
+  ~670 MB, review round 1) and decoded after the capture, an empty poll
+  sleeps 1 ms (Python 3.11+ sleeps on a high-resolution timer there). `--fps` takes 24 / 25 / 30.
 - Measured on dev1 (#272 comment 6164962209): every frame of the three
   clips reads back (also through `read_video`'s pts path: 1440 / 1500 /
   1800, clean); real decoded frames blended 25 on 30, cut to an SNV
@@ -528,15 +542,15 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
   print(dxcam.output_info())"`.
 - **It grabs only the strip rows the reader found, never the whole
   output** (v2: ci.yml sets no `SP_WALL_REGION`). The reader looks at the
-  whole output once, finds the copies and grabs their strip rows ± a
-  quarter and their columns ± a cell (`capture_region`; `located.region`
-  in the report and the spec's log line), so a change of Arena's wall
-  mapping needs no new rows. A full 7680×1080 grab is too slow to time each
-  refresh: the reader exits 5 ("only 2 intervals timed within 1.67 ms").
-  v1's band 160–312 (16.10.2026) polled at 16.6 ms; a v2 region at SNV's
-  2× is ~200 rows of ~4900 px (modelled on dev1, not yet measured on the
-  box). `SP_WALL_REGION` stays a manual override: it must then hold a
-  whole ruler and its strip.
+  whole output once, finds the copies and grabs the strip rows ± a
+  quarter and the columns ± a cell of at most 4 of them (`capture_region`;
+  `located.region` in the report and the spec's log line), so a change of
+  Arena's wall mapping needs no new rows. A full 7680×1080 grab is too
+  slow to time each refresh: the reader exits 5 ("only 2 intervals timed
+  within 1.67 ms"). v1's band 160–312 (16.10.2026) polled at 16.6 ms; a v2
+  region at SNV's 2× is ~200 rows of ~3400 px (modelled on dev1, not yet
+  measured on the box). `SP_WALL_REGION` stays a manual override, an area
+  to look in: it must then hold a whole ruler and its strip.
 - **A manual measurement on the box checks the rig lease FIRST, and
   before each round** (17.10.2026: an overnight layer A/B cut SP-program
   and bypassed Arena layers for 6 min inside camera-box's 8 h av-soak,
@@ -609,11 +623,14 @@ bright overlay, indices across the clip whole and 4× with no false copy, a
 copy placed by its ruler only — a covered ruler, an index-0 strip, the
 digits, a copy the capture cuts —, disagreeing copies and the majority a
 capture keeps, and every bound of `bright_mask`, `ruler_candidates`,
-`group_candidates`, `ruler_rows`, `ruled_strip`, `capture_region`,
-`find_clip`; hand mutants of the v2 code: 99 of 101 killed, the two left
-equivalent: `group_candidates`' look-back stop `>` for `>=` (a candidate
-that far can never match) and `clip_copies`' `<=` for `<` against
-`SAME_PICTURE`, as for `disagree`), `test_wall_frames_analyse.py` (one sample
+`group_candidates`, `ruler_rows`, `ruled_strips`, `capture_region`,
+`find_clip`, a copy reading only its own strips across a slice seam,
+`read_sums`; `test_wall_capture.py`: `capture_dxcam` on a fake camera,
+`read_video`'s looks; hand mutants of the v2 code (a scratch harness on
+dev1, not CI): 115 of 117 killed, the two left equivalent:
+`group_candidates`' look-back stop `>` for `>=` (a candidate that far can
+never match) and `clip_copies`' `<=` for `<` against `SAME_PICTURE` (as
+for `disagree`: positions are multiples of 1/256)), `test_wall_frames_analyse.py` (one sample
 per refresh: every grid phase through the program's byte blend at 24 / 25
 / 30 fps, loops / losses / jumps / weights / unverified steps at 60 and
 50 Hz / judder / the song-end clamp at every phase, a loss at the seam, a hold over 1 s there / the
@@ -630,7 +647,8 @@ a 12 ms lag, a wall that stopped, a wrong or missing `--refresh-hz`, a bad
 `scripts/tests/wall_fakes.py` (the clip's frames, the program's byte blend,
 the pacer's readings, the wall's refreshes as a camera samples them, a
 simulated dxcam capture), all numpy-only for CI's Eval Checks job, whose
-ruff lists name the four scripts (`wall_spans.py` too). Hand mutants of `wall_frames.py` / `wall_analysis.py` (every
+ruff lists name the wall scripts (`wall_clip.py`, `wall_frames.py`,
+`wall_locate.py`, `wall_analysis.py`, `wall_spans.py`). Hand mutants of `wall_frames.py` / `wall_analysis.py` (every
 threshold, guard, bound and exit code; a scratch harness on dev1, not CI)
 were run after each review round and the tests extended until none
 survived; an equivalent one is removed from the code instead.
