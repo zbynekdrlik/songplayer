@@ -45,7 +45,10 @@ const PYTHON =
 const READER = path.resolve(__dirname, "..", "scripts", "wall_frames.py");
 /** dxcam's output index of the wall (SNV: 1 = 7680×1080, 0 = the primary). */
 const DXCAM_OUTPUT = process.env.SP_WALL_DXCAM_OUTPUT || "1";
-/** An optional dxcam region `L,T,R,B` of the wall output. */
+/** An optional dxcam region `L,T,R,B` of the wall output, a manual
+ *  override. #272 v2: with none, the reader finds the clip's copies on the
+ *  whole output and grabs only their strip rows and columns, so a change of
+ *  Arena's wall mapping needs no new rows here. */
 const REGION = process.env.SP_WALL_REGION || "";
 /** The wall's refresh as dxcam sees it: DWM composes SNV at 60.000 Hz. */
 const REFRESH_HZ = "60";
@@ -204,7 +207,8 @@ test.describe("the LED wall shows every frame, in order, on its cadence (#272)",
         `wall frames ${clip.name}: exit ${result.code}, verdict ${r?.verdict ?? "-"}, ` +
           `boundaries ${r?.boundaries ?? "-"}, judged ${r?.refreshes?.judged ?? "-"}, ` +
           `uneven ${r?.refreshes?.uneven ?? "-"}, jumps back ${r?.jumps_back ?? "-"}, ` +
-          `lost ${r?.lost_frames ?? "-"}, decoded ${r?.decoded ?? "-"}/${r?.samples ?? "-"}`,
+          `lost ${r?.lost_frames ?? "-"}, decoded ${r?.decoded ?? "-"}/${r?.samples ?? "-"}, ` +
+          `located ${JSON.stringify(r?.located ?? null)}`,
       );
       if (result.stderr.trim()) {
         console.log(`wall frames ${clip.name} stderr: ${result.stderr.trim().slice(0, 2000)}`);

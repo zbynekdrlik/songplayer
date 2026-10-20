@@ -1,8 +1,11 @@
 //! #272: the test item's pinned clip LIST — camera-box's measurement clip
 //! (#228, the default) and SongPlayer's own wall measurement clips
-//! (`scripts/wall_clip.py`: each frame's index as a 16-cell Gray-code strip
-//! repeated in 8 bands, read back by `scripts/wall_frames.py`; 3840×2160
-//! H.264 at 24 / 25 / 30 fps, 60 s, a silent 48 kHz stereo AAC track).
+//! (`scripts/wall_clip.py`: each frame's index as a 16-cell Gray-code strip,
+//! clip v2: in 9 self-contained copies across the width, each under a static
+//! ruler, repeated in 8 bands, so any quarter of the width and height reads
+//! under the operator's zoom; read back by `scripts/wall_frames.py`;
+//! 3840×2160 H.264 at 24 / 25 / 30 fps, 60 s, a silent 48 kHz stereo AAC
+//! track).
 //!
 //! - **One playlist, one row per clip.** Every clip is a video of the ONE
 //!   hidden kind-`test` playlist (`SP-test`, scene `sp-test`, mode `loop`),
@@ -15,6 +18,11 @@
 //! - **Each clip is pinned by its sha256**, read from `<data dir>/bench`
 //!   under its own file name and imported exactly as camera-box's clip is
 //!   (the video stream copied, the audio into FLAC with no filter).
+//! - **v1 → v2 keeps the rows** (`wallclip-24/25/30`): the v2 file and song
+//!   name give new cache names, so the import records each row anew (the
+//!   `already` check never takes the v1 files for v2), and the self-heal
+//!   deletes the v1 pair as a superseded duplicate at the next start (the
+//!   newest pair of an id is kept).
 //! - **Which clip plays.** `/start {"clip"}` plays one from position 0 (no
 //!   body: camera-box's). Loop repeats it, and Loop's memory (V37) keeps the
 //!   clip started LAST: a press of `sp-test` with no start plays THAT clip,
@@ -75,55 +83,55 @@ pub const WALL_ARTIST: &str = "SongPlayer";
 /// The wall clips' length, ms.
 pub const WALL_DURATION_MS: i64 = 60_000;
 
-/// The 24 fps wall clip (4 231 474 bytes; dev1
-/// `~/.claude/work-products/issue-272/`, generated 14.10.2026).
+/// The 24 fps wall clip (13 959 001 bytes; dev1
+/// `~/.claude/work-products/issue-272/`, clip v2 generated 20.10.2026).
 pub const WALL_24: Clip = Clip {
     name: "wall-24",
-    file: "wall-clip-v1-24fps-60s.mp4",
+    file: "wall-clip-v2-24fps-60s.mp4",
     sha256: [
-        0x0b, 0x25, 0x40, 0xf1, 0x32, 0x87, 0x39, 0x69, 0x93, 0xa0, 0xd2, 0xc1, 0x45, 0xf5, 0xc4,
-        0xc7, 0xd5, 0xef, 0x3e, 0xe3, 0x5f, 0xfa, 0xf6, 0xad, 0x5c, 0xba, 0xb0, 0xf8, 0xeb, 0x6a,
-        0x54, 0x88,
+        0x7e, 0x7e, 0xaa, 0x4a, 0x0d, 0x60, 0xee, 0xd9, 0x39, 0xdf, 0xda, 0x00, 0x3a, 0x8d, 0x9b,
+        0xa1, 0x2c, 0x60, 0x32, 0x35, 0x4b, 0x71, 0x5d, 0x7e, 0xa4, 0x45, 0x17, 0x77, 0xa5, 0xa1,
+        0x2d, 0xf0,
     ],
     fps: 24,
     youtube_id: "wallclip-24",
-    song: "Wall clip v1 24 fps",
+    song: "Wall clip v2 24 fps",
     artist: WALL_ARTIST,
-    title: "SongPlayer wall clip v1, 24 fps (60 s)",
+    title: "SongPlayer wall clip v2, 24 fps (60 s)",
     duration_ms: WALL_DURATION_MS,
 };
 
-/// The 25 fps wall clip (4 270 913 bytes), the one #251's blend runs on.
+/// The 25 fps wall clip (14 028 769 bytes), the one #251's blend runs on.
 pub const WALL_25: Clip = Clip {
     name: "wall-25",
-    file: "wall-clip-v1-25fps-60s.mp4",
+    file: "wall-clip-v2-25fps-60s.mp4",
     sha256: [
-        0x7b, 0x00, 0xc1, 0x61, 0x1e, 0x9c, 0xed, 0xe9, 0xf3, 0x28, 0xfd, 0xc6, 0x0f, 0xd0, 0x14,
-        0xce, 0xed, 0x7a, 0xa9, 0x85, 0x91, 0x5d, 0xf7, 0x8b, 0xbb, 0x5e, 0x87, 0x60, 0xc5, 0x38,
-        0xc3, 0x55,
+        0x7a, 0x9b, 0xdc, 0x6b, 0x28, 0x11, 0x15, 0x27, 0x09, 0x8b, 0xd8, 0xfe, 0x65, 0x20, 0x25,
+        0x67, 0x96, 0xd0, 0x73, 0x5b, 0x22, 0x64, 0x54, 0xd2, 0x0a, 0xd8, 0xfe, 0xa5, 0x4d, 0xac,
+        0x9d, 0x70,
     ],
     fps: 25,
     youtube_id: "wallclip-25",
-    song: "Wall clip v1 25 fps",
+    song: "Wall clip v2 25 fps",
     artist: WALL_ARTIST,
-    title: "SongPlayer wall clip v1, 25 fps (60 s)",
+    title: "SongPlayer wall clip v2, 25 fps (60 s)",
     duration_ms: WALL_DURATION_MS,
 };
 
-/// The 30 fps wall clip (4 893 700 bytes): the grid's own rate.
+/// The 30 fps wall clip (15 748 924 bytes): the grid's own rate.
 pub const WALL_30: Clip = Clip {
     name: "wall-30",
-    file: "wall-clip-v1-30fps-60s.mp4",
+    file: "wall-clip-v2-30fps-60s.mp4",
     sha256: [
-        0x78, 0x9d, 0xfd, 0xbe, 0x41, 0xdb, 0x15, 0x45, 0x1c, 0x3f, 0xf9, 0x46, 0x65, 0x14, 0x06,
-        0x43, 0x1b, 0x6a, 0xd8, 0x04, 0x4c, 0xe8, 0x2c, 0x97, 0x1d, 0x2a, 0xd1, 0x48, 0x39, 0xb3,
-        0x65, 0x2c,
+        0xf2, 0x13, 0x49, 0x02, 0xbd, 0xfe, 0x74, 0x21, 0x6b, 0x8a, 0x41, 0x05, 0x84, 0x36, 0x3e,
+        0x84, 0x66, 0xea, 0xd3, 0xea, 0x1e, 0x86, 0x7a, 0x4f, 0xfe, 0xab, 0xc6, 0x8b, 0x49, 0xd3,
+        0x12, 0x8d,
     ],
     fps: 30,
     youtube_id: "wallclip-30",
-    song: "Wall clip v1 30 fps",
+    song: "Wall clip v2 30 fps",
     artist: WALL_ARTIST,
-    title: "SongPlayer wall clip v1, 30 fps (60 s)",
+    title: "SongPlayer wall clip v2, 30 fps (60 s)",
     duration_ms: WALL_DURATION_MS,
 };
 

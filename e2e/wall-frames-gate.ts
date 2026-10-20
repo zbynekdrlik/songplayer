@@ -27,6 +27,9 @@ export interface WallFramesReport {
   weights: { mismatches: number };
   refreshes: { judged: number; uneven: number; unresolved: number } | null;
   unverified: { steps: number };
+  /** #272 v2: the copies of the clip's strip the reader found, their cell
+   *  width (px) and the dxcam region it grabbed; null when it found none. */
+  located?: { copies: number; cell_px: number; region: number[] | null } | null;
 }
 
 /** What the reader's exit codes mean (`wall_frames.py`'s module doc). */
@@ -49,7 +52,7 @@ export function wallFramesFailures(
   const where = `${clip}:`;
   if (exitCode === EXIT_NOTHING_DECODED) {
     return [
-      `${where} no picture of the clip was read on the wall output: the wall does not show SongPlayer's program (Arena's clip on another source or disconnected, MAX off, or the clip not on program)`,
+      `${where} no picture of the clip was read on the wall output: the wall does not show SongPlayer's program (Arena's clip on another source or disconnected, MAX off, or the clip not on program), or no whole copy of the clip's strip and its ruler is in view (the reader's stderr says which)`,
     ];
   }
   if (exitCode === EXIT_CAPTURE_FAILED) {

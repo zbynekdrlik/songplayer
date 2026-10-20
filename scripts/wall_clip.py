@@ -1,25 +1,44 @@
-"""SongPlayer's wall measurement clips (#272 lane 1).
+"""SongPlayer's wall measurement clips (#272).
 
 The owner (14.10.2026): whether Resolume puts out every frame, in order, must
 be measured, never judged by eye. These clips carry their own frame index in
 a form a capture of the LED wall can read back on every refresh, whatever
-band of the picture the wall shows (SNV shows about a quarter of the height,
-scaled up).
+part of the picture the wall shows: SNV shows about a quarter of the height
+and, since the operator's mapping of 18.10.2026, only the middle half of the
+width (the clip at ~2x). The operator's mapping is the truth and is never
+changed (#259), so the clip is read under ANY zoom of its width and height.
 
 Every frame carries its 0-based clip index:
 
-- **A Gray-code strip**, the primary code: ``CELLS`` equal cells across most
-  of the width. The outer two at each end are fixed references (black
-  outside, white inside); the 16 between them are the index in reflected
-  Gray code, most significant bit first, white = 1, black = 0. The strip is
-  repeated in each of the ``BANDS`` horizontal bands, so any crop of a
-  quarter of the height keeps whole rows of it. Two consecutive indices
-  differ in exactly ONE cell, so a boundary that blends two frames (#251's
-  25 / 24 fps blend on the 30 fps grid) shows exactly one grey cell, and its
-  level between the reference black and white IS the blend weight.
-- **The index in digits** (and the clip's fps), in each band under the
-  strip, for the eye. Drawn with a 5x7 bitmap font in numpy: no font file,
-  no PIL, so the drawing code also runs in CI's eval env.
+- **A Gray-code strip**, the primary code: ``CELLS`` equal cells. The outer
+  two at each end are fixed references (black outside, white inside); the 16
+  between them are the index in reflected Gray code, most significant bit
+  first, white = 1, black = 0. Two consecutive indices differ in exactly ONE
+  cell, so a boundary that blends two frames (#251's 25 / 24 fps blend on the
+  30 fps grid) shows exactly one grey cell, and its level between the
+  reference black and white IS the blend weight.
+- **Copies across the width (v2).** Each band holds ``COPIES`` self-contained
+  copies of the strip side by side, each with its own references. A copy is
+  20 of the frame's 192 cell widths and the copies touch, so any window of
+  40 cells holds a whole one: any quarter of the width (48 cells), at any
+  offset, holds a whole copy with 8 cells to spare.
+- **A ruler over each copy (v2).** A static row band above each copy's strip:
+  cells 0 and 19 white, cells 1-18 black, in every frame. The strip's own
+  references cannot place a copy: with copies side by side, the bit cells of
+  most indices also form the ``W B B W`` around a junction at a wrong phase
+  (863 of the 1800 indices of a 30 fps clip, #272 comment 6281619930). No
+  run of bit cells draws 18 black cells between two white ones, and a ruler
+  row is never read as a strip (its "black" references are white), so the
+  reader takes a copy's place and cell width from its ruler and reads the
+  bits in the strip right under it.
+- The strip, the ruler and the index in digits are repeated in each of the
+  ``BANDS`` horizontal bands, so any quarter of the height holds a whole
+  band.
+- **The index in digits** (and the clip's fps), in each copy's bit cells
+  above its ruler, for the eye, dim grey on the background (too faint for
+  the reader to take a glyph for a ruler or a strip). Drawn with a 5x7
+  bitmap font in numpy: no font file, no PIL, so the drawing code also runs
+  in CI's eval env.
 - No QR code: the ``qrcode`` package is not in CI's eval env, and the strip
   already gives the exact index (#272 dispatch, lane 1).
 
@@ -51,7 +70,7 @@ from pathlib import Path
 
 import numpy as np
 
-CLIP_VERSION = 1
+CLIP_VERSION = 2
 CLIP_SECONDS = 60
 FPS_SET = (24, 25, 30)
 WIDTH = 3840
@@ -61,21 +80,31 @@ BITS = 16
 REF_CELLS = 2
 CELLS = BITS + 2 * REF_CELLS
 BANDS = 8
-# The strip's left and right margin is width // MARGIN_DIV; every width that
-# is a multiple of 960 then puts the cell edges at the same fractions.
-MARGIN_DIV = 48
+COPIES = 9
+# A cell is width // CELL_DIV px wide (20 at 3840): the copies take
+# COPIES * CELLS = 180 of the 192 cells, 6 cells of margin on each side.
+CELL_DIV = 192
 
 Y_BLACK = 16
 Y_WHITE = 235
 Y_BACKGROUND = 40
-Y_DIGIT = 200
+# The digits stand only 40 over the background, under the reader's 25 % of
+# full scale (64): no glyph edge can read as a ruler or a strip (#272 v2: at
+# 200, glyph strokes 4x scaled formed both, a copy reading index 0).
+Y_DIGIT = 80
 C_NEUTRAL = 128
 
-# Inside a band, as fractions of its height.
-STRIP_TOP = 0.10
-STRIP_BOTTOM = 0.40
-DIGITS_TOP = 0.52
-DIGITS_BOTTOM = 0.88
+# Inside a band, as fractions of its height: the digits, the ruler, the
+# strip. The ruler's gap to its strip is half the ruler's height; above it
+# the digits end 10 % of the band earlier, and under the strip the next
+# band's digits start 30 % later, so the reader never pairs other rows as a
+# ruler and its strip (wall_locate.locate).
+DIGITS_TOP = 0.06
+DIGITS_BOTTOM = 0.30
+RULER_TOP = 0.40
+RULER_BOTTOM = 0.48
+STRIP_TOP = 0.52
+STRIP_BOTTOM = 0.76
 
 AUDIO_RATE = 48_000
 X264_PRESET = "veryfast"
@@ -133,41 +162,53 @@ def bits_index(bits: list[int]) -> int:
 
 @dataclass(frozen=True)
 class Layout:
-    """Where everything sits in a ``width`` x ``height`` frame."""
+    """Where everything sits in a ``width`` x ``height`` frame: the cell
+    width, each copy's left edge, and per band the rows of the digits, the
+    ruler and the strip."""
 
     width: int
     height: int
-    cell_edges: tuple[int, ...]
-    strips: tuple[tuple[int, int], ...]
+    cell: int
+    copies: tuple[int, ...]
     digit_rows: tuple[tuple[int, int], ...]
+    rulers: tuple[tuple[int, int], ...]
+    strips: tuple[tuple[int, int], ...]
+
+    def cell_edges(self, copy: int) -> tuple[int, ...]:
+        """The ``CELLS + 1`` cell edges of copy ``copy`` (px)."""
+        x0 = self.copies[copy]
+        return tuple(x0 + k * self.cell for k in range(CELLS + 1))
 
 
 def layout(width: int, height: int) -> Layout:
     """The layout of a ``width`` x ``height`` frame."""
-    margin = width // MARGIN_DIV
-    cell = (width - 2 * margin) // CELLS
+    cell = width // CELL_DIV
     if cell < 1:
-        raise ValueError(f"a {width} px wide frame has no room for {CELLS} cells")
-    edges = tuple(margin + k * cell for k in range(CELLS + 1))
-    strips = []
-    digit_rows = []
-    for band in range(BANDS):
-        top = band * height // BANDS
-        size = (band + 1) * height // BANDS - top
-        strips.append((top + int(size * STRIP_TOP), top + int(size * STRIP_BOTTOM)))
-        digit_rows.append(
-            (top + int(size * DIGITS_TOP), top + int(size * DIGITS_BOTTOM))
-        )
-    return Layout(width, height, edges, tuple(strips), tuple(digit_rows))
+        raise ValueError(f"a {width} px wide frame has no room for its cells")
+    margin = (width - COPIES * CELLS * cell) // 2
+    copies = tuple(margin + k * CELLS * cell for k in range(COPIES))
 
+    def rows(top: float, bottom: float) -> tuple[tuple[int, int], ...]:
+        out = []
+        for band in range(BANDS):
+            y0 = band * height // BANDS
+            size = (band + 1) * height // BANDS - y0
+            out.append((y0 + int(size * top), y0 + int(size * bottom)))
+        return tuple(out)
 
-def cell_fractions() -> list[float]:
-    """The cell edges as fractions of the frame width (any multiple of 960)."""
-    return [edge / WIDTH for edge in layout(WIDTH, HEIGHT).cell_edges]
+    return Layout(
+        width,
+        height,
+        cell,
+        copies,
+        rows(DIGITS_TOP, DIGITS_BOTTOM),
+        rows(RULER_TOP, RULER_BOTTOM),
+        rows(STRIP_TOP, STRIP_BOTTOM),
+    )
 
 
 def label(index: int, fps: int) -> str:
-    """The text under each strip."""
+    """The text in each copy's digit rows."""
     return f"{index:04d}  {fps} FPS"
 
 
@@ -184,14 +225,20 @@ def text_mask(text: str, unit: int) -> np.ndarray:
 
 
 def static_frame(lay: Layout) -> np.ndarray:
-    """The luma plane every frame starts from: background + reference cells."""
+    """The luma plane every frame starts from: the background, each copy's
+    ruler and its strip's reference cells."""
     plane = np.full((lay.height, lay.width), Y_BACKGROUND, dtype=np.uint8)
-    edges = lay.cell_edges
-    for y0, y1 in lay.strips:
-        plane[y0:y1, edges[0] : edges[1]] = Y_BLACK
-        plane[y0:y1, edges[1] : edges[2]] = Y_WHITE
-        plane[y0:y1, edges[-3] : edges[-2]] = Y_WHITE
-        plane[y0:y1, edges[-2] : edges[-1]] = Y_BLACK
+    for copy in range(COPIES):
+        edges = lay.cell_edges(copy)
+        for y0, y1 in lay.rulers:
+            plane[y0:y1, edges[0] : edges[-1]] = Y_BLACK
+            plane[y0:y1, edges[0] : edges[1]] = Y_WHITE
+            plane[y0:y1, edges[-2] : edges[-1]] = Y_WHITE
+        for y0, y1 in lay.strips:
+            plane[y0:y1, edges[0] : edges[1]] = Y_BLACK
+            plane[y0:y1, edges[1] : edges[2]] = Y_WHITE
+            plane[y0:y1, edges[-3] : edges[-2]] = Y_WHITE
+            plane[y0:y1, edges[-2] : edges[-1]] = Y_BLACK
     return plane
 
 
@@ -200,26 +247,31 @@ def draw_frame(
 ) -> np.ndarray:
     """The luma plane of clip frame ``index`` (``base`` = ``static_frame``)."""
     plane = (static_frame(lay) if base is None else base).copy()
-    edges = lay.cell_edges
     row = plane[lay.strips[0][0]].copy()
-    for k, bit in enumerate(code_bits(index)):
-        row[edges[REF_CELLS + k] : edges[REF_CELLS + k + 1]] = (
-            Y_WHITE if bit else Y_BLACK
-        )
+    bits = code_bits(index)
+    for copy in range(COPIES):
+        edges = lay.cell_edges(copy)
+        for k, bit in enumerate(bits):
+            row[edges[REF_CELLS + k] : edges[REF_CELLS + k + 1]] = (
+                Y_WHITE if bit else Y_BLACK
+            )
     for y0, y1 in lay.strips:
         plane[y0:y1] = row
-    inner0 = edges[REF_CELLS]
-    inner1 = edges[CELLS - REF_CELLS]
+    text = label(index, fps)
+    inner = BITS * lay.cell
+    units_wide = text_mask(text, 1).shape[1]
     for y0, y1 in lay.digit_rows:
-        unit = max(1, (y1 - y0) // FONT_H)
-        mask = text_mask(label(index, fps), unit)
+        unit = min((y1 - y0) // FONT_H, inner // units_wide)
+        if unit < 1:
+            raise ValueError("the label does not fit inside a copy's bit cells")
+        mask = text_mask(text, unit)
         height, width = mask.shape
-        if width > inner1 - inner0 or height > y1 - y0:
-            raise ValueError("the label does not fit inside the strip's cells")
-        x0 = inner0 + (inner1 - inner0 - width) // 2
         top = y0 + (y1 - y0 - height) // 2
-        region = plane[top : top + height, x0 : x0 + width]
-        region[mask] = Y_DIGIT
+        for copy in range(COPIES):
+            inner0 = lay.cell_edges(copy)[REF_CELLS]
+            x0 = inner0 + (inner - width) // 2
+            region = plane[top : top + height, x0 : x0 + width]
+            region[mask] = Y_DIGIT
     return plane
 
 
@@ -368,7 +420,8 @@ def write_clip(
 
 
 def parse_size(text: str) -> tuple[int, int]:
-    """``WxH`` -> (W, H); the width a multiple of 960 (the cell fractions)."""
+    """``WxH`` -> (W, H); the width a multiple of 960 (whole cells, the 4K
+    layout scaled), the height even."""
     width_text, _, height_text = text.lower().partition("x")
     width, height = int(width_text), int(height_text)
     if width % 960 or width <= 0 or height <= 0 or height % 2:

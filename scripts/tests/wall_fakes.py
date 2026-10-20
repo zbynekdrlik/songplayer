@@ -1,6 +1,8 @@
 """Shared fakes for the wall reader's tests (#272): the clip's own frames,
-the program's byte blend, the pacer's readings, the wall's refreshes as a
-camera samples them, and a simulated dxcam capture."""
+what a wall shows of them (any zoom and offset, scaled the way a renderer
+scales: bilinear, and blurred), the program's byte blend, the pacer's
+readings, the wall's refreshes as a camera samples them, and a simulated
+dxcam capture."""
 
 from __future__ import annotations
 
@@ -14,6 +16,7 @@ import numpy as np
 import wall_clip as clip
 import wall_analysis as wa
 import wall_frames as wf
+import wall_locate as wl
 
 
 @functools.lru_cache(maxsize=None)
@@ -31,6 +34,49 @@ def blend(a: np.ndarray, b: np.ndarray, weight: float) -> np.ndarray:
     """``b`` over ``a`` at ``weight``, rounded to 8 bits like the program."""
     mixed = a.astype(np.float64) * (1 - weight) + b.astype(np.float64) * weight
     return np.clip(np.round(mixed), 0, 255).astype(np.uint8)
+
+
+def wall_view(
+    picture: np.ndarray,
+    zoom: float,
+    left: float,
+    top: float,
+    width: int,
+    height: int,
+    zoom_y: float | None = None,
+) -> np.ndarray:
+    """What a ``width`` x ``height`` output shows of ``picture`` scaled by
+    ``zoom`` across (``zoom_y`` down, default the same) from its pixel
+    ``(left, top)``: output pixel ``(x, y)`` shows ``(left + (x + 0.5) /
+    zoom - 0.5, ...)``, bilinear (Arena's scaler), edges clamped, 8 bits."""
+    zoom_y = zoom if zoom_y is None else zoom_y
+    rows, cols = picture.shape
+    xs = np.clip(left + (np.arange(width) + 0.5) / zoom - 0.5, 0, cols - 1)
+    ys = np.clip(top + (np.arange(height) + 0.5) / zoom_y - 0.5, 0, rows - 1)
+    x0, y0 = np.floor(xs).astype(int), np.floor(ys).astype(int)
+    x1, y1 = np.minimum(x0 + 1, cols - 1), np.minimum(y0 + 1, rows - 1)
+    fx, fy = (xs - x0)[None, :], (ys - y0)[:, None]
+    p = picture.astype(np.float64)
+    upper = p[y0][:, x0] * (1 - fx) + p[y0][:, x1] * fx
+    lower = p[y1][:, x0] * (1 - fx) + p[y1][:, x1] * fx
+    return np.clip(np.round(upper * (1 - fy) + lower * fy), 0, 255).astype(np.uint8)
+
+
+def blurred(picture: np.ndarray, radius: int) -> np.ndarray:
+    """A box blur of ``2 * radius + 1`` px each way (edges clamped)."""
+    out = picture.astype(np.float64)
+    size = 2 * radius + 1
+    for axis in (0, 1):
+        pad = [(0, 0), (0, 0)]
+        pad[axis] = (radius, radius)
+        padded = np.pad(out, pad, mode="edge")
+        sums = np.cumsum(padded, axis=axis)
+        sums = np.insert(sums, 0, 0, axis=axis)
+        out = (
+            np.take(sums, range(size, sums.shape[axis]), axis=axis)
+            - np.take(sums, range(0, sums.shape[axis] - size), axis=axis)
+        ) / size
+    return np.clip(np.round(out), 0, 255).astype(np.uint8)
 
 
 def noisy(picture: np.ndarray, sigma: float, seed: int) -> np.ndarray:
@@ -137,10 +183,12 @@ def dxcam_capture(
     ``late``: no poll in that span; ``after``: polls run on that long after
     the last present; ``grab``: what a poll that got a picture costs;
     ``held`` ``(at, delay)``: the first poll from ``at`` acquires ``delay``
-    after its stamp (preempted between the two)."""
+    after its stamp (preempted between the two). The copies are located
+    once, on the clip's first frame, as ``capture_dxcam`` does."""
     presents = [(n / 60 + 0.0005, 100 + n // 2) for n in range(60)]
     end = presents[-1][0] + 0.002 + after
     times, sampled, polls, ended = [], [], [], []
+    copies = wf.clip_copies(frame(100, 30))
     seen = -1
     t = 0.0
     while t < end:
@@ -155,9 +203,9 @@ def dxcam_capture(
             seen = newest
             times.append(t)
             ended.append(taken)
-            sampled.append(wf.sample_columns(frame(presents[newest][1], 30), (0, 1)))
+            sampled.append(wl.cell_sums(frame(presents[newest][1], 30), copies))
             t = max(t + grab - 0.001, taken)
         t += 0.001
         if late and late[0] <= t < late[1]:
             t = late[1]
-    return times, sampled, polls, ended
+    return times, sampled, polls, ended, wf.Located(tuple(copies), None)

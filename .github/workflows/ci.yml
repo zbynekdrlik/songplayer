@@ -131,9 +131,9 @@ jobs:
       - name: Install Python eval dependencies (ruff + pytest + jsonschema + requests + numpy + soundfile)
         run: pip install ruff==0.5.7 pytest==8.3.2 jsonschema==4.23.0 requests==2.32.3 numpy==2.1.1 soundfile==0.12.1
       - name: Lint with ruff
-        run: ruff check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_analysis.py scripts/wall_spans.py
+        run: ruff check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_locate.py scripts/wall_analysis.py scripts/wall_spans.py
       - name: Format check with ruff
-        run: ruff format --check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_analysis.py scripts/wall_spans.py
+        run: ruff format --check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_locate.py scripts/wall_analysis.py scripts/wall_spans.py
       - name: Run pytest
         run: pytest eval/lyrics/tests -v
       - name: Run scripts pytest (#171 segment stitch / additivity, #156 minidump helpers)
@@ -2624,11 +2624,10 @@ jobs:
           # dxcam output on SNV (Output[1] = 7680x1080; Output[0] is the
           # primary). The reader runs on SP_AVSYNC_PYTHON's venv.
           SP_WALL_DXCAM_OUTPUT: "1"
-          # The rows of that output it grabs (L,T,R,B): one strip band of
-          # the wall clip, rows 170-308 at Arena's mapping (measured
-          # 16.10.2026). A full 7680x1080 grab is too slow to time each
-          # refresh (the reader exits 5); this band polls at 16.6 ms.
-          SP_WALL_REGION: "0,160,7680,312"
+          # No SP_WALL_REGION (#272 v2): the reader finds the clip's copies
+          # on the whole output once and grabs only their strip rows and
+          # columns (a full 7680x1080 grab is too slow to time each
+          # refresh), so a change of Arena's wall mapping needs no new rows.
           # #233 lane 3: how many enabled ASIO outputs the box must run
           # (e2e/post-deploy-audio-asio.spec.ts). SNV runs one since
           # 8.10.2026: "DVS (Dante)", Dante Virtual Soundcard TX 1/2.
