@@ -2193,11 +2193,13 @@ the FHD `SP-program`:
   (`Presets\Advanced Output\<preset>.xml` + `Preferences\AdvancedOutput.xml`),
   and put it back the same way; a Save & Close may rewrite a param's
   `default` attribute, never its value.
-- **THE CAUSE (20.10.2026, #251): the second Advanced Output screen "dummy".**
-  - The screen: a Virtual Output 2580×360 with one slice "fullsize", created 7.10.2026 10:40:17Z (its uniqueId), 36 s before SongPlayer's MAX clips. No clip reads it.
-  - With it, a live input (Spout or NDI) costs the Display window 55–65 % of the pictures: 205–262 of 600 per 20 s. Without it, the same A/B (`diag\wall-bridge\ao_dummy_ab.ps1`: preset copied aside, the node removed, Arena restarted, ALWAYS put back) reads 571–589 with a live input and 600 without one.
-  - PP's Arena has one screen.
-  - Ruled out first, each by the same A/B:
+- **The Advanced Output screen "dummy" is a TRADE-OFF, not the cause (20.10.2026, #251).**
+  - The screen: a Virtual Output 2580×360 with slice "fullsize", created 7.10.2026 10:40:17Z, 36 s before SongPlayer's MAX clips. No clip reads it.
+  - It governs how Arena's output loop is paced.
+  - WITH it, Arena's OWN clip under any live input reaches the wall at 205–262 of 600 pictures per 20 s (`ndi_ab.ps1`), while SongPlayer's picture through MAX is near clean: wall-30 uneven 2–16 of ~1190, 0 back, 0 lost (`wall_take.ps1`).
+  - WITHOUT it (`ao_dummy_ab.ps1` / `ao_dummy_remove.ps1`, owner-approved), Arena's own clip reads 571–591 under a live input, but SongPlayer's wall-30 reads 203 uneven, 100 jumps back and 100 lost boundaries. It was reverted at once.
+  - Judge EVERY wall change by BOTH measurements, never by one: Arena's own clip under a live input AND the live input's own frames.
+  - Ruled out as causes by the same A/B:
     - HAGS;
     - the NVIDIA driver 617.42 / 566.36;
     - the display layout;
@@ -2205,9 +2207,8 @@ the FHD `SP-program`:
     - SongPlayer stopped;
     - Arena 7.27.1;
     - DMA textures;
-    - the NVIDIA GL present method (Arena presents through its own DXGI swapchains).
-  - Removing the screen is the owner's / operator's call (#259 rule); `ao_dummy_remove.ps1` does it with a backup.
-  - Lesson: when a live input hurts only one site, diff the sites' Arena OUTPUT setup (every Advanced Output screen and device) before the PC, the driver and the GPU.
+    - the NVIDIA GL present method.
+  - Diag scripts refuse to run while another one runs (`diag_guard.ps1`): a take started inside another's condition saves ITS Blank as the source to restore.
 - **Restarting Arena on SNV:** the operator's `NL_STARTUP.ahk` (AutoHotkey)
   relaunches Arena within ~1 s of its end. A script that changes Arena's
   config must write it BEFORE the kill (a kill writes nothing back), wait
