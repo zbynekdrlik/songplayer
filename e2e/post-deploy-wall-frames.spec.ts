@@ -139,14 +139,21 @@ const ARENA_COMPOSITION =
 /** #272 (19.10.2026): what covers the clip when nothing was decoded, from
  *  Arena's composition (`coveringLayers`); never changes it. */
 async function whatCovers(): Promise<string> {
-  try {
-    const resp = await fetch(ARENA_COMPOSITION, { signal: AbortSignal.timeout(5000) });
-    const composition = (await resp.json()) as { layers?: ArenaLayer[] };
-    const above = coveringLayers(composition.layers ?? []);
-    return above.length > 0 ? above.join(", ") : "none";
-  } catch (err) {
-    return `Arena's composition could not be read (${err})`;
+  let failed = "";
+  // One retry (CI 39345213643: the second clip's read failed with "TypeError:
+  // fetch failed" a minute after the first one answered).
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const resp = await fetch(ARENA_COMPOSITION, { signal: AbortSignal.timeout(5000) });
+      const composition = (await resp.json()) as { layers?: ArenaLayer[] };
+      const above = coveringLayers(composition.layers ?? []);
+      return above.length > 0 ? above.join(", ") : "none";
+    } catch (err) {
+      failed = `${err}`;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
   }
+  return `Arena's composition could not be read (${failed})`;
 }
 
 test.describe.configure({ mode: "serial" });

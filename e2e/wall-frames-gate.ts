@@ -147,6 +147,13 @@ export interface ArenaLayer {
 /** The Spout sender Arena's wall clip receives (`SPOUT_SENDER_NAME`). */
 export const MAX_SENDER = "SP-program-MAX";
 
+/** A clip whose source is Arena's Blank generator (its description's first
+ *  line), which draws nothing, so it covers nothing (#272, SNV 20.10.2026:
+ *  L17-19). */
+function drawsNothing(description: string | undefined): boolean {
+  return (description ?? "").split("\n")[0].trim() === "Blank";
+}
+
 /**
  * Why a take decoded nothing, read from Arena's composition (#272, 19.10.2026:
  * the operator's layers left on after a service covered the clip): the
@@ -174,7 +181,9 @@ export function coveringLayers(layers: ArenaLayer[]): string[] {
       return;
     }
     for (const clip of connected(layer)) {
-      above.push(`L${i + 1} '${clip.name?.value ?? ""}'`);
+      if (!drawsNothing(clip.video?.description)) {
+        above.push(`L${i + 1} '${clip.name?.value ?? ""}'`);
+      }
     }
   });
   return above;
