@@ -2183,6 +2183,16 @@ the FHD `SP-program`:
   sharing* itself made the cadence uneven (odd runs ~10 → ~200 per 20 s,
   1- / 3-frame pictures), so measure an Advanced Output `Spout` device, on
   count AND cadence, before building on it.
+- **Measured: an Advanced Output screen on the `Spout` device is clean**
+  (`aodev_ab.ps1`, 6281509748): the unused screen "dummy" switched to
+  Spout (`Arena - dummy`, 2580×360) carried 601–603 distinct pictures per
+  20 s under the live input, ~98 % held exactly 2 frames, while the
+  Display window read 267–273 of 600 in the same minutes. That is the
+  #259 bridge's input. Switch a screen's device in Output → Advanced… (JUCE
+  UI, no REST), back the preset up first
+  (`Presets\Advanced Output\<preset>.xml` + `Preferences\AdvancedOutput.xml`),
+  and put it back the same way; a Save & Close may rewrite a param's
+  `default` attribute, never its value.
 - **Restarting Arena on SNV:** the operator's `NL_STARTUP.ahk` (AutoHotkey)
   relaunches Arena within ~1 s of its end. A script that changes Arena's
   config must write it BEFORE the kill (a kill writes nothing back), wait
