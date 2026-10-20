@@ -2193,13 +2193,16 @@ the FHD `SP-program`:
   (`Presets\Advanced Output\<preset>.xml` + `Preferences\AdvancedOutput.xml`),
   and put it back the same way; a Save & Close may rewrite a param's
   `default` attribute, never its value.
-- **The Advanced Output screen "dummy" is a TRADE-OFF, not the cause (20.10.2026, #251).**
-  - The screen: a Virtual Output 2580×360 with slice "fullsize", created 7.10.2026 10:40:17Z, 36 s before SongPlayer's MAX clips. No clip reads it.
-  - It governs how Arena's output loop is paced.
-  - WITH it, Arena's OWN clip under any live input reaches the wall at 205–262 of 600 pictures per 20 s (`ndi_ab.ps1`), while SongPlayer's picture through MAX is near clean: wall-30 uneven 2–16 of ~1190, 0 back, 0 lost (`wall_take.ps1`).
-  - WITHOUT it (`ao_dummy_ab.ps1` / `ao_dummy_remove.ps1`, owner-approved), Arena's own clip reads 571–591 under a live input, but SongPlayer's wall-30 reads 203 uneven, 100 jumps back and 100 lost boundaries. It was reverted at once.
-  - Judge EVERY wall change by BOTH measurements, never by one: Arena's own clip under a live input AND the live input's own frames.
-  - Ruled out as causes by the same A/B:
+- **The Advanced Output screen "dummy" (20.10.2026, #251) was REMOVED on SNV (owner's decision, 15:22Z).**
+  - The screen: a Virtual Output 2580×360 with slice "fullsize", created 7.10.2026 10:40:17Z. No clip read it.
+  - Measured by `ab_long.ps1`, which alternates without / with it twice, both measurements each time. Without it:
+    - Arena's own clip under a live input: ndi 588–589, max 575 of 600 (with it: 386–387, 297–319);
+    - SongPlayer's wall-30 through MAX: 2 uneven, 0 back, 0 lost (with it: 14–15 uneven, 2 back, 2 lost).
+  - After the removal: 589 / 575 / 601, and wall-30 0 / 0 / 0.
+  - Without it, a MAX send phase of 12 ms read 54 uneven; 4, 8, 16 and today's 19 ms read 2–4 (`phase_ab.ps1`).
+  - It is NOT proven to be the whole judder. An intermittent disturbance (14:39–14:49Z: a frozen round, then 203 uneven / 100 back / 100 lost) has no cause yet, and that one take made me revert wrongly once.
+  - Judge EVERY wall change by BOTH measurements, Arena's own clip under a live input AND SongPlayer's wall-30 through MAX, over repeated A/B/A cycles. Never announce a cause from one kind of measurement or one take.
+  - Ruled out by the same A/B:
     - HAGS;
     - the NVIDIA driver 617.42 / 566.36;
     - the display layout;
