@@ -98,7 +98,7 @@ C_NEUTRAL = 128
 # strip. The ruler's gap to its strip is half the ruler's height; above it
 # the digits end 10 % of the band earlier, and under the strip the next
 # band's digits start 30 % later, so the reader never pairs other rows as a
-# ruler and its strip (wall_frames.locate).
+# ruler and its strip (wall_locate.locate).
 DIGITS_TOP = 0.06
 DIGITS_BOTTOM = 0.30
 RULER_TOP = 0.40

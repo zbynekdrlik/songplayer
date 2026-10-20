@@ -449,6 +449,7 @@ def test_a_copy_s_cells_are_summed_exactly_and_read_where_it_was_found():
     alpha = np.full_like(picture, 255)
     bgra = np.dstack([picture, picture, picture + 1, alpha])
     assert np.array_equal(wl.cell_sums(bgra, copies), sums + 3)
+    assert np.array_equal(wl.cell_sums(picture[:, :, None], copies), sums)
     with pytest.raises(ValueError, match="not of 8 copies"):
         wf.read_sums(sums, copies[:8])
     with pytest.raises(ValueError, match="not of 9 copies"):
@@ -513,6 +514,21 @@ def test_capture_region_grabs_the_strip_rows_of_the_most_copies():
     region, inside = wl.capture_region(both + lower[:1], (1080, 1920))
     assert region[1::2] == (230, 290) and len(inside) == 3
     assert {c.strips for c in inside} == {((10, 50),)}
+    # A copy whose strip split into two runs counts once in its set, with
+    # one strip over both (review round 2), so a set of more copies wins.
+    split = [wl.Copy(900.0, 10.0, ((40, 48), (52, 60)))]
+    region, inside = wl.capture_region(upper[:2] + split, (1080, 1920))
+    assert [c.x0 + region[0] for c in inside] == [100.0, 320.0, 900.0]
+    assert inside[2].strips == ((5, 25),)
+    region, inside = wl.capture_region(upper[:1] + split + lower[:3], (1080, 1920))
+    assert region[1::2] == (230, 290) and len(inside) == 3
+    five = (
+        upper[:2]
+        + split
+        + [wl.Copy(1120.0 + 220 * k, 10.0, ((40, 60),)) for k in range(2)]
+    )
+    region, inside = wl.capture_region(five, (1080, 1920))
+    assert [c.x0 + region[0] for c in inside] == [100.0, 320.0, 900.0, 1120.0]
     # At most MAX_COPIES (4), the middle ones by left edge.
     nine = [wl.Copy(100.0 + 220 * k, 10.0, ((40, 60),)) for k in range(9)]
     region, inside = wl.capture_region(nine[::-1], (1080, 2400))
@@ -560,7 +576,8 @@ def test_find_clip_looks_until_a_picture_shows_the_clip():
     located = wf.find_clip(in_area, given, 3.0)
     assert asked == [given]
     left, top = located.region[:2]
-    assert left > 100 and top > 50 and located.region[2:] < (900, 540)
+    right, bottom = located.region[2:]
+    assert left > 100 and top > 50 and right <= 900 and bottom <= 540
     assert [c.x0 + left for c in located.copies] == list(lay.copies[2:6])
     band = lay.strips[1]
     assert [c.strips for c in located.copies] == [((band[0] - top, band[1] - top),)] * 4

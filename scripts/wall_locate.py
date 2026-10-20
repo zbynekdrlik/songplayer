@@ -251,12 +251,21 @@ def copy_columns(copies: list[Copy]) -> np.ndarray:
 
 
 def cell_sums(picture: np.ndarray, copies: list[Copy]) -> np.ndarray:
-    """Per row of ``picture``, each copy's cells' sums of their
+    """Per row of an 8-bit ``picture``, each copy's cells' sums of their
     ``CELL_SAMPLES`` sampled columns: (rows, copies, 20), uint16 (8 x 255
-    fits; a colour capture's luma is a mean of its channels, rounded)."""
-    sampled = to_luma(np.asarray(picture)[:, copy_columns(copies)])
-    shaped = sampled.reshape(len(sampled), len(copies), clip.CELLS, CELL_SAMPLES)
-    return np.rint(shaped.sum(axis=3)).astype(np.uint16)
+    fits). A grey picture's sums are exact. A colour capture's B, G and R
+    are summed in integers and divided by 3 once, rounded: the mean of its
+    channels, as ``to_luma``'s, at about a third of a float path's cost
+    inside dxcam's timed polls (review round 2: ~1.5 ms a picture of SNV's
+    region against 4-5 ms on dev1; ``np.take``, not fancy indexing)."""
+    plane = np.take(np.asarray(picture), copy_columns(copies), axis=1)
+    rows = plane.shape[0]
+    if plane.ndim == 3 and plane.shape[2] > 1:
+        shaped = plane[..., :3].reshape(rows, len(copies), clip.CELLS, CELL_SAMPLES, 3)
+        return np.rint(shaped.sum(axis=(3, 4), dtype=np.uint32) / 3).astype(np.uint16)
+    # Grey: 2-D, or one channel (its axis folds into the reshape).
+    shaped = plane.reshape(rows, len(copies), clip.CELLS, CELL_SAMPLES)
+    return shaped.sum(axis=3, dtype=np.uint16)
 
 
 def capture_region(
@@ -281,7 +290,13 @@ def capture_region(
             sets.append([(copy, strip)])
         else:
             home.append((copy, strip))
-    chosen = sorted(max(sets, key=len), key=lambda item: item[0].x0)
+    # The set of the most copies; a copy whose strip split into two runs
+    # there counts once, with one strip over both (review round 2).
+    merged: dict[Copy, tuple[int, int]] = {}
+    for copy, (s0, s1) in max(sets, key=lambda s: len({c for c, _ in s})):
+        a, b = merged.get(copy, (s0, s1))
+        merged[copy] = (min(a, s0), max(b, s1))
+    chosen = sorted(merged.items(), key=lambda item: item[0].x0)
     skip = (len(chosen) - MAX_COPIES) // 2
     chosen = chosen[max(0, skip) :][:MAX_COPIES]
     y0 = min(s0 for _, (s0, _) in chosen)

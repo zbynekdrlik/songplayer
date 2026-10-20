@@ -59,7 +59,7 @@ def test_the_4k_layout_has_nine_copies_of_20_px_cells_in_eight_bands():
         assert digits[1] < ruler[0] and ruler[1] < strip[0], "digits, ruler, strip"
         assert ruler[1] - ruler[0] >= 20 and strip[1] - strip[0] >= 60
         # The strip starts under its ruler within half the ruler's height,
-        # the gap the reader pairs them by (wall_frames.ruled_strip).
+        # the gap the reader pairs them by (wall_locate.ruled_strips).
         assert strip[0] - ruler[1] <= (ruler[1] - ruler[0]) // 2 + 1
     assert lay.rulers[0] == (108, 129) and lay.strips[0] == (140, 205)
 

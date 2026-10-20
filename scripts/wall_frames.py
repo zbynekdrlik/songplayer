@@ -32,14 +32,16 @@ half of them (``clip_copies``), and each picture keeps only their cell sums
 (``wall_locate.cell_sums``, 20 numbers a row per copy): a video file through
 ffmpeg (``av_sync_check``'s reader: every stored frame, with its pts; no
 ffprobe; looked at on every ``LOCATE_EVERY``-th picture until found, at most
-``LOCATE_TRIES`` times; a pts gap is a span the recording was blind, and a
-recording slower than the wall refreshes is blind everywhere), or the
-Windows desktop duplication of one output through ``dxcam`` (the box's
-``ops\\probe-venv``; ``--refresh-hz`` required): the copies are looked for
-on the whole output (or in ``--region``) and the capture grabs only their
-strip rows and columns (``wall_locate.capture_region``); every poll is
-timed, and a poll more than half a refresh after the one before is a blind
-span (a poll on time that finds no new picture is the wall holding one).
+``LOCATE_TRIES`` times, so a clip that first shows after ~600 pictures, 10 s
+at 60 fps, is not found: trim the recording; a pts gap is a span the
+recording was blind, and a recording slower than the wall refreshes is
+blind everywhere), or the Windows desktop duplication of one output through
+``dxcam`` (the box's ``ops\\probe-venv``; ``--refresh-hz`` required): the
+copies are looked for on the whole output (or in ``--region``) and the
+capture grabs only their strip rows and columns
+(``wall_locate.capture_region``); every poll is timed, and a poll more
+than half a refresh after the one before is a blind span (a poll on time
+that finds no new picture is the wall holding one).
 
 Usage::
 
@@ -94,7 +96,6 @@ from wall_locate import (
     cell_sums,
     locate,
     strip_rows,
-    to_luma,
 )
 
 # How long a dxcam capture looks for the copies before its timed polls (s):
@@ -173,11 +174,10 @@ def read_sums(sums: np.ndarray, copies: list[Copy]) -> Reading:
 
 
 def read_frame(image: np.ndarray) -> Reading:
-    """Decode one captured picture: find its copies, then read them (none
-    found: ``no_strip``)."""
-    luma = to_luma(image)
-    copies = locate(luma)
-    return read_sums(cell_sums(luma, copies), copies)
+    """Decode one captured 8-bit picture: find its copies, then read them
+    (none found: ``no_strip``)."""
+    copies = locate(image)
+    return read_sums(cell_sums(image, copies), copies)
 
 
 def clip_copies(picture: np.ndarray) -> list[Copy]:
@@ -187,10 +187,9 @@ def clip_copies(picture: np.ndarray) -> list[Copy]:
     overlay drawing a ruler over a strip) reads another index and is left
     out; with no such majority (a torn picture, two copies reading two
     pictures), none: the caller looks at another picture."""
-    luma = to_luma(picture)
     good = []
-    for copy in locate(luma):
-        reading = read_sums(cell_sums(luma, [copy]), [copy])
+    for copy in locate(picture):
+        reading = read_sums(cell_sums(picture, [copy]), [copy])
         if reading.ok:
             good.append((copy, reading.position()))
     if not good:

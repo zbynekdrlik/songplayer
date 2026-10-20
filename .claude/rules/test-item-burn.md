@@ -242,15 +242,16 @@ the pacer's rule, the capture's timing). Run it from the repo checkout's
   picture).
   - A recording: looked at on every `LOCATE_EVERY` (15th) picture from the
     first, and on its last, until found, at most `LOCATE_TRIES` (40) times
-    (a look takes 0.1–3 s); the pictures since the look before are read at
-    the copies found (`no_strip` if none were). Nothing found → exit 4, the
-    reason on stderr.
+    (a look takes 0.1–3 s), so a clip that first shows after ~600 pictures
+    (10 s at 60 fps) is not found: trim the recording. The pictures since
+    the look before are read at the copies found (`no_strip` if none were).
+    Nothing found → exit 4, the reason on stderr.
   - dxcam: before its timed polls (`find_clip`, ≤ `LOCATE_S` 10 s; one look
     at a whole 7680×1080 output takes ~0.6 s on dev1), on the whole output
     or in `--region` (an AREA to look in), then it grabs only the strip
     rows (± a quarter) and columns (± a cell) of the largest set of strips
-    sharing rows, at most `MAX_COPIES` (4) copies, the middle ones
-    (`capture_region`). Nothing found → exit 4, the reason on stderr.
+    sharing rows (a copy whose strip split into two runs counts once), at
+    most `MAX_COPIES` (4) copies, the middle ones (`capture_region`). Nothing found → exit 4, the reason on stderr.
   - The report's `located`: copies, `cell_px`, `region`.
 - **One picture = within `SAME_PICTURE`** (8 Q8 + the 0.04 level edge):
   the program's own 8-bit blend (`nv12_mix.rs`, `(f(256 − w) + tw + 128)
@@ -462,7 +463,9 @@ the pacer's rule, the capture's timing). Run it from the repo checkout's
   the main session checks the box): every poll timed, only each picture's
   cell sums kept (20 uint16 a row per copy, ≤ 4 copies: ~31 KB a picture at
   SNV's ~194 rows, ~75 MB a 40 s take; v2 at first kept 160 columns a copy,
-  ~670 MB, review round 1) and decoded after the capture, an empty poll
+  ~670 MB, review round 1; ~1.5 ms a picture on dev1, B, G and R summed in
+  integers with `np.take`, review round 2) and decoded after the capture,
+  an empty poll
   sleeps 1 ms (Python 3.11+ sleeps on a high-resolution timer there). `--fps` takes 24 / 25 / 30.
 - Measured on dev1 (#272 comment 6164962209): every frame of the three
   clips reads back (also through `read_video`'s pts path: 1440 / 1500 /
@@ -521,7 +524,7 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
     middle half reached the wall and v1's reference cells were off it.
     Clip v2 (20.10.2026) reads under any zoom of the width. Look before
     blaming layers: play `wall-30`, grab output 1 once, view it
-    (`diag\wall-bridge\strip_probe.ps1`), and run `wall_frames.locate`
+    (`diag\wall-bridge\strip_probe.ps1`), and run `wall_locate.locate`
     on it (the copies found, their cell).
   - Only exit 0 with verdict `clean` passes.
   - `defects` names every counter: judder (`refreshes.uneven` of `judged`),
@@ -627,7 +630,7 @@ capture keeps, and every bound of `bright_mask`, `ruler_candidates`,
 `find_clip`, a copy reading only its own strips across a slice seam,
 `read_sums`; `test_wall_capture.py`: `capture_dxcam` on a fake camera,
 `read_video`'s looks; hand mutants of the v2 code (a scratch harness on
-dev1, not CI): 115 of 117 killed, the two left equivalent:
+dev1, not CI): 122 of 124 killed, the two left equivalent:
 `group_candidates`' look-back stop `>` for `>=` (a candidate that far can
 never match) and `clip_copies`' `<=` for `<` against `SAME_PICTURE` (as
 for `disagree`: positions are multiples of 1/256)), `test_wall_frames_analyse.py` (one sample
