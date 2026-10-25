@@ -2295,7 +2295,7 @@ per `Compositor`, `vs_5_0` / `ps_5_0` at feature level 11.0+. #279 P1a:
 build step, and WARP and the RTX run the same source. A compile error is
 `GpuError::Shader` with the compiler's log.
 
-## Tier-0 and the gates
+## The gates
 
 - `src/win/` is `#[cfg(windows)]` and excluded from the Linux mutation gate
   (`.cargo/mutants.toml`). Every decision lives in a pure, Linux-tested module:

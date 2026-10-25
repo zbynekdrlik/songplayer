@@ -705,7 +705,7 @@ are the recovery's `on_program_lines`.
   both sides of each boundary, `shows`, the senders with a full cg OBS
   queue) and `a_recovery_follows_the_title_clock_not_a_lagging_position`.
 
-## Testing the driver on the no-compile box
+## Testing the driver
 
 - **One clock.** `on_tick_at(now)` → `run_full_refresh(reason, now)` →
   `refresh_mapping(now)` stamps `last_full_attempt_at`, `last_full_refresh_ok_at`

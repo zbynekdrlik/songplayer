@@ -369,9 +369,8 @@ DELETED names.
      additivity holds by linearity. audio-separator exposes NO per-chunk resume
      hook (verified on box — `Separator.separate()` returns whole stems only), so
      the split/stitch is self-managed. The stitch/additivity math is pure numpy —
-     **unit-test it LOCALLY on dev1** (`numpy` is present even though `soundfile`
-     isn't): identity reconstruction + `v+i==mix` must be ~0.0 error before shipping
-     to the no-compile box.
+     **unit-test it locally**: identity reconstruction + `v+i==mix` must be ~0.0
+     error before shipping.
   2. **Stall timeout (Rust, `heavy_plan::stall_timeout`/`stall_limit`/`wait_with_stall_timeout`).**
      The per-segment progress files ARE the stall signal: `preprocess_vocals` /
      `separate_stems` no longer use `timeout(child.wait())` — they kill the child
@@ -482,7 +481,7 @@ DELETED names.
   (N.)") gains the SAME tier rank (`(tier ASC, stem_manual_priority DESC, id
   ASC)`) via the inlined `tier_case_sql` CASE, so the chip stays truthful; the
   legacy 2-arg `models_stems::queue_position` delegates to it with empty tiers
-  (the unrestricted oldest-first order). RED-on-a-no-compile-box: the whole
+  (the unrestricted oldest-first order). RED: the whole
   feature ships behind the real const `RESTRICTED_TIERS` (RED `= 0` skips tiers
   1+2, GREEN `= 2`) — the `idle_gate_abort` wrong-constant pattern. No schema
   change, no `LYRICS_PIPELINE_VERSION` bump, no change to the separation itself.
@@ -590,9 +589,9 @@ component's visuals but MUST preserve this state contract.
   `unavailable`/`failed`. The E2E mock drives every state via
   `POST /__mock/karaoke-now-playing`.
 
-## TIER-0 mutation gotchas for the mixer (learned #186)
+## Mutation gotchas for the mixer (learned #186)
 
-The diff-scoped mutation gate caught two classes the no-compile box can't:
+The diff-scoped mutation gate caught two classes:
 
 - **A reader CHOICE that only differs by TYPE is not observable through
   `AudioStream`** — `StemMixReader` and `SymphoniaAudioReader` both report 48 kHz

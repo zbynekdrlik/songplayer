@@ -122,7 +122,7 @@ round 9 section below and in `genlock.md`.
 - **`GET /api/v1/status`** gains `heavy_containment { cap_pct, affinity_mask
   (hex), priority_class }`, resolved live from the same pure fn.
 
-## Tier-0 (no-compile box) traps hit here
+## Compile traps hit here
 
 - **`cpu_rate_from_pct` + `Containment.memory_priority_low` are read ONLY inside
   `#[cfg(windows)]`** → dead_code in the Linux lib target. Both carry
@@ -294,7 +294,7 @@ windows) is in `genlock.md` under "#147 round 9 — memory residency".
     `process_start::residency` via `#[path]`, because `lib.rs` is at the
     1000-line cap).
   - It needs the windows-sys feature `Win32_System_Memory` (added in round 9).
-- **Tier-0 notes.**
+- **Compile notes.**
   - `Containment.max_working_set_mb`, `job_limit_flags` and `job_working_set_bytes`
     are read only by the `#[cfg(windows)]` seam or the dead-on-Linux
     `contained_line`, so they carry `#[cfg_attr(not(windows), allow(dead_code))]`.

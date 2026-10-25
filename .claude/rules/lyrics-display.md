@@ -407,8 +407,7 @@ one only together with the design record on #217.
     ≤ 800 ms and after a ≥ 1500 ms pause, and no line is up under 1200 ms.
 
   When the algorithm changes on purpose, re-derive the pins with a reference
-  model that mirrors `build_plan` step by step. The Tier-0 box cannot run the
-  tests.
+  model that mirrors `build_plan` step by step.
 - **The design record's counts (56/49/122 display lines on 335/221/What A
   God) are not the pins.** They were simulated at the old 72-char width, and
   that simulation skipped the char check for a line that ends a sentence (so

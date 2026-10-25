@@ -398,7 +398,7 @@ dependencies get none, like every other Rust crate the project links),
 pinned against the `Cargo.toml` version by
 `the_installer_notice_carries_the_pinned_rubatos_license` — re-copy the
 notice when the pin moves. Added to the lock with `cargo update --workspace`
-(Tier-0-allowed, compiles nothing): it adds exactly the new tree.
+(it adds exactly the new tree).
 
 ## The list (`audio_outputs`) and the network rate (`audio_network_rate`) — lane 1
 

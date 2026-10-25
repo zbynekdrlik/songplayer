@@ -618,7 +618,7 @@ stale `program_follow_obs` row in a box's settings table is never read.
   `api/program_tests.rs`, and the mock E2Es `program-control.spec.ts` +
   `settings-program-transition.spec.ts`.
 - Pins were derived with scratch Python models of `ProgramCore` and the
-  weight / blend math (rust-workspace.md, no-compile box). Re-derive them with
+  weight / blend math (rust-workspace.md). Re-derive them with
   your own model when the Rust changes.
 - A blend pin at weight 128 cannot tell the sides apart (`f·128 + t·128` is
   symmetric): a call site that swapped `from` / `to` passes it. Pin at an

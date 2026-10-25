@@ -49,14 +49,14 @@ the callers across `crates/` (tests included) with the Grep tool first.
 
 Changing a call site in a file already at exactly 1000 lines is only safe if it
 adds NO line — and a wider `let` pattern can force rustfmt to re-wrap the block
-and ADD one, which the no-compile box only learns at the CI cap check. `pipeline.rs`
+and ADD one, which then fails the CI cap check. `pipeline.rs`
 (1000/1000): widening `let (ndi_audio, audio_us) = …timed(|| …)` to
 `let ((ndi_audio, ring_depth), audio_us) = …` pushed the `let` line past ~100
 cols, and rustfmt re-indented the whole closure body (a diff, and a risk of an
 extra line). Fix: keep the binding SHORT — bind the tuple once
 (`let (audio_out, audio_us) = …`) and use `audio_out.0` / `audio_out.1` at the use
 sites, instead of destructuring in the `let`. Verify with
-`awk 'NR==<line>{print length($0)}'` + `cargo fmt --all --check` (both Tier-0-allowed)
+`awk 'NR==<line>{print length($0)}'` + `cargo fmt --all --check`
 and re-`wc -l` before committing.
 
 ## rustfmt breaks a `foo(long::path::bar(arg()))` nested call into 3 lines even under ~94 cols (#207)
@@ -67,8 +67,8 @@ single argument is ITSELF a call and whose args exceed ~60 cols — even when th
 whole line is well under 100. `lib.rs` (999→cap): a hand-written
 `tokio::spawn(crate::lyrics::host_commit::run_host_commit_logger(shutdown_tx.subscribe()));`
 (94 cols) was reflowed by `cargo fmt` into a 3-line form (`tokio::spawn(\n  arg,\n));`),
-silently taking the file to 1002 — the no-compile box only sees it via `wc -l` /
-the CI cap check, NOT `cargo fmt --all --check` alone (which passes on EITHER form,
+silently taking the file to 1002 — only `wc -l` /
+the CI cap check shows it, NOT `cargo fmt --all --check` alone (which passes on EITHER form,
 it just prefers the 3-line one). So near the cap: after writing any nested-call
 statement, run `cargo fmt --all` FIRST, then `wc -l`, and budget for the form
 rustfmt actually produces (a trailing `// comment` on the closing `));` line keeps
@@ -110,17 +110,15 @@ CI does NOT want. After any `cargo fmt --all`, `git checkout --
 crates/sp-server/src/db/models.rs` if you didn't intend to touch it, and confirm
 `cargo fmt --all --check` then flags ONLY models.rs (ignore that one). **When YOUR change edits `models.rs` itself, never `git checkout` it after the fmt** (#144 F1: the checkout silently threw away the GREEN edits of `mark_video_lyrics*`): run the fmt, then `git diff crates/sp-server/src/db/models.rs | grep -E '^[-+](mod|#\[path|pub use)'` — revert only a module-block reorder, if any shows (on 10.10.2026 the local rustfmt no longer reordered it). Never let
 the models.rs reorder ride in an unrelated diff — CI's newer rustfmt would fail
-`--check` on it. (TIER-0: `cargo fmt` is the only local cargo command allowed;
-CI compiles everything else.)
+`--check` on it.
 
 ## sp-ui / src-tauri are OUTSIDE the workspace
 Root `cargo fmt --all` / `clippy` do NOT touch `sp-ui/` or `src-tauri/`, and CI
 has no fmt/clippy step for them (only `trunk build`). Never blanket-`cargo fmt`
 sp-ui (it rewrites long-drifted files) — see `.claude/rules/sp-ui-frontend.md`.
 
-## RED commit on the TIER-0 (no local compile) box
-You can't run tests locally, so a RED test must FAIL against a version of the
-code you can only reason about, without leaving warnings CI's clippy
+## RED commit: real logic with ONE wrong constant
+A RED test must FAIL without leaving warnings CI's clippy
 (`--all-targets -D warnings`) would reject. The clean pattern (used for #161's
 `idle_gate_abort`): make the RED commit ship the REAL logic but with ONE WRONG
 CONSTANT (e.g. `const ABORT_CONSECUTIVE_BUSY: u32 = u32::MAX;` → GREEN sets `2`;
@@ -134,7 +132,7 @@ use `#[tokio::test(start_paused = true)]` (tokio `test-util` is a dev-dep) so th
 
 Pick the WRONG constant so it is NOT an arithmetic identity: shipping a RED
 `produced_ms() = count * 1` (GREEN `* 500`) trips `clippy::identity_op` under
-`-D warnings` (the Lint job the no-compile box can't see), reddening the RED
+`-D warnings` (the Lint job), reddening the RED
 commit itself. Use a wrong NON-identity value (a named const `FRAGMENT_MS = 250`
 → GREEN `500`, or a different literal) so the exact-value test still fails but
 the RED tree is clippy-clean.
@@ -175,13 +173,13 @@ caller's new seam `shown_lines` and the index mapping) with the step not called
 then killed by the plan-level tests; check that with a site-keyed Python
 harness before CI.
 
-**Deriving exact expected values on the no-compile box (#217).** Do not
+**Deriving exact expected values (#217).** Do not
 hand-compute dozens of pins. Write a scratch Python model that mirrors the pure
 Rust function step by step, and derive every exact value from it: fixture
 counts, boundary show/hide times, what each mutant would do. Keep the model in
 the scratchpad, not the repo. When the Rust changes, update the model in the
 same step. Each fresh-context review pass should re-derive the pins with its own
-model; two independent models agreeing is the only local evidence available.
+model.
 A review dispatch's brief RESTATES the lane's machine bar ("never touch
 win-resolume, resolume-pp, fohabl or any `mcp__win-*` tool, not even a
 read"): a reviewer inherits none of the lane's dispatch rules, and #233
@@ -259,7 +257,7 @@ literal fails them with no behaviour change (CI 38048742066). Before moving a
 message or a call, `grep -rn '<the literal>' crates/*/src --include='*tests*'`
 and repoint the scan in the same push.
 
-## Linux clippy `-D warnings` traps a no-compile box can't catch locally (#162)
+## Linux clippy `-D warnings` traps that compile clean on Windows (#162)
 The ubuntu job runs `clippy --workspace --all-targets -D warnings`, so these
 compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
 
@@ -275,8 +273,7 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   because the replay now reads `s.transport`), a type that was named only through
   that helper (`TransportState`) is suddenly referenced ONLY inside
   `#[cfg(test)] mod tests`. The top-level `use` is then unused in the LIB target
-  (tests don't count), so `clippy --all-targets -D warnings` fails — the
-  no-compile box can't see it. Fix: move that name into a test-only import
+  (tests don't count), so `clippy --all-targets -D warnings` fails. Fix: move that name into a test-only import
   (`use …::TransportState;` INSIDE `mod tests`, not the top-level `use`). Grep the
   non-test region for every name in a `use` you touched when deleting a consumer.
 - **An RAII guard field held ONLY for its Drop is `dead_code` "never read" — a
@@ -302,8 +299,8 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   allow; adding one is a dead annotation (harmless, but don't add it "to be
   safe"). Count real params (free fns have no `&self`).
 - **`clippy::manual_slice_fill`** (rust 1.98, `-D warnings`): a `for x in &mut
-  slice { *x = <const> }` loop must be `slice.fill(<const>)`. The no-compile box
-  can't see it; it failed #186's Lint on `for e in &mut self.eos { *e = false }`.
+  slice { *x = <const> }` loop must be `slice.fill(<const>)`. It
+  failed #186's Lint on `for e in &mut self.eos { *e = false }`.
 - **`clippy::collapsible_if` in edition 2024 wants a let-chain** (#147 r9):
   `if cond { if let Some(x) = f() { … } }` with no `else` fails `-D warnings`.
   Write `if cond && let Some(x) = f() { … }` (the tree already uses let-chains,
@@ -311,7 +308,7 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
 - **`clippy::manual_div_ceil`** (warn-by-default → `-D warnings`): a hand-rolled
   ceil-division `(a + b - 1) / b` (or the `(a * p + 99) / 100` form) must be
   `a.div_ceil(b)`. `u64::div_ceil` is **const-fn since 1.73**, so it works inside
-  a `const fn` too — don't avoid it there. The no-compile box can't see it; it
+  a `const fn` too — don't avoid it there. It
   cost #192 round 3 a whole review round (three ceil-divs in `audio_emitter.rs`
   `block_ms`/`ring_capacity_blocks` + `loop_stats.rs` `percentile_ceil`). The tree
   already uses `.div_ceil()` (`loop_stats.rs`) — grep before
@@ -414,8 +411,7 @@ Lint job on code that passed a day earlier. The 1.99 drift that broke run
 37145344169, and the fixes:
 
 - **`clippy::double_must_use` inside `#[async_trait]`:** bump the crate,
-  `cargo update -p async-trait --precise 0.1.92` (Tier-0-allowed, it compiles
-  nothing; dtolnay/async-trait#303). Never paper over it with allows on the
+  `cargo update -p async-trait --precise 0.1.92` (dtolnay/async-trait#303). Never paper over it with allows on the
   traits.
 - **`Atomic*::fetch_update` deprecated (renamed `try_update`):** `try_update`
   is newer than the workspace MSRV 1.87 (`clippy::incompatible_msrv`), so write
@@ -447,7 +443,7 @@ text order), or number the fragment too. A scratch `python3 -c "import
 sqlite3"` of the exact query, with the binds sqlx would give, shows it
 before CI does.
 
-## Two compile errors a no-compile review round cannot see (#218/#219 integration)
+## Two compile errors review rounds missed (#218/#219 integration)
 
 Six fresh-context review rounds passed both of these, and the first CI run
 failed on them (`36438006665`):
@@ -599,8 +595,8 @@ value.
 ## A unit test that hardcodes a PLATFORM-specific value fails on the Windows job (#189)
 The `Build (Windows)` CI job runs `cargo test --workspace` on `windows-latest`,
 so EVERY `#[test]` in `crates/` runs on BOTH Linux (the `Test` job) and Windows.
-A test that bakes in a Unix-only literal passes on Linux and FAILS on Windows —
-and the no-compile box can't see it. The one that bit #189: a `path_with_tools`
+A test that bakes in a Unix-only literal passes on Linux and FAILS on Windows.
+The one that bit #189: a `path_with_tools`
 test asserting the joined PATH string `"/opt/tools:/usr/bin:/bin"` — on Windows
 `std::env::{split_paths,join_paths}` use `;`, not `:`, so the string differs
 (`1482 passed; 1 failed` on the Windows job only). Fix: assert the INVARIANT, not
@@ -676,7 +672,7 @@ held back with or without the gate under test, and the test passes vacuously
 
 CI clippy runs with `-D warnings`, and `clippy::doc_lazy_continuation` (stable
 since 1.80) rejects a paragraph line that directly follows a list item without
-a blank doc line or indentation — the Tier-0 box cannot see it, so it fails
+a blank doc line or indentation, so it fails
 the Lint job (#195, three sites). After the last `- item` / `3. item`, insert a
 bare `//!` (or `///`) line before continuing prose.
 
@@ -749,7 +745,7 @@ give a test file an explicit `use` for every type it names that the parent
 only imports (`SharedFrame`, `AudioFrame`, `Arc`, …). An explicit import
 shadows a glob-imported name and never conflicts, so this is safe either way.
 
-## RED on the no-compile box for a REFACTOR (not just a wrong constant) — #203
+## RED for a REFACTOR (not just a wrong constant) — #203
 
 The "ship real logic with ONE WRONG CONSTANT" pattern extends to structural
 refactors: ship the FULL structural change in the RED commit but make ONE spot
@@ -895,9 +891,6 @@ behaviour, not a wrong spot. Keep them compiling on both sides:
 lists the diff's mutants (`file:line` + replacement) so a review can name
 the test that kills each one BEFORE CI's mutation gate runs.
 
-- The Tier-0 hook blocks it as a cargo subcommand. Because it only lists,
-  the logged `# airuleset:build-ok list-only` bypass is honest here, and
-  only here.
 - **In a worktree lane, and after merging origin/dev into it** (#221 L4b):
   the Bash guard refuses `cd <wt> && cargo mutants … > file`. Run two plain
   commands instead: `git -C <wt> diff origin/dev..HEAD --output=<scratch>/range.diff`,
@@ -907,7 +900,7 @@ the test that kills each one BEFORE CI's mutation gate runs.
   To KEEP the list (to diff it after each fix round and map only the new
   mutants), a `> file` redirect is refused too: pipe it instead,
   `cargo mutants … --list --dir <wt> | python3 -c "import sys;
-  open('<scratch>/mutants.txt','w').write(sys.stdin.read())"   # airuleset:build-ok list-only`
+  open('<scratch>/mutants.txt','w').write(sys.stdin.read())"`
   (#233 lane 1, eight review rounds: list → diff against the previous
   list, ignoring line:col → map the new descriptions).
 - **Give a review dispatch the merged base SHA, not `origin/dev`** (#136):
@@ -1185,7 +1178,7 @@ reads better too: the map keys are visible.
 `assert_eq!(take(cap).as_ptr(), p, …)` is a compile ERROR under CI's
 `clippy --all-targets -D warnings`: rustc's `dangling_pointers_from_temporaries`
 lint fires because the `Vec` temporary dies at the end of the statement while
-the pointer is compared. The no-compile box cannot see it (it is a lint of the
+the pointer is compared (a lint of the
 lib TEST target). Write `let again = take(cap); assert_eq!(again.as_ptr(), p, …)`
 — any pointer-identity assertion on a fresh value needs the value bound to a
 local for the statement's lifetime. (`sub.prev_frame.as_ref().unwrap().as_ptr()`
@@ -1276,7 +1269,7 @@ bottom of a file is preceded by `#[cfg(test)]`; inserting a NEW production
 pure module) lands the pre-existing `#[cfg(test)]` onto the NEW `mod` — gating a
 PRODUCTION module out of every non-test build — and leaves the tests module
 UNGATED (dragging `MockNdiBackend`/`#[test]` into the lib). `cargo test` passes
-(cfg(test) on) and `cargo fmt` cannot see it, so the no-compile box ships it;
+(cfg(test) on) and `cargo fmt` cannot see it;
 `cargo build` / the release Tauri compile / `clippy --workspace --all-targets`
 (lib target, cfg(test) OFF) then fail with `unresolved import`/`E0432`. Put the
 new `mod` AFTER the test module, or move the `#[cfg(test)]` explicitly back onto
@@ -1288,7 +1281,7 @@ above your `old_string` anchor before an Edit that adds a sibling `mod`.
 - Drive a handler with `crate::api::router(state, None)` + `tower::ServiceExt::oneshot`, as in `api/lyrics_tests.rs::send`, and assert the row / response afterwards.
 - A test that runs its OWN copy of the handler's UPDATE ("mirror the handler's SQL") can never fail on a change to the handler. #144 deleted two of these: `reprocess_video_ids_sets_manual_priority` and `reprocess_all_stale_only_flags_stale_rows`.
 - A test for a DELETED route stays useful as a regression guard. `router(state, None)` has no SPA fallback (that needs a `dist_dir`), so a removed path answers 404. Assert the harmful effect is absent FIRST, so the RED fails for the right reason, and the 404 last.
-- **Use the route's REAL method, read from `api/mod.rs`, never from a ticket's wording** (#225 unit 2). axum answers 405 for an unrouted method before the handler runs. The playlist update is `PUT /api/v1/playlists/{id}`; the ticket called it "the PATCH", and five tests sent PATCH. On the no-compile box they were "RED" for the wrong reason and could never pass. Two fresh-context review rounds missed it; the third found it by reading the route table. Before writing a router test, `grep` the path in `api/mod.rs`.
+- **Use the route's REAL method, read from `api/mod.rs`, never from a ticket's wording** (#225 unit 2). axum answers 405 for an unrouted method before the handler runs. The playlist update is `PUT /api/v1/playlists/{id}`; the ticket called it "the PATCH", and five tests sent PATCH. They were "RED" for the wrong reason and could never pass. Two fresh-context review rounds missed it; the third found it by reading the route table. Before writing a router test, `grep` the path in `api/mod.rs`.
 - **The test pool has ONE connection** (`db::create_memory_pool`, `max_connections(1)`; `test_state` uses it). A helper that holds it (`pool.acquire()`, an open transaction) while it, or the code it calls, runs another query on the pool waits out sqlx's 30 s acquire timeout and panics (#261 lane 2 review round 1: three import tests failed on the RED AND the GREEN tree, for the wrong reason). Change state through the real route (`PUT /api/v1/playlists/{id}` `{"is_active": …}`, `routes_import_tests.rs::set_active`), or run each query on `&pool` directly.
 
 ## A cross-crate test-only helper must be `#[doc(hidden)] pub`, NOT `#[cfg(test)]` (#203 2b)
@@ -1335,7 +1328,7 @@ delta is pinned exactly (`before + 1`): `mf_hw_decode.rs` `COUNTERS`.
 `clippy --all-targets -D warnings` runs `clippy::await_holding_lock` on the lib
 TEST target too: a `static SERIAL: std::sync::Mutex<()>` guard taken at the top
 of a `#[tokio::test]` and held across the handler's/worker's `.await`s is a
-compile ERROR the no-compile box cannot see (it reddened `api/mix_tests.rs`
+compile ERROR (it reddened `api/mix_tests.rs`
 and then `heavy_slot_tests.rs` + `worker_tests_idle_gate.rs` + the
 `stems/worker.rs` test module the same night). Declare the serializer as
 `static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());`
@@ -1362,7 +1355,7 @@ A feature change never touches `Cargo.lock`: features are not recorded
 there.
 
 **The `windows` crate (sp-decoder's MF bindings, 0.58) may be missing from
-the box's registry** (#223 S0): nothing on Tier-0 compiles a Windows target.
+the box's registry** (#223 S0): a Linux box never compiles a Windows target.
 Look first: `ls -d ~/.cargo/registry/src/*/windows-0.58.0` (by #223 S3b it
 was there, with `windows-core-0.58.0`; read `src/Windows/Win32/<Area>/mod.rs`
 in place, and copy a big `mod.rs` to the scratchpad before grepping it with
@@ -1375,33 +1368,9 @@ dwmediatypeindex: u32) -> windows_core::Result<IMFMediaType>`). `GUID`'s
 public `data1..data4` fields are in `windows-core-0.58.0/src/guid.rs`, from
 the same URL with `windows-core`.
 
-## Adding a NEW registry crate to the lock on the Tier-0 box (#233 lane 2)
-
-`cargo update -p <crate> --precise <v>` fails for a crate the lock does not
-hold yet ("did not match any packages"). With the members' lock versions
-current (`sync-version.sh` keeps them so now), `cargo update --workspace`
-(Tier-0-allowed, compiles nothing) adds exactly the new crate's tree and
-moves no other line — check that `git diff Cargo.lock` is additions only.
-Verify the newest version from the sparse index
-(`https://index.crates.io/<ab>/<cd>/<name>`, a neutral User-Agent) and read
-its source from the downloaded `.crate` (static.crates.io) before writing
-calls against it.
-
-## Adding a path dependency between workspace crates on the Tier-0 box (#184 G4)
-
-`Cargo.lock` is tracked but its workspace-member versions are long stale (e.g.
-`sp-decoder 0.49.0-dev.6`), and CI builds without `--locked`. So when a crate gains
-a path dep (G4: `sp-decoder` → `sp-core`), add ONE line to that crate's
-`dependencies = [...]` list in `Cargo.lock` by hand (alphabetical). Do NOT let
-`cargo tree` / `cargo metadata` resolve it: they rewrite every stale member
-version and bump unrelated deps (a ~20-line lockfile diff riding in a feature
-PR). Also check the new edge adds no cycle (`sp-core` depends only on serde /
-thiserror, so anything may depend on it).
-
 ## Scripted edits after `cargo fmt`: assert the anchor, never a silent `str.replace` (#212)
 
-On the no-compile box every change goes through editors/scripts, and `cargo fmt`
-re-wraps long lines. A later scripted `s.replace(old, new)` whose `old` is the
+`cargo fmt` re-wraps long lines. A later scripted `s.replace(old, new)` whose `old` is the
 PRE-fmt text silently does nothing — #212 shipped a test asserting the old 2×2
 standby while the rig built 2×4, caught only by a review pass (it would have
 reddened 6 CI tests). Fail loudly when an anchor is missing
@@ -1426,8 +1395,7 @@ own.
 The gating Coverage job runs every test under `cargo tarpaulin`'s ptrace, and
 under ptrace a thread can stall for a long time on a breakpoint. So a
 real-time grid, a "this call took < N ms" budget, or a read of a value some
-other thread is still publishing can flake there. The no-compile box never
-sees that. What held up across five review rounds:
+other thread is still publishing can flake there. What held up across five review rounds:
 
 - **Prove WHERE a call ran.** Have the mock record `thread::current().name()`
   per call (`MockNdiReceiveBackend::calls_by_thread`) and assert the helper's
@@ -1515,8 +1483,7 @@ dispatcher and no global default is set, tracing-core asks only the CALLING
 thread's default (`Dispatchers::has_just_one`, tracing-core 0.1.36
 `callsite.rs`): a parallel test that hits the same `info!` first, on a
 thread with no default, caches it as `never`, and the capturing test
-misses its own line on correct code (a flake the no-compile box cannot
-see). With a second dispatcher registered every callsite is asked of all
+misses its own line on correct code. With a second dispatcher registered every callsite is asked of all
 of them (`sometimes`), and registering a scoped default rebuilds every
 cached interest. So every capture goes through `crate::test_log::capturing`,
 which installs a global `NoSubscriber` once (`std::sync::Once`,

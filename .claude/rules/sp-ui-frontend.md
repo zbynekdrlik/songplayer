@@ -179,8 +179,8 @@ Edition 2024's `impl Trait` captures ALL in-scope lifetimes, so
 for the `&DubRow` lifetime. Call it as `{row_view(&row)}` inside a `<For>`
 `children=move |row| view!{ … }` closure and rustc rejects it with
 `error[E0515]: cannot return value referencing function parameter 'row'` — the
-returned `view!` structure holds a reference to the closure's local `row`. The
-no-compile TIER-0 box can't see it; it failed #180's Build WASM job.
+returned `view!` structure holds a reference to the closure's local `row`. It
+failed #180's Build WASM job.
 
 Fix: pass the OWNED fields the helper needs instead of a borrow —
 `fn row_view(chain_state: String, dub_error: Option<String>) -> impl IntoView`,
@@ -386,8 +386,7 @@ it. Never re-implement a row, a status marker, or an import field per page.
   messages in the test's `finally` (or add it to that test's allow-list) — it is
   the point of the test, not a bug.
 - **`Option::<T>::new()` does not exist** — `Option` has no `new`; seed an
-  `RwSignal<Option<T>>` with `None::<T>`. The TIER-0 no-compile box can't catch
-  it; it fails Build WASM (`E0599`).
+  `RwSignal<Option<T>>` with `None::<T>`. It fails Build WASM (`E0599`).
 
 ### Cross-page review checklist (run for every lane that touches `sp-ui`)
 
@@ -631,8 +630,8 @@ deliberate 500's `Failed to load resource` console entry in the error test.
 `BANNED_PLACEHOLDERS`). A stronger POSITIVE gate ("fail any pure-ASCII chrome
 word not in a product-name allowlist") was deferred: the Slovak-without-diacritics
 allowlist (skladby, skladba, Interpret, adresa, osoba, Dabing, dabingu, Mix,
-Stemy, stemov, …) cannot be bounded ≤30 or verified complete from the Tier-0
-no-mock-run box — static source extraction can't separate rendered chrome from
+Stemy, stemov, …) cannot be bounded ≤30 or verified complete by static source
+extraction, which can't separate rendered chrome from
 comments / CSS / testids / format fragments, so a positive gate would false-
 positive and red CI. New denylist entries must be verified ABSENT from the view
 code first (grep the string literal, exclude comment/class/testid lines).
@@ -875,7 +874,7 @@ miesto"). The fix is a pending-target DISPLAY HOLD:
   displayed value never drops below the target during the hold, then follows
   live. The box proof is in `post-deploy-preview.spec.ts` (see `preview.md`).
 
-## Running the mock E2E locally for a JS-only sp-ui change (Tier-0: no trunk build)
+## Running the mock E2E locally for a JS-only sp-ui change (no trunk build)
 
 `sp-ui/*.js` shims (e.g. `preview_player.js`) are bundled by trunk into
 `dist/snippets/sp-ui-<hash>/<name>.js`, referenced from `dist/index.html` by a

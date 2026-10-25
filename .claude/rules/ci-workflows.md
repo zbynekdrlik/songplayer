@@ -229,8 +229,7 @@ A mutant that turns a loop infinite costs a 300 s TIMEOUT and fails the step
 on a shrinking slice instead of two `offset < len` checks).
 
 ### Write new pure code so it has NO equivalent mutants (#182 lesson)
-The no-compile box only learns about survivors ~15 min after the push, so shape
-pure code up front. cargo-mutants' binary-operator table (its book,
+CI reports survivors ~15 min after the push, so shape pure code up front. cargo-mutants' binary-operator table (its book,
 `mutants.md`):
 
 - `<` → `==`, `>` (and `<=`, below)
@@ -376,7 +375,7 @@ carries one `[no-test: <sha7> <reason>]` per covered commit; the script prints
 `bypass: … (declared by <sha7>)`. Only the leading `fix(#N):` form is gated;
 scope-only subjects (`fix(stems): … (#14)`) are not. Run
 `bash scripts/check-red-green-order.sh origin/main..HEAD` before opening a
-release PR — it is bash-only, allowed under Tier-0.
+release PR.
 
 ## `gh run rerun <old-run>` CANCELS the newer in-flight run on the same branch
 `ci.yml` has a per-branch concurrency group with `cancel-in-progress`; a re-run
@@ -483,8 +482,7 @@ stops SongPlayer:
 - Tests: `scripts/tests/test_rig_lease_gate.py` (Eval Checks pytest; the
   script is in both ruff lists): the decision, the bounded wait on a fake
   clock (120 × 30 s then exit 3; a last short pause ends exactly at the
-  bound), the fetch over a real local HTTP server. Python runs locally on
-  the Tier-0 box, so its RED/GREEN is really run before the push.
+  bound), the fetch over a real local HTTP server.
 
 **The E2E job's "Verify Resolume title delivery" cuts SP-program** (release
 0.71.0 review). Since #221 lane 2 only SP-program's playlist writes the
