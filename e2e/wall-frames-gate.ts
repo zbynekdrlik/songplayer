@@ -8,8 +8,10 @@
  * refreshes (judder), blended at the wrong weight, frozen. This module
  * turns its exit code and JSON report into the gate's failures. A gate
  * never passes without positive evidence: only exit 0 with the verdict
- * `clean` passes. An incomplete or failed capture fails too, named as what
- * it is, never as judder.
+ * `clean` passes, or a take whose ONE defect is a single slip (the owner,
+ * #272, 30.10.2026: at most one per 40 s take; one picture held a refresh
+ * long, the next a refresh short). An incomplete or failed capture fails
+ * too, named as what it is, never as judder.
  */
 
 /** The reader's report fields the gate reads (`wall_analysis.analyse`). */
@@ -25,7 +27,13 @@ export interface WallFramesReport {
   cadence_errors: number;
   frozen: boolean;
   weights: { mismatches: number };
-  refreshes: { judged: number; uneven: number; unresolved: number } | null;
+  refreshes: {
+    judged: number;
+    uneven: number;
+    unresolved: number;
+    /** The uneven boundaries' numbers; absent = none listed. */
+    uneven_samples?: number[];
+  } | null;
   unverified: { steps: number };
   /** #272 v2: the copies of the clip's strip the reader found, their cell
    *  width (px) and the dxcam region it grabbed; null when it found none. */
@@ -39,6 +47,27 @@ export const EXIT_USAGE = 2;
 export const EXIT_INCOMPLETE = 3;
 export const EXIT_NOTHING_DECODED = 4;
 export const EXIT_CAPTURE_FAILED = 5;
+/** The reader's own floors for a clean take (`MIN_COVERAGE`, `MIN_BOUNDARIES`). */
+const MIN_COVERAGE = 0.95;
+const MIN_JUDGED = 300;
+
+/** Whether the take's only defect is one slip: exactly two neighbouring
+ *  uneven boundaries, and everything a clean verdict needs besides. */
+function oneSlipOnly(report: WallFramesReport): boolean {
+  const r = report.refreshes;
+  const at = r?.uneven_samples ?? [];
+  return (
+    r !== null &&
+    r.uneven === 2 &&
+    at.length === 2 &&
+    at[1] === at[0] + 1 &&
+    r.unresolved === 0 &&
+    r.judged >= MIN_JUDGED &&
+    report.unverified.steps === 0 &&
+    report.decoded >= MIN_COVERAGE * report.samples &&
+    defects("", { ...report, refreshes: { ...r, uneven: 0 } }).length === 0
+  );
+}
 
 /**
  * The gate's failures for one clip's take: `exitCode` and `report` (null
@@ -65,6 +94,9 @@ export function wallFramesFailures(
   }
   if (report === null) {
     return [`${where} the reader exited ${exitCode} with no report`];
+  }
+  if (exitCode === EXIT_DEFECTS && report.verdict === "defects" && oneSlipOnly(report)) {
+    return [];
   }
   const failures = defects(where, report);
   if (exitCode === EXIT_DEFECTS || report.verdict === "defects") {

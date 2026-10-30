@@ -527,7 +527,11 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
     blaming layers: play `wall-30`, grab output 1 once, view it
     (`diag\wall-bridge\strip_probe.ps1`), and run `wall_locate.locate`
     on it (the copies found, their cell).
-  - Only exit 0 with verdict `clean` passes.
+  - Only exit 0 with verdict `clean` passes, or a take whose ONE defect is
+    one slip (owner, #272, 30.10.2026: at most 1 per 40 s take): exactly two
+    neighbouring uneven boundaries, one picture a refresh long and the next
+    a refresh short, everything a clean verdict needs besides
+    (`oneSlipOnly`). Its cause is not proven.
   - `defects` names every counter: judder (`refreshes.uneven` of `judged`),
     jumps back, lost frames and boundaries, cadence, weights, frozen.
   - `incomplete` (exit 3) fails as INCOMPLETE, never as judder or clean.

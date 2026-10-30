@@ -50,6 +50,68 @@ test("judder fails and names the uneven boundaries", () => {
   ]);
 });
 
+/** A take whose only defect is one slip at boundaries 708 and 709. */
+function oneSlip(): WallFramesReport {
+  return {
+    ...clean(),
+    verdict: "defects",
+    refreshes: { judged: 1166, uneven: 2, unresolved: 0, uneven_samples: [708, 709] },
+  };
+}
+
+test("one slip per take passes (owner, #272, 30.10.2026)", () => {
+  expect(wallFramesFailures("wall-30", EXIT_DEFECTS, oneSlip())).toEqual([]);
+});
+
+test("two uneven boundaries that are not neighbours fail", () => {
+  const report = oneSlip();
+  report.refreshes!.uneven_samples = [708, 710];
+  expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toEqual([
+    "wall-30: JUDDER: 2 of 1166 judged boundaries were held the wrong number of refreshes",
+  ]);
+});
+
+test("two slips fail", () => {
+  const report = oneSlip();
+  report.refreshes!.uneven = 4;
+  report.refreshes!.uneven_samples = [708, 709, 900, 901];
+  expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toEqual([
+    "wall-30: JUDDER: 4 of 1166 judged boundaries were held the wrong number of refreshes",
+  ]);
+});
+
+test("a slip with no listed boundaries fails", () => {
+  const report = oneSlip();
+  delete report.refreshes!.uneven_samples;
+  expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toHaveLength(1);
+});
+
+test("a slip beside any other defect fails, and the slip is named", () => {
+  for (const other of [
+    { jumps_back: 1 },
+    { lost_frames: 1 },
+    { lost_boundaries: 1 },
+    { cadence_errors: 1 },
+    { frozen: true },
+    { weights: { mismatches: 1 } },
+  ]) {
+    const failures = wallFramesFailures("wall-30", EXIT_DEFECTS, { ...oneSlip(), ...other });
+    expect(failures).toHaveLength(2);
+    expect(failures[0]).toContain("JUDDER");
+  }
+});
+
+test("a slip in a take a clean verdict could not hold fails", () => {
+  for (const weak of [
+    { unverified: { steps: 1 } },
+    { decoded: 2000 },
+    { refreshes: { judged: 299, uneven: 2, unresolved: 0, uneven_samples: [8, 9] } },
+    { refreshes: { judged: 1166, uneven: 2, unresolved: 1, uneven_samples: [8, 9] } },
+  ]) {
+    expect(wallFramesFailures("wall-30", EXIT_DEFECTS, { ...oneSlip(), ...weak })).not.toEqual([]);
+  }
+});
+
 test("every defect counter is named, in one failure each", () => {
   const report: WallFramesReport = {
     ...clean(),
