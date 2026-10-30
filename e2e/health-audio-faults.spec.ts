@@ -281,7 +281,9 @@ test("the window selector re-reads the history over 1 h and 7 d", async ({ page 
   await expect(events).toHaveCount(5);
   await expect(row(panel, "program").getByTestId("audio-path-losses")).toHaveText("1 chyba");
   const dayTicks = await panel.getByTestId("audio-axis-tick").allTextContents();
-  expect(dayTicks.length).toBeGreaterThanOrEqual(7);
+  // 168 h hold 6 local midnights across the autumn clock change, 7 or 8
+  // otherwise (CI 41139726181, 22:46 UTC, 30.10.2026).
+  expect(dayTicks.length).toBeGreaterThanOrEqual(6);
   expect(dayTicks.length).toBeLessThanOrEqual(8);
   for (const label of dayTicks) expect(label).toMatch(/^\d{1,2}\.\d{1,2}\.$/);
 });
