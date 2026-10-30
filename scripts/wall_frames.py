@@ -86,6 +86,7 @@ from wall_analysis import (
     GRID_FPS,
     LEVEL_EDGE,
     MIN_BOUNDARIES,
+    POLL_TIME_ERROR,
     SAME_PICTURE,
     Reading,
     analyse,
@@ -109,6 +110,11 @@ LOCATE_S = 10.0
 # The rows a Spout capture reads of each strip: 24 rows poll at ~0.6 ms on SNV,
 # the whole strip's 150 at ~1.75 ms, over a tenth of a 60 Hz refresh.
 SPOUT_ROWS = 24
+# A Spout picture lands when Arena finishes it, not on a refresh: intervals of
+# 26-41 ms for 33.3 on SNV. At 0.5 and 1 ms the brackets contradict themselves
+# (2-41 boundaries a take), 2 and 3 ms read both clips clean, and at 4 ms and
+# more wall-25 leaves boundaries unresolved (30.10.2026).
+SPOUT_TIME_ERROR = 0.003
 # A recording is looked at on every LOCATE_EVERY-th picture until the copies
 # are found (a look takes 0.1-3 s), at most LOCATE_TRIES times; the pictures
 # between two looks are kept and read once the copies are found.
@@ -447,6 +453,7 @@ def poll_blind(times: list[float], polls: list[float]) -> list[float]:
 def capture(args: argparse.Namespace) -> dict:
     """Capture or read the pictures ``args`` names, then the report."""
     late = None
+    spout = False
     if args.video is not None:
         readings, times, located = read_video(args.video, args.width)
         if located is None:
@@ -484,6 +491,7 @@ def capture(args: argparse.Namespace) -> dict:
         readings = [read_sums(s, list(located.copies)) for s in sums]
         blind = poll_blind(times, polls)
         late = [max(0.0, e - t) for t, e in zip(times, ended)]
+        spout = args.spout is not None
         check_present_rate(times, args.refresh_hz, blind, late)
         span = (polls[0], polls[-1]) if polls else None
     report = analyse(
@@ -498,6 +506,7 @@ def capture(args: argparse.Namespace) -> dict:
         min_boundaries=args.min_boundaries,
         locked=args.locked,
         late=late,
+        time_error=SPOUT_TIME_ERROR if spout else POLL_TIME_ERROR,
     )
     report["located"] = located.report() if located else None
     return report

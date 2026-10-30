@@ -559,6 +559,12 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
   cells beside 60. Its samples sat near the cell edges, each bit change read
   as a blend, and every 128th frame read `disagree`: 10 "lost" frames per
   40 s on Spout and NDI alike. A count equal on both arms is the reader.
+- **A Spout picture's instant is off by up to `SPOUT_TIME_ERROR` 3 ms**
+  (`analyse(time_error)`): it lands when Arena finishes it, not on a refresh
+  (intervals 26-41 ms for 33.3). At dxcam's 0.5 ms every take read 20-47
+  `inconsistent` boundaries, so no take could be `clean`; 2 and 3 ms read
+  both clips clean, 4 ms and more leave `unresolved`. A slip (50 + 16.7 ms)
+  still reads uneven (`test_wall_spout.py`).
 - **A picture's acquire window ends at `receive`** (`NewPictures.update_frame`,
   the shape `time_acquire` stamps): the read-back of each new picture waits
   ~4 ms on the GPU copy.

@@ -103,6 +103,7 @@ test("a slip beside any other defect fails, and the slip is named", () => {
 
 test("a slip in a take a clean verdict could not hold fails", () => {
   for (const weak of [
+    { refreshes: { judged: 1166, uneven: 2, unresolved: 0, inconsistent: 1, uneven_samples: [8, 9] } },
     { unverified: { steps: 1 } },
     { decoded: 2000 },
     { refreshes: { judged: 299, uneven: 2, unresolved: 0, uneven_samples: [8, 9] } },

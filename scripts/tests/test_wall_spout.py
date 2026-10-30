@@ -11,6 +11,7 @@ import json
 import numpy as np
 import pytest
 
+import wall_analysis as wa
 import wall_frames as wf
 import wall_locate as wl
 import wall_spout as ws
@@ -57,6 +58,46 @@ def test_the_acquire_window_ends_at_the_receive_not_at_a_slow_read(monkeypatch):
     camera.grab()
     assert acquired[0] == pytest.approx(0.0003)
     assert clock[0] == pytest.approx(0.0043)
+
+
+def spout_take(steps_ms: list[float]) -> dict:
+    """A 30 fps take from Arena's sender: one picture per boundary after
+    each interval, read by polls 0.6 ms apart."""
+    times = [0.0]
+    for step in steps_ms:
+        times.append(times[-1] + step / 1000)
+    readings = [wa.Reading("ok", 100 + n, None, 0, 1) for n in range(len(times))]
+    return wa.analyse(
+        readings,
+        30,
+        times=times,
+        refresh_hz=60.0,
+        blind=[0.0006] * len(times),
+        late=[0.0004] * len(times),
+        span=(times[0] - 0.02, times[-1] + 0.02),
+        time_error=wf.SPOUT_TIME_ERROR,
+    )
+
+
+def jitter(n: int) -> list[float]:
+    # SNV: intervals around 33.3 ms, 4 ms off and back, 33.3 on average.
+    return [33.33 + (4 if k % 2 else -4) for k in range(n)]
+
+
+def test_arena_s_render_jitter_reads_clean_at_the_spout_time_error():
+    report = spout_take(jitter(400))
+    assert report["refreshes"]["inconsistent"] == 0
+    assert report["refreshes"]["uneven"] == 0
+    assert report["verdict"] == "clean"
+
+
+def test_a_slip_still_reads_as_judder_at_the_spout_time_error():
+    steps = jitter(200) + [50.0, 16.67] + jitter(200)
+    report = spout_take(steps)
+    assert report["refreshes"]["uneven"] == 2
+    a, b = report["refreshes"]["uneven_samples"]
+    assert b == a + 1
+    assert report["verdict"] == "defects"
 
 
 def plain(*levels: int) -> list[np.ndarray]:

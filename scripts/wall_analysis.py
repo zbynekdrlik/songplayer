@@ -474,6 +474,7 @@ def analyse(
     min_boundaries: int = MIN_BOUNDARIES,
     locked: bool = False,
     late: list[float] | None = None,
+    time_error: float = POLL_TIME_ERROR,
 ) -> dict:
     """The report of a capture of the ``fps`` clip (see the module doc).
 
@@ -483,8 +484,8 @@ def analyse(
     instant sample (``capture_blind``); ``span`` the capture's own start
     and end (default: its first and last picture); ``late`` each dxcam
     picture's acquire window after its time; ``locked`` whether each
-    recorded picture is one wall refresh. Without times, each sample is one
-    refresh. The refresh check needs the wall's ``refresh_hz``. ``clean``
+    recorded picture is one wall refresh; ``time_error`` how far a present's
+    instant may be off. Without times, each sample is one refresh. The refresh check needs the wall's ``refresh_hz``. ``clean``
     needs ``min_boundaries`` boundaries judged for judder."""
     n_frames = clip.frame_count(fps, clip.CLIP_SECONDS) if frames is None else frames
     period = 1 / refresh_hz if refresh_hz else None
@@ -492,7 +493,7 @@ def analyse(
     presents = blind is not None
     error = 0.0
     if times is not None:
-        error = POLL_TIME_ERROR if presents else max(pts_jitter(times), PTS_TIME_ERROR)
+        error = time_error if presents else max(pts_jitter(times), PTS_TIME_ERROR)
         blind = capture_blind(times, blind)
         if span is None and times:
             span = (times[0], times[-1])

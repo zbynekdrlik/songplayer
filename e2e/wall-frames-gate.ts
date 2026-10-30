@@ -31,6 +31,8 @@ export interface WallFramesReport {
     judged: number;
     uneven: number;
     unresolved: number;
+    /** Boundaries whose timing contradicts itself: the capture's fault. */
+    inconsistent?: number;
     /** The uneven boundaries' numbers; absent = none listed. */
     uneven_samples?: number[];
   } | null;
@@ -62,6 +64,7 @@ function oneSlipOnly(report: WallFramesReport): boolean {
     at.length === 2 &&
     at[1] === at[0] + 1 &&
     r.unresolved === 0 &&
+    (r.inconsistent ?? 0) === 0 &&
     r.judged >= MIN_JUDGED &&
     report.unverified.steps === 0 &&
     report.decoded >= MIN_COVERAGE * report.samples &&
@@ -162,6 +165,9 @@ function incomplete(where: string, report: WallFramesReport): string {
   } else {
     if (report.refreshes.unresolved > 0) {
       parts.push(`${report.refreshes.unresolved} boundary(ies) unresolved`);
+    }
+    if ((report.refreshes.inconsistent ?? 0) > 0) {
+      parts.push(`${report.refreshes.inconsistent} boundary(ies) with contradictory timing`);
     }
     parts.push(`${report.refreshes.judged} boundaries judged`);
   }
