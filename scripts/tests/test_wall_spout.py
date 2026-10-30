@@ -93,6 +93,24 @@ def test_a_region_outside_the_sender_is_refused(region):
         ws.NewPictures(FakeSender(plain(1))).grab(region=region)
 
 
+def test_a_copy_cut_by_a_seam_is_left_out_by_its_narrower_cell():
+    # SNV 30.10.2026: 60, 60 and 58.33 px; the last read a blend at each change
+    # of a bit its samples sat next to.
+    whole = [wl.Copy(float(x), 60.0, ()) for x in (60, 1260)]
+    cut = wl.Copy(3631.0, 58.33, ())
+    assert wf.same_scale([*whole, cut]) == whole
+    assert wf.same_scale([cut, *whole]) == whole
+    # A tie: the larger cells, whose reading no seam shortened.
+    assert wf.same_scale([whole[0], cut, wl.Copy(4800.0, 58.33, ()), whole[1]]) == [
+        whole[0],
+        whole[1],
+    ]
+    assert wf.same_scale([]) == []
+    # Within the share: one scale.
+    near = [wl.Copy(0.0, 60.0, ()), wl.Copy(900.0, 59.5, ())]
+    assert wf.same_scale(near) == near
+
+
 def test_a_capture_reads_only_the_middle_rows_of_the_strips():
     picture = frame(100, 30)
     copies = wf.clip_copies(picture)

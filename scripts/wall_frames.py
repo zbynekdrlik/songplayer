@@ -114,6 +114,8 @@ SPOUT_ROWS = 24
 # between two looks are kept and read once the copies are found.
 LOCATE_EVERY = 15
 LOCATE_TRIES = 40
+# Copies of one capture are of one scale, within this share of a cell.
+SCALE_MATCH = 0.01
 # main()'s exit codes (2 is argparse's usage error).
 EXIT_CODES = {"clean": 0, "defects": 1, "incomplete": 3}
 EXIT_NOTHING_DECODED = 4
@@ -188,6 +190,20 @@ def read_frame(image: np.ndarray) -> Reading:
     return read_sums(cell_sums(image, copies), copies)
 
 
+def same_scale(copies: list[Copy]) -> list[Copy]:
+    """The largest group of copies whose cells are within ``SCALE_MATCH`` of
+    each other (a tie: the larger cells). One mapping shows every copy at one
+    scale; a copy cut by a seam of the output reads a narrower cell, its
+    samples sit near its cells' edges, and each change of a bit reads there
+    as a blend (SNV, 58.33 px beside 60: `disagree` at every 128th frame, on
+    Spout and NDI alike)."""
+    groups = [
+        [c for c in copies if abs(c.cell / copy.cell - 1) <= SCALE_MATCH]
+        for copy in copies
+    ]
+    return max(groups, key=lambda g: (len(g), g[0].cell), default=[])
+
+
 def clip_copies(picture: np.ndarray) -> list[Copy]:
     """The copies a capture reads every picture at: those of ``picture``
     that read it as one picture (within ``SAME_PICTURE``) with MORE than half
@@ -196,7 +212,7 @@ def clip_copies(picture: np.ndarray) -> list[Copy]:
     out; with no such majority (a torn picture, two copies reading two
     pictures), none: the caller looks at another picture."""
     good = []
-    for copy in locate(picture):
+    for copy in same_scale(locate(picture)):
         reading = read_sums(cell_sums(picture, [copy]), [copy])
         if reading.ok:
             good.append((copy, reading.position()))

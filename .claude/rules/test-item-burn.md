@@ -550,6 +550,14 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
 - **Arena's sender keeps no frame count**, so every Spout read answers:
   `NewPictures` calls a poll with the same bytes as the last one a poll
   with nothing new, as an empty dxcam grab. No sleep between polls.
+- **A copy cut by a seam is left out (`same_scale`, 30.10.2026):** SNV's
+  output is slices of the composition, and a copy across one read 58.33 px
+  cells beside 60. Its samples sat near the cell edges, each bit change read
+  as a blend, and every 128th frame read `disagree`: 10 "lost" frames per
+  40 s on Spout and NDI alike. A count equal on both arms is the reader.
+- **A picture's acquire window ends at `receive`** (`NewPictures.update_frame`,
+  the shape `time_acquire` stamps): the read-back of each new picture waits
+  ~4 ms on the GPU copy.
 - **It reads 24 rows of the strips (`SPOUT_ROWS`), never the whole
   output** (v2: ci.yml sets no `SP_WALL_REGION`). The reader looks at the
   whole picture once, finds the copies and polls the middle of the rows
