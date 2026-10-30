@@ -90,7 +90,11 @@ class GlSender:
         glfw.make_context_current(window)
         self.receiver = SpoutGL.SpoutReceiver()
         self.receiver.setReceiverName(name)
-        self.size = self._open()
+        try:
+            self.size = self._open()
+        except RuntimeError:
+            self.close()
+            raise
         self.texture = GL.glGenTextures(1)
         GL.glBindTexture(GL.GL_TEXTURE_2D, self.texture)
         GL.glTexImage2D(
