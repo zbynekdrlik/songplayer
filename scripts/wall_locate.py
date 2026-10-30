@@ -269,7 +269,7 @@ def cell_sums(picture: np.ndarray, copies: list[Copy]) -> np.ndarray:
 
 
 def capture_region(
-    copies: list[Copy], shape: tuple[int, ...]
+    copies: list[Copy], shape: tuple[int, ...], max_rows: int | None = None
 ) -> tuple[tuple[int, int, int, int], list[Copy]]:
     """The part of a picture a dxcam capture grabs, for the copies found on
     it: of the strips that share rows, the largest set (the topmost on a
@@ -277,7 +277,10 @@ def capture_region(
     of its middle ``MAX_COPIES`` copies with a cell to spare; and those
     copies within that part, each with that strip only. A smaller grab is a
     faster one: a whole 7680x1080 output is too slow to time each refresh
-    (#272 lane 2)."""
+    (#272 lane 2). ``max_rows``: no more rows than that, from the middle of
+    the rows all the chosen strips share, with none to spare (a Spout read
+    of the whole strip is too slow, ``wall_spout``); where they share fewer
+    than ``MIN_STRIP_ROWS`` it changes nothing."""
     height, width = shape[0], shape[1]
     sets: list[list[tuple[Copy, tuple[int, int]]]] = []
     # Top-down: a strip shares rows with a set when it starts above the
@@ -303,12 +306,22 @@ def capture_region(
     y1 = max(s1 for _, (_, s1) in chosen)
     spare = max(1, (y1 - y0) // 4)
     top, bottom = max(0, y0 - spare), min(height, y1 + spare)
+    shared0 = max(s0 for _, (s0, _) in chosen)
+    shared1 = min(s1 for _, (_, s1) in chosen)
+    if max_rows is not None and shared1 - shared0 >= MIN_STRIP_ROWS:
+        rows = min(max_rows, shared1 - shared0)
+        top = (shared0 + shared1 - rows) // 2
+        bottom = top + rows
     left = max(0, int(np.floor(min(c.x0 - c.cell for c, _ in chosen))))
     right = min(
         width, int(np.ceil(max(c.x0 + (clip.CELLS + 1) * c.cell for c, _ in chosen)))
     )
     inside = [
-        replace(c, x0=c.x0 - left, strips=((s0 - top, s1 - top),))
+        replace(
+            c,
+            x0=c.x0 - left,
+            strips=((max(s0, top) - top, min(s1, bottom) - top),),
+        )
         for c, (s0, s1) in chosen
     ]
     return (left, top, right, bottom), inside

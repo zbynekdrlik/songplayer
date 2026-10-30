@@ -2231,14 +2231,14 @@ dependencies = [
 
 [[package]]
 name = "sp-asrc"
-version = "0.84.0-dev.20"
+version = "0.84.0-dev.21"
 dependencies = [
  "rubato",
 ]
 
 [[package]]
 name = "sp-core"
-version = "0.84.0-dev.20"
+version = "0.84.0-dev.21"
 dependencies = [
  "serde",
  "serde_json",
@@ -2247,7 +2247,7 @@ dependencies = [
 
 [[package]]
 name = "sp-decoder"
-version = "0.84.0-dev.20"
+version = "0.84.0-dev.21"
 dependencies = [
  "mutants",
  "sp-core",
@@ -2260,7 +2260,7 @@ dependencies = [
 
 [[package]]
 name = "sp-gpu"
-version = "0.84.0-dev.20"
+version = "0.84.0-dev.21"
 dependencies = [
  "cc",
  "mutants",
@@ -2274,7 +2274,7 @@ dependencies = [
 
 [[package]]
 name = "sp-ndi"
-version = "0.84.0-dev.20"
+version = "0.84.0-dev.21"
 dependencies = [
  "libloading",
  "mutants",
@@ -2285,7 +2285,7 @@ dependencies = [
 
 [[package]]
 name = "sp-server"
-version = "0.84.0-dev.20"
+version = "0.84.0-dev.21"
 dependencies = [
  "anyhow",
  "async-trait",

@@ -41,7 +41,9 @@ copies are looked for on the whole output (or in ``--region``) and the
 capture grabs only their strip rows and columns
 (``wall_locate.capture_region``); every poll is timed, and a poll more
 than half a refresh after the one before is a blind span (a poll on time
-that finds no new picture is the wall holding one).
+that finds no new picture is the wall holding one). A Spout sender
+(``--spout``, ``wall_spout``) is read the same way, from a picture that is
+off the desktop: only ``SPOUT_ROWS`` rows of the strips, polled with no sleep.
 
 Usage::
 
@@ -49,6 +51,8 @@ Usage::
                                   [--refresh-hz 60]
     python scripts/wall_frames.py --fps 25 --dxcam 1 --refresh-hz 60
                                   --seconds 20 [--region L,T,R,B]
+    python scripts/wall_frames.py --fps 25 --spout "Arena - Screen 2"
+                                  --refresh-hz 60 --seconds 20
 
 The report is JSON on stdout (``located``: the copies read, their cell and
 the region grabbed); exit 0 = clean, 1 = defects, 3 = incomplete, 4 =
@@ -97,10 +101,14 @@ from wall_locate import (
     locate,
     strip_rows,
 )
+from wall_spout import GlSender, NewPictures
 
 # How long a dxcam capture looks for the copies before its timed polls (s):
 # a look at a whole 7680x1080 output takes ~0.6 s on dev1.
 LOCATE_S = 10.0
+# The rows a Spout capture reads of each strip: 24 rows poll at ~0.6 ms on SNV,
+# the whole strip's 150 at ~1.75 ms, over a tenth of a 60 Hz refresh.
+SPOUT_ROWS = 24
 # A recording is looked at on every LOCATE_EVERY-th picture until the copies
 # are found (a look takes 0.1-3 s), at most LOCATE_TRIES times; the pictures
 # between two looks are kept and read once the copies are found.
@@ -287,13 +295,15 @@ def find_clip(
     seconds: float,
     clock: Callable[[], float] = time.perf_counter,
     pause: Callable[[float], None] = time.sleep,
+    max_rows: int | None = None,
 ) -> Located | None:
     """Grab pictures (``region``, or the whole output) until one shows copies
     that read as one picture (``clip_copies``), for at most ``seconds``:
     the copies and the region to capture, the part of the grabbed area that
     ``capture_region`` picks (its strip rows and columns); None if no picture
     showed them. ``grab`` takes the region by keyword, as dxcam's does; a
-    grab that finds no new picture pauses 1 ms."""
+    grab that finds no new picture pauses 1 ms. ``max_rows`` as
+    ``capture_region``'s."""
     left, top = region[:2] if region else (0, 0)
     deadline = clock() + seconds
     while clock() < deadline:
@@ -304,7 +314,8 @@ def find_clip(
         copies = clip_copies(picture)
         if not copies:
             continue
-        (x0, y0, x1, y1), inside = capture_region(copies, np.asarray(picture).shape)
+        shape = np.asarray(picture).shape
+        (x0, y0, x1, y1), inside = capture_region(copies, shape, max_rows)
         return Located(tuple(inside), (left + x0, top + y0, left + x1, top + y1))
     return None
 
@@ -329,12 +340,38 @@ def capture_dxcam(
     import dxcam  # Windows only (the box's ops\probe-venv)
 
     camera = dxcam.create(output_idx=output, output_color="BGRA")
+    return capture_camera(camera, region, seconds)
+
+
+def capture_spout(
+    sender: str, region: tuple[int, int, int, int] | None, seconds: float
+) -> tuple[list[float], list[np.ndarray], list[float], list[float], Located | None]:
+    """``capture_dxcam``'s five results from a Spout sender (Windows)."""
+    source = GlSender(sender)
+    try:
+        return capture_camera(
+            NewPictures(source), region, seconds, max_rows=SPOUT_ROWS, idle=0.0
+        )
+    finally:
+        source.close()
+
+
+def capture_camera(
+    camera,
+    region: tuple[int, int, int, int] | None,
+    seconds: float,
+    max_rows: int | None = None,
+    idle: float = 0.001,
+) -> tuple[list[float], list[np.ndarray], list[float], list[float], Located | None]:
+    """The timed polls of ``capture_dxcam`` on anything with its ``grab``.
+    ``idle``: what a poll that finds nothing sleeps; ``max_rows`` as
+    ``capture_region``'s."""
     acquired = time_acquire(camera)
     times: list[float] = []
     pictures: list[np.ndarray] = []
     polls: list[float] = []
     acquire_ended: list[float] = []
-    located = find_clip(camera.grab, region, LOCATE_S)
+    located = find_clip(camera.grab, region, LOCATE_S, max_rows=max_rows)
     if located is None:
         del camera
         return times, pictures, polls, acquire_ended, None
@@ -345,7 +382,7 @@ def capture_dxcam(
         acquired[0] = None
         picture = camera.grab(region=located.region)
         if picture is None:
-            time.sleep(0.001)
+            time.sleep(idle)
             continue
         ended = acquired[0] if acquired[0] is not None else time.perf_counter()
         times.append(now)
@@ -408,13 +445,20 @@ def capture(args: argparse.Namespace) -> dict:
         blind = None  # since the picture before
         span = None  # the first picture's pts to the last one's
     else:
-        times, sums, polls, ended, located = capture_dxcam(
-            args.dxcam, args.region, args.seconds
-        )
+        if args.spout is not None:
+            source = f"sender {args.spout!r}"
+            times, sums, polls, ended, located = capture_spout(
+                args.spout, args.region, args.seconds
+            )
+        else:
+            source = f"output {args.dxcam}"
+            times, sums, polls, ended, located = capture_dxcam(
+                args.dxcam, args.region, args.seconds
+            )
         if located is None:
             print(
-                f"wall_frames: no copy of the clip's strip found on output "
-                f"{args.dxcam} in {LOCATE_S:g} s (region {args.region}): nothing "
+                f"wall_frames: no copy of the clip's strip found on {source} "
+                f"in {LOCATE_S:g} s (region {args.region}): nothing "
                 "captured",
                 file=sys.stderr,
             )
@@ -459,6 +503,7 @@ def main(argv: list[str] | None = None) -> int:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--video", type=Path)
     source.add_argument("--dxcam", type=int, metavar="OUTPUT")
+    source.add_argument("--spout", metavar="SENDER")
     parser.add_argument("--width", type=int, help="scale a video to this width")
     # The wall's own rate: one read from a capture is the capture's (a
     # camera's; dxcam's 1 ms polls read 58.8 Hz for 60).
@@ -474,7 +519,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--region",
         type=parse_region,
-        help="dxcam area L,T,R,B to look for the clip in (default: the output)",
+        help="area L,T,R,B to look for the clip in (default: the whole picture)",
     )
     parser.add_argument(
         "--min-boundaries",
@@ -483,7 +528,7 @@ def main(argv: list[str] | None = None) -> int:
         help="boundaries a clean capture judges for judder",
     )
     args = parser.parse_args(argv)
-    if args.locked and args.dxcam is not None:
+    if args.locked and args.video is None:
         parser.error("--locked is for a --video of the wall's own signal")
     try:
         report = capture(args)

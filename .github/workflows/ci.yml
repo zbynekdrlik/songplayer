@@ -131,9 +131,9 @@ jobs:
       - name: Install Python eval dependencies (ruff + pytest + jsonschema + requests + numpy + soundfile)
         run: pip install ruff==0.5.7 pytest==8.3.2 jsonschema==4.23.0 requests==2.32.3 numpy==2.1.1 soundfile==0.12.1
       - name: Lint with ruff
-        run: ruff check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_locate.py scripts/wall_analysis.py scripts/wall_spans.py
+        run: ruff check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_spout.py scripts/wall_locate.py scripts/wall_analysis.py scripts/wall_spans.py
       - name: Format check with ruff
-        run: ruff format --check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_locate.py scripts/wall_analysis.py scripts/wall_spans.py
+        run: ruff format --check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_spout.py scripts/wall_locate.py scripts/wall_analysis.py scripts/wall_spans.py
       - name: Run pytest
         run: pytest eval/lyrics/tests -v
       - name: Run scripts pytest (#171 segment stitch / additivity, #156 minidump helpers)
@@ -2555,17 +2555,18 @@ jobs:
           }
           Write-Host "OK: the A/V gate venv at $venv has numpy $version with numpy.fft"
           # #272 lane 2: the wall frame gate (e2e/post-deploy-wall-frames.spec.ts)
-          # runs scripts/wall_frames.py from this venv; it captures the wall
-          # output with dxcam (the versions of the box's ops\probe-venv; dxcam
-          # 0.3+ never loads OpenCV with BGRA output). numpy stays pinned.
-          $dxcam = "0.3.0"
-          $comtypes = "1.4.17"
-          & $py -c "import sys, importlib.metadata as m; sys.exit(0 if (m.version('dxcam'), m.version('comtypes')) == ('$dxcam', '$comtypes') else 3)" 2>$null
+          # runs scripts/wall_frames.py from this venv; it reads Arena's Spout
+          # output through SpoutGL (the versions of the box's ops\probe-venv).
+          # numpy stays pinned.
+          $spoutgl = "0.1.1"
+          $glfw = "2.10.2"
+          $pyopengl = "3.1.10"
+          & $py -c "import sys, importlib.metadata as m; sys.exit(0 if (m.version('SpoutGL'), m.version('glfw'), m.version('PyOpenGL')) == ('$spoutgl', '$glfw', '$pyopengl') else 3)" 2>$null
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "Installing dxcam==$dxcam comtypes==$comtypes into the e2e venv"
-            & $py -m pip install --disable-pip-version-check --no-input "dxcam==$dxcam" "comtypes==$comtypes" "numpy==$numpy"
+            Write-Host "Installing SpoutGL==$spoutgl glfw==$glfw PyOpenGL==$pyopengl into the e2e venv"
+            & $py -m pip install --disable-pip-version-check --no-input "SpoutGL==$spoutgl" "glfw==$glfw" "PyOpenGL==$pyopengl" "numpy==$numpy"
             if ($LASTEXITCODE -ne 0) {
-              Write-Error "FAIL: pip install dxcam==$dxcam comtypes==$comtypes exited $LASTEXITCODE"
+              Write-Error "FAIL: pip install SpoutGL==$spoutgl glfw==$glfw PyOpenGL==$pyopengl exited $LASTEXITCODE"
               exit 1
             }
           }
@@ -2574,12 +2575,12 @@ jobs:
             Write-Error "FAIL: wall_frames.py does not start under $py (exit $LASTEXITCODE)"
             exit 1
           }
-          & $py -c "import dxcam, numpy; import sys; sys.exit(0 if numpy.__version__ == '$numpy' else 3)"
+          & $py -c "import SpoutGL, glfw, OpenGL.GL, numpy; import sys; sys.exit(0 if numpy.__version__ == '$numpy' else 3)"
           if ($LASTEXITCODE -ne 0) {
-            Write-Error "FAIL: dxcam does not import under $py, or numpy moved off $numpy (exit $LASTEXITCODE)"
+            Write-Error "FAIL: SpoutGL does not import under $py, or numpy moved off $numpy (exit $LASTEXITCODE)"
             exit 1
           }
-          Write-Host "OK: the e2e venv also has dxcam $dxcam for the wall frame gate"
+          Write-Host "OK: the e2e venv also has SpoutGL $spoutgl for the wall frame gate"
 
       # #221 lane 3 (camera-box request, 6.10.2026): the post-deploy suite
       # switches cg OBS's program for the A/V gate's take (the probe scene)
@@ -2620,13 +2621,13 @@ jobs:
           # bundled ffmpeg (the box has no ffprobe; none is needed).
           SP_AVSYNC_PYTHON: C:\ProgramData\SongPlayer\e2e\avsync_venv\Scripts\python.exe
           SP_FFMPEG: C:\ProgramData\SongPlayer\cache\tools\ffmpeg.exe
-          # #272 lane 2 (e2e/post-deploy-wall-frames.spec.ts): the wall's
-          # dxcam output on SNV (Output[1] = 7680x1080; Output[0] is the
-          # primary). The reader runs on SP_AVSYNC_PYTHON's venv.
-          SP_WALL_DXCAM_OUTPUT: "1"
+          # #272 lane 2 (e2e/post-deploy-wall-frames.spec.ts): Arena's Spout
+          # output of the wall, before wall-bridge (the wall is off the
+          # desktop). The reader runs on SP_AVSYNC_PYTHON's venv.
+          SP_WALL_SPOUT_SENDER: "Arena - Screen 2"
           # No SP_WALL_REGION (#272 v2): the reader finds the clip's copies
-          # on the whole output once and grabs only their strip rows and
-          # columns (a full 7680x1080 grab is too slow to time each
+          # on the whole picture once and reads only their strip rows and
+          # columns (a full 7680x1080 read is too slow to time each
           # refresh), so a change of Arena's wall mapping needs no new rows.
           # #233 lane 3: how many enabled ASIO outputs the box must run
           # (e2e/post-deploy-audio-asio.spec.ts). SNV runs one since

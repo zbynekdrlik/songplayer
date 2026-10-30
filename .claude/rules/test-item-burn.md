@@ -13,6 +13,7 @@ paths:
   - "scripts/wall_frames.py"
   - "scripts/wall_locate.py"
   - "scripts/wall_analysis.py"
+  - "scripts/wall_spout.py"
   - "scripts/wall_spans.py"
   - "scripts/tests/test_wall_clip.py"
   - "scripts/tests/test_wall_*.py"
@@ -499,11 +500,11 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
   - For `wall-30`, then `wall-25`: `/start {"clip"}`, then a program cut
     to the test playlist. It waits until `on_air_item.youtube_id` is
     `wallclip-30` / `wallclip-25` with `position_ms` ≥ 3000 (≤ 25 s).
-  - Then 40 s of `scripts/wall_frames.py --fps <fps> --dxcam
-    $SP_WALL_DXCAM_OUTPUT --refresh-hz 60`.
+  - Then 40 s of `scripts/wall_frames.py --fps <fps> --spout
+    "$SP_WALL_SPOUT_SENDER" --refresh-hz 60` (`Arena - Screen 2`).
   - It runs on the e2e venv (`SP_AVSYNC_PYTHON`, which ci.yml also gives
-    `dxcam==0.3.0` + `comtypes==1.4.17` with numpy kept at its pin). The
-    runner runs in the desktop session 1, so desktop duplication works.
+    `SpoutGL==0.1.1` + `glfw==2.10.2` + `PyOpenGL==3.1.10` with numpy kept
+    at its pin).
   - `afterAll` cuts back to the source it found, then `/start` + `/stop`
     with no body.
 - **The verdict** is `e2e/wall-frames-gate.ts::wallFramesFailures`, unit
@@ -537,23 +538,28 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
   - Exit 5 = the capture failed.
 - **It is RED while the wall judders.** That is the point; never loosen it
   to make a deploy green.
-- **What it does not see.** dxcam reads DWM's composition, stage 1, not the
-  physical wall after Surround and the LED processor. A clean take covers
-  only its 40 s, and the judder comes in waves.
-- dxcam's output on SNV: `Output[1]` 7680×1080 (`Output[0]` is the 4K
-  primary). Read it with `python -c "import dxcam;
-  print(dxcam.output_info())"`.
-- **It grabs only the strip rows the reader found, never the whole
+- **It reads Arena's Spout output, before wall-bridge (owner, #272,
+  30.10.2026).** Since 29.10. the wall is a specialized display off the
+  Windows desktop, so dxcam lists only the 3840×2160 primary and cannot see
+  it. `scripts/wall_spout.py` reads `Arena - Screen 2`, the picture
+  wall-bridge takes, next to it (measured: 0 missed vblanks, 0 drops).
+- **What it does not see.** The bridge, Surround and the LED processor: a
+  clean take says nothing about the screens. A clean take covers only its
+  40 s, and the judder comes in waves. `--dxcam` stays for a wall on the
+  desktop (PP).
+- **Arena's sender keeps no frame count**, so every Spout read answers:
+  `NewPictures` calls a poll with the same bytes as the last one a poll
+  with nothing new, as an empty dxcam grab. No sleep between polls.
+- **It reads 24 rows of the strips (`SPOUT_ROWS`), never the whole
   output** (v2: ci.yml sets no `SP_WALL_REGION`). The reader looks at the
-  whole output once, finds the copies and grabs the strip rows ± a
-  quarter and the columns ± a cell of at most 4 of them (`capture_region`;
-  `located.region` in the report and the spec's log line), so a change of
-  Arena's wall mapping needs no new rows. A full 7680×1080 grab is too
-  slow to time each refresh: the reader exits 5 ("only 2 intervals timed
-  within 1.67 ms"). v1's band 160–312 (16.10.2026) polled at 16.6 ms; a v2
-  region at SNV's 2× is ~200 rows of ~3400 px (modelled on dev1, not yet
-  measured on the box). `SP_WALL_REGION` stays a manual override, an area
-  to look in: it must then hold a whole ruler and its strip.
+  whole picture once, finds the copies and polls the middle of the rows
+  their strips share and the columns ± a cell of at most 4 of them
+  (`capture_region(max_rows)`; `located.region` in the report and the
+  spec's log line), so a change of Arena's wall mapping needs no new rows.
+  A poll on SNV: 7680×1080 16 ms, 3030×150 1.75 ms, 3030×24 0.58 ms (a
+  timed interval needs ≤ 1.67 ms, else exit 5, "only 2 intervals timed").
+  `SP_WALL_REGION` stays a manual override, an area to look in: it must
+  then hold a whole ruler and its strip.
 - **A manual measurement on the box checks the rig lease FIRST, and
   before each round** (17.10.2026: an overnight layer A/B cut SP-program
   and bypassed Arena layers for 6 min inside camera-box's 8 h av-soak,

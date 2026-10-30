@@ -6,17 +6,18 @@
  * Every other gate reads SongPlayer's own counters. None looked at the
  * picture Arena puts on the LED wall, so deploys went green while the wall
  * juddered. This spec plays SongPlayer's frame-ID wall clips on program
- * (the test item's `wall-30`, then `wall-25`), reads them back from the
- * wall output as Windows composes it (`scripts/wall_frames.py --dxcam`,
- * the runner runs in the desktop session), and fails on ANY lost frame,
+ * (the test item's `wall-30`, then `wall-25`), reads them back from Arena's
+ * Spout output, the picture wall-bridge takes for the wall
+ * (`scripts/wall_frames.py --spout`), and fails on ANY lost frame,
  * jump back, judder (a boundary held the wrong number of refreshes), blend
  * weight off the pacer's rule or frozen wall (`wall-frames-gate.ts`,
  * unit-tested in the mock suite). An incomplete or failed capture fails
  * too, named as such: the gate never passes without positive evidence.
  *
- * What it sees is stage 1 of #272: DWM's composition of the wall output,
- * before NVIDIA Surround and the LED processor. A clean take covers only
- * its span (the judder comes in waves): it is a regression check, never
+ * What it sees is Arena's output BEFORE wall-bridge, NVIDIA Surround and the
+ * LED processor (owner, 30.10.2026, #272: the wall is off the Windows desktop
+ * since 29.10., desktop duplication no longer sees it). A clean take covers
+ * only its span (the judder comes in waves): it is a regression check, never
  * proof of a frame-exact path (`test-item-burn.md`).
  *
  * It needs Arena's wall clip on SongPlayer's program (`SP-program-MAX`, or
@@ -36,21 +37,21 @@ import {
   wallFramesFailures,
 } from "./wall-frames-gate";
 
-/** The e2e venv's Python (numpy + dxcam, ci.yml "Prepare the A/V gate's own Python"). */
+/** The e2e venv's Python (numpy + SpoutGL, ci.yml "Prepare the A/V gate's own Python"). */
 const PYTHON =
   process.env.SP_WALL_PYTHON ||
   process.env.SP_AVSYNC_PYTHON ||
   "C:\\ProgramData\\SongPlayer\\e2e\\avsync_venv\\Scripts\\python.exe";
 /** The runner's checkout of the reader. */
 const READER = path.resolve(__dirname, "..", "scripts", "wall_frames.py");
-/** dxcam's output index of the wall (SNV: 1 = 7680×1080, 0 = the primary). */
-const DXCAM_OUTPUT = process.env.SP_WALL_DXCAM_OUTPUT || "1";
-/** An optional dxcam region `L,T,R,B` of the wall output, a manual
- *  override. #272 v2: with none, the reader finds the clip's copies on the
- *  whole output and grabs only their strip rows and columns, so a change of
+/** Arena's Spout sender of the wall screen (`snv surround 7680`'s Screen 2). */
+const SPOUT_SENDER = process.env.SP_WALL_SPOUT_SENDER || "Arena - Screen 2";
+/** An optional region `L,T,R,B` of the sender's picture, a manual override.
+ *  #272 v2: with none, the reader finds the clip's copies on the whole
+ *  picture and reads only their strip rows and columns, so a change of
  *  Arena's wall mapping needs no new rows here. */
 const REGION = process.env.SP_WALL_REGION || "";
-/** The wall's refresh as dxcam sees it: DWM composes SNV at 60.000 Hz. */
+/** Arena renders on the primary display's 60.000 Hz (`gpu-max.md`). */
 const REFRESH_HZ = "60";
 /** Seconds captured per clip: ~1200 boundaries, 4× the reader's floor. */
 const TAKE_S = 40;
@@ -103,14 +104,14 @@ async function waitOnAir(request: APIRequestContext, row: string, ms: number): P
   throw new Error(`the clip ${row} did not play on program within 25 s (on air: ${last})`);
 }
 
-/** One dxcam take of `fps`'s clip: the reader's exit code and report. */
+/** One Spout take of `fps`'s clip: the reader's exit code and report. */
 function take(fps: number): { code: number | null; report: WallFramesReport | null; stderr: string } {
   const args = [
     READER,
     "--fps",
     String(fps),
-    "--dxcam",
-    DXCAM_OUTPUT,
+    "--spout",
+    SPOUT_SENDER,
     "--refresh-hz",
     REFRESH_HZ,
     "--seconds",
@@ -178,7 +179,7 @@ test.describe("the LED wall shows every frame, in order, on its cadence (#272)",
     }
   });
 
-  test("wall-30 and wall-25 read back frame-exact from the wall output", async ({ request }) => {
+  test("wall-30 and wall-25 read back frame-exact from Arena's wall output", async ({ request }) => {
     test.setTimeout(CLIPS.length * (TAKE_S + 150) * 1000);
     const item = await request.get("/api/v1/test-item");
     expect(item.status(), "GET /api/v1/test-item").toBe(200);
@@ -218,7 +219,7 @@ test.describe("the LED wall shows every frame, in order, on its cadence (#272)",
         failures.push(`${clip.name}: Arena layers above SongPlayer's clip: ${await whatCovers()}`);
       }
     }
-    expect(failures, "the wall output must show every clip frame, in order, on its cadence").toEqual(
+    expect(failures, "Arena's wall output must show every clip frame, in order, on its cadence").toEqual(
       [],
     );
   });
