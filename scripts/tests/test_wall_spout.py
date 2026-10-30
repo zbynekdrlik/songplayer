@@ -24,12 +24,39 @@ class FakeSender:
         self.pictures = pictures
         self.size = (pictures[0].shape[1], pictures[0].shape[0])
         self.boxes: list[tuple[int, int, int, int]] = []
+        self.received = 0
+
+    def receive(self) -> None:
+        self.received += 1
 
     def read(self, region: tuple[int, int, int, int]) -> bytes:
+        assert self.received == len(self.boxes) + 1, "a read without a receive"
         self.boxes.append(region)
         left, top, right, bottom = region
         picture = self.pictures[min(len(self.boxes) - 1, len(self.pictures) - 1)]
         return np.stack([picture[top:bottom, left:right]] * 4, axis=2).tobytes()
+
+
+def test_the_acquire_window_ends_at_the_receive_not_at_a_slow_read(monkeypatch):
+    # CI 41083008317: each new picture's read-back waits ~4 ms on the GPU, and
+    # stamping after it left 0 intervals timed.
+    clock = [0.0]
+    monkeypatch.setattr(wf.time, "perf_counter", lambda: clock[0])
+
+    class SlowRead(FakeSender):
+        def receive(self) -> None:
+            clock[0] += 0.0003
+            super().receive()
+
+        def read(self, region):
+            clock[0] += 0.004
+            return super().read(region)
+
+    camera = ws.NewPictures(SlowRead(plain(1)))
+    acquired = wf.time_acquire(camera)
+    camera.grab()
+    assert acquired[0] == pytest.approx(0.0003)
+    assert clock[0] == pytest.approx(0.0043)
 
 
 def plain(*levels: int) -> list[np.ndarray]:
@@ -125,6 +152,9 @@ class Closing:
     def __init__(self, sender: FakeSender) -> None:
         self.sender = sender
         self.size = sender.size
+
+    def receive(self):
+        self.sender.receive()
 
     def read(self, region):
         return self.sender.read(region)

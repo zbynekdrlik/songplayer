@@ -14,7 +14,10 @@ window; ``ops\\probe-venv``'s versions, ci.yml installs them in the e2e venv).
 
 Reading only a few rows keeps a poll at ~0.6 ms on SNV; 150 rows take ~1.75 ms
 and a whole 7680x1080 picture 16 ms (measured 30.10.2026 next to wall-bridge:
-0 missed vblanks, 0 drops).
+0 missed vblanks, 0 drops). The picture is taken at ``receive``; the read-back
+after it waits ~4 ms on the GPU copy of each NEW picture (CI 41083008317: 0
+intervals timed), so a picture's acquire window ends at ``receive``, dxcam's
+``AcquireNextFrame`` here, and never at the end of the read.
 """
 
 from __future__ import annotations
@@ -33,6 +36,8 @@ class Sender(Protocol):
 
     size: tuple[int, int]
 
+    def receive(self) -> None: ...
+
     def read(self, region: tuple[int, int, int, int]) -> bytes: ...
 
 
@@ -43,6 +48,11 @@ class NewPictures:
     def __init__(self, sender: Sender) -> None:
         self.sender = sender
         self.last: tuple[tuple[int, int, int, int], bytes] | None = None
+        # dxcam's shape: ``wall_frames.time_acquire`` stamps this call's end.
+        self._duplicator = self
+
+    def update_frame(self) -> None:
+        self.sender.receive()
 
     def grab(self, region: tuple[int, int, int, int] | None = None):
         width, height = self.sender.size
@@ -50,6 +60,7 @@ class NewPictures:
         left, top, right, bottom = box
         if not (0 <= left < right <= width and 0 <= top < bottom <= height):
             raise ValueError(f"region {box} is not inside {width}x{height}")
+        self._duplicator.update_frame()
         data = self.sender.read(box)
         if self.last == (box, data):
             return None
@@ -113,12 +124,14 @@ class GlSender:
         listed = list(self.receiver.getSenderList())
         raise RuntimeError(f"no Spout sender {self.name!r}; listed: {listed}")
 
-    def read(self, region: tuple[int, int, int, int]) -> bytes:
-        gl = self.gl
-        self.receiver.receiveTexture(self.texture, gl.GL_TEXTURE_2D, False, 0)
+    def receive(self) -> None:
+        self.receiver.receiveTexture(self.texture, self.gl.GL_TEXTURE_2D, False, 0)
         if self.receiver.isUpdated():
             size = self.receiver.getSenderWidth(), self.receiver.getSenderHeight()
             raise RuntimeError(f"sender {self.name!r} changed to {size}")
+
+    def read(self, region: tuple[int, int, int, int]) -> bytes:
+        gl = self.gl
         left, top, right, bottom = region
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self.framebuffer)
         return bytes(
