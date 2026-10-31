@@ -48,17 +48,56 @@ pub(crate) const DECODE_QUEUE_BOUND: usize = 12;
 /// matching `timeEndPeriod` is intentionally omitted: the resolution stays
 /// 1 ms either way, the count only grows by one per started thread. winmm
 /// is always present on Windows.
+///
+/// Windows 11 stops honouring the request of a process whose windows are all
+/// invisible, and SongPlayer's window is hidden, so the process opts out of
+/// that first (#285: with DVS's services stopped nothing else kept the timer
+/// fast, and the program played at 0.71 speed on hardware decode).
 pub(crate) fn request_high_res_timer() {
+    #[repr(C)]
+    struct PowerThrottlingState {
+        version: u32,
+        control_mask: u32,
+        state_mask: u32,
+    }
+    const PROCESS_POWER_THROTTLING: i32 = 4;
+    const IGNORE_TIMER_RESOLUTION: u32 = 0x4;
     #[link(name = "winmm")]
     unsafe extern "system" {
         fn timeBeginPeriod(u_period: u32) -> u32;
     }
-    // SAFETY: winmm.timeBeginPeriod is a leaf call with no invariants beyond a
-    // valid period; 1 ms is in range.
-    unsafe {
-        timeBeginPeriod(1);
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetCurrentProcess() -> *mut std::ffi::c_void;
+        fn SetProcessInformation(
+            process: *mut std::ffi::c_void,
+            class: i32,
+            info: *const std::ffi::c_void,
+            size: u32,
+        ) -> i32;
     }
-    info!("requested 1 ms system timer (timeBeginPeriod) for genlock pacing");
+    let state = PowerThrottlingState {
+        version: 1,
+        control_mask: IGNORE_TIMER_RESOLUTION,
+        state_mask: 0,
+    };
+    // SAFETY: the pseudo handle needs no close, and `state` is the struct
+    // this class documents, alive for the call. winmm.timeBeginPeriod is a
+    // leaf call with no invariants beyond a valid period; 1 ms is in range.
+    let honoured = unsafe {
+        let ok = SetProcessInformation(
+            GetCurrentProcess(),
+            PROCESS_POWER_THROTTLING,
+            (&raw const state).cast(),
+            size_of::<PowerThrottlingState>() as u32,
+        );
+        timeBeginPeriod(1);
+        ok != 0
+    };
+    info!(
+        honoured,
+        "requested 1 ms system timer (timeBeginPeriod) for genlock pacing"
+    );
 }
 
 /// Sleep the monotonic clock until ~2 ms before `until_100ns` (wall-clock
