@@ -35,6 +35,11 @@ pub const MAX_OUTPUTS: usize = 16;
 pub const MAX_VBAN_OUTPUTS: usize = 8;
 /// ASIO entries: each owns one driver on its own worker thread.
 pub const MAX_ASIO_OUTPUTS: usize = 4;
+/// Dante entries: one device of SongPlayer's own on the network (#285).
+pub const MAX_DANTE_OUTPUTS: usize = 1;
+/// A Dante device name: Dante's own limit, 1 to 31 letters, digits and
+/// hyphens, no hyphen at either end.
+pub const MAX_DANTE_NAME_LEN: usize = 31;
 /// An ASIO driver's registry description, characters.
 pub const MAX_DRIVER_NAME_LEN: usize = 128;
 /// The highest ASIO output channel an entry names (0-based; shown 1-based).
@@ -52,16 +57,18 @@ pub const DEFAULT_VBAN_PORT: u16 = 6980;
 pub enum OutputType {
     Vban,
     Asio,
+    Dante,
 }
 
 impl OutputType {
     /// The values `type` accepts, for an error text.
-    pub const NAMES: &'static str = "vban or asio";
+    pub const NAMES: &'static str = "vban, asio or dante";
 
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Vban => "vban",
             Self::Asio => "asio",
+            Self::Dante => "dante",
         }
     }
 
@@ -69,6 +76,7 @@ impl OutputType {
         match s {
             "vban" => Some(Self::Vban),
             "asio" => Some(Self::Asio),
+            "dante" => Some(Self::Dante),
             _ => None,
         }
     }
@@ -188,6 +196,15 @@ pub struct AsioDest {
     pub loop_check: bool,
 }
 
+/// A native Dante device (#285): the name it announces and the IPv4 address
+/// of this PC it serves on. Beside DVS that is a second address of the NIC.
+/// Always two TX channels at the network rate.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DanteDest {
+    pub device: String,
+    pub ip: String,
+}
+
 /// `skip_serializing_if` for a flag written only when it is set.
 fn is_false(flag: &bool) -> bool {
     !*flag
@@ -210,6 +227,8 @@ pub struct OutputEntry {
     pub vban: Option<VbanDest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asio: Option<AsioDest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dante: Option<DanteDest>,
 }
 
 impl OutputEntry {
@@ -224,6 +243,7 @@ impl OutputEntry {
             delay_ms: 0,
             vban: Some(dest),
             asio: None,
+            dante: None,
         }
     }
 
@@ -238,6 +258,22 @@ impl OutputEntry {
             delay_ms: 0,
             vban: None,
             asio: Some(dest),
+            dante: None,
+        }
+    }
+
+    /// A Dante entry at the network rate, no delay.
+    pub fn dante(id: &str, name: &str, dest: DanteDest) -> Self {
+        Self {
+            id: id.to_string(),
+            name: name.to_string(),
+            kind: OutputType::Dante,
+            enabled: true,
+            rate: RateChoice::Network,
+            delay_ms: 0,
+            vban: None,
+            asio: None,
+            dante: Some(dest),
         }
     }
 }
@@ -257,6 +293,7 @@ pub enum Problem {
     SameChannel,
     DriverTaken,
     DestinationTaken,
+    BadAddress,
 }
 
 impl Problem {
@@ -269,6 +306,7 @@ impl Problem {
             Self::UnsupportedRate => "must be \"network\" or 44100, 48000, 88200, 96000 or 192000",
             Self::TooLarge => "is over 2000 ms",
             Self::Missing => "is missing",
+            Self::BadAddress => "must be an IPv4 address of this PC",
             Self::BadPort => "must be 1-65535",
             Self::OutOfRange => "must be 0-511",
             Self::SameChannel => "must name two different channels",
@@ -292,6 +330,7 @@ impl Problem {
             }
             Self::TooLarge => "má viac ako 2000 ms",
             Self::Missing => "chýba",
+            Self::BadAddress => "musí byť IPv4 adresa tohto počítača",
             Self::BadPort => "musí byť 1 až 65535",
             // The dashboard shows the channels 1-based.
             Self::OutOfRange => "musí byť 1 až 512",
@@ -465,6 +504,30 @@ fn driver_problem(driver: &str) -> Option<Problem> {
     }
 }
 
+/// Dante's own device name rule (dstack `valid_device_name`).
+fn dante_name_problem(name: &str) -> Option<Problem> {
+    if name.is_empty() {
+        Some(Problem::Empty)
+    } else if name.len() > MAX_DANTE_NAME_LEN {
+        Some(Problem::TooLong)
+    } else if name.starts_with('-')
+        || name.ends_with('-')
+        || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    {
+        Some(Problem::BadCharacters)
+    } else {
+        None
+    }
+}
+
+/// A unicast-looking dotted IPv4 address (never `0.0.0.0`).
+fn dante_ip_problem(ip: &str) -> Option<Problem> {
+    match ip.parse::<std::net::Ipv4Addr>() {
+        Ok(addr) if !addr.is_unspecified() => None,
+        _ => Some(Problem::BadAddress),
+    }
+}
+
 fn channels_problem(channels: [u32; 2]) -> Option<Problem> {
     if channels.iter().any(|&c| c > MAX_ASIO_CHANNEL) {
         Some(Problem::OutOfRange)
@@ -536,6 +599,17 @@ pub fn validate_entry(index: usize, e: &OutputEntry) -> Result<(), EntryError> {
                 return Err(err("asio.channels", p));
             }
         }
+        OutputType::Dante => {
+            let Some(d) = &e.dante else {
+                return Err(err("dante", Problem::Missing));
+            };
+            if let Some(p) = dante_name_problem(&d.device) {
+                return Err(err("dante.device", p));
+            }
+            if let Some(p) = dante_ip_problem(&d.ip) {
+                return Err(err("dante.ip", p));
+            }
+        }
     }
     Ok(())
 }
@@ -544,7 +618,7 @@ pub fn validate_entry(index: usize, e: &OutputEntry) -> Result<(), EntryError> {
 pub fn asio_driver(e: &OutputEntry) -> Option<&str> {
     match e.kind {
         OutputType::Asio => e.asio.as_ref().map(|a| a.driver.as_str()),
-        OutputType::Vban => None,
+        OutputType::Vban | OutputType::Dante => None,
     }
 }
 
@@ -558,7 +632,7 @@ pub fn driver_taken(earlier: &[OutputEntry], e: &OutputEntry) -> bool {
 fn vban_dest(e: &OutputEntry) -> Option<&VbanDest> {
     match e.kind {
         OutputType::Vban => e.vban.as_ref(),
-        OutputType::Asio => None,
+        OutputType::Asio | OutputType::Dante => None,
     }
 }
 
@@ -587,6 +661,7 @@ pub fn max_of_type(kind: OutputType) -> usize {
     match kind {
         OutputType::Vban => MAX_VBAN_OUTPUTS,
         OutputType::Asio => MAX_ASIO_OUTPUTS,
+        OutputType::Dante => MAX_DANTE_OUTPUTS,
     }
 }
 
@@ -601,7 +676,7 @@ pub fn validate_list(entries: &[OutputEntry]) -> Result<(), ListError> {
             count: entries.len(),
         });
     }
-    for kind in [OutputType::Vban, OutputType::Asio] {
+    for kind in [OutputType::Vban, OutputType::Asio, OutputType::Dante] {
         let count = entries.iter().filter(|e| e.kind == kind).count();
         let max = max_of_type(kind);
         if count > max {
