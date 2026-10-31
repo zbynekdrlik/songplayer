@@ -787,8 +787,9 @@ function outputsRefusal(body) {
     const at = `${first} (id ${shownId(e.id)})`;
     if (e.type === undefined) return `${at}: type is missing`;
     if (typeof e.type !== "string") return `${at}: type has the wrong type`;
-    if (e.type !== "vban" && e.type !== "asio") return `${at}: type must be vban or asio`;
-    const block = e.type === "vban" ? vbanBlockRefusal(e.vban, at) : asioBlockRefusal(e.asio, at);
+    if (!["vban", "asio", "dante"].includes(e.type)) return `${at}: type must be vban, asio or dante`;
+    const blocks = { vban: vbanBlockRefusal, asio: asioBlockRefusal, dante: danteBlockRefusal };
+    const block = blocks[e.type](e[e.type], at);
     if (block) return block;
     if (e.name === undefined) return `${at}: name is missing`;
   }
@@ -800,6 +801,7 @@ function outputsRefusal(body) {
   for (const [kind, max] of [
     ["vban", 8],
     ["asio", 4],
+    ["dante", 1],
   ]) {
     const count = list.filter((e) => e.type === kind).length;
     if (count > max) return `audio_outputs has ${count} ${kind} entries (at most ${max})`;
@@ -811,6 +813,10 @@ function outputsRefusal(body) {
     if (e.type === "vban") {
       if (!e.vban.host) return `${at}: vban.host is empty`;
       if (e.vban.port === 0) return `${at}: vban.port must be 1-65535`;
+    } else if (e.type === "dante") {
+      if (!/^\d+\.\d+\.\d+\.\d+$/.test(e.dante.ip)) {
+        return `${at}: dante.ip must be an IPv4 address of this PC`;
+      }
     } else {
       if (!e.asio.driver.trim()) return `${at}: asio.driver is empty`;
       if (e.asio.channels.some((c) => c > 511)) return `${at}: asio.channels must be 0-511`;
@@ -827,6 +833,14 @@ function outputsRefusal(body) {
       drivers.add(e.asio.driver);
     }
   }
+  return null;
+}
+// #285: as `audio_out_config::dante_dest`.
+function danteBlockRefusal(d, at) {
+  if (d === undefined) return `${at}: dante is missing`;
+  if (d === null || typeof d !== "object" || Array.isArray(d)) return `${at}: dante is not a JSON object`;
+  if (typeof d.device !== "string") return `${at}: dante.device is missing`;
+  if (typeof d.ip !== "string") return `${at}: dante.ip is missing`;
   return null;
 }
 function vbanBlockRefusal(v, at) {

@@ -764,6 +764,23 @@ pub fn new_asio(entries: &[OutputEntry], driver: &str) -> OutputEntry {
     )
 }
 
+/// The entry the dashboard's "add Dante" creates: switched off (#285: the
+/// production gate), its address left for the operator (validation refuses
+/// it empty).
+pub fn new_dante(entries: &[OutputEntry]) -> OutputEntry {
+    let id = next_id(entries);
+    let mut entry = OutputEntry::dante(
+        &id,
+        "Dante",
+        DanteDest {
+            device: "SongPlayer".to_string(),
+            ip: String::new(),
+        },
+    );
+    entry.enabled = false;
+    entry
+}
+
 /// The stored (0-based) ASIO channel of the dashboard's 1-based `shown`
 /// one. A shown 0 is no channel: it wraps to `u32::MAX`, which validation
 /// refuses ("musí byť 1 až 512"), and [`asio_channel_shown`] shows it as 0

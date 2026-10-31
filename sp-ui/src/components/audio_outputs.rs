@@ -61,7 +61,7 @@ use sp_core::asio_resampling::{
 use sp_core::audio_outputs::{
     OutputEntry, OutputType, RateChoice, SUPPORTED_RATES, VbanDest, VbanSampleFormat,
     asio_add_refusal, asio_channel_index, asio_channel_shown, asio_driver_options,
-    asio_waiting_text, new_asio, new_vban, validate_list,
+    asio_waiting_text, new_asio, new_dante, new_vban, validate_list,
 };
 use sp_core::audio_outputs_save::{
     NOT_CHECKED, SAVED, first_unreadable, latency_sk, parse_whole, rate_to_send, remove_one,
@@ -438,6 +438,16 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
         });
     };
 
+    let add_dante = move |_: leptos::ev::MouseEvent| {
+        let saved =
+            stored.with_untracked(|(list, _)| stored_list(list.as_deref()).unwrap_or_default());
+        entries.update(|l| {
+            let known: Vec<OutputEntry> = l.iter().cloned().chain(saved).collect();
+            let fresh = new_dante(&known);
+            l.push(fresh);
+        });
+    };
+
     let on_save = move |_: leptos::ev::MouseEvent| {
         // Never save before the load landed, nor over a stored list this
         // dashboard cannot read (its rows were reset to none).
@@ -575,6 +585,16 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                 </button>
                 <button
                     type="button"
+                    data-testid="audio-outputs-add-dante"
+                    prop:disabled=move || {
+                        entries.with(|l| l.iter().any(|e| e.kind == OutputType::Dante))
+                    }
+                    on:click=add_dante
+                >
+                    "Pridať výstup Dante"
+                </button>
+                <button
+                    type="button"
                     data-testid="audio-outputs-save"
                     prop:disabled=move || loaded.get() != Some(true) || load_error.get().is_some()
                     on:click=on_save
@@ -605,7 +625,11 @@ fn OutputRow(
     view! {
         <div class="audio-output-row" data-testid="audio-output-row" data-id=row_id>
             <span class="audio-output-type" data-testid="audio-output-type">
-                {move || if kind.get() == Some(OutputType::Asio) { "ASIO" } else { "VBAN" }}
+                {move || match kind.get() {
+                    Some(OutputType::Asio) => "ASIO",
+                    Some(OutputType::Dante) => "Dante",
+                    _ => "VBAN",
+                }}
             </span>
             <label>
                 "Názov"
@@ -659,6 +683,9 @@ fn OutputRow(
             <Show when=move || kind.get() == Some(OutputType::Vban)>
                 <VbanFields id=id entries=entries />
             </Show>
+            <Show when=move || kind.get() == Some(OutputType::Dante)>
+                <DanteFields id=id entries=entries />
+            </Show>
             <LiveState id=id live=live saved_ids=saved_ids />
             <button
                 type="button"
@@ -682,6 +709,57 @@ fn OutputRow(
 /// An ASIO row's own fields: the rate (the driver's), the driver (a stored
 /// one the box does not list stays, marked once the list is known), the
 /// two channels shown 1-based.
+#[component]
+fn DanteFields(id: StoredValue<String>, entries: RwSignal<Vec<OutputEntry>>) -> impl IntoView {
+    view! {
+        <span class="audio-output-asio-rate" data-testid="audio-output-dante-rate">
+            "Frekvencia: podľa siete, 2 kanály"
+        </span>
+        <label>
+            "Názov zariadenia"
+            <input
+                type="text"
+                autocomplete="off"
+                data-testid="audio-output-dante-device"
+                prop:value=move || {
+                    read(entries, &id.get_value(), |e| {
+                        e.dante.as_ref().map(|d| d.device.clone()).unwrap_or_default()
+                    })
+                }
+                on:input=move |ev| {
+                    let v = event_target_value(&ev);
+                    edit(entries, &id.get_value(), |e| {
+                        if let Some(d) = e.dante.as_mut() {
+                            d.device = v;
+                        }
+                    });
+                }
+            />
+        </label>
+        <label>
+            "IP adresa tohto PC"
+            <input
+                type="text"
+                autocomplete="off"
+                data-testid="audio-output-dante-ip"
+                prop:value=move || {
+                    read(entries, &id.get_value(), |e| {
+                        e.dante.as_ref().map(|d| d.ip.clone()).unwrap_or_default()
+                    })
+                }
+                on:input=move |ev| {
+                    let v = event_target_value(&ev);
+                    edit(entries, &id.get_value(), |e| {
+                        if let Some(d) = e.dante.as_mut() {
+                            d.ip = v;
+                        }
+                    });
+                }
+            />
+        </label>
+    }
+}
+
 #[component]
 fn AsioFields(
     id: StoredValue<String>,

@@ -995,3 +995,12 @@ fn the_list_holds_one_dante_device() {
         })
     );
 }
+
+#[test]
+fn a_new_dante_entry_starts_switched_off_with_no_address() {
+    let e = new_dante(&[]);
+    assert_eq!(e.id, "out-1");
+    assert!(!e.enabled, "the production gate (#285)");
+    assert_eq!(e.dante.as_ref().unwrap().device, "SongPlayer");
+    assert_eq!(field_problem(&e), ("dante.ip", Problem::BadAddress));
+}
