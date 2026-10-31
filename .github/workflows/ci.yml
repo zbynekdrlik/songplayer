@@ -2630,8 +2630,8 @@ jobs:
           # columns (a full 7680x1080 read is too slow to time each
           # refresh), so a change of Arena's wall mapping needs no new rows.
           # #233 lane 3: how many enabled ASIO outputs the box must run
-          # (e2e/post-deploy-audio-asio.spec.ts). SNV runs one since
-          # 8.10.2026: "DVS (Dante)", Dante Virtual Soundcard TX 1/2.
+          # (e2e/post-deploy-audio-asio.spec.ts). SNV runs one: since
+          # 31.10.2026 the native Dante output, on the same worker and gates.
           SP_ASIO_OUTPUTS_EXPECTED: "1"
         run: |
           # Runs the committed e2e/post-deploy*.spec.ts against the

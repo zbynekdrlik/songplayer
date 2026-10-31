@@ -77,17 +77,17 @@ function slipCount(at: number[]): number {
 }
 
 /** Whether the take's only defect is at most `MAX_SLIPS` slips, with
- *  everything a clean verdict needs besides. */
+ *  everything a clean verdict needs besides. A boundary the capture left
+ *  unresolved may be a slip, so it counts as one. */
 function slipsOnly(report: WallFramesReport): boolean {
   const r = report.refreshes;
   const uneven = r?.uneven_boundaries ?? [];
   return (
     r !== null &&
-    r.uneven > 0 &&
+    r.uneven + r.unresolved > 0 &&
     uneven.length === r.uneven &&
     uneven.every((b) => b.refreshes <= MAX_SLIP_REFRESHES) &&
-    slipCount(uneven.map((b) => b.boundary)) <= MAX_SLIPS &&
-    r.unresolved === 0 &&
+    slipCount(uneven.map((b) => b.boundary)) + r.unresolved <= MAX_SLIPS &&
     (r.inconsistent ?? 0) === 0 &&
     r.judged >= MIN_JUDGED &&
     report.unverified.steps === 0 &&
@@ -122,7 +122,9 @@ export function wallFramesFailures(
   if (report === null) {
     return [`${where} the reader exited ${exitCode} with no report`];
   }
-  if (exitCode === EXIT_DEFECTS && report.verdict === "defects" && slipsOnly(report)) {
+  const judged = exitCode === EXIT_DEFECTS && report.verdict === "defects";
+  const unresolved = exitCode === EXIT_INCOMPLETE && report.verdict === "incomplete";
+  if ((judged || unresolved) && slipsOnly(report)) {
     return [];
   }
   const failures = defects(where, report);

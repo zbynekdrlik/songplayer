@@ -77,13 +77,19 @@ export const LATENCY_OVER_DELAY_MS = 1000;
  */
 export function gatedAsioOutputs(list: OutputStatus[]): OutputStatus[] {
   const waiting = waitingForClock(list);
-  return list.filter((o) => o.type === "asio" && o.enabled && !waiting.includes(o));
+  return list.filter((o) => onDriverWorker(o) && o.enabled && !waiting.includes(o));
+}
+
+/** The outputs on the ASIO worker: a native Dante output runs on it too
+ *  (#285) and reports the same `asio` status, so the same gates judge it. */
+function onDriverWorker(o: OutputStatus): boolean {
+  return o.type === "asio" || o.type === "dante";
 }
 
 /** The enabled ASIO outputs waiting for their driver's clock (`no_clock`). */
 export function waitingForClock(list: OutputStatus[]): OutputStatus[] {
   return list.filter(
-    (o) => o.type === "asio" && o.enabled && o.state === "waiting" && o.asio?.reason_code === "no_clock",
+    (o) => onDriverWorker(o) && o.enabled && o.state === "waiting" && o.asio?.reason_code === "no_clock",
   );
 }
 

@@ -532,7 +532,8 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
     one picture a refresh long and the next a refresh short, everything a
     clean verdict needs besides (`slipsOnly`). A run of neighbouring uneven
     boundaries counts one slip per two, rounded up, so a lone one is a slip
-    (`slipCount`), and a boundary held over 3 refreshes is a stall, never a
+    (`slipCount`), an unresolved boundary counts as a slip, and a boundary
+    held over 3 refreshes is a stall, never a
     slip (`MAX_SLIP_REFRESHES`, `uneven_boundaries`: a 15 s freeze reads 1
     uneven boundary, no loss). CI takes read 0-5, off-CI takes 0-1. Their cause is not
     proven, and whether a slip shows on the wall is not verified.

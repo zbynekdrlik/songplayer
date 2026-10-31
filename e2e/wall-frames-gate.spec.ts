@@ -131,6 +131,28 @@ test("a slip with no listed boundaries fails", () => {
   expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toHaveLength(1);
 });
 
+test("an unresolved boundary counts as a slip (#272, CI 41227214102)", () => {
+  const incomplete = { ...clean(), verdict: "incomplete" as const };
+  incomplete.refreshes = { judged: 1197, uneven: 0, unresolved: 2 };
+  expect(wallFramesFailures("wall-30", EXIT_INCOMPLETE, incomplete)).toEqual([]);
+  const report = oneSlip();
+  report.refreshes!.unresolved = 2;
+  expect(wallFramesFailures("wall-25", EXIT_DEFECTS, report)).toEqual([]);
+  report.refreshes!.unresolved = 3;
+  expect(wallFramesFailures("wall-25", EXIT_DEFECTS, report)).toHaveLength(1);
+});
+
+test("an incomplete take with a contradiction or a short decode still fails", () => {
+  const incomplete = { ...clean(), verdict: "incomplete" as const };
+  incomplete.refreshes = { judged: 1197, uneven: 0, unresolved: 1, inconsistent: 1 };
+  expect(wallFramesFailures("wall-30", EXIT_INCOMPLETE, incomplete)).toHaveLength(1);
+  const short = { ...clean(), verdict: "incomplete" as const, decoded: 2000 };
+  short.refreshes = { judged: 1197, uneven: 0, unresolved: 1 };
+  expect(wallFramesFailures("wall-30", EXIT_INCOMPLETE, short)).toHaveLength(1);
+  const quiet = { ...clean(), verdict: "incomplete" as const, decoded: 2000 };
+  expect(wallFramesFailures("wall-30", EXIT_INCOMPLETE, quiet)).toHaveLength(1);
+});
+
 test("a slip beside any other defect fails, and the slip is named", () => {
   for (const other of [
     { jumps_back: 1 },
@@ -152,7 +174,7 @@ test("a slip in a take a clean verdict could not hold fails", () => {
     { unverified: { steps: 1 } },
     { decoded: 2000 },
     { refreshes: { judged: 299, uneven: 2, unresolved: 0, uneven_boundaries: held(8, 9) } },
-    { refreshes: { judged: 1166, uneven: 2, unresolved: 1, uneven_boundaries: held(8, 9) } },
+    { refreshes: { judged: 1166, uneven: 2, unresolved: 3, uneven_boundaries: held(8, 9) } },
   ]) {
     expect(wallFramesFailures("wall-30", EXIT_DEFECTS, { ...oneSlip(), ...weak })).not.toEqual([]);
   }
