@@ -1070,3 +1070,46 @@ test("a Dante output: starts off, needs its address, saves and reloads as saved 
   await expect(page.locator('[data-testid="audio-output-dante-ip"]')).toHaveValue("10.77.9.210");
   expect(realConsoleErrors()).toEqual([]);
 });
+
+const DANTE_ENTRY = JSON.stringify([
+  { id: "out-1", name: "Dante", type: "dante", dante: { device: "SongPlayer", ip: "10.77.9.210" } },
+]);
+
+test("a running Dante output reads as Dante, with the stack's figures (#285)", async ({
+  page,
+  request,
+}) => {
+  const seeded = await request.patch("/api/v1/settings", {
+    data: { audio_outputs: DANTE_ENTRY, audio_network_rate: "96000" },
+  });
+  expect(seeded.status()).toBe(204);
+  await openSettings(page);
+  for (const [key, text] of [
+    ["dante-clock", "hodiny Dante v poriadku"],
+    ["dante-flows", "prúdy 1"],
+    ["dante-late", "paket neskoro max +0,4 ms · odoslanie max +0,1 ms"],
+    ["asio-card", "sieť Dante +0,4 ppm voči SongPlayeru (odhad zamknutý)"],
+  ]) {
+    await expect(chip(page, key)).toHaveText(text, { timeout: 10000 });
+  }
+  const row = page.locator('[data-testid="audio-output-row"]').first();
+  await expect(row).not.toContainText("karta");
+  await expect(row).not.toContainText("ovládač");
+  await expect(chip(page, "asio-card")).not.toHaveAttribute("title", /kart/);
+});
+
+test("a waiting Dante output says why, in Dante's words (#285)", async ({ page, request }) => {
+  const seeded = await request.patch("/api/v1/settings", {
+    data: { audio_outputs: DANTE_ENTRY },
+  });
+  expect(seeded.status()).toBe(204);
+  const held = await request.post("/__mock/asio-state", {
+    data: { id: "out-1", reason_code: "failed", reason: "the address is taken", retry_in_s: 10 },
+  });
+  expect(held.ok()).toBe(true);
+  await openSettings(page);
+  await expect(page.locator('[data-testid="audio-output-state"]')).toContainText(
+    "chyba zariadenia Dante · ďalší pokus o 10 s",
+    { timeout: 10000 },
+  );
+});

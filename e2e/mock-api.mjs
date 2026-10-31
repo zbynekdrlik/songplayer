@@ -2315,11 +2315,29 @@ function mockAsioOutput(e, network) {
       : {}),
   };
 }
+// #285: a Dante entry as the server lists it: the ASIO worker's line, its
+// `type`, and the stack's figures while it runs.
+function mockDanteOutput(e, network) {
+  const line = mockAsioOutput({ ...e, asio: { driver: e.dante.device, channels: [0, 1] } }, network);
+  const dante = {
+    clock_ready: true,
+    live_flows: 1,
+    late_bins: [900, 12, 0, 0, 0, 0],
+    late_max_us: 420,
+    send_max_us: 60,
+    pump_late: 0,
+    pump_missed: 0,
+    pump_overruns: 0,
+  };
+  return { ...line, type: "dante", ...(line.state === "running" ? { dante } : {}) };
+}
+
 function mockOutputs() {
   const list = mockStoredOutputs().filter((e) => !outputsSkipped.has(e.id));
   const network = Number(settings.audio_network_rate || 48000);
   return list.map((e) => {
     if (e.type === "asio") return mockAsioOutput(e, network);
+    if (e.type === "dante") return mockDanteOutput(e, network);
     const rate = e.rate === "network" || e.rate === undefined ? network : Number(e.rate);
     const enabled = e.enabled !== false;
     const held = enabled ? vbanHeld.get(e.id) : undefined;

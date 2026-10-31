@@ -55,9 +55,7 @@ use std::collections::HashMap;
 
 use leptos::prelude::*;
 use serde::Deserialize;
-use sp_core::asio_resampling::{
-    AsioFigures, Chip, LastFault, asio_resampling_chips, asio_state_chips,
-};
+use sp_core::asio_resampling::{AsioFigures, Chip, LastFault, asio_state_chips};
 use sp_core::audio_outputs::{
     OutputEntry, OutputType, RateChoice, SUPPORTED_RATES, VbanDest, VbanSampleFormat,
     asio_add_refusal, asio_channel_index, asio_channel_shown, asio_driver_options,
@@ -68,11 +66,12 @@ use sp_core::audio_outputs_save::{
     save_refusal, shown_message, vban_waiting_text,
 };
 use sp_core::config::{SETTING_AUDIO_NETWORK_RATE, SETTING_AUDIO_OUTPUTS, audio_network_rate};
+use sp_core::dante_status::{DanteFigures, dante_state_chips, dante_waiting_text};
 
 #[path = "audio_outputs_dante.rs"]
 mod dante_fields;
 
-use dante_fields::DanteFields;
+use dante_fields::{DanteFields, resampling_line};
 
 use crate::api;
 use crate::store::DashboardStore;
@@ -81,6 +80,8 @@ use crate::store::DashboardStore;
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 pub struct OutputLive {
     pub id: String,
+    #[serde(rename = "type", default)]
+    pub kind: String,
     pub state: String,
     #[serde(default)]
     pub reason: Option<String>,
@@ -96,6 +97,9 @@ pub struct OutputLive {
     pub note: Option<String>,
     #[serde(default)]
     pub asio: Option<AsioLive>,
+    /// #285: the stack's figures while a Dante device runs.
+    #[serde(default)]
+    pub dante: Option<DanteFigures>,
 }
 
 /// An ASIO output's live numbers (`outputs[i].asio`, the fields shown).
@@ -180,9 +184,14 @@ fn running_asio(live: &ProgramOutputs, id: &str) -> Option<AsioFigures> {
 /// A row's state line as chips: a running ASIO output's figures (each with
 /// its tooltip), else the one state text (the row's tooltip shows through).
 fn state_chips(live: &ProgramOutputs, id: &str, saved: bool) -> Vec<Chip> {
-    match running_asio(live, id) {
-        Some(f) => asio_state_chips(state_sk("running"), &f),
-        None => vec![Chip {
+    let dante = live
+        .outputs
+        .iter()
+        .find(|o| o.id == id && o.kind == "dante");
+    match (running_asio(live, id), dante) {
+        (Some(f), Some(o)) => dante_state_chips(state_sk("running"), &f, o.dante.as_ref()),
+        (Some(f), None) => asio_state_chips(state_sk("running"), &f),
+        (None, _) => vec![Chip {
             key: "audio-output-state-text",
             text: live_text(live, id, saved),
             title: None,
@@ -283,6 +292,9 @@ fn output_text(o: &OutputLive) -> String {
     match (&o.asio, o.state.as_str()) {
         (Some(_), "running") => state.to_string(),
         (None, "running") => format!("{state} · {}", latency_sk(o.latency_ms)),
+        (Some(a), _) if o.kind == "dante" => {
+            dante_waiting_text(state, a.reason_code.as_deref(), a.retry_in_s)
+        }
         (Some(a), _) => asio_waiting_text(state, a.reason_code.as_deref(), a.retry_in_s),
         (None, _) => vban_waiting_text(state, o.reason_code.as_deref()),
     }
@@ -974,8 +986,7 @@ fn LiveState(
         // line (empty otherwise).
         <div class="audio-output-resampling" data-testid="audio-output-resampling">
             {move || {
-                let figures = running_asio(&live.get(), &id.get_value());
-                chips_view(figures.map(|f| asio_resampling_chips(&f)).unwrap_or_default())
+                chips_view(resampling_line(&live.get(), &id.get_value()))
             }}
         </div>
     }
