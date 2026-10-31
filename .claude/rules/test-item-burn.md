@@ -532,7 +532,9 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
     one picture a refresh long and the next a refresh short, everything a
     clean verdict needs besides (`slipsOnly`). A run of neighbouring uneven
     boundaries counts one slip per two, rounded up, so a lone one is a slip
-    (`slipCount`). CI takes read 0-3, off-CI takes 0-1. Their cause is not
+    (`slipCount`), and a boundary held over 3 refreshes is a stall, never a
+    slip (`MAX_SLIP_REFRESHES`, `uneven_boundaries`: a 15 s freeze reads 1
+    uneven boundary, no loss). CI takes read 0-5, off-CI takes 0-1. Their cause is not
     proven, and whether a slip shows on the wall is not verified.
   - `defects` names every counter: judder (`refreshes.uneven` of `judged`),
     jumps back, lost frames and boundaries, cadence, weights, frozen.

@@ -33,8 +33,11 @@ export interface WallFramesReport {
     unresolved: number;
     /** Boundaries whose timing contradicts itself: the capture's fault. */
     inconsistent?: number;
-    /** The uneven boundaries' numbers; absent = none listed. */
+    /** The capture samples the uneven boundaries start at. */
     uneven_samples?: number[];
+    /** Each uneven boundary's number and the fewest refreshes it surely
+     *  held; absent = none listed. */
+    uneven_boundaries?: { boundary: number; refreshes: number }[];
   } | null;
   unverified: { steps: number };
   /** #272 v2: the copies of the clip's strip the reader found, their cell
@@ -54,6 +57,9 @@ const MIN_COVERAGE = 0.95;
 const MIN_JUDGED = 300;
 /** The slips a take may hold (the owner, #272, 31.10.2026). */
 const MAX_SLIPS = 3;
+/** A slip holds a picture one refresh long on a 60 Hz wall: 3. More is a
+ *  stall, which never passes as a slip. */
+const MAX_SLIP_REFRESHES = 3;
 
 /** The slips the uneven boundaries make: two neighbours are one, one picture
  *  long and the next short; a lone boundary is one too, so a run counts one
@@ -74,12 +80,13 @@ function slipCount(at: number[]): number {
  *  everything a clean verdict needs besides. */
 function slipsOnly(report: WallFramesReport): boolean {
   const r = report.refreshes;
-  const at = r?.uneven_samples ?? [];
+  const uneven = r?.uneven_boundaries ?? [];
   return (
     r !== null &&
     r.uneven > 0 &&
-    at.length === r.uneven &&
-    slipCount(at) <= MAX_SLIPS &&
+    uneven.length === r.uneven &&
+    uneven.every((b) => b.refreshes <= MAX_SLIP_REFRESHES) &&
+    slipCount(uneven.map((b) => b.boundary)) <= MAX_SLIPS &&
     r.unresolved === 0 &&
     (r.inconsistent ?? 0) === 0 &&
     r.judged >= MIN_JUDGED &&
