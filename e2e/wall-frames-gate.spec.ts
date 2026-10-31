@@ -71,13 +71,40 @@ test("two uneven boundaries that are not neighbours fail", () => {
   ]);
 });
 
-test("two slips fail", () => {
+test("three slips per take pass (owner, #272, 31.10.2026)", () => {
+  const report = oneSlip();
+  report.refreshes!.uneven = 6;
+  report.refreshes!.uneven_samples = [8, 9, 708, 709, 900, 901];
+  expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toEqual([]);
+});
+
+test("four slips fail", () => {
+  const report = oneSlip();
+  report.refreshes!.uneven = 8;
+  report.refreshes!.uneven_samples = [8, 9, 708, 709, 900, 901, 1000, 1001];
+  expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toEqual([
+    "wall-30: JUDDER: 8 of 1166 judged boundaries were held the wrong number of refreshes",
+  ]);
+});
+
+test("an odd count of uneven boundaries fails", () => {
+  const report = oneSlip();
+  report.refreshes!.uneven = 3;
+  report.refreshes!.uneven_samples = [708, 709, 710];
+  expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toHaveLength(1);
+});
+
+test("slips whose later pair is not neighbours fail", () => {
   const report = oneSlip();
   report.refreshes!.uneven = 4;
-  report.refreshes!.uneven_samples = [708, 709, 900, 901];
-  expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toEqual([
-    "wall-30: JUDDER: 4 of 1166 judged boundaries were held the wrong number of refreshes",
-  ]);
+  report.refreshes!.uneven_samples = [708, 709, 900, 902];
+  expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toHaveLength(1);
+});
+
+test("fewer listed boundaries than uneven ones fail", () => {
+  const report = oneSlip();
+  report.refreshes!.uneven = 4;
+  expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toHaveLength(1);
 });
 
 test("a slip with no listed boundaries fails", () => {

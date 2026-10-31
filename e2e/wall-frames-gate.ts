@@ -8,10 +8,10 @@
  * refreshes (judder), blended at the wrong weight, frozen. This module
  * turns its exit code and JSON report into the gate's failures. A gate
  * never passes without positive evidence: only exit 0 with the verdict
- * `clean` passes, or a take whose ONE defect is a single slip (the owner,
- * #272, 30.10.2026: at most one per 40 s take; one picture held a refresh
- * long, the next a refresh short). An incomplete or failed capture fails
- * too, named as what it is, never as judder.
+ * `clean` passes, or a take whose ONE defect is slips (the owner, #272,
+ * 31.10.2026: at most `MAX_SLIPS` per 40 s take; a slip is one picture held a
+ * refresh long, the next a refresh short). An incomplete or failed capture
+ * fails too, named as what it is, never as judder.
  */
 
 /** The reader's report fields the gate reads (`wall_analysis.analyse`). */
@@ -52,17 +52,27 @@ export const EXIT_CAPTURE_FAILED = 5;
 /** The reader's own floors for a clean take (`MIN_COVERAGE`, `MIN_BOUNDARIES`). */
 const MIN_COVERAGE = 0.95;
 const MIN_JUDGED = 300;
+/** The slips a take may hold (the owner, #272, 31.10.2026). */
+const MAX_SLIPS = 3;
 
-/** Whether the take's only defect is one slip: exactly two neighbouring
- *  uneven boundaries, and everything a clean verdict needs besides. */
-function oneSlipOnly(report: WallFramesReport): boolean {
+/** Whether the uneven boundaries pair up into neighbours, one pair a slip. */
+function pairedAsSlips(at: number[]): boolean {
+  return at.every((n, i) => i % 2 === 0 || n === at[i - 1] + 1);
+}
+
+/** Whether the take's only defect is slips: at most `MAX_SLIPS` pairs of
+ *  neighbouring uneven boundaries, and everything a clean verdict needs
+ *  besides. */
+function slipsOnly(report: WallFramesReport): boolean {
   const r = report.refreshes;
   const at = r?.uneven_samples ?? [];
   return (
     r !== null &&
-    r.uneven === 2 &&
-    at.length === 2 &&
-    at[1] === at[0] + 1 &&
+    r.uneven > 0 &&
+    r.uneven % 2 === 0 &&
+    r.uneven <= 2 * MAX_SLIPS &&
+    at.length === r.uneven &&
+    pairedAsSlips(at) &&
     r.unresolved === 0 &&
     (r.inconsistent ?? 0) === 0 &&
     r.judged >= MIN_JUDGED &&
@@ -98,7 +108,7 @@ export function wallFramesFailures(
   if (report === null) {
     return [`${where} the reader exited ${exitCode} with no report`];
   }
-  if (exitCode === EXIT_DEFECTS && report.verdict === "defects" && oneSlipOnly(report)) {
+  if (exitCode === EXIT_DEFECTS && report.verdict === "defects" && slipsOnly(report)) {
     return [];
   }
   const failures = defects(where, report);
