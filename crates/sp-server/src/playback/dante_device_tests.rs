@@ -369,3 +369,12 @@ fn a_program_block_reaches_the_wire_through_the_asio_worker() {
     worker.join().unwrap();
     assert!(heard, "the program on the wire: {:?}", out.snapshot());
 }
+
+/// A receiver subscribed to `01@resolume-snv` finds the device under DVS's
+/// channel names, so DVS is replaced with no change on any receiver.
+#[test]
+fn the_channels_carry_dvs_s_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let text = params(dir.path(), Ipv4Addr::LOCALHOST).config_text();
+    assert!(text.contains("tx = [\"01\", \"02\"]"), "{text}");
+}
