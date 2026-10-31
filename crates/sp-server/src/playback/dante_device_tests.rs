@@ -136,6 +136,70 @@ fn a_vban_entry_is_no_dante_device() {
 }
 
 #[test]
+fn the_stacks_status_line_reads_as_the_figures() {
+    let line = r#"{"clock":{"ready":1,"epoch":1},"tx":[
+        {"flow":1,"live":1,"late_bins":[5,1,0,0,0,0],"late_max_us":300,"send_max_us":20},
+        {"flow":2,"live":0,"late_bins":[1,1,1,0,0,2],"late_max_us":7000,"send_max_us":10}
+        ],"engine":{"late":1,"missed":2,"overruns":3}}"#;
+    let f = figures_of(line).unwrap();
+    assert!(f.clock_ready);
+    assert_eq!(f.live_flows, 1);
+    assert_eq!(f.late_bins, [6, 2, 1, 0, 0, 2]);
+    assert_eq!((f.late_max_us, f.send_max_us), (7000, 20));
+    assert_eq!((f.pump_late, f.pump_missed, f.pump_overruns), (1, 2, 3));
+    assert_eq!(
+        figures_of(r#"{"clock":{"ready":0}}"#).unwrap().live_flows,
+        0
+    );
+    assert_eq!(figures_of("error: nothing"), None);
+}
+
+#[test]
+fn the_link_reads_the_running_stack_and_nothing_after_the_close() {
+    let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let link = DanteLink::default();
+    assert_eq!(link.figures(), None);
+    let mut device = DanteDevice::linked(params(dir.path(), routed_ipv4()), link.clone());
+    device.open("", [0, 1]).unwrap();
+    assert_eq!(link.figures(), None, "not started yet");
+    let (_tx, rx) = rtrb::RingBuffer::new(1024);
+    device.start(rx).unwrap();
+    let figures = link.figures().expect("the running stack answers");
+    assert!(figures.clock_ready, "the system clock is ready at once");
+    assert_eq!(figures.live_flows, 0);
+    device.close();
+    assert_eq!(link.figures(), None);
+}
+
+#[test]
+fn an_output_with_no_device_running_shows_no_dante_figures() {
+    use crate::playback::audio_out::{OutputSink, RunningOutput};
+    let entry = OutputEntry::dante(
+        "out-1",
+        "Dante",
+        DanteDest {
+            device: "SongPlayer".into(),
+            ip: "10.0.0.5".into(),
+        },
+    );
+    let out = RunningOutput {
+        built_rate: 96_000,
+        sink: Some(OutputSink::Dante(
+            Arc::new(AsioOut::for_dante(&entry).unwrap()),
+            DanteParams::for_entry(&entry, 96_000).unwrap(),
+            DanteLink::default(),
+        )),
+        error: None,
+        entry,
+    };
+    let status = out.status(96_000);
+    assert_eq!((status.kind, status.dante), ("dante", None));
+    let json = serde_json::to_string(&out.status(96_000)).unwrap();
+    assert!(!json.contains("\"dante\":"), "{json}");
+}
+
+#[test]
 fn a_taken_address_fails_the_open_and_names_no_panic() {
     let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();

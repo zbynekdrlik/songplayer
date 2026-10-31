@@ -16,16 +16,20 @@
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 use dante_audio_io::{Block, Process};
+use dante_stack::ctl;
+use dante_stack::daemon::media::Media;
 use dante_stack::daemon::{Options, Place};
 use dante_stack::host::{self, ClockSource, Host, HostError, Prepared, Signals};
 use dante_stack::media::source::Source;
 use dante_stack::stream::{self, Map, Pump, PumpStats, Timing};
+use serde::Deserialize;
 use sp_core::audio_outputs::{DanteDest, OutputEntry, effective_rate};
+use sp_core::dante_status::DanteFigures;
 use tracing::{info, warn};
 
 use crate::playback::asio_format::AsioSample;
@@ -97,6 +101,83 @@ impl DanteParams {
              work_margin = {DANTE_WORK_MARGIN}\nstate_file = \"{state}\"\n",
             self.device, self.rate
         )
+    }
+}
+
+/// The fields of the stack's status line that `outputs[i].dante` shows (its
+/// flags are 0 or 1).
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct StatusLine {
+    clock: ClockLine,
+    tx: Vec<FlowLine>,
+    engine: EngineLine,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct ClockLine {
+    ready: u8,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct FlowLine {
+    live: u8,
+    late_bins: Vec<u64>,
+    late_max_us: u64,
+    send_max_us: u64,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct EngineLine {
+    late: u64,
+    missed: u64,
+    overruns: u64,
+}
+
+/// The stack's status line (`ctl::answer("status", ..)`) as the dashboard's
+/// figures: its TX flows' bins summed, their maxima taken, a flow that ended
+/// included. `None` for a line that does not read.
+pub fn figures_of(line: &str) -> Option<DanteFigures> {
+    let line: StatusLine = serde_json::from_str(line).ok()?;
+    let mut f = DanteFigures {
+        clock_ready: line.clock.ready != 0,
+        pump_late: line.engine.late,
+        pump_missed: line.engine.missed,
+        pump_overruns: line.engine.overruns,
+        ..DanteFigures::default()
+    };
+    for flow in &line.tx {
+        f.live_flows += u32::from(flow.live != 0);
+        f.late_max_us = f.late_max_us.max(flow.late_max_us);
+        f.send_max_us = f.send_max_us.max(flow.send_max_us);
+        if f.late_bins.len() < flow.late_bins.len() {
+            f.late_bins.resize(flow.late_bins.len(), 0);
+        }
+        for (sum, n) in f.late_bins.iter_mut().zip(&flow.late_bins) {
+            *sum += n;
+        }
+    }
+    Some(f)
+}
+
+/// The running device's media, for the status: the worker sets it at the
+/// start and clears it at the close, `GET /api/v1/program` reads it. Nothing
+/// on the audio path takes this lock.
+#[derive(Clone, Default)]
+pub struct DanteLink(Arc<Mutex<Option<Arc<Media>>>>);
+
+impl DanteLink {
+    fn set(&self, media: Option<Arc<Media>>) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = media;
+    }
+
+    /// The stack's figures now; `None` while no device runs.
+    pub fn figures(&self) -> Option<DanteFigures> {
+        let media = self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()?;
+        figures_of(&ctl::answer("status", &media))
     }
 }
 
@@ -179,15 +260,22 @@ pub struct DanteDevice {
     prepared: Option<Prepared>,
     running: Option<Running>,
     counts: Arc<Counts>,
+    link: DanteLink,
 }
 
 impl DanteDevice {
     pub fn new(params: DanteParams) -> Self {
+        Self::linked(params, DanteLink::default())
+    }
+
+    /// A device whose status reads through `link`.
+    pub fn linked(params: DanteParams, link: DanteLink) -> Self {
         Self {
             params,
             prepared: None,
             running: None,
             counts: Arc::default(),
+            link,
         }
     }
 
@@ -264,6 +352,7 @@ impl AsioDevice for DanteDevice {
             }
         };
         info!(rate = self.params.rate, "dante output: device announced");
+        self.link.set(Some(media));
         self.running = Some(Running {
             host,
             pump: thread,
@@ -314,6 +403,7 @@ impl AsioDevice for DanteDevice {
     }
 
     fn close(&mut self) {
+        self.link.set(None);
         self.prepared = None;
         if let Some(run) = self.running.take() {
             run.stop.store(true, Ordering::Release);

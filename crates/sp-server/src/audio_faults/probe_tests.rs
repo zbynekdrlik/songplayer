@@ -129,6 +129,7 @@ fn output(id: &str, enabled: bool, sent: u64, dropped: u64) -> OutputStatus {
         vban: None,
         note: None,
         asio: None,
+        dante: None,
     }
 }
 

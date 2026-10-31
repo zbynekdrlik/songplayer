@@ -15,6 +15,7 @@ pub mod background_hold; // #230: a sp-90s press holds the background work 4 h /
 pub mod blend;
 pub mod clock_health;
 pub mod config;
+pub mod dante_status; // #285: a running Dante output's chips and reasons
 pub mod data_size; // #261: the data dir's size on the status, Nastavenia's line
 pub mod fit;
 pub mod genlock;

@@ -34,7 +34,7 @@ use crate::playback::asio_out::{AsioOut, run_asio_worker};
 use crate::playback::audio_out::{AudioOutputs, OutputSink, OutputStatus, RunningOutput};
 use crate::playback::audio_out_config::{OutputsSettings, load};
 use crate::playback::audio_out_migrate::{MigrationOutcome, migrate_vban_settings};
-use crate::playback::dante_device::{DanteDevice, DanteParams};
+use crate::playback::dante_device::{DanteDevice, DanteLink, DanteParams};
 use crate::playback::vban_out::{VbanConfig, VbanOut, needs_resolve, resolve_dest};
 
 /// How often the list is re-read (#210's VBAN settings poll).
@@ -190,7 +190,7 @@ async fn build(
             DanteParams::for_entry(entry, network_rate),
         ) {
             (Ok(out), Ok(params)) => {
-                let sink = OutputSink::Dante(Arc::new(out), params);
+                let sink = OutputSink::Dante(Arc::new(out), params, DanteLink::default());
                 start(&sink, &entry.id);
                 log_started(entry, built_rate);
                 output.sink = Some(sink);
@@ -264,21 +264,23 @@ pub fn start_output_thread(sink: &OutputSink, id: &str) {
     match sink {
         OutputSink::Vban(out) => start_vban_thread(out, id),
         OutputSink::Asio(out) => start_asio_thread(out, id),
-        OutputSink::Dante(out, params) => start_dante_thread(out, id, params.clone()),
+        OutputSink::Dante(out, params, link) => {
+            start_dante_thread(out, id, params.clone(), link.clone());
+        }
     }
 }
 
 /// #285: a Dante output's worker, in this process on every platform (the
 /// stack loads no driver, so the spawn finding does not reach it).
 #[cfg_attr(test, mutants::skip)] // OS thread spawn
-pub fn start_dante_thread(out: &Arc<AsioOut>, id: &str, params: DanteParams) {
+pub fn start_dante_thread(out: &Arc<AsioOut>, id: &str, params: DanteParams, link: DanteLink) {
     let worker = Arc::clone(out);
     let spawned = std::thread::Builder::new()
         .name(format!("dante-{id}"))
         .spawn(move || {
             let wall = crate::playback::wallclock::WallClock::system();
             let mut clock = crate::playback::vban_out::WallVbanClock::new(wall);
-            run_asio_worker(&worker, &mut DanteDevice::new(params), &mut clock);
+            run_asio_worker(&worker, &mut DanteDevice::linked(params, link), &mut clock);
         });
     if let Err(e) = spawned {
         out.set_start_error(format!("the output's thread did not start: {e}"));
