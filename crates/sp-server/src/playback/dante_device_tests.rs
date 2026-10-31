@@ -377,4 +377,5 @@ fn the_channels_carry_dvs_s_names() {
     let dir = tempfile::tempdir().unwrap();
     let text = params(dir.path(), Ipv4Addr::LOCALHOST).config_text();
     assert!(text.contains("tx = [\"01\", \"02\"]"), "{text}");
+    assert!(text.contains("timing = \"normal\""), "{text}");
 }

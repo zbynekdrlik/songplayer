@@ -403,13 +403,13 @@ dependencies = [
 
 [[package]]
 name = "dante-audio-io"
-version = "0.3.3"
-source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.3.3#57d798770edf66591887fe4e14c8c724b71134b5"
+version = "0.4.2"
+source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.4.2#eb78dafa7be15513050d9783f20494e7d167692f"
 
 [[package]]
 name = "dante-stack"
-version = "0.3.3"
-source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.3.3#57d798770edf66591887fe4e14c8c724b71134b5"
+version = "0.4.2"
+source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.4.2#eb78dafa7be15513050d9783f20494e7d167692f"
 dependencies = [
  "dante-audio-io",
  "if-addrs",
@@ -418,6 +418,7 @@ dependencies = [
  "mio",
  "serde",
  "serde_json",
+ "simple-dns",
  "socket2",
  "thiserror",
  "tokio",
@@ -2227,6 +2228,15 @@ name = "simd-adler32"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "703d5c7ef118737c72f1af64ad2f6f8c5e1921f818cdcb97b8fe6fc69bf66214"
+
+[[package]]
+name = "simple-dns"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b6f884fa9a8d48101774bfbd3aeb81e968dd22cffd19a372da69f183db22c1a"
+dependencies = [
+ "bitflags 2.13.2",
+]
 
 [[package]]
 name = "slab"
