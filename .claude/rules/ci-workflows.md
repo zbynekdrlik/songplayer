@@ -158,6 +158,12 @@ message to worker` before blaming a person.
   SongPlayer: ci.yml's "Deliver the runner's auto-start" before "Deploy
   SongPlayer", deploy-pp.yml's after its box check, before "Stop
   SongPlayer". A non-zero exit fails the step with SongPlayer untouched.
+- A dispatched OLDER build (a rollback, #251: PP back to 0.82.0 before an
+  event) checks out a tree from before the script: deploy-pp's step then
+  warns and exits 0 (`Test-Path` first), the auto-start left as the last
+  deploy delivered it. It failed closed before, so no older build could
+  reach PP (run 39010164786). Guard:
+  `test_pps_deploy_skips_the_delivery_for_a_build_older_than_the_script`.
 - `setup-runner.ps1` runs it through `Install-RunnerAutostart` (the file
   next to it, or fetched from `dev` under `irm | iex`) on a new install and
   on a configured box; it holds no copy of the files.
@@ -223,8 +229,7 @@ A mutant that turns a loop infinite costs a 300 s TIMEOUT and fails the step
 on a shrinking slice instead of two `offset < len` checks).
 
 ### Write new pure code so it has NO equivalent mutants (#182 lesson)
-The no-compile box only learns about survivors ~15 min after the push, so shape
-pure code up front. cargo-mutants' binary-operator table (its book,
+CI reports survivors ~15 min after the push, so shape pure code up front. cargo-mutants' binary-operator table (its book,
 `mutants.md`):
 
 - `<` → `==`, `>` (and `<=`, below)
@@ -370,7 +375,7 @@ carries one `[no-test: <sha7> <reason>]` per covered commit; the script prints
 `bypass: … (declared by <sha7>)`. Only the leading `fix(#N):` form is gated;
 scope-only subjects (`fix(stems): … (#14)`) are not. Run
 `bash scripts/check-red-green-order.sh origin/main..HEAD` before opening a
-release PR — it is bash-only, allowed under Tier-0.
+release PR.
 
 ## `gh run rerun <old-run>` CANCELS the newer in-flight run on the same branch
 `ci.yml` has a per-branch concurrency group with `cancel-in-progress`; a re-run
@@ -419,7 +424,7 @@ lease on dev1 while they drive the shared rig. "Deploy to win-resolume" runs
 "Wait for the rig lease" right after checkout, before "Deploy SongPlayer"
 stops SongPlayer:
 
-- `GET /rig-lease.json` (camera-box `scripts/rig-lease-server.py`, :8890;
+- `GET /rig-lease.json?resources=resolume-snv` (camera-box issue 1450: the box-scoped view, so a holder of only SNV's cameras / strih / stream never blocks SongPlayer's deploy; today's server ignores the query and answers the whole-rig view, schema 1 unchanged; pinned by `test_every_ci_lease_wait_asks_the_resolume_snv_view`) (camera-box `scripts/rig-lease-server.py`, :8890;
   `held`, `stale`, `holder.repo`, `expected_release_at`, `ttl_s`), trying
   `http://10.77.9.200:8890` (dev1's LAN address, 5-15 ms from win-resolume,
   29.9.2026) and then `http://dev1:8890` (the mDNS name `dev1.local`: it
@@ -477,8 +482,7 @@ stops SongPlayer:
 - Tests: `scripts/tests/test_rig_lease_gate.py` (Eval Checks pytest; the
   script is in both ruff lists): the decision, the bounded wait on a fake
   clock (120 × 30 s then exit 3; a last short pause ends exactly at the
-  bound), the fetch over a real local HTTP server. Python runs locally on
-  the Tier-0 box, so its RED/GREEN is really run before the push.
+  bound), the fetch over a real local HTTP server.
 
 **The E2E job's "Verify Resolume title delivery" cuts SP-program** (release
 0.71.0 review). Since #221 lane 2 only SP-program's playlist writes the

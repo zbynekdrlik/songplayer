@@ -14,10 +14,12 @@ pub mod decide;
 pub mod download;
 pub mod fetch;
 pub mod follow;
+pub mod follow_title;
 pub mod hash;
 pub mod hasher;
 pub mod kind;
 pub mod lan;
+pub mod leftovers; // #261: the records of a video no row has any more go, daily
 pub mod lyrics;
 pub mod queued;
 pub mod repair;
@@ -53,6 +55,8 @@ pub struct Exchange {
     pub(crate) transfer_probe: tokio::sync::Mutex<()>,
     /// #264: the lyrics follow's memory and status (`follow`).
     pub(crate) follow: std::sync::Mutex<follow::FollowState>,
+    /// #269: the title follow's memory and status (`follow_title`).
+    pub(crate) title_follow: std::sync::Mutex<follow::FollowState<follow_title::TitleWhy>>,
 }
 
 impl Exchange {
@@ -64,6 +68,7 @@ impl Exchange {
             client: client::PeerClient::new(),
             transfer_probe: tokio::sync::Mutex::new(()),
             follow: std::sync::Mutex::new(follow::FollowState::default()),
+            title_follow: std::sync::Mutex::new(follow::FollowState::default()),
         })
     }
 

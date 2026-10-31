@@ -3,6 +3,7 @@ paths:
   - "crates/sp-server/src/playback/program_burn*.rs"
   - "crates/sp-server/src/playback/program_item*.rs"
   - "crates/sp-server/src/playback/program_output_tests_burn.rs"
+  - "crates/sp-server/src/playback/program_output_ndi*.rs"
   - "crates/sp-server/src/playback/handle_pipeline_event_tests_item.rs"
   - "crates/sp-server/src/test_item*.rs"
   - "crates/sp-server/src/api/test_item*.rs"
@@ -10,10 +11,15 @@ paths:
   - "e2e/post-deploy-test-item.spec.ts"
   - "scripts/wall_clip.py"
   - "scripts/wall_frames.py"
+  - "scripts/wall_locate.py"
   - "scripts/wall_analysis.py"
+  - "scripts/wall_spout.py"
+  - "scripts/wall_spans.py"
   - "scripts/tests/test_wall_clip.py"
   - "scripts/tests/test_wall_*.py"
   - "scripts/tests/wall_fakes.py"
+  - "e2e/wall-frames-gate*.ts"
+  - "e2e/post-deploy-wall-frames.spec.ts"
 ---
 
 # The SP-program burn 911014, the on-air item, the local test item (#228)
@@ -43,6 +49,18 @@ audio" and "SongPlayer holds the rig lease" stay parked on camera-box.
 - The paint: luma 16 / 235, chroma 128, nothing outside the square, into a
   COPY (`burned`): the canvas picture can be the source's own allocation,
   which `SP-program-MAX` and the Spout FHD sender hold — they never carry it.
+- #279 P1b: from the GPU readback `SP-program` is UYVY (`U Y0 V Y1` per
+  pixel pair, rows of `width · 2` bytes), so the delay line
+  (`program_output_ndi.rs`, `ProgramOutput::burn` with
+  `PixelFormat::Uyvy`) burns with `burned_uyvy(video, width, height,
+  frame, gen_ts_ns)`: the same `geometry` and modules, into a COPY
+  (`paint_uyvy`: the luma bytes of the square by module, 16 / 235; the U
+  and V of every pair the square covers 128 — at a 1 px module the square
+  ends on an odd pixel, and that pair's chroma goes neutral too). The burn
+  goes out with the boundary it shows: its item frame and wire stamp
+  travel with the held pair, one slot late. `program_burn_tests_uyvy.rs`:
+  the bytes pixel by pixel, the same luma as the NV12 burn, and an rqrr
+  round trip reading every odd byte.
 - `program_burn_tests.rs` decodes the painted canvas with rqrr 0.9.3
   (camera-box's decoder; dev-dependency WITHOUT default features, or it
   drags `image` into the lock) on white, grey and black, and next to two
@@ -105,11 +123,16 @@ MEASURED with frame ids, never judged by eye. Design record: #272 comment
 - **`test_item_clips.rs`: a pinned LIST** — `CLIPS` = camera-box's clip
   (`CAMERA_BOX`, the default; #228's row `measure-v01` unchanged), then
   `wall-24` / `wall-25` / `wall-30` (rows `wallclip-24/25/30`, files
-  `wall-clip-v1-{fps}fps-60s.mp4`, artist `SongPlayer`, 60 s). Each is a
+  `wall-clip-v2-{fps}fps-60s.mp4`, artist `SongPlayer`, 60 s). Each is a
   ROW of the one test playlist, never a playlist of its own (a scene in the
   catalog and an idle pipeline per clip on the boxes); `not_test_item!`
   goes by the playlist's kind, so every row stays out of every queue.
   sha256s are byte arrays, like camera-box's.
+- **Clip v2 keeps the rows** (20.10.2026): its song / title say v2, so its
+  cache names are new and the import records each row anew (`already`
+  keys on the cache names, so it never takes the v1 files for v2); the
+  next start's self-heal deletes the v1 pair as a superseded duplicate
+  (`scan_cache` keeps the newest pair of an id).
 - `import(file, clips)` imports a file as the listed clip whose sha256 it
   has, under that clip's names; `import_listed` takes each clip from the
   bench under its OWN file name (`absent` is no error; `wrong_file` names
@@ -134,43 +157,103 @@ MEASURED with frame ids, never judged by eye. Design record: #272 comment
 
 ### `scripts/wall_clip.py` (the generator, deterministic)
 
-- 20 equal cells across the frame: margin `W // 48`, cell
-  `(W − 2·margin) // 20` (184 px at 3840; any width that is a multiple of
-  960 keeps the same fractions, which the reader samples by); cells 0 / 19
-  black, 1 / 18 white (the references), 2–17 the index in reflected Gray
-  code, MSB first, white = 1. Two consecutive indices differ in ONE cell:
-  a 2-frame blend shows one grey cell whose level is the weight.
-- 8 bands; per band the strip at 10–40 % of its height, the digits
-  (`0037  25 FPS`, a 5×7 numpy font, inside the strip's inner cells) at
-  52–88 %. Any quarter of the height holds a whole strip row (pinned at
-  4K). No QR: `qrcode` is not in CI's eval env.
+- **Clip v2 (20.10.2026): read under ANY zoom of the width.** v1 had one
+  strip across the frame, its references at the clip's two edges; the
+  operator's mapping (SNV, 18.10.2026: the clip at ~2×, only its middle
+  half on the wall; his mapping is the truth, #259) put them off the wall:
+  "decoded 0" on every deploy (#272 comments 6281310892, 6281626609).
+- Cells of `W / 192` px (20 at 4K; a width that is a multiple of 960 is
+  the 4K layout scaled). Per band 9 self-contained COPIES of the strip side
+  by side, margins `W / 32`; a copy is 20 cells: 0 / 19 black, 1 / 18
+  white (its own references), 2–17 the index in reflected Gray code, MSB
+  first, white = 1. Two consecutive indices differ in ONE cell of each
+  copy: a 2-frame blend shows one grey cell whose level is the weight.
+- Any window of 40 cells holds a whole copy, so ANY quarter of the width
+  (48 cells) holds one at every offset, 8 cells (161 px at 4K) to spare
+  (pinned px by px).
+- **A static RULER over each copy's strip**: cells 0 / 19 white, 1–18
+  black, the same in every frame. The reader places a copy only by it.
+  With copies side by side the strip's own references are ambiguous: the
+  bit cells of 863 of the 1800 indices of a 30 fps clip also form the
+  `W B B W` of a junction at a wrong phase. No strip draws 18 black cells
+  between white ones (pinned for all 65 536 codes), and a ruler row fails
+  the strip check (its "black" references are white).
+- Per band, of its height: digits 6–30 %, ruler 40–48 %, strip 52–76 %;
+  any quarter of the height holds a whole band. A strip starts half a
+  ruler under its ruler; the digits end 10 % above a ruler and the next
+  band's start 30 % under a strip, so no other rows pair as a ruler and its
+  strip.
+- The digits (`0037  25 FPS`, a 5×7 numpy font, 4 px font pixels at 4K)
+  sit in each copy's bit cells, luma **80**: 40 over the background, under
+  the reader's 25 % contrast floor. At v1's 200, a 4× scaled glyph pair
+  read as a ruler over a strip: a false copy reading index 0. No QR:
+  `qrcode` is not in CI's eval env.
 - Raw yuv420p (luma 16 / 235 / background 40, chroma 128) into libx264 on
   ONE thread, `veryfast` crf 16, GOP = fps, no B-frames, BT.709 tv tags,
   plus a silent 48 kHz stereo AAC track (the import splits it as
   camera-box's), `+bitexact`, no metadata: the same ffmpeg gives the same
-  bytes (dev1 regenerated the 25 fps clip byte-identical). A changed
-  picture = bump `CLIP_VERSION` (new file names) and re-pin the sha256s.
+  bytes (dev1 regenerated the 25 fps clip byte-identical, v1 and v2). A
+  changed picture = bump `CLIP_VERSION` (new file names and song names)
+  and re-pin the sha256s and sizes in `test_item_clips.rs`. v2: 13 959 001
+  / 14 028 769 / 15 748 924 B (24 / 25 / 30 fps; v1 was ~4.3 MB).
 
-### `scripts/wall_frames.py` (the reader) + `scripts/wall_analysis.py`
+### `scripts/wall_frames.py` (the reader) + `wall_locate.py` + `wall_analysis.py`
 
-`wall_frames.py` reads each picture (`read_frame`) and holds the capture
-glue and the CLI; `wall_analysis.py` is the pure analysis of a run of
-readings (`analyse`, the pacer's rule, the capture's timing). Run it from
-the repo checkout's `scripts/` (on the box: the runner's checkout): it
-imports `wall_clip`, `wall_analysis` and `av_sync_check` (with its
-`av_sync_drift` / `av_sync_warp`).
+`wall_locate.py` is the pure search (where the copies sit, `locate`, and
+what a capture grabs, `capture_region`); `wall_frames.py` reads each
+picture (`read_frame`, `read_sums`) and holds the capture glue and the CLI;
+`wall_analysis.py` is the pure analysis of a run of readings (`analyse`,
+the pacer's rule, the capture's timing). Run it from the repo checkout's
+`scripts/` (on the box: the runner's checkout): it imports `wall_clip`,
+`wall_locate`, `wall_analysis` (with `wall_spans`) and `av_sync_check`
+(with its `av_sync_drift` / `av_sync_warp`).
 
 
-- Per picture: 8 sampled columns per cell (`CELL_SAMPLES`, over the
-  central half, at the cells' fractions of `--x-range`;
-  `sample_columns` → `read_columns`), the rows whose references read black /
-  white with contrast > 25 % of full scale and every bit between them, a
-  run of ≥ 3 such rows = one strip; its core rows normalised by its own
-  references. One grey cell (level 0.04–0.96) → `(i, i + 1, w)`, `w` the
-  LATER frame's weight in Q8, rounded (the program's `FrameBlend` unit).
-  Never guessed: `no_strip`, `multi` (≥ 2 grey cells), `non_adjacent`,
-  `disagree` (the bands read positions more than `SAME_PICTURE` apart: a
-  torn picture).
+- **Finding the copies (`locate`, v2), wherever they sit, at any scale:**
+  - per row, bright vs dark at the row's LOCAL midpoint (`bright_mask`:
+    the lowest / highest level ±16 of 64 blocks around, a half-row window;
+    a dimmed clip beside a bright overlay still splits; a spread ≤ 25 % of
+    full scale is never bright);
+  - a dark run of 18 cells between two bars of ≥ ¾ cell is a candidate
+    (`ruler_candidates`: left edge, cell ≥ 2 px);
+  - candidates within half a cell and 5 % of a cell of a group's first are
+    one copy, standing for its middle candidate (`group_candidates`: one
+    row's own reading, so every sampled column lies inside the picture);
+  - a copy is kept only where, at its own columns, strip rows sit right
+    under ruler rows (`ruled_strips`: within the ruler's height + 2 rows),
+    and it keeps those strips (`Copy.strips`): only they are ever read for
+    it. Review round 1: SNV's output is made of slices, and another slice
+    cut in a few rows under the strip put a second strip into the grabbed
+    rows: read for every copy, a clean wall read `disagree`.
+- **Reading (`read_sums`):** each copy's cells' sums per row (`cell_sums`:
+  its 8 sampled columns per cell, `CELL_SAMPLES`, over the central half,
+  summed, exact in uint16), in the rows of its own strips, the rows whose
+  references read black / white with
+  contrast > 25 % of full scale and every bit between them, a run of ≥ 3
+  such rows = one strip; its core rows normalised by its own references.
+  One grey cell (level 0.04–0.96) → `(i, i + 1, w)`, `w` the LATER frame's
+  weight in Q8, rounded (the program's `FrameBlend` unit). Never guessed:
+  `no_strip`, `multi` (≥ 2 grey cells), `non_adjacent`, `disagree` (the
+  copies and bands read positions more than `SAME_PICTURE` apart: a torn
+  picture).
+- **A capture locates ONCE, then keeps only each picture's cell sums**
+  (as v1 read at `--x-range`'s columns, which v2 deletes). `clip_copies`
+  keeps the copies that read the picture as one with more than half of
+  them (an overlay drawing a false copy is left out; no majority = another
+  picture).
+  - A recording: looked at on every `LOCATE_EVERY` (15th) picture from the
+    first, and on its last, until found, at most `LOCATE_TRIES` (40) times
+    (a look takes 0.1–3 s), so a clip that first shows after ~600 pictures
+    (10 s at 60 fps) is not found: trim the recording. The pictures since
+    the look before are read at the copies found (`no_strip` if none were).
+    Nothing found → exit 4, the reason on stderr.
+  - dxcam: before its timed polls (`find_clip`, ≤ `LOCATE_S` 10 s; one look
+    at a whole 7680×1080 output takes ~0.6 s on dev1), on the whole output
+    or in `--region` (an AREA to look in), then it grabs only the strip
+    rows (± a quarter) and columns (± a cell) of the largest set of strips
+    sharing rows (a copy whose strip split into two runs counts once), at
+    most `MAX_COPIES` (4) copies, the middle ones (`capture_region`). Nothing found → exit 4, the reason on stderr.
+  - The report's `located`: copies, `cell_px`, `region`.
 - **One picture = within `SAME_PICTURE`** (8 Q8 + the 0.04 level edge):
   the program's own 8-bit blend (`nv12_mix.rs`, `(f(256 − w) + tw + 128)
   >> 8` on 16 / 235) rounds a weight near 0 or 256 to either side of the
@@ -189,6 +272,41 @@ imports `wall_clip`, `wall_analysis` and `av_sync_check` (with its
   pacer's `BLEND_DEAD_BAND_100NS`, read from `pacer_blend.rs` by a test.
   Review rounds 1–2: `test_every_grid_phase_…` sweeps 512 phases per frame
   through the program's byte blend at 24 / 25 fps (and 30): clean.
+- `capture.still_ms_max` / `held_ms_max` (#279 P3a's A/B,
+  `scripts/wall_spans.py`, imported by `wall_analysis.capture_report`):
+  the longest span with no new picture, the capture's first and last
+  poll included, and the longest its own polls saw the output HOLD. An
+  empty dxcam poll proves nothing new was presented, so a span holds
+  but for the blind span of the picture that ended it (that picture
+  can have come anywhere in it) and the acquire window of the one that
+  began it (`Timing.late`: a present inside it IS that picture), and
+  the capture's end holds whole but for that window (its last poll
+  found nothing new). A starved capture reads a long still
+  span that holds little; a hold reads in both, whatever else the take
+  saw. `blind_ms_max` and `interval_ms_max` stay take-wide and between
+  pictures only. Tests `test_wall_still.py`; hand mutants 37 of 37
+  killed.
+- `distinct_boundaries` (#279 P3a's A/B, `video-decode.md`): the distinct
+  pictures the boundaries showed, numbered on across the clip's loops, a
+  run within `SAME_PICTURE` of a picture shown before counted once
+  (`wall_analysis.distinct_boundaries`). The program's boundaries over the
+  capture (1 200 per 40 s on the grid; at a 24 / 25 fps loop seam the
+  clamp shows ONE picture for two boundaries) minus it are the pictures
+  the wall did not show or the capture did not see: a jump back re-shows a picture
+  and adds nothing, and a capture that is dead or freezes to its end
+  counts every picture it did not show. `boundaries` (one per run) counts
+  every re-show again, and `lost_boundaries` sees only skips between two
+  readings and counts the step out of a back as one too. A run is one
+  picture within `SAME_PICTURE` of its FIRST reading, as `boundaries`
+  groups it. It holds away from a loop seam: the new play's open hold
+  (`loop_seams.hold_s`) repeats pictures, and a back across the seam
+  reads as one more loop (the A/B's span holds no seam). Hand mutants of
+  it: 27 of 33 killed. The six left are equivalent: the loop label counted
+  down, scaled or subtracted (any label whose loops lie at least
+  `n_frames` apart); `>=` for `>`, since positions are multiples of 1/256
+  and `SAME_PICTURE` is 18.24/256; and `abs()` over a sorted difference.
+  The edge is pinned: weight 238 against the plain next frame is one
+  picture, 237 is two.
 - **What a clean verdict means (the owner's ruling, #272 comment
   6170760353):** the wall's judder is intermittent, so a clean verdict
   covers only the span captured. A short take (a post-deploy gate of N
@@ -344,13 +462,21 @@ imports `wall_clip`, `wall_analysis` and `av_sync_check` (with its
   so dxcam 0.3+ never loads OpenCV — dxcam 0.0.5 imports it at module load
   whatever the colour, so the venv needs dxcam ≥ 0.3 or `opencv-python`:
   the main session checks the box): every poll timed, only each picture's
-  sampled columns kept as luma (~170 KB at 1080 rows, ~345 KB at 2160) and
-  decoded after the capture, an empty poll sleeps 1 ms (Python 3.11+ sleeps
-  on a high-resolution timer there). `--fps` takes 24 / 25 / 30.
+  cell sums kept (20 uint16 a row per copy, ≤ 4 copies: ~31 KB a picture at
+  SNV's ~194 rows, ~75 MB a 40 s take; v2 at first kept 160 columns a copy,
+  ~670 MB, review round 1; ~1.5 ms a picture on dev1, B, G and R summed in
+  integers with `np.take`, review round 2) and decoded after the capture,
+  an empty poll
+  sleeps 1 ms (Python 3.11+ sleeps on a high-resolution timer there). `--fps` takes 24 / 25 / 30.
 - Measured on dev1 (#272 comment 6164962209): every frame of the three
   clips reads back (also through `read_video`'s pts path: 1440 / 1500 /
   1800, clean); real decoded frames blended 25 on 30, cut to an SNV
   quarter band, ×4 and noised read 0, 214, 170, 127, 85, 41 (±1 Q8).
+  v2 (20.10.2026): every frame of the three v2 files reads back through
+  `read_video` (9 copies, 72 strips a picture); real decoded v2 frames
+  blended 25 on 30 through the program's byte blend, shown at 2× across
+  the middle half and a quarter of the height (bilinear), noised, read 0,
+  214, 171, 128, 84, 40 at three offsets.
 - The clip's song / artist go to the wall's title clip like any song's
   (nothing treats the test playlist apart there): a strip the title covers
   fails its reference check and the consensus takes the other bands; a
@@ -358,6 +484,117 @@ imports `wall_clip`, `wall_analysis` and `av_sync_check` (with its
   `unverified` (one boundary per picture), never clean. Whether a test
   item should write the wall title at all is open (a follow-up candidate
   on #272).
+
+## The post-deploy wall frame gate (#272 lane 2, `e2e/post-deploy-wall-frames.spec.ts`)
+
+The owner (16.10.2026, during an event with the wall juddering): no CI run
+may pass while the LED wall judders. Every other gate reads SongPlayer's
+own counters. The MAX gate checks the send and compose phases, and
+`post-deploy-wall.spec.ts` checks Arena's display setup. Nothing read the
+picture, so deploys went green over a juddering wall. Design: #272 comment
+6220915104.
+
+- **What it does (SNV only).** `post-deploy-pp.config.ts` lists its specs
+  by name and does not take this one.
+  - It reads `GET /api/v1/test-item`; the clips must be imported.
+  - For `wall-30`, then `wall-25`: `/start {"clip"}`, then a program cut
+    to the test playlist. It waits until `on_air_item.youtube_id` is
+    `wallclip-30` / `wallclip-25` with `position_ms` ≥ 3000 (≤ 25 s).
+  - Then 40 s of `scripts/wall_frames.py --fps <fps> --spout
+    "$SP_WALL_SPOUT_SENDER" --refresh-hz 60` (`Arena - Screen 2`).
+  - It runs on the e2e venv (`SP_AVSYNC_PYTHON`, which ci.yml also gives
+    `SpoutGL==0.1.1` + `glfw==2.10.2` + `PyOpenGL==3.1.10` with numpy kept
+    at its pin).
+  - `afterAll` cuts back to the source it found, then `/start` + `/stop`
+    with no body.
+- **The verdict** is `e2e/wall-frames-gate.ts::wallFramesFailures`, unit
+  tests in the mock suite (`wall-frames-gate.spec.ts`).
+- **"decoded 0" names what covers the clip** (19.10.2026: the operator's
+  layers left connected after the 18.10 service — L20's NDI background,
+  logos, texts — covered the strips, two CI runs red with no SongPlayer
+  fault): on exit 4 the spec reads Arena's composition (read only,
+  `RESOLUME_REST_URL`) and adds `Arena layers above SongPlayer's clip: L<n>
+  '<clip>', …` (`coveringLayers`: every connected, not bypassed clip on a
+  layer above the highest one receiving `SP-program-MAX`, Arena's Blank
+  generator left out: it draws nothing). It never clears them: the
+  composition is the operator's. Arena's read is tried twice, a second
+  apart (a second read failed "fetch failed", CI 39345213643).
+  - **"decoded 0" from 18.10.2026 was a ZOOM, not layers** (#272
+    comment 6281310892): Arena shows the wall clip ~2× across the
+    composition's width (the operator's mapping), so only the clip's
+    middle half reached the wall and v1's reference cells were off it.
+    Clip v2 (20.10.2026) reads under any zoom of the width. Look before
+    blaming layers: play `wall-30`, grab output 1 once, view it
+    (`diag\wall-bridge\strip_probe.ps1`), and run `wall_locate.locate`
+    on it (the copies found, their cell).
+  - Only exit 0 with verdict `clean` passes, or a take whose ONE defect is
+    slips (owner, #272, 31.10.2026: at most 3 per 40 s take, `MAX_SLIPS`):
+    one picture a refresh long and the next a refresh short, everything a
+    clean verdict needs besides (`slipsOnly`). A run of neighbouring uneven
+    boundaries counts one slip per two, rounded up, so a lone one is a slip
+    (`slipCount`). CI takes read 0-3, off-CI takes 0-1. Their cause is not
+    proven, and whether a slip shows on the wall is not verified.
+  - `defects` names every counter: judder (`refreshes.uneven` of `judged`),
+    jumps back, lost frames and boundaries, cadence, weights, frozen.
+  - `incomplete` (exit 3) fails as INCOMPLETE, never as judder or clean.
+  - Exit 4 = the wall does not show SongPlayer's program (Arena's clip on
+    another source, MAX off with the clip on MAX, the clip not on air), or
+    no whole copy of the clip's strip and its ruler is in view (v2: the
+    reader's stderr says `no copy of the clip's strip found`).
+  - Exit 5 = the capture failed.
+- **It is RED while the wall judders.** That is the point; never loosen it
+  to make a deploy green.
+- **It reads Arena's Spout output, before wall-bridge (owner, #272,
+  30.10.2026).** Since 29.10. the wall is a specialized display off the
+  Windows desktop, so dxcam lists only the 3840×2160 primary and cannot see
+  it. `scripts/wall_spout.py` reads `Arena - Screen 2`, the picture
+  wall-bridge takes, next to it (measured: 0 missed vblanks, 0 drops).
+- **What it does not see.** The bridge, Surround and the LED processor: a
+  clean take says nothing about the screens. A clean take covers only its
+  40 s, and the judder comes in waves. `--dxcam` stays for a wall on the
+  desktop (PP).
+- **Arena's sender keeps no frame count**, so every Spout read answers:
+  `NewPictures` calls a poll with the same bytes as the last one a poll
+  with nothing new, as an empty dxcam grab. No sleep between polls.
+- **A copy cut by a seam is left out (`same_scale`, 30.10.2026):** SNV's
+  output is slices of the composition, and a copy across one read 58.33 px
+  cells beside 60. Its samples sat near the cell edges, each bit change read
+  as a blend, and every 128th frame read `disagree`: 10 "lost" frames per
+  40 s on Spout and NDI alike. A count equal on both arms is the reader.
+- **A Spout picture's instant is off by up to `SPOUT_TIME_ERROR` 3 ms**
+  (`analyse(time_error)`): it lands when Arena finishes it, not on a refresh
+  (intervals 26-41 ms for 33.3). At dxcam's 0.5 ms every take read 20-47
+  `inconsistent` boundaries, so no take could be `clean`; 2 and 3 ms read
+  both clips clean, 4 ms and more leave `unresolved`. A slip (50 + 16.7 ms)
+  still reads uneven (`test_wall_spout.py`).
+- **A picture's acquire window ends at `receive`** (`NewPictures.update_frame`,
+  the shape `time_acquire` stamps): the read-back of each new picture waits
+  ~4 ms on the GPU copy.
+- **It reads 24 rows of the strips (`SPOUT_ROWS`), never the whole
+  output** (v2: ci.yml sets no `SP_WALL_REGION`). The reader looks at the
+  whole picture once, finds the copies and polls the middle of the rows
+  their strips share and the columns ± a cell of at most 4 of them
+  (`capture_region(max_rows)`; `located.region` in the report and the
+  spec's log line), so a change of Arena's wall mapping needs no new rows.
+  A poll on SNV: 7680×1080 16 ms, 3030×150 1.75 ms, 3030×24 0.58 ms (a
+  timed interval needs ≤ 1.67 ms, else exit 5, "only 2 intervals timed").
+  `SP_WALL_REGION` stays a manual override, an area to look in: it must
+  then hold a whole ruler and its strip.
+- **A manual measurement on the box checks the rig lease FIRST, and
+  before each round** (17.10.2026: an overnight layer A/B cut SP-program
+  and bypassed Arena layers for 6 min inside camera-box's 8 h av-soak,
+  whose lease the deploy honoured). It does not apply to a read-only
+  capture. Any script that cuts the program, switches an Arena source or
+  bypasses a layer runs `diag\wall-bridge\lease_free.ps1` first. That is
+  `scripts/rig_lease_gate.py` with `--max-wait-seconds 0`: exit 0 = free,
+  3 = another repo holds it. The script does not start while the lease
+  is held, and stops and restores when another repo takes it mid-run
+  (`layer_ab.ps1`, `test0_rot.ps1`). Tell the holder's session (ListAgents
+  → SendMessage) what overlapped, if anything did.
+- **The first manual take (16.10.2026 19:00Z, `wall-30` through MAX on
+  L4 / L5):** verdict `defects`: 521 jumps back and 1040 of 1708 boundaries
+  held the wrong number of refreshes in 40 s. So the gate was red on the
+  day it landed, as the owner saw the wall.
 
 ## Box procedure (main session, once per box)
 
@@ -372,12 +609,17 @@ imports `wall_clip`, `wall_analysis` and `av_sync_check` (with its
    item`.
 3. `GET /api/v1/test-item` → `imported: true`; `/api/v1/ndi/health` has an
    `SP-test` row.
-4. #272, the wall clips: copy `wall-clip-v1-{24,25,30}fps-60s.mp4` (dev1
-   `~/.claude/work-products/issue-272/`, sizes and sha256s in
-   `test_item_clips.rs`) into the same bench dir, then `POST
+4. #272, the wall clips: copy `wall-clip-v2-{24,25,30}fps-60s.mp4` (dev1
+   `~/.claude/work-products/issue-272/`, next to v1's; sizes and sha256s
+   in `test_item_clips.rs`) into the same bench dir, then `POST
    /api/v1/test-item/import` with NO body → 200, each listed clip
    `imported` / `already` (`absent` for a file not copied, never an
-   error); `GET /api/v1/test-item` → `clips[*].imported`.
+   error); `GET /api/v1/test-item` → `clips[*].imported`. The v1 files in
+   the bench dir are no listed clip any more (delete them by hand); the v1
+   cache pair goes at the next start (self-heal, a superseded duplicate).
+5. After the deploy that carries v2: the gate's log line names `located`
+   (copies, `cell_px`, region). SNV's wall at ~2× should show 3–4 whole
+   copies of ~40 px cells.
 
 ## Tests
 
@@ -403,11 +645,28 @@ post-deploy spec reads the list. The scripts: `scripts/tests/test_wall_clip.py`
 encode leaving no ffmpeg and no partial file) and
 `scripts/tests/test_wall_frames.py` (reading a picture: blends, bands, ×4 +
 noise, the band median, the named failures, the pacer's rule and its dead
-band tied to `pacer_blend.rs`), `test_wall_frames_analyse.py` (one sample
+band tied to `pacer_blend.rs`), `test_wall_locate.py` (v2: the clip read
+under 1×–3× of its width at offsets across it, a quarter of the width and
+height across every phase of the copies, blur, a dimmed clip beside a
+bright overlay, indices across the clip whole and 4× with no false copy, a
+copy placed by its ruler only — a covered ruler, an index-0 strip, the
+digits, a copy the capture cuts —, disagreeing copies and the majority a
+capture keeps, and every bound of `bright_mask`, `ruler_candidates`,
+`group_candidates`, `ruler_rows`, `ruled_strips`, `capture_region`,
+`find_clip`, a copy reading only its own strips across a slice seam,
+`read_sums`; `test_wall_capture.py`: `capture_dxcam` on a fake camera,
+`read_video`'s looks; hand mutants of the v2 code (a scratch harness on
+dev1, not CI): 122 of 124 killed, the two left equivalent:
+`group_candidates`' look-back stop `>` for `>=` (a candidate that far can
+never match) and `clip_copies`' `<=` for `<` against `SAME_PICTURE` (as
+for `disagree`: positions are multiples of 1/256)), `test_wall_frames_analyse.py` (one sample
 per refresh: every grid phase through the program's byte blend at 24 / 25
 / 30 fps, loops / losses / jumps / weights / unverified steps at 60 and
 50 Hz / judder / the song-end clamp at every phase, a loss at the seam, a hold over 1 s there / the
-300-boundary minimum / coverage), `test_wall_timing.py` (the brackets: a locked recording and dxcam on time exact, 120 / 240 fps cameras proving counts and finding judder, cameras too coarse — 60 / 59.94 / 50 / 30 fps on 60 Hz, 60 fps on 50 Hz, 120 fps on 144 Hz, 60 fps on 75 Hz — never calling judder and never calling it clean, `unresolved`, a stall at the start, middle and end, blind refreshes hiding one boundary per refresh at 60 and 50 Hz, `hidden_refreshes`, `unseen_refreshes`, `held_range`, a frozen wall (dxcam only), the judged share, the required rate; round 6: unreadable pictures after the last boundary, cameras' pts on 1/90000, 1/10000, 1/1000 and 1/600 timebases, a rate within its tolerance either way, judder a box stall hid from dxcam; round 7: a grab preempted 2–40 ms before its acquire, an impossible bracket, a locked capture ending on unreadable pictures, a camera exposure mixing two boundaries) and `test_wall_capture.py` (round 7: `--locked` checked, a rate that cannot be checked)
+300-boundary minimum / coverage / the distinct pictures: a re-show once, one
+picture read two ways, the `SAME_PICTURE` edge, a run grouped by its first
+reading, a frozen tail, a dead capture, across loops (from the wrap's own
+step), a skipped blended boundary), `test_wall_timing.py` (the brackets: a locked recording and dxcam on time exact, 120 / 240 fps cameras proving counts and finding judder, cameras too coarse — 60 / 59.94 / 50 / 30 fps on 60 Hz, 60 fps on 50 Hz, 120 fps on 144 Hz, 60 fps on 75 Hz — never calling judder and never calling it clean, `unresolved`, a stall at the start, middle and end, blind refreshes hiding one boundary per refresh at 60 and 50 Hz, `hidden_refreshes`, `unseen_refreshes`, `held_range`, a frozen wall (dxcam only), the judged share, the required rate; round 6: unreadable pictures after the last boundary, cameras' pts on 1/90000, 1/10000, 1/1000 and 1/600 timebases, a rate within its tolerance either way, judder a box stall hid from dxcam; round 7: a grab preempted 2–40 ms before its acquire, an impossible bracket, a locked capture ending on unreadable pictures, a camera exposure mixing two boundaries) `test_wall_capture.py` (round 7: `--locked` checked, a rate that cannot be checked) and `test_wall_still.py` (#279: the still span of a clean capture, of an output presenting nothing, of a starved capture, a still head and tail, one picture, no span or blind spans)
 (`av_sync_check.gray_video_args`, `showinfo_pts`, `read_video` against a
 stand-in ffmpeg — pts, a half frame, a failed exit, the kill when a read
 fails —, `poll_blind`, `check_present_rate`, `main`'s exit codes for a
@@ -417,7 +676,20 @@ a 12 ms lag, a wall that stopped, a wrong or missing `--refresh-hz`, a bad
 `scripts/tests/wall_fakes.py` (the clip's frames, the program's byte blend,
 the pacer's readings, the wall's refreshes as a camera samples them, a
 simulated dxcam capture), all numpy-only for CI's Eval Checks job, whose
-ruff lists name the three scripts. Hand mutants of `wall_frames.py` / `wall_analysis.py` (every
+ruff lists name the wall scripts (`wall_clip.py`, `wall_frames.py`,
+`wall_locate.py`, `wall_analysis.py`, `wall_spans.py`). Hand mutants of `wall_frames.py` / `wall_analysis.py` (every
 threshold, guard, bound and exit code; a scratch harness on dev1, not CI)
 were run after each review round and the tests extended until none
 survived; an equivalent one is removed from the code instead.
+
+Two gotchas of that harness and of editing these scripts (#272 v2):
+- A harness that runs the tests on a COPY of `scripts/` must also copy
+  `crates/sp-server/src/playback/pacer_blend.rs` to the same place
+  relative to it: `test_the_reader_s_dead_band_is_the_pacer_s` reads it
+  through `parents[2]`, and without it every mutant reads as killed.
+  Run its pytest with `-x` and 4 workers; count the results (a pool cut
+  short by a timeout prints no line for the mutants it never ran).
+- `wall_frames.py::time_acquire` holds a pre-existing `except
+  AttributeError: pass`. The airuleset pre-write hook refuses a whole-file
+  Write that contains it: change the file with Edit, or splice the new
+  parts around the untouched functions with an anchor-asserted script.

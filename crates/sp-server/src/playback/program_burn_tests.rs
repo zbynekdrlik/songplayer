@@ -273,8 +273,9 @@ fn the_longest_payload_still_fits_the_fixed_qr() {
 
 // ---- The paint ----
 
-/// A checkerboard of modules, so every module's place is visible.
-fn checkerboard() -> Vec<bool> {
+/// A checkerboard of modules, so every module's place is visible (#279
+/// P1b: the UYVY burn's tests paint it too).
+pub(super) fn checkerboard() -> Vec<bool> {
     let n = BURN_MODULES as usize;
     (0..n * n)
         .map(|i| (i / n + i % n).is_multiple_of(2))

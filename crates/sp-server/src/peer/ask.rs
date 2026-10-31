@@ -477,12 +477,44 @@ impl Exchange {
     /// What `job` makes for `youtube_id` is this node's own from now on: the
     /// records of a peer's copy of it are dropped, so the old "fetched from
     /// the peer" record never vouches for this node's own audio
-    /// (`peer::audio`).
+    /// (`peer::audio`). The title's record stays while this node's title is
+    /// still that copy (ROZHODNUTÉ on #269: a download run here keeps it;
+    /// [`forgotten`]).
     pub(crate) async fn forget_origins(&self, job: Job, youtube_id: &str) {
-        if let Err(e) = models_peer::forget_fetches(&self.pool, youtube_id, job.makes()).await {
+        let makes = job.makes();
+        let title_kept = if makes.contains(&ArtifactKind::Metadata) {
+            self.title_kept(youtube_id).await
+        } else {
+            false
+        };
+        let kinds = forgotten(makes, title_kept);
+        if let Err(e) = models_peer::forget_fetches(&self.pool, youtube_id, &kinds).await {
             warn!(youtube_id, %e, "exchange: forgetting a peer's copy failed");
         }
     }
+
+    /// This node's title of `youtube_id` is still the copy it recorded from
+    /// a peer (`follow_title::title_is_recorded_copy`); a failed read is
+    /// WARNed and reads as no (the record goes, as before #269).
+    async fn title_kept(&self, youtube_id: &str) -> bool {
+        super::follow_title::title_is_recorded_copy(&self.pool, youtube_id)
+            .await
+            .inspect_err(|e| warn!(youtube_id, %e, "exchange: reading the title's record failed"))
+            .unwrap_or(false)
+    }
+}
+
+/// The kinds a job making `makes` that runs here forgets the peer records of
+/// (`Exchange::forget_origins`): all of them, but the title's while this
+/// node's title is still the copy it recorded (`title_kept`; ROZHODNUTÉ on
+/// #269: a download run here keeps a recorded title, and the peer's later
+/// corrections still follow).
+pub fn forgotten(makes: &[ArtifactKind], title_kept: bool) -> Vec<ArtifactKind> {
+    makes
+        .iter()
+        .copied()
+        .filter(|kind| *kind != ArtifactKind::Metadata || !title_kept)
+        .collect()
 }
 
 /// The audio `peer`'s catalog (as read for the decision) lists for

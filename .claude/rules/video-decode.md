@@ -6,7 +6,11 @@ paths:
   - "crates/sp-gpu/src/win/video_device.rs"
   - "crates/sp-gpu/tests/video_device.rs"
   - "crates/sp-server/src/playback/video_decode*.rs"
-  - "crates/sp-server/src/playback/pipeline_paced.rs"
+  - "crates/sp-server/src/playback/pipeline_paced*.rs"
+  - "crates/sp-server/src/playback/gpu_resident*.rs"
+  - "crates/sp-gpu/src/win/producer.rs"
+  - "crates/sp-server/src/playback/paced_producer*.rs"
+  - "crates/sp-core/src/config_video_decode.rs"
 ---
 
 # The Media Foundation video reader: software and opt-in hardware decode (#223 S3b)
@@ -15,7 +19,7 @@ Design: #223 revision 3, R3-4 point 2 (comment 5979609879); the S0 result
 that asked for it (comment 5981771378: 4K AV1 95 %, 4K VP9 93 % of the
 frame period in software); the anchors and MF facts (comment 5990523303).
 
-## The two modes
+## The modes
 
 `MediaFoundationVideoReader::open_with(path, DecodeMode)`:
 
@@ -37,6 +41,13 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   with ONE `MFCreateDXGISurfaceBuffer` buffer over a slice of its
   `D3D11_BIND_DECODER` texture array. One device per reader: a lost device
   never touches another song.
+- **`GpuResident(Arc<ProducerGpu>)`** (#279 P3a, the setting `video_decode`
+  = `gpu`; "GPU-resident decode" below): the `Hardware` path on the
+  pipeline's producer device (`sp_gpu::ProducerGpu`: the same
+  `pick_adapter` device with the video API), and every DXGI surface is
+  COPIED into a slot of the producer's ring instead of read back: the
+  picture never comes to RAM. Off by default; nothing of it runs with
+  `video_decode` = `software`.
 
 ## Reading a GPU picture back (`video/dxgi_frame.rs`)
 
@@ -81,6 +92,322 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   1350 / 1098 / 1182 / 858 widescreen songs); 1440 / 1280 / 1072 / 720
   were not. Check a fix on the box with the bench (`hw` true and false
   must report the same size).
+
+## The decode cap (#282): a picture larger than `max_resolution` is decoded scaled
+
+Design: #282 comment 6233842555 (Approach 1); the lane's implementation
+note, comment 6233930202 (its "+15 rows on the D3D path" and "a scaled
+D3D picture counts as hardware" were superseded by review rounds 1–2,
+below). Asked as a lever until #279 (the GPU-resident path): the wall's
+jumps back follow the bytes SongPlayer moves (#251 comment 6232632646).
+The owner then made it a permanent switch per site (ROZHODNUTÉ on #282,
+17.10.2026: "musi byt sposob to zmenit"), so `max_resolution` caps
+download AND decode for good. SNV runs it at 1440 since 17.10.2026 15:09Z
+(the box A/B on #282: 10-15× fewer jumps back under NVENC, from two ABA
+rounds of 40 s takes on one AV1 song: a regression check, not a proof of a
+frame-exact path). The follow-up lane's design is #282 comment
+6241829405.
+
+**Automatic.** Setting `max_resolution` back to automatic restores
+3840×2160 with no code change, WITH hardware decode on (SNV, PP). The rule
+is the download's, so automatic still scales three kinds of file (review
+rounds 1–2):
+
+- a picture wider than 16:9 at 2160 rows (DCI 4096×2160 → 3840×2026) is
+  scaled on the GPU;
+- anything taller than 2160 rows (a portrait 2160×3840 → 1216×2160) is
+  scaled too;
+- on a box with `video_hw_decode` off (automatic = 1440), every 4K file is
+  scaled on the CPU.
+
+- **One knob.** `max_resolution` (Nastavenia "Najvyššie rozlíšenie
+  (sťahovanie aj prehrávanie)", with the hint `settings-max-resolution-hint`:
+  the owner's per-site switch when 4K is a problem) caps decode through the download's own rule
+  `downloader::format::max_resolution(raw, hw_decode)`: automatic = 2160
+  with hardware decode, else 1440; a number clamped to 480..=2160. The 5 s
+  settings task (`video_decode.rs`) applies it with `video_hw_decode`
+  (`HwDecodeSetting::max_height`); the paced producer opens each song with
+  `open_with(path, mode, Some(cap))`. A playing song keeps its reader.
+- **The size** (`hw_decode::scaled_size`, pure, mutation-gated): the box is
+  cap × 16/9 wide and cap tall, both rounded down to even (`decode_box`;
+  1080 → 1920×1080, 480 → 852×480). A picture inside it → `None`: it opens
+  EXACTLY as before. A larger one is scaled by min(box w / w, box h / h):
+  the side that binds takes the box's size, the other is rounded to the
+  nearest even (a tie upwards), each ≥ 2. 3840×2160 at 1080 → 1920×1080;
+  3840×1606 → 1920×804; 4096×2160 at 2160 → 3840×2026. The cross products
+  are u128 (no overflow at any `u32`).
+- **The open** (`video/mf_reader.rs::create`, the scaled half in
+  `video/mf_reader_scaled.rs` and the Media Foundation reads in
+  `video/mf_scaled.rs`): the first source reader is made as before and only
+  read for the native type (no output type set yet, so no decoder MFT is
+  loaded). A scaled open makes a SECOND reader (`open_scaled` →
+  `source_reader(.., advanced)`) with
+  `MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING` = 1
+  (`MF_READWRITE_DISABLE_CONVERTERS` must stay unset). Microsoft: the
+  source reader then inserts a video processor and "attempts to match" the
+  output type's frame rate, frame size, interlace mode, pixel aspect and
+  subtype (for the pixel aspect, see the next bullet).
+  On the D3D path it is D3D11-aware and scales on the GPU before the
+  readback, so the readback, the frame pool, MAX's upload and the canvas
+  all carry the smaller picture. In software it scales on the CPU.
+- **The scaled output type** (`mf_scaled::ScaledType::apply`) carries:
+  - `MF_MT_FRAME_SIZE` = the scaled size;
+  - `MF_MT_PIXEL_ASPECT_RATIO` = `hw_decode::scaled_pixel_aspect`, the
+    native display aspect kept exactly (3840×1606 → 1920×804 is 804:803).
+    Whether the reader keeps it is unproven for our NV12 output. Wine's
+    Windows-run `test_source_reader_aspect_ratio`
+    (`dlls/mfreadwrite/tests/mfplat.c`, "Aspect ratio in output type is
+    ignored") shows an ARGB32 output's ratio absent from the current type
+    (with no frame size the reader rescales by the INPUT's aspect; with
+    one, the frame size wins). CI's software 66×50 edge bands prove the
+    picture fills the frame, not which attribute fills it: 66×50 at 100:99
+    is the native 4:3, so either way the same picture comes out. The
+    negotiated ratio is printed by the CI log (`out_pixel_aspect`, the
+    software path) and by the box's open INFO (`pixel_aspect_out`, the
+    D3D11 path);
+  - the native type's `MF_MT_YUV_MATRIX` and `MF_MT_VIDEO_NOMINAL_RANGE`
+    when it has them, so that the processor need not convert colour. That
+    is the intent, unproven: Microsoft's matched attributes do not list
+    colour, and the box's hue check is the proof. A size-based default,
+    e.g. BT.601 for an SD output, would shift the hues the compositor
+    reads as BT.709.
+
+  It carries NO frame rate (review round 2). A rate of ours could start
+  the processor's frame-rate conversion when the decoder reports another
+  rate, putting a periodic repeated picture on the wall. The reader reports
+  the processor type's rate, else the native type's
+  (`hw_decode::scaled_frame_rate`), never the 29.97 guess for a scaled open.
+- **Never a dead song, no green strip.** Each of these is a refusal:
+  - the negotiated type is not EXACTLY the requested size
+    (`hw_decode::scale_took`), on the D3D path too. Behind the processor
+    the output type is ours and the picture fills it, so a padded type
+    would be picture the readback cuts off;
+  - the decoder's padding could reach the processor
+    (`hw_decode::scaled_open_safe`, the green strip; review round 3). The
+    decoder's output type is read from the reader's chain at open
+    (`IMFSourceReaderEx::GetTransformForStream` → the
+    `MFT_CATEGORY_VIDEO_DECODER` → `GetOutputCurrentType(0)`: its
+    `MF_MT_FRAME_SIZE` and `MF_MT_MINIMUM_DISPLAY_APERTURE`):
+    - padding seen at open without exactly the native aperture refuses;
+    - on the D3D path NVDEC may learn its padded size only at the first
+      frame, AFTER this check (a VP9 / AV1 sample entry carries no frame
+      header). So there a stream that is not whole 16-pixel blocks
+      (3840×1606, 2560×1350) is scaled only when the decoder already shows
+      the native aperture at open, and an unreadable chain refuses it.
+      NVDEC's 16-row padding cannot reach whole blocks (3840×2160,
+      2560×1440, 4096×2160), so the 16:9 majority keeps the lever UNLESS
+      the decoder shows padding at open without the native aperture: that
+      refuses on any size. Seen on SNV (17.10.2026, AV1 3840×2160, D3D11):
+      the decoder showed `3840×2160`, no aperture, at open;
+    - in software only the padding seen at open refuses, and an unreadable
+      chain is let through with a WARN naming the file (the same WARN
+      lets a D3D11 stream of whole blocks through; it names `path`). What
+      is PROVEN of the software decoders: CI run 39040435639 printed the
+      runner's H.264 software decoder (the line names no MFT) showing
+      `160×120`, no aperture, AT OPEN for the fixture coded 160×128; at
+      its FIRST PICTURE the same decoder turns to `160×128` WITH the native
+      aperture `(0, 0, 160×120)` and range 2 (CI run 39081688670's `at the
+      first picture` lines), so its padding never reaches the processor.
+      The VP9 / AV1 software decoders are not proven;
+  - Media Foundation refuses the attribute or the type.
+
+  A refusal logs WARN `mf_reader: the scaled open was refused; this file
+  decodes at its own size` (the error names the negotiated size or the
+  decoder's output), counts `scale_refusals` +1, and configures the first
+  reader unscaled. A padded TEXTURE with an exact type is fine: the
+  readback takes the UV offset from the texture's height.
+- One INFO per scaled open: `mf_reader: opened scaled to the decode cap
+  (#282); the decoder's own path is not visible behind the video
+  processor`, `scaled_opens` +1. Its fields:
+  - `from`, `to`, `pixel_aspect`, `path` (D3D11 / software);
+  - `decoder`: what the decoder hands the processor, `Ok(DecoderOutput
+    {size, aperture, colour})` or why the chain could not be read;
+  - `chain`: the source reader's transforms in order (`Decoder`,
+    `VideoProcessor`, `Other(<category GUID>)`, or the `Error` that ended
+    the walk);
+  - `native_aperture`: the native type's `MF_MT_GEOMETRIC_APERTURE`;
+  - `colour_native` / `colour_out` / `colour_decoder`: the matrix and the
+    nominal range (`MF_MT_YUV_MATRIX`: 1 = BT.709, 2 = BT.601;
+    `MF_MT_VIDEO_NOMINAL_RANGE`: 1 = full, 2 = 16..235) of the native type
+    (put on the scaled type), the negotiated scaled type and the decoder's
+    output. Whether `colour_out` keeps each value the native type states
+    (ours, `ScaledType::apply`) is NOT proven: the reader may drop it as it
+    drops an ARGB32 output's pixel aspect (above). The CI test fails only
+    where the native type states a value and the scaled type states
+    another; the CI fixture most likely states none. Only two STATED,
+    unequal values of `colour_out` and `colour_decoder` suggest a
+    conversion; an unstated (`None`) side says nothing (the processor then
+    takes some default of its own: reasoned, not measured). The proof
+    stays the hue check against the uncapped song;
+  - `pixel_aspect_out`: the negotiated type's pixel aspect
+    (`out_pixel_aspect`; `None` = not stated, or Media Foundation did
+    not answer).
+
+- **The first scaled picture** (#282 follow-up): the decoder MFT found at
+  the open is kept and its output type read again ONCE there, then let go,
+  with no `GetTransformForStream` call mid-stream (Microsoft: drain the
+  reader before calling it). One INFO `mf_reader: the decoder's output at
+  the first scaled picture (#282)` with `at_open`, `at_first_picture` and
+  `padding_in_reach` (`hw_decode::padding_reaches_processor` on the new
+  type against the stream's own size; also in the facts,
+  `first_picture_padding_in_reach`). On the box, `padding_in_reach=true`
+  is where the green strip is expected (NVDEC padded after the open's
+  check; that the processor crops only by `MF_MT_MINIMUM_DISPLAY_APERTURE`
+  was reasoned in review, not measured): look at that file's bottom rows
+  on MAX.
+- The reader's `scaled_from()` is the stream's own size;
+  `scaled_decoder_output()` and `scaled_open_facts()` (doc-hidden,
+  `ScaledOpenFacts`, `video/mod.rs` re-exports it) are what the open read.
+- **Where the code lives:** the reader's scaled half (`open_scaled`, its
+  log lines, the first picture's re-read, the accessors) is the CHILD
+  module `video/mf_reader_scaled.rs` (`#[path = "mf_reader_scaled.rs"]
+  mod scaled;` inside `mf_reader.rs`, resolved next to it). As a child it
+  reaches the reader's private fields and `source_reader` / `configure`,
+  so `mf_reader.rs` (900 lines) stayed under the cap with no field made
+  `pub(super)`. The chain walk and the Media Foundation reads are
+  `mf_scaled.rs` (`read_chain`: every transform up to
+  `MF_E_INVALIDINDEX`, the first decoder's output; Microsoft: a decoder
+  sits at index 0).
+- **The reference size.** With scaling, `visible_size`'s reference is the
+  REQUESTED size (`hw_decode::visible_reference`), never the native one
+  (it never fits a scaled surface).
+- **The path label.** A scaled picture lies in the video processor's
+  texture, which carries no `D3D11_BIND_DECODER`, so it tells nothing of
+  the DECODER's path. `DecodePath::of_surface(bind_flags, scaled)` labels
+  every DXGI surface of a scaled open `hardware` (the bench's
+  `decode_path`: on the GPU), and `hw_decode::decoder_path_visible` keeps
+  its first picture out of `gpu_decodes` AND `mf_software` (no "hardware
+  decode active" INFO, no "MF decodes this file in software" WARN). So
+  with the cap in force the 16.10 software-decode guard (`mf_software`)
+  is blind for scaled songs: a decoder MFT falling back to software behind
+  the processor (a GPU with no decoder for the codec) shows only in the
+  bench's timings (a scaled 4K hardware run far slower than ~20 ms a
+  picture is not NVDEC).
+- **A mid-stream software reopen keeps the cap** (`max_height` on the
+  reader) but judges the scale afresh on the new decoder
+  (`scaled_open_safe`), so the size can change mid-song EITHER way: a
+  D3D11 open that scaled, then a refused reopen, goes on at the stream's
+  own size; a D3D11 open that was refused (not whole blocks, no aperture
+  shown), then a software reopen that scales, goes on at the scaled
+  size. The canvas fits any size. It counts in `scaled_opens` (or
+  `scale_refusals`) again, and the reopen's first picture re-reads its
+  own decoder. CI pins the software one: `tests/mf_decode_cap.rs`
+  `a_reopen_after_a_decode_error_keeps_the_decode_cap`.
+- **Which readers take the cap.** The paced producer and the decode bench
+  (the cap in force, computed with the SETTING's `video_hw_decode` — #279
+  P3a: or `video_decode` = gpu in effect —, not the bench request's `hw`: the bench measures what playback runs; set
+  the setting back to automatic to bench a 4K sample at 4K; the report
+  carries `max_height` and `scaled_from`). The video upgrade's facts and
+  the repair's codec open with `None`: they measure the FILE (a 4K file
+  read at 1080 would look 1080 to the upgrade worker, which would download
+  it again).
+- **Telemetry:** `status.video_decode.max_height` (the cap in force),
+  `scaled_opens`, `scale_refusals` (`hw_counters()`, process-wide, any
+  mode; `gpu_decodes` / `mf_software` count no scaled open).
+- **Tests:** `hw_decode_tests_scale.rs` (Linux; every pin from a scratch
+  model that also killed each listed mutant), `video_decode_tests.rs` (the
+  cap from the setting, the JSON names), `diag/decode_bench_tests.rs` (the
+  report's two facts), and on Windows `tests/mf_decode_cap.rs`:
+  - the software reader on the 160×120 fixture (coded 160×128) with a cap
+    of 60 hands every picture over at 80×60 (stride 80, `scaled_from`
+    160×120, one scaled open);
+  - the timestamps and the frame rate (as a ratio) equal the unscaled
+    reader's;
+  - the picture is compared region by region: a 4×4 grid of luma means
+    and the four edge bands, tolerance 6. Reviewer-measured maxima over all
+    90 pictures with ffmpeg stand-ins:
+    - correct scalers: grid ≤ 4.95 (fast_bilinear; the others ≤ 2.9),
+      bands ≤ 1.34;
+    - defects: ≥ 7.0 (a 1-column pillarbox on the grid; its bands 38), a
+      range conversion 10.8.
+
+    One whole-picture mean cannot see a range conversion here, because the
+    fixture's mean (111.4) sits near that conversion's fixed point (113.3);
+  - a cap of 50 (66×50, pixel aspect 100:99) must fill the frame: edge
+    bands, tolerance 10, correct ≤ 7.2, a 1 px letterbox ≥ 25;
+  - caps of 120 and 2160 change nothing (no facts either);
+  - an injected refusal (`refuse_next_scaled_open_for_test`, doc-hidden)
+    plays the file unscaled with `scale_refusals` +1. The hook returns a
+    guard (`ScaledOpenRefusal`, `#[must_use]`) whose drop disarms it, so
+    a test that panics before its open never refuses a sibling's
+    (`a_dropped_refusal_guard_refuses_no_later_scaled_open`);
+  - a seek on a scaled reader (60 pictures, then back to the middle)
+    lands where the unscaled reader's lands, every picture after it
+    80×60, nothing reopened;
+  - an injected decode error on a scaled reader: the software reopen is
+    scaled too (`scaled_opens` +1), no picture lost or doubled.
+
+  Each scaled open writes to stderr (the CI log) what MF negotiated and
+  its whole `ScaledOpenFacts`, and after the first picture the decoder's
+  output at the open and at the first picture. Every scaled open made
+  through the `open_scaled` helper asserts:
+  - the chain is the decoder at index 0 and a transform (not an `Error`)
+    after it;
+  - the decoder's output was read (`scaled_decoder_output()` Some);
+  - where the native type states a colour value, the negotiated type
+    states no other (the CI fixture most likely states none: no VUI
+    signal type, no `colr` box, so this is most likely vacuous there).
+
+  The tests that decode from the first picture (cap 60, cap 50, the
+  seek, the reopen's second open) also assert the re-read (`Some(Ok)`)
+  and that the padding check ran. Two runner premises sit in their own
+  tests, each proven only once its first CI run passes, so a runner that
+  disagrees fails there alone:
+  - `the_first_picture_shows_no_decoder_padding_in_reach` pins
+    `first_picture_padding_in_reach` `Some(false)`. The fixture fills its
+    frame, so this pins that the check reads the stream's own size. Its
+    premise: the decoder shows its crop as
+    `MF_MT_MINIMUM_DISPLAY_APERTURE`, or no padding at all (Wine's H.264
+    decoder tests);
+  - `a_scaled_open_lists_the_video_processor_in_its_chain` pins the
+    processor's CATEGORY. Evidence for the chain's shape: Microsoft (a
+    decoder at index 0) and Wine's conformance tests, which run against
+    Windows (`dlls/mfreadwrite/tests/mfplat.c`: "the video processor can
+    be accessed at index 1 with
+    MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING", index 2 =
+    `MF_E_INVALIDINDEX`; with no conversion needed, the decoder alone).
+    Neither proves the category on Windows (Wine's own reader reports
+    `MFT_CATEGORY_VIDEO_PROCESSOR`); if the test fails, the stderr line
+    before it names the chain.
+- **Box checks (CI cannot run the D3D path):**
+  - PATCH `max_resolution` to 1080 and wait 5 s. Then run the decode
+    bench with `"hw": true` on a 4K sample, for EACH 4K codec (VP9, AV1,
+    H.264), over the whole file (`ended: end_of_stream`), and again with
+    the setting back to automatic. Expect:
+    - `width` / `height` = the scaled size, with `scaled_from` and
+      `max_height` set;
+    - `frames` and `source_fps` equal to the uncapped run's. Unequal
+      means frame-rate conversion: a repeated picture;
+    - a mean well under the uncapped run's;
+    - the log's `opened scaled to the decode cap` line says `path="D3D11"`
+      and names the `decoder` output, the `chain` (a `VideoProcessor`
+      after the `Decoder`), the colours (two stated, unequal values of
+      `colour_out` and `colour_decoder` suggest a conversion: check the
+      hues) and `pixel_aspect_out` (the D3D11 path's answer to whether the
+      reader keeps the output ratio); the `at the first scaled picture`
+      line says
+      `at_first_picture=Ok(…)` and `padding_in_reach=false` (a failed
+      re-read also prints `false`).
+  - Play a 4K song: `status.video_decode.scaled_opens` +1 and
+    `scale_refusals` +0. A refusal's WARN names the negotiated size or the
+    decoder's padding. `GET /api/v1/program` `max.upload_mb_s` should drop
+    from ~298 to about a quarter.
+  - A widescreen 4K song whose rows are not a multiple of 16 (3840×1606:
+    NVDEC pads to 1616): it is scaled only if the decoder showed the native
+    aperture at open (the INFO's `decoder`), else refused (WARN,
+    `scale_refusals`) and played at 4K as before. When it plays scaled,
+    always look at MAX's / the wall's bottom rows for a green line (the
+    check runs at open, the decoder's type can change at the first
+    frame; the `at the first scaled picture` INFO's
+    `padding_in_reach=true` is that case, by the model).
+
+    The exact fix if such songs must scale too (review round 1): ONE
+    reader with `IMFSourceReaderEx::AddTransformForStream`, inserting a
+    `CLSID_VideoProcessorMFT` whose `IMFVideoProcessorControl::
+    SetSourceRectangle` is the native picture, so the geometry is ours.
+  - A 2560×1350 or 3840×1606 song at 1080 (a fraction of a pixel off the
+    aspect): check for a black column or row at MAX's / the wall's edges.
+    Check the colours too: no hue shift against the uncapped song.
 
 ## Which path really decoded (read from the pictures, not from the mode)
 
@@ -139,7 +466,9 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   second
   error goes to the caller, as before S3b.
 - `HwCounters` (`sp_decoder::hw_counters()`, process-wide, every
-  `Hardware` open, the bench's too): `requested` (counted before the open,
+  `Hardware` and #279 P3a `GpuResident` open, the bench's too;
+  `resident_opens` counts the GPU-resident ones on the D3D path):
+  `requested` (counted before the open,
   so a file that then opens nowhere counts only there), `gpu_decodes`,
   `mf_software`, `open_fallbacks`, `mid_stream_fallbacks`,
   `path_changes`, `last_fallback`. A fall back is counted once the file
@@ -153,18 +482,1225 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   path passes D2, 1440p not slower).
 - `start` (lib.rs, before the pipelines) applies it to the process value
   (`global()`), then a task re-reads it every 5 s. The PACED producer
-  (`pipeline_paced.rs::run_decode_producer`) opens each song with
-  `global().mode()`: a change applies from the next song, a playing song
-  keeps its reader. (#221 lane 3 deleted the SDK-clocked path, which
+  (`pipeline_paced.rs::run_decode_producer`) opens each song in the mode
+  `PipelineGpu::song_mode()` gives (`global().mode()`, or #279 P3a
+  GPU-resident on the pipeline's producer): a change applies from the
+  next song, a playing song keeps its reader. (#221 lane 3 deleted the SDK-clocked path, which
   stayed software.)
 - Toggle: `PATCH /api/v1/settings {"video_hw_decode": "true"}`; no restart.
+- **Never switch SNV (or PP) to software decode while it plays to a room**
+  (#251 comment 6221372473, 16.10.2026, during an event). With the setting
+  off, every song from 17:01 to 17:43Z opened in software. The Dante
+  Virtual Soundcard's ASIO callbacks then came late or early, 12–40 a
+  minute against 4–8 (the out-3 risks of the audio fault ledger). Dante
+  Controller showed SNV's packets red, and the audio popped at FOH. It
+  stopped with the first GPU-decoded song. The total CPU stayed at 1–2 %:
+  MF's software decoder is BURSTY, not heavy on average, so a CPU reading
+  never clears it. Software decode did not cure the wall judder either.
+  The setting stays `true` on SNV.
 - `GET /api/v1/status` → `video_decode {hw_decode, hw_requested,
   gpu_decodes, mf_software, open_fallbacks, mid_stream_fallbacks,
-  path_changes, last_fallback}` (the setting + the counters; counts of FILES since the
-  process started, not live state; `#[serde(default)]`, so a missing key
-  reads as zero).
+  path_changes, last_fallback, max_height, scaled_opens, scale_refusals,
+  video_decode, gpu_resident_opens, gpu_resident_blocked, pipelines}`
+  (the setting + the decode cap (#282) + the counters + #279 P3a's
+  GPU-resident fields, "GPU-resident decode" below; counts of FILES since
+  the process started, not live state; `#[serde(default)]`, so a missing
+  key reads as zero).
 - `POST /api/v1/diag/decode-bench` takes `"hw": true` and reports
   `decode_path` / `adapter` / `hw_fallback` (`diag-bench.md`).
+
+## GPU-resident decode (#279 P3a)
+
+Design: #279 comment 6244390810 (`Design-by: main`), plan
+`docs/superpowers/plans/2026-10-16-gpu-video-path.md` §5.1-§5.3,
+§5.8-§5.11, §9 P3a. With `video_decode` = `software` (the default) the
+`video_hw_decode` paths above are as they were; what still runs at the
+default:
+
+- the producer's per-song INFO (`path="ram"`: a string field, quoted by
+  the log's formatter) with its `codec()` read
+  (`GetNativeMediaType`, which the bench has called on the box since
+  #223 S0), and the table's row;
+- on the `program-max` thread (the timing-critical one): MAX's standby
+  black composed as Black (`gpu-max.md`: the same pixels, fewer uploads on
+  black boundaries), and every compose records `MaxOut::record_compose`
+  (it walks `Composition::cpu_sides()`, and the window entry carries the
+  sides by kind and the slot totals) under MAX's stats lock;
+- `GET /api/v1/program` builds `gpu` (`MaxOut::gpu_status`: a second
+  clone of the 900-compose window under that same lock, which each compose
+  also takes), and `status.video_decode` carries four more fields, its
+  read taking the table's lock;
+- the song's mode is read on the paced EMIT thread at its open
+  (`PipelineGpu::song_mode()`), while its decode cap is still read on the
+  decode thread, so one 5 s poll can land between the two reads;
+- the settings task reads `video_decode` and `program_ndi_source` too: an
+  unreadable one now also holds back a `video_hw_decode` change (the task
+  applies nothing on a read error);
+- each `/api/v1/ndi/health` row takes the table's lock to read
+  `gpu_decoded`; the idle heartbeat calls `release_idle` (nothing to let
+  go without a producer);
+- the log lines: the reader's open INFO names `mode`, the bench's start
+  line logs `mode` where it logged `hw`, and the settings task's INFO
+  (`settings applied`) also fires on a `program_ndi_source` change (gate
+  2's flip logs it);
+- the bench's report carries `gpu_resident` and `ring` (`diag-bench.md`).
+
+**Never set `video_decode` = `gpu` on PP before P3b** (the design's
+shared-benefit line: PP's preview gate keeps software until then). A
+GPU-decoded song offers no preview (`preview.md`), so every `deploy-pp`
+run would fail `post-deploy-pp-preview.spec.ts`: the on-program card
+shows "Náhľad nedostupný pri GPU dekódovaní." and has no
+`preview-start`.
+
+- **The setting** `video_decode` (`sp_core::config::video_decode`: exactly
+  `gpu`, trimmed, is `VideoDecode::Gpu`, anything else software) is read
+  with `video_hw_decode` by the 5 s settings task
+  (`HwDecodeSetting::set_video_decode` / `set_ndi_source`) and applies
+  from the next song.
+- **The precondition** (`gpu_resident::Resident::of`): `gpu` takes effect
+  only while `program_ndi_source` = `gpu`, because the CPU canvas shows a
+  GPU picture as black. While it is blocked:
+  - each song opens in `video_hw_decode`'s mode;
+  - `status.video_decode.gpu_resident_blocked` reads `ndi_source_cpu`;
+  - each change into the block logs one WARN (`resident_log`), and on / off
+    one INFO.
+- **When `gpu` stops taking effect** (switched off, or `program_ndi_source`
+  back to `cpu`; review rounds 1-2; an addition to the design, which
+  applies `video_decode` at each song's open: needed, or NDI would show
+  the playing song black on the canvas), the settings task retires every
+  live producer (`gpu_resident::precondition_changed` →
+  `Pipelines::retire_producers` → `ProducerGpu::retire`): a song playing
+  GPU-resident reads its pictures back from its next one, the GPU decoder
+  going on (`mf_reader_resident.rs`: a retired producer's surfaces take
+  the `Hardware` readback; no reopen, no gap, no software decode). With
+  NDI back on the canvas it would otherwise show black there for the rest
+  of the song. A retired producer still held at the next take is replaced
+  at once (its device is healthy: no backoff). Never a reopen in software
+  here: round 1 did that, and it froze the program with silence for up to
+  a GOP, then decoded the rest of the song in software, which this file
+  bans while SNV / PP play to a room. A producer being MADE while the
+  task retires (review round 4: the table does not hold it yet, so the
+  scan misses it) is retired by its own open: `gpu_resident::take_for_open`
+  writes its row, then asks the precondition again (the task writes the
+  setting before its scan takes the table's lock, so one of the two sees
+  the other), and the song opens in the base mode (`Leased::Retired`, one
+  INFO). Known bounds:
+  - the two settings tasks (this one and MAX's `program_max_phase.rs`,
+    which switches NDI) each read `program_ndi_source` every 5 s, so they
+    can disagree up to ~5 s either way: NDI on the canvas before the
+    retire (black NDI for a GPU-resident song meanwhile, plus the frames
+    already queued), or, when it goes to the GPU, a song opened
+    GPU-resident while NDI still reads the canvas (black NDI until MAX's
+    task switches it);
+  - an AUTOMATIC NDI fall back to the canvas (`ndi_source_for`'s rule: a
+    readback none or over 30 slots stale; the way back to the GPU is P1b's
+    `ReturnGate`, 30 on time in a row) changes no setting: a GPU-resident
+    song keeps decoding into its ring and NDI shows its pictures black
+    until the readback returns (the compositor that stopped reading back
+    is MAX's too). P3b's CPU path for a ring frame is what lifts it;
+  - `PipelineGpu`'s drop race (review round 3, left): a playlist
+    re-created while its old pipeline still tears down. The old
+    `PipelineGpu`'s drop forgets the playlist's row, now the NEW
+    pipeline's, so a later retire misses the new producer and a
+    GPU-resident song on it is black on NDI for the rest of the song; the
+    lost row also reads `gpu_decoded` false (the Player offers a preview
+    that stays black) and leaves `status.video_decode.pipelines[]`, both
+    until the next song writes it again. It
+    needs a re-created playlist, a GPU-resident song on it and a
+    switch-off together; a generation check or a process-wide retire epoch
+    is the fix: a follow-up candidate the lane returned to the main
+    session (to file, or add to P4's scope on #279), to decide before
+    `gpu` runs during an event;
+  - a PAUSED GPU-resident song never reaches the idle fill, so
+    `release_idle` never runs for it: its reader, its producer and the
+    slots of its queued frames (about 14 × 12.4 MB at 4K) stay in VRAM for
+    the whole pause, and pausing a stray (plan §7's precondition) frees
+    none of it. The 10 min rule could not free it either while the reader
+    lives. A candidate for P4's VRAM guard; read it in the VRAM-sum gate
+    below;
+  - the rollback order: set `video_decode` = `software` FIRST, then
+    `program_ndi_source` = `cpu` (one settings poll apart, ≥ 5 s). The
+    other order opens the up-to-5 s window above, NDI on the canvas while
+    a song still decodes GPU-resident (black NDI).
+- **The decode cap** (review round 1): `gpu` in effect takes the hardware
+  decode's cap (`max_resolution` automatic = 2160) even with
+  `video_hw_decode` off (`load_settings`: `hw || Resident::On`).
+- **The deliberate additions to the design, for the main session to
+  ratify on #279 in one ROZHODNUTÉ** (review rounds 1-7): the mid-song
+  retire (above); the idle release counted from the pipeline going idle
+  (its idle fill's first heartbeat since the last open, so a long song
+  never counts as idle); the producer let go at once at an open while
+  `gpu` does not take effect; the decode cap `hw || Resident::On` (above).
+- **The producer** (`sp_gpu::ProducerGpu`, `gpu-max.md`) is ONE
+  `VideoDevice` and the pipeline's 20-slot `PictureRing` on it, one per
+  PIPELINE (`gpu_resident::PipelineGpu`, a `Lease`, in the pipeline's
+  `PipelineOutput`):
+  - made at the first GPU-resident open (`ProducerGpu::new`) and kept
+    across the songs;
+  - let go 10 min after the pipeline went idle (`PRODUCER_IDLE_RELEASE`,
+    counted from the idle fill's first heartbeat since the last open, so a
+    long song never counts as idle);
+  - let go at once when a song opens with the precondition off (no idle
+    fill runs while songs keep playing), and when the pipeline ends;
+  - a producer whose ring died (a lost device, an abandoned key) is
+    dropped at the next open (a G open = a GPU-resident one, an S open =
+    one while `gpu` does not take effect; the A/B's sides below). A G
+    open asks it (`Lease::take` →
+    `lost()`): the WARN `… was lost`, and the next one is made only
+    `PRODUCER_REBUILD_BACKOFF` (30 s) later, a failed build likewise;
+    meanwhile the songs open in the base mode. An S open
+    (`release_at_open`) lets it go like a live one, with no WARN and
+    no backoff, and the next G open makes a new one at once;
+  - it is built on the pipeline's paced EMIT thread
+    (`PipelineGpu::song_mode()`, at the song's open, before the decode
+    feed attaches; the consumer fills those boundaries, so no hole, only
+    a few `consumer_fill_pairs` and late frames), and an idle release
+    drops its device and slot textures on that thread at an idle
+    heartbeat. A `Hardware` reader's `VideoDevice` is made on the decode
+    thread instead. The cost falls only at a pipeline's first
+    GPU-resident song, after a release, a backoff or a retire; moving
+    the build onto the decode thread (and the drop off the emit thread)
+    is a follow-up candidate the lane returned to the main session (to
+    file, or add to P4's scope on #279).
+- **The open** (`open_with(path, GpuResident(p), cap)`): `HwSession`
+  (`video/hw_session.rs`) resets its DXGI device manager to the
+  PRODUCER's device (`HwDevice::Producer`) instead of a new
+  `VideoDevice`, so the decoder's pictures lie on the device of the ring
+  they are copied into. A producer whose ring is dead is refused there.
+  A failed open falls back to software at open, as a `Hardware` one does
+  (`hw_fallback` `open: …`). The open's INFO names `mode`;
+  `HwCounters::resident_opens` (`status.video_decode.gpu_resident_opens`)
+  counts the opens on the D3D path.
+- **Each picture** (`video/mf_reader_resident.rs::surface_picture`, a
+  child of `mf_reader.rs`, through `DxgiSurface::picture`; the choice is
+  the pure `hw_decode::SurfaceUse::of(resident, retired)`: the ring for a
+  GPU-resident reader whose producer is not retired, else the readback):
+  - a DXGI surface is copied into a ring slot (`DxgiSurface::copy_into`
+    → `ProducerGpu::copy_from(texture, subresource, visible size)`: the
+    slot's key, `CopySubresourceRegion` of the slice's even box, flush,
+    release, timed into the ring's copy p99), at `visible_size` (never
+    NVDEC's padded rows), its path read as for a readback
+    (`DecodePath::of_surface`); a scaled open's processor surface is
+    copied the same way;
+  - the frame is `DecodedVideoFrame.gpu = Some(GpuFrame)`, `data` empty,
+    stride one chroma row;
+  - a SYSTEM-MEMORY sample (Media Foundation decoding in software behind
+    the manager) is read as before: a CPU picture.
+- **Never a dead song.** A copy that fails is a decode error (`BufferLock
+  "GPU ring: …"`), so `FallbackGate` reopens the file in software once
+  (`mid-stream: …`, and the paced producer's WARN that the pictures
+  changed kind): a ring full past `RING_WAIT` (100 ms), a dead ring, a
+  refused picture, a lost producer device (a retired producer is no
+  failure: its surfaces are read back, above). A lost device kills the ring
+  (`GpuError::removed`), so the pipeline's next song drops the producer:
+  a G song waits the 30 s backoff, an S song lets it go with neither a
+  WARN nor a backoff.
+- **sp-server** (`gpu_resident.rs`, `paced_producer.rs`):
+  - a ring frame becomes `Picture::Gpu` (`to_paced_frame`);
+  - the producer reports each change of the frames' kind (`KindChange`:
+    the song's first frame, a fall back) into the table
+    (`note_song_path`): one INFO per song (path, codec, size, ring), a
+    WARN for a change mid-song; a song's end clears its row;
+  - `status.video_decode` adds `video_decode`, `gpu_resident_opens`,
+    `gpu_resident_blocked`, `pipelines [{playlist_id, gpu_decoding, ring
+    {slots, in_use, waits, full, dead, copy_us_p99, vram_mb}}]`;
+  - the `/api/v1/ndi/health` row's `gpu_decoded` feeds the Player's
+    preview slot (`preview.md`).
+- **The ring's 20 slots** (`RING_CAPACITY`, P2's sizing kept by P3a's
+  design) hold, from ONE pipeline: the 12 queued frames, the producer's
+  frame waiting to be pushed, the decoder's `frame_before_end`, the held
+  step, the pacer's shown / next frame, the handoff's 2, and the bus's
+  pending reorder entries and submit queue (`PROGRAM_PENDING_BOUND` 16,
+  `PROGRAM_QUEUE_BOUND` 10, normally 1-3), MAX's queue and the
+  compositor's open slots. The steady state is ~16-18; a catch-up or a
+  bus stall can reach 20, and a copy then waits `RING_WAIT` (100 ms,
+  counted in `waits`) and, past it, is a decode error: the song goes on in
+  software (`full` +1). The box gate reads `ring.full` (+0 required) and
+  reports `waits`.
+- **A ring killed while its producer's device is healthy** (review round
+  3): the COMPOSITOR losing its own device mid-compose leaves the slot
+  keys it held abandoned, and the producer's next write (or the rebuilt
+  compositor's draw) kills the ring (`ring_state`'s abandoned rule, left
+  to P4 since P2). The design's fall back then applies: a dead ring is a
+  decode error, the song reopens in SOFTWARE (up to a GOP of silence, the
+  rest of the song in software) and the next G song waits the 30 s
+  backoff (an S song lets the producer go with neither a WARN nor a
+  backoff). Reading back on the same healthy decoder instead (round 2's
+  path for a retired producer) would be gapless, but changes a fall back
+  the design chose: a follow-up candidate the lane returned to the main
+  session (to file, or add to P4's scope on #279). It, and a ring full
+  past `RING_WAIT`, put a song on the software decode this file bans while
+  SNV / PP play to a room, so the main session decides it before `gpu`
+  runs during an event. The box gate reads `gpu.abandoned` and
+  `max.device_resets` against `video_decode.mid_stream_fallbacks`.
+- **Tests:**
+  - sp-decoder `tests/mf_gpu_resident.rs` (Windows, WARP): a
+    decoder-like 2-slice 640×368 NV12 array on the producer's device, its
+    slice 1 wrapped as a decoded sample (`copy_texture_as_decoded_sample`,
+    doc-hidden, through the reader's own `DxgiSurface::picture`) and copied
+    into the ring, draws like an upload of the same picture (worst ≤ 1) and
+    unlike slice 0; a picture larger than its surface is refused before any
+    slot is taken; a RETIRED producer's slice is read back byte for byte,
+    with no slot taken (slice 1 of the SRV-bound 2-slice array through
+    Media Foundation's staging copy: unproven on WARP until its first CI
+    run; if refused, read the HRESULT, never switch it to slice 0, which
+    loses the which-slice proof);
+  - `hw_decode_tests.rs` (the modes compare by kind, `resident_opens`,
+    `SurfaceUse::of`; on Windows GPU-resident modes compare by their
+    producer);
+  - sp-gpu `tests/ring.rs` (a producer copies a slice and counts it; a
+    retired producer says so, its ring alive);
+  - sp-server `gpu_resident_tests.rs` (incl. a producer made while the
+    settings task stops `gpu`: retired at its open, `take_for_open`; the
+    release at an open while `gpu` does not take effect and the idle
+    release, each leaving no row: `release_at_open`, `release_when_idle`),
+    `paced_producer_tests_gpu.rs`, `video_decode_tests.rs`.
+
+  WARP refuses the video device, so the D3D decode path into the ring
+  runs only on the box.
+- **Box gates (the main session), in the design's order (#279 comment
+  6244390810, "Box gates"; the plan §7 and §9 P3a). Each step starts only
+  once the one before held:**
+  1. **The deploy at the default** (`video_decode` = `software`,
+     `program_ndi_source` = `cpu`, and #251's two wall levers at their
+     defaults for BOTH hours, read before and after: `program_max_size` as
+     `GET /api/v1/program` `max.width` / `height` = 3840×2160, and
+     `program_max_spout_send` as its STORED value in `GET /api/v1/settings`
+     (anything but exactly `plain` or `release_then_wait`, trimmed, is the
+     default `synced`; it is on no field of `GET /api/v1/program`, and the
+     INFO `program max: Spout hand-off applied` names the applied `mode`
+     when a change took effect, within one 5 s poll), and the decode
+     cap read the same way (`status.video_decode.max_height`, #282: it
+     moves the backs 10–15×); a lever or the cap moved between the two
+     hours voids the comparison): every
+     existing gate holds, and the wall is measured an hour after the E2E
+     against an hour before (`gpu-max.md`, "Judging a deploy on the wall";
+     since #251's 19.10 finding the missing pictures next to the backs,
+     both read as in the main A/B below): this build changes
+     the `program-max` thread at the default too (the standby black
+     composed as Black, the same pixels; every compose's
+     `record_compose`; the `gpu` read's window clone, the default-path
+     list above), so a worse wall after this deploy is traced there
+     first.
+  2. **NDI on the GPU alone** (P1b's window, `gpu-max.md` "The gates on
+     the box" items 2-3): tell camera-box first what changes on
+     `SP-program` (the FourCC NV12 → UYVY, a constant +33.3 ms arrival
+     lag, its genlock FIFO `shallow_depth` +1), then
+     `program_ndi_source` = `gpu` with `video_decode` still `software`
+     for a whole drift hour: an NDI receiver reads 1920×1080 UYVY,
+     `ndi.repeats` / `readback_late` +0 over songs and fades, the
+     automatic fall backs to the canvas counted (`ndi.switches` against
+     the setting's flips), the A/V gate (`post-deploy-av-sync.spec.ts`),
+     `max-gate` and cg OBS's `genlock-fifo audit` hold.
+  3. **Then `video_decode` = `gpu`** (NDI stays on `gpu`):
+     - `decode-bench` with `"resident": true` on each 4K sample (AV1, VP9)
+       within D2 (`diag-bench.md`), its `ring.in_use` 0 after the run,
+       BOTH at SNV's decode cap (1440: the sample opens scaled, so the
+       copy is of the video processor's surface) and at `max_resolution`
+       automatic (the copy of the DECODER's surface, a texture-array
+       slice). Every automatic part of this gate (the bench and the 4K
+       song's window below) runs under the automatic take's arming and
+       `finally` (the main A/B below: #230's hold armed and read back,
+       `video_upgrade_enabled` off, the cap put back first, the hold
+       last), since automatic is also the DOWNLOAD cap; and this gate's
+       +0 span (its window, its box-only checks and the A/B), at both
+       caps, runs with `video_upgrade_enabled` off, put back in a
+       `finally` before the 72 h run (its check opens a song's file in
+       the hardware mode, which the fall-back rule below must not read
+       as the song's own reader);
+     - with a 4K song on program, at the cap and at automatic (the design
+       says "a 4K song"): `GET /api/v1/program` `gpu.gpu_sides_per_s`
+       about 30 for a song the pacer does not blend, up to two ring
+       slots per blended boundary for one it blends (about 55 at 25
+       fps: 1 000 of 1 200 boundaries draw two, `genlock.md`
+       "BLENDED"), and `max.upload_mb_s` 0 (the design and plan
+       call it `gpu.upload_mb_s`; this build has it on `max`),
+       `status.video_decode.pipelines[].ring.full` +0 (`waits` reported:
+       20 slots against the holds above), and the sum of every
+       `pipelines[].ring.vram_mb` (one producer per GPU-resident
+       pipeline, ≤ 249 MB at 4K each, until 10 min idle; P4 adds the VRAM
+       guard);
+     - over that whole window and over the A/B, each of these stays +0:
+       `gpu.km_acquire_timeouts`, `gpu.abandoned`, `gpu.open_failures`
+       (each a ring side drawn BLACK on the wall or NDI; WARP never runs
+       the keyed mutexes against real NVDEC surfaces, so only the box
+       proves them) and every pipeline's `ring.full` (`ring.dead`
+       stays false; both read at every block's start AND end read,
+       below): G's OWN failures, which
+       only G has (its ring and the compositor's draw of it);
+       `video_decode.mid_stream_fallbacks`
+       and `open_fallbacks` (a fall back is the software decode this
+       file bans while SNV plays to a room); and at the 1440 cap
+       `video_decode.scale_refusals` (a 4K song that opened unscaled on
+       either side). The two fall-back counters are process-wide: every
+       reader in the hardware mode feeds them, S's own D3D11 reader
+       (SNV's S is a hardware reader, one code path), the outgoing
+       playlist's song during a cut, and the background jobs' readers
+       (the video upgrade's facts, the #277 repair, the download
+       check open in that mode too, `video-upgrade.md`; so every take
+       keeps `video_upgrade_enabled` off, put back in its `finally`,
+       as the automatic take does,
+       and the repair and the download check read only a failing or
+       a new file, never an A/B one). So a +1 is judged by the MODE
+       the reader of its WARN's `file` opened in, never by the per-
+       song `path` INFO (a G open that fell back, and a first copy
+       that failed, both log `path="ram"`):
+       - a mid-stream +1 (step 8's WARN) is G's when the last
+         `mf_reader: opened on the D3D11 path (hardware decode
+         requested)` INFO naming that `file` BEFORE that WARN reads
+         `mode="gpu_resident"`: any song's, an outgoing one's in a
+         cut (into any block, Blank included) too;
+       - an open +1 (step 7's WARN) is G's when the song was opened
+         while `gpu` took effect on its pipeline (the block it lands
+         in is a G block, or anywhere in this gate before the A/B
+         while `gpu_resident_blocked` reads null) and no step-7 line
+         since the song's open BEGAN explains a base-mode open (the
+         emit thread logs its lease line before the reader logs its
+         WARN: a producer lost, not made or not yet there, a retired
+         producer's INFO, the INFO `the producer device let go -
+         video_decode=gpu does not take effect`,
+         `gpu_resident_blocked`);
+       - G's fails this gate; an S block's own content falling back
+         is a fall back of the default path, reported and that block
+         never measured; a background job's reader is reported,
+         never G's.
+
+       `ring.full` / `ring.dead` are read at every block's START and
+       END read (every `pipelines[]` row, the evidence below), `full`
+       at each as the change since that row's PREVIOUS read, so the
+       switch between two blocks (a cut, its fade and hold, the lead)
+       is read too: an outgoing G pipeline's ring can fill in a cut
+       into Blank, before that take's start. A ring restarts at 0
+       only with a new producer, so a row whose producer was made
+       since its previous read (the INFO `gpu resident: the
+       pipeline's producer device made`, its `playlist_id`) counts
+       its whole `full`, and a WARN `gpu resident: the producer
+       device was lost` counts as a dead ring the reads may never
+       see. A producer is kept across songs (`Leased::Kept`: G →
+       Blank → G keeps the ring and its count). After an S block's
+       PATCH retired it, the pipeline's next open drops it: an S open
+       lets it go and its row goes, a G open makes a new ring at 0 at
+       once. After its ring died, it depends on the next open: a G
+       open gets none (`Leased::Lost`: the WARN, its row goes, the
+       song decodes in the base mode) and a new ring at 0 comes only
+       at the first G open after the 30 s backoff (`Leased::Waiting`
+       until then); an S open lets it go like a live one, with no
+       WARN and no backoff, and the next G open makes a new ring at
+       once (`Made`, its INFO). On that G → S path a death the reads
+       missed shows only by its effects: a mid-stream +1 (the rule
+       above), `gpu.abandoned` or `gpu.open_failures` (a slot that
+       does not open kills its ring), the WARN `sp-gpu: a picture ring
+       died` every ring kill writes, or a display-driver reset in the
+       log.
+       The same holds for a G ring's `full` in a G → S switch of one
+       playlist between its end read and step 1's retire (the S
+       open removes the row before the S start read): a `full` +1 is
+       always a decode error, which the mid-stream rule judges G's.
+
+       A gate-3 failure during the A/B stops it and turns
+       `video_decode` back to `software` the same day (NDI stays on
+       `gpu`, which passed gate 2 on its own; gate 4's full rollback
+       is for "worse"): the A/B resumes only once its cause is
+       fixed (the lane's reading of plan §7);
+     - NDI / A/V / max gates again with `video_decode` = `gpu`: the A/V
+       gate, `max-gate`, cg OBS's `genlock-fifo audit`, `ndi.repeats` /
+       `readback_late` +0;
+     - what only the box can prove, each read on the counters above:
+       - a padded-height song (AV1 1920×1080, NVDEC's surface 1088 rows)
+         decoded GPU-resident: MAX's and the wall's bottom rows show no
+         green strip (#223's);
+       - a seek on a GPU-resident 4K song: the pictures before the target
+         are copied, then dropped: `ring.full` +0, no fall back;
+       - a fade between two GPU-resident playlists (one compose draws
+         the slots of two producers): `km_acquire_timeouts` +0;
+       - the producer device built on the emit thread at a pipeline's
+         first GPU-resident song on program (the producer bullet above
+         claims no hole, unmeasured): read `consumer_fill_pairs`, the
+         late frames and the audio fault ledger at that song's start;
+       - 10 min after a GPU-resident pipeline went idle its
+         `pipelines[]` row and its `vram_mb` are gone;
+       - the retire (review round 3): on a song playing GPU-resident, set
+         `program_ndi_source` = `cpu` mid-song. Expect one WARN `the
+         song's pictures changed kind mid-song (… or its producer
+         retired)`, `mid_stream_fallbacks` +0,
+         `pipelines[].gpu_decoding` false, NDI showing the picture within
+         ~5 s of MAX's switch, and no loss in the audio fault ledger for
+         that song; the next song (in the base mode) lets the producer
+         go at its open (`gpu_resident::release_at_open`): its
+         `pipelines[]` row and its `vram_mb` are gone;
+     - **the main A/B** (`video_decode` gpu vs software: the sides G and
+       S), by plan §7's fixed protocol:
+       - preconditions: record the build, the settings, HAGS, Arena's
+         uptime (no Arena restart inside a take), the heavy children,
+         the background hold (`GET /api/v1/background-hold`), and the
+         program's source (`GET /api/v1/program` `source`) at the
+         take's very start, before any cut (the automatic take's
+         arming cut included). The FIRST take's is the one guard 2
+         checks (below); a later take compares its own with it, and a
+         difference (a leftover, or the operator took over) stops the
+         A/B, reported. Every take's `finally` cuts back to that one
+         (`POST /api/v1/program/cut`) in the order the driver's guards
+         give (below). #251's two
+         wall levers (`gpu-max.md`, "Arena loses its OWN frames") keep ONE
+         value for the whole take, read per block as in gate 1 (the size
+         as `max.width` / `height`, the hand-off as its stored value in
+         `GET /api/v1/settings`, its default as in gate 1); so does the
+         decode cap (`max_resolution`, read per block as
+         `status.video_decode.max_height`; production on SNV is 1440,
+         where a 3840×2160 song opens scaled to 2560×1440 on both sides,
+         confirmed at its first open in the take by
+         `status.video_decode.scaled_opens` +1 and `scale_refusals` +0 (a
+         4K file whose height is not whole 16-row blocks may play
+         unscaled, `hw_decode::scaled_open_safe`; name a 3840×2160 one),
+         and automatic is a take of its own: the design's ≈ 132 vs ≈ 298
+         MB/s, and #282 found the cap moves the wall's backs 10–15×).
+         EVERY take switches `video_upgrade_enabled` off at its start
+         and puts it back in its `finally` (the upgrade worker could
+         open or swap an A/B file, and gate 3 judges every fall back
+         by its reader). `max_resolution` is also the DOWNLOAD cap
+         (#282), so an
+         automatic take, BEFORE it switches the cap: arms #230's
+         background hold until the take's planned end plus a margin of
+         at least #230's own 4 h (`background_hold_until_ms`, UTC ms,
+         `background-hold.md`: no new download fetches a ≤ 2160 file
+         that would stay after the take; the watcher ends a hold at its
+         time, so a take that overran a tight end would lose it with the
+         cap still automatic; only the `finally` below ends it). The
+         watcher reads the stored end only after an on-air change: with
+         a hold already running (an operator's `sp-90s`), it would still
+         end at that older time, so after arming make one cut (to Blank)
+         and read `GET /api/v1/background-hold` back (`held` true,
+         `until_utc_ms` the take's value: the watcher's timed release
+         deletes the stored end whatever it holds) before switching the
+         cap. It then switches
+         `video_upgrade_enabled` off. A cut to `sp-slow` ends that hold
+         and one to `sp-90s` re-arms it for 4 h (`background_hold.rs`,
+         `RELEASE_SCENE` / `HOLD_SCENE`), and a dashboard cut names its
+         playlist's scene: so the take plays none of its contents from
+         ytslow or yt90s, reads `GET /api/v1/background-hold` `held` true
+         in every block (a block where it is false is dropped and the
+         download worker's lines since the last `held` true read are
+         reported, and the hold is armed again, PATCH, one cut, the read
+         back, or the automatic take ends through its `finally`) and
+         checks
+         per block that the A/B songs' files are unchanged; a
+         `deploy-pp` run (guard 3's trigger below) ends it through its
+         `finally` first (PP's peer gate fails on SNV's hold, 503
+         `background-hold`). When it ends, a `finally` (like Arena's
+         changes; the order in the driver's guards below, the cap
+         before the program's cut back) puts back the values found
+         (`""` for one that was not
+         stored), one PATCH each, in this order: `max_resolution` first
+         (then `max_height` reads 1440 again), `video_upgrade_enabled`,
+         and `background_hold_until_ms` LAST, so the hold never ends
+         while the cap is still automatic; each only while it still has
+         the take's own value (an operator's `sp-90s` press during the
+         take is a real hold, and stays). A take at another value of
+         either #251 lever or the cap is a take of its own, never mixed
+         into this one. Only the on-program pipeline
+         decodes: judge strays by every pipeline's `transport` and pause
+         them (`video_decode.pipelines[]` lists only the pipelines that
+         decode GPU-resident or hold a producer, and its `gpu_decoding`
+         stays true through a pause: the plan's `pipelines[].decoding` is
+         not in this build, a P4 note);
+       - content, fixed: `wall-25` (blend) and `wall-30` (#272), Blank
+         (the floor), one named 4K AV1 catalog song and one 1440p VP9
+         song, each song's frame rate logged. Each song is checked on
+         its file to hold no picture over 1 s in the analysed span,
+         + 15 s to + 55 s, and the Arena clip over its WHOLE loop, its
+         seam included (Arena loops it on its own clock, never re-cued
+         per block). The check is `wall_cadence.py`'s own same-picture
+         comparison run over the file's decoded frames (an input mode
+         its extension adds beside the held span below: the frames in
+         the pixel format its comparison reads), in the region it
+         reads mapped back into the FILE's own pixels (through Arena's
+         placement, and MAX's fit for a song), the clip's file looped
+         once so its last frame meets its first. ffmpeg is a coarser
+         stand-in: a song `ffmpeg -ss 15 -t 40 -i <file> -vf
+         crop=<region>,format=gray,freezedetect=d=1:n=<that threshold
+         as a ratio of full scale> -f null -`, the clip the same with
+         `-stream_loop 1` for `-ss` / `-t` (`format=gray`, never
+         `extractplanes`: ffmpeg decodes HAP and DXV's DXT1 / DXT5 to
+         RGB(A); `n` is a
+         normalised difference, its default −60 dB passes a
+         near-still shot the reader holds). A still shot of
+         their own would read as a hold on both sides (the
+         dead-stretch rule below). A Blank block has EVERY
+         pipeline paused (no `transport` `Playing`): an off-program
+         GPU-resident pipeline still decodes and copies, which would lift
+         G's floor alone;
+       - **Arena's content is the other variable.** The 18.10 service
+         juddered on two chains (#251 comment 6263579491, corrected by
+         6263853064): SongPlayer's songs through `SP-program-MAX`, and,
+         with SongPlayer on Blank (`max.upload_mb_s` 0), the worship
+         background from the song notebook's own Resolume over NDI
+         ("SNV BG", ≈ 57 then ≈ 30 distinct pictures per second), up to
+         48 backs per 40 s. L4 / L5 kept receiving `SP-program-MAX` under
+         it (#251 comment 6263953328), and a layer receiving it costs
+         Arena 38–58 % of its own clip's frames even on Blank (#251
+         comments 6264648133 and 6266710679); but that receive A/B read
+         missing pictures with 0 jumps back, so whether the receive
+         explains the Blank stretch's backs is unmeasured, and so is a
+         load from Arena's own content. Backs and missing pictures were
+         both seen. Every block records Arena's content all the same: the
+         composition, every layer's clip or NDI source (name, codec, size,
+         rate) and the wall's distinct pictures per 40 s. SongPlayer, CI
+         and a script left running never trigger an Arena clip (the
+         operator's Stream Deck runs them). The A/B's own Arena changes
+         (feed (B), the Arena-native clip below) are the main session's
+         alone, allowed for tests on SNV's bridge Arena (#251 comment
+         6263953328), made only while the rig lease is free
+         (`lease_free.ps1`'s exit code, binding), every clip and setting
+         put back in a `finally` (`gpu-max.md`, "How to judge any wall
+         change"). Three guards from #251's incident (comment
+         6278634515: a `schtasks /sc once` trigger re-fired four A/B
+         scripts hours later, during a deploy's E2E, each taking the
+         one before's leftovers for the operator's state and
+         "restoring" them; SongPlayer's own E2E holds no lease):
+         - a driver started through a scheduled task deletes the task
+           in the same turn it starts it, its `Next Run Time` read
+           back gone;
+         - ONCE, before the A/B's first block, the values the
+           `finally` will put back (the program's recorded source,
+           Arena's clips and settings) are checked against the
+           operator's setup (the program on the operator's own
+           source, never a test's Blank; no Arena group soloed; no
+           test change left; the source not in `cut_refused` of `GET
+           /api/v1/program`, an NDI input active): any other value
+           stops the A/B, reported. Every later take restores these
+           first, checked values for SongPlayer's program source and
+           the Arena settings the A/B changed. After an Arena restart
+           its `finally` undoes only the A/B's own test changes (the
+           receiving clip's reconnection included) and leaves the
+           clip state the reload brought (`wall.md`: no clip runs
+           until the operator presses a scene); the operator's
+           overlays are never restored. A cut back restores the
+           source, not the song (a paused playlist starts its next
+           song; a recorded `sp-90s` re-arms #230's hold, which then
+           stays); one refused (409 / 404) is reported and left to the
+           operator;
+         - the operator's cut is never overridden: the driver's
+           record of the program's source is seeded with the source
+           read at the take's start and changed only once `source`
+           reads a cut the driver made. At each block's start and end
+           read, and right before EVERY cut the driver makes (step 3,
+           a Blank block's cut, the arming and re-arm cuts, the
+           `finally`'s cut back), a `source` other than the record
+           means the operator took over: no further cut, no cut back,
+           no re-arm of the hold; the `finally` runs at once without
+           its cut back, and the A/B stops, reported (the cut-back
+           counterpart of "each only while it still has the take's
+           own value");
+         - no deploy is pending (through the A/B and every gate-3
+           span run with `gpu` set): once per block (at its start;
+           block N's read is block N + 1's check) and before an
+           automatic take arms its hold, no ci.yml `push` run of dev
+           or main and no `deploy-pp` run in any status but
+           `completed` (`queued`, `in_progress`, `pending`, `waiting`,
+           `requested`; a `deploy-pp` its `resolve` job skips
+           completes in about 1 s as `skipped`). A ci.yml push run
+           reaches its deploy job about 15–19 min in; PP's E2E starts
+           41–72 s after its deploy job. The main session reads it on
+           dev1 (`gh run list`, authenticated) before it gives the
+           driver each block's go, or the driver reads the public
+           repo's `/actions/runs?per_page=100` itself with conditional
+           requests (`If-None-Match`: a 304 is not counted against the
+           unauthenticated 60 an hour, one read per ~65 s block being
+           ~55); a failed read holds the next block until a read
+           succeeds, and the yield's wait for an E2E's end reads at
+           most once a minute. Whenever any take value is set (in a
+           block, between blocks and takes, while a read is held,
+           through a gate-3 span) the driver also polls SNV's
+           `Runner.Worker` process every 2 s or less (local, no
+           limit): measured from a job's start, an E2E job restarts
+           SongPlayer at about + 14–23 s and a deploy job kills it at
+           about + 20–33 s, and a job re-run gets there within a
+           minute or two. The main session re-runs or dispatches no
+           SNV job, and no `deploy-pp` during an automatic take, while
+           a take runs. A pending
+           deploy is never held: the A/B YIELDS, its `finally` run at
+           once in this order (every take's): SongPlayer's writes
+           first — `video_decode` = `software` and, in an automatic
+           take, the cap put back, then a wait (bounded, 15 s) until
+           `GET /api/v1/status` reads `video_decode.video_decode` =
+           `software` and the `max_height` the restored
+           `max_resolution` gives (a cut back opens a song at the
+           then-applied cap, and a cut to `sp-slow` ends #230's hold,
+           which must never end while the cap is automatic), then the
+           program cut back (unless the operator took over), the
+           upgrade switch, the hold last of these — then Arena's test
+           changes. A write a restarting SongPlayer refused is retried
+           once its API answers again (long before the E2E's suite).
+           The driver then waits until the deploy's E2E has ended; a
+           deploy E2E a block ran into is re-run by the main session
+           on dev1 (`gh run rerun --job <id>`, reported as the
+           A/B's; on a main run its completion fires `deploy-pp`
+           again, which an automatic take waits out too), and only
+           then a NEW take starts (the new build's preconditions,
+           never pooled with the blocks before). A
+           block a deploy cut is dropped, never a dead stretch, and
+           ends its take. After a main release, a new automatic take
+           waits until `deploy-pp`'s E2E has ended. A block
+           whose Arena
+           content anyone else changed is
+         dropped, and the A/B is read per Arena content. Each Arena
+         content gets its own Blank blocks, interleaved with its G and S
+         blocks: SongPlayer's share is a side's reading minus the floor
+         of that metric on that region ("the floors" below; where
+         there is none, G against S only) under the SAME Arena content,
+         never against a Blank taken under another. The
+         feed ((A) or (B)) is not part of the Arena content: each Arena
+         content is read on both feeds. Each Arena content needs its own
+         drift cycles (the block budget below); a content the take did
+         not cover that long is reported, not judged;
+       - per block also: `nvidia-smi --query-gpu=utilization.gpu,
+         utilization.memory,utilization.decoder,memory.used,
+         pcie.link.width.current` and `nvidia-smi dmon -s t` (the PCIe rx
+         / tx; the link is x8 of x16 on SNV since 18.10), MAX's
+         `compose_late` / `slot_repicks` deltas, the heavy children and
+         the background hold (a job that starts inside a block drops the
+         block);
+       - feeds: (A) the operator's clip on `SP-program-MAX`, and (B) the
+         independent Spout sender `spout_test_sender.py` on the clip (#251's
+         method, comment 6212436810, an Arena change as above): nothing
+         receives `SP-program-MAX` under (B), while SongPlayer still
+         decodes and composes. Arena still RECEIVES there (the test
+         sender), and ANY Spout receive costs Arena the same ~45 % of
+         its own clip's pictures on SNV (#251 comment 6275818478,
+         `recv3_ab`: an all-black independent sender 573–678, MAX
+         563–706, FHD `SP-program` 513–741, no receive 1198–1202 of
+         ~1 200 per 40 s). So (B) is the control WITHOUT SongPlayer's
+         sender at the same receive cost, never one without the
+         receive; its backs floor stands (the receive read no backs).
+         The acceptance and "worse" judge (A); (B)'s Blank blocks
+         supply SongPlayer's backs' floor below, and (B)'s G / S blocks
+         are reported only. The cost is paid every frame whatever the
+         sender sends, not per received copy, and it lies mostly
+         between Arena's composition and the wall output (#251
+         comments 6276425317 and 6276709434, `recv4_ab` / `recv4b_ab`,
+         8 + 8 takes: on the wall a black sender at one picture a
+         second 546–656, at 30 a second 548–723, MAX on Blank 522 /
+         587, no receive 1201; Arena's own composition monitor
+         1140–1168 under a receive against 1199–1201 with none): so
+         (B) carries it at whatever rate the test sender sends. And it
+         is any LIVE input, Spout or NDI (#251 comments 6279484457 and
+         6279611039: an NDI source on L5 205 / 294 of 600 per 20 s,
+         Spout 250 / 281, Arena's own non-live Blank generator 601;
+         Arena presents every frame to the wall, but its output window
+         draws a stale composition picture about half the time). Read
+         any newer #251 result before the take;
+       - the metrics, every take analysed over the same 40 s:
+         - **every block's setup**, read at its take's start and end
+           (Arena's composition, REST, read only, and `max.state`):
+           - the receiving clip on the block's feed;
+           - the clip the region shows (that one, or the Arena-native
+             clip) RUNNING by `wall.md`'s rule (connected, its layer
+             not bypassed, the layer's opacity and master over 0, its
+             group and the composition likewise), judged from the
+             composition read at that moment. `GET /api/v1/wall`
+             `songplayer_clip` is only a cross-check for (A): it is ONE
+             state over every SongPlayer clip on any layer (`running`,
+             with `clips` listing each one's layer and source), and the
+             Resolume driver's last read, up to ~40 s old;
+           - `max.state` `running` at both reads (never `off`,
+             `quiesced` or `error: …`);
+           - the test sender running (a (B) block).
+
+           A block that fails it is dropped and reported whatever it
+           read, the A/B's own Arena changes re-applied. A layer above
+           the region's own one covers the region only when its
+           picture lies over the captured rows, seen in a grab of the
+           wall output taken with the end reads, after the reader
+           exits. The layer list never says it alone: SongPlayer's own
+           `#sp-*` clips stay connected whether or not they draw (the
+           title at opacity 0, the lines as empty text), and Arena's
+           `Blank` clips are transparent. While a song or a clip plays
+           on program, SongPlayer's own title (from + 1.5 s) and lyric
+           lines DO draw above the receiving layer: where they lie over
+           the captured rows they are SongPlayer's own cover, the same
+           on both sides (the frame reader's band consensus reads past
+           a partly covered strip, `test-item-burn.md`). An Arena
+           content that covers a region cannot be read there: its
+           blocks of the region are reported, not judged (never a dead
+           stretch, below), and the operator's layers are left as they
+           are (`wall.md`);
+         - **a dead stretch is never averaged.** It STOPS the A/B
+           before the next block, and no block of that region since
+           it last read live is measured. A dead stretch is any of:
+           - a take whose reader exits 4 (nothing decoded, its
+             `undecoded` naming which reading failed);
+           - a take whose reader exits 5 (the capture failed) WHILE the
+             evidence grabs below show the output black or still (an
+             output that stopped presenting leaves the reader too few
+             timed intervals). With the output still presenting, an
+             exit 5 is the capture's own failure (`test-item-burn.md`:
+             a broken capture never reads as a broken wall): its
+             stderr recorded, the block run again at most twice (like
+             step 6's re-runs), then the A/B stops and the capture is
+             reported; never a dead stretch;
+           - a take that reads `frozen` or decodes under 95 % of its
+             pictures (`MIN_COVERAGE`);
+           - one picture held over 1 s. The frame reader shows it two
+             ways: while the output keeps presenting, as
+             `pictures_per_boundary` with a key over 60; when the output
+             presents nothing new (Arena's render hung, a receive
+             blocked: its `Display` window is the only one on the wall
+             output), as `capture.held_ms_max` over 1000: the longest
+             span the capture's own polls saw the output hold
+             (`wall_spans.still_spans`: an empty poll proves nothing new
+             was presented, so a span with no new picture holds but for
+             the blind span of the picture that ended it and the
+             acquire window of the one that began it; the capture's
+             first and last poll are included, the end whole but for
+             that window). A
+             `capture.still_ms_max` over 1000 with `held_ms_max` at most
+             1000 is a capture that starved: its own failure, re-run
+             like an exit 5. `wall_cadence.py`, a box script outside this
+             repo and the only reader of the songs and the Arena clip,
+             is extended before the take to report its held span the
+             same way and its longest still run (as the 72 h run
+             extends `wall_monitor5.py`), each over 1 s a hold. Never a count of
+             pictures: #251's receive loss alone reads 509–746 of
+             1 200 (the missing pictures' floor, below);
+           - a content block whose end check finds its item stopped,
+             its position short, or `pacing.resyncs` grown (below).
+
+           The evidence is recorded for EVERY take, so it is there when a
+           take turns out dead. The block's counters are read at the
+           take's START (with the `on_air_item` start read, after step
+           6's check) and at its END. The `/api/v1/ndi/health` row is a
+           5 s heartbeat's snapshot, stamped `last_heartbeat_ts` on the
+           engine's own clock (mapped from its start, so never compared
+           with the driver's): each read takes the row, then re-reads it
+           until that stamp changes (≤ 5 s), so the start read is the
+           first heartbeat inside the take (its first, unanalysed 5 s;
+           the reader runs as its own process from its own instant,
+           beside these re-reads) and the end read the first after it
+           (a clip's + 60 s bound holds for the `on_air_item` read
+           only). A stamp that does not change within two heartbeats
+           (10 s) is recorded as a stalled row, its block decided by
+           the end check. Right after
+           the take, with its end reads and never during it (ONE
+           capture per take, below), the driver takes:
+           - two dxcam grabs about 2 s apart of the wall output
+             (`Output[1]`) and of Arena's composition preview on the
+             primary (`Output[0]`), as #251 comment 6273568431 did;
+           - the composition and `max.state`;
+           - the reader's stderr;
+           - the block's counters: the on-program pipeline's
+             `pacing.repeats` / `dropped` / `resyncs` and
+             `audio.underruns_mid` (`GET /api/v1/ndi/health`), EVERY
+             row of `status.video_decode.pipelines[]` (`ring.waits` /
+             `ring.full` / `ring.dead`, a bool: an outgoing G
+             pipeline's ring can fill in a cut), the process-wide
+             `status.video_decode.mid_stream_fallbacks` and
+             `open_fallbacks`, and
+             `gpu.km_acquire_timeouts` / `abandoned` / `open_failures`;
+           - the box's log since the restart: SongPlayer's WARN and
+             ERROR lines, a display-driver reset, Arena's own lines.
+
+           Which side a dead stretch first landed in proves nothing:
+           #251's receive loss is the same on G, S and Blank, most of
+           the decode path is shared (the file, the audio, the D3D11
+           decoder S also runs on SNV), and a display-driver reset can
+           kill G's ring where S's reader only falls back. G's own
+           failures are gate 3's verdict already, whatever the wall
+           showed (`gpu.km_acquire_timeouts`, `abandoned`,
+           `open_failures`, `ring.full`, `ring.dead` over the A/B; the
+           fall-back counters by gate 3's rule). So the counters
+           and lines above
+           are recorded, never used to name a side alone. A block whose
+           log holds the ERROR `paced producer: decode error` is dropped
+           whichever trigger fired (the end check). The main session
+           decides before the take resumes:
+           - an OTHER-SIDE test, once the region reads live
+             again (the output brought back first, below): five blocks
+             of each side alternated under the same content and feed
+             (for a stretch first seen in a Blank block: the G / S
+             blocks of the content read on that region, the Arena
+             clip's being its 4K-song blocks), ordinary blocks of the
+             take. A recurrence inside it is
+             tallied, never a new STOP, and the output is brought back
+             before the next test block; a stretch counts for the block
+             it began in. It is G's when it recurs in at least two G
+             blocks and in no S block, and S's in the mirror case. Its
+             tally carries across an Arena restart (the attribution);
+             its measurements do not (a new take);
+           - otherwise it is no side's for the A/B: dropped and
+             reported, an Arena crash or restart included (gate 3's
+             counters are judged on their own). A
+             region that never reads live again, once bringing the
+             output back was tried, ends the take, reported.
+
+           A G dead stretch is a "worse" finding by itself (below),
+           never a count in a mean. An S one is a defect of the default
+           path, reported. The take resumes once the region reads live
+           again. Bringing Arena's output back is the main session's
+           step under the owner's ruling (#251 comment 6274074165:
+           reload the saved Advanced Output, or restart Arena). It never
+           changes the operator's screen setup itself (`wall.md`). An
+           Arena restart starts a new take (the preconditions). What the
+           reload brings back varies: on 19.10 the composition reloaded
+           its saved column and dropped the operator's overlays (#251
+           comment 6274680850, L5 receiving MAX as reloaded), on 9.10 a
+           relaunch left most clips disconnected, the Spout clip
+           included (`gpu-max.md`; `wall.md`: no clip runs until the
+           operator presses a scene). The new take checks the setup
+           again: it
+           reconnects the receiving clip only when the reload did not
+           bring it back (an A/B test change, put back in the
+           `finally`), reports the operator's dropped overlays and never
+           restores them, and is never pooled with the take before. An
+           automatic take whose STOP would outlast its #230 hold's
+           margin runs its `finally` first (the cap first);
+         - the backs: exact jumps back per 40 s and one-refresh runs
+           (`wall_frames.py` / `wall_analysis.py`, `--refresh-hz 60`, for
+           `wall-25` / `wall-30`; `wall_cadence.py`'s `exact_backs` for the
+           songs and the Arena clip), each block binned by the offer AND
+           the compose phase after the primary vblank
+           (`max.send_phase_us_*`, `compose_phase_us_*`);
+         - the MISSING pictures (#251 comment 6264648133: the room's
+           judder is frames missing, which a count of backs never sees):
+           the content's reference rate × 40 s minus its distinct FORWARD
+           pictures (`wall_cadence.py`; for `wall-25` / `wall-30` the
+           frame reader's `distinct_boundaries`: each picture counted
+           once however often it is re-shown, so a hold of up to 1 s
+           counts every picture it did not show (a longer hold or a
+           dead take is a dead stretch, above, never counted),
+           `test-item-burn.md`; `lost_boundaries`, `lost_frames` and
+           `unverified.boundaries` reported beside it, never as the
+           count: `lost_boundaries` sees only skips between two
+           readings and counts the step out of every back as one, and
+           on a blended `wall-25` a skipped boundary often loses no
+           clip frame; an unverified boundary counts as missing, the
+           same for both sides), never
+           the raw count, which re-shows inflate (#251's Part 2 read
+           ~1 200-1 370 per 40 s for 30 fps songs). The reference is what
+           the content shows on the wall. For SongPlayer's content it is
+           the program's own pictures: 1 200 per 40 s for a source of
+           30 fps or faster (the newest frame at each boundary,
+           `pacer_prepare.rs`: 48 / 50 / 59.94 / 60 fps alike) and for one
+           the pacer blends (a frame gap strictly between one slot + 2 ms
+           and two slots − 2 ms, `pacer_blend.rs::blend_weight_q8`: about
+           15.5–28.3 fps, 23.976 / 24 / 25 fps among them; `genlock.md`
+           "BLENDED"); the source's own rate otherwise (12.5 fps 500,
+           15 fps 600). The pacer reads pts rounded down to whole ms, which
+           moves the band's edges a little and holds a 29.97 fps song a few
+           pictures under 1 200 (a scratch model of the round-11 code
+           review: 1 186–1 193): for a rate near an edge or one the grid
+           does not divide, take the reference from S's own blocks of that
+           content (both sides run the same pacer) and report the absolute
+           figure only. For an Arena clip it is its own rate (a 30 fps DXV
+           loop 1 200);
+         - both are read for SongPlayer's content and for an Arena-native
+           clip read in its OWN layer and screen region, apart from the
+           layer receiving `SP-program-MAX` (never blended Add over
+           SongPlayer's picture), while that layer shows the block's G or
+           S content: in the clip's blocks always the 4K song (the
+           A/B's 4K content, at the take's cap), the same on both sides
+           (on Blank G and S
+           send the same black: a Blank block is a floor, never a side).
+           Under (B) they read the test sender's pictures (its own rate)
+           and the Arena clip;
+         - **the floors**, per metric and region ("Blank's band" = a
+           floor's mean + one standard deviation):
+           - the backs of SongPlayer's content: (B)'s Blank blocks, the
+             test sender's moving picture on the same layer and region,
+             nothing receiving `SP-program-MAX`, where plan §7's 0–3 per
+             40 s came from (#251 comment 6212436810), read with
+             `wall_cadence.py`'s `exact_backs` (the sender's picture has
+             no frame-id strip); the frame clips' `jumps_back` are the
+             same kind of count from another tool, so the table names
+             the tool beside each band. Never SongPlayer's region on
+             (A)'s Blank blocks: its black has no frame to go back to
+             (#279 comment 6220256670);
+           - the Arena clip's missing pictures, and its backs: (A)'s
+             Blank blocks on the clip's region, the receive on (#251
+             read 0 backs there); this missing pictures' floor is #251's
+             loss (acceptance below);
+           - SongPlayer's content's missing pictures: no Blank floor
+             (Blank shows none of it); judged G against S, the absolute
+             figure reported;
+         - ONE capture per take: never two concurrent duplications of the
+           output (a second 1 ms-polling grab adds the CPU load #251
+           found disturbing the wall, and a wider grab fails
+           `wall_frames.py`'s timing check, exit 5). Each take reads one
+           region with one tool, so the Arena clip's region is read in
+           blocks of its own, interleaved with the others under the
+           same levers;
+       - **the block budget**: interleaved blocks of about a minute (a
+         switch and a 45 s take, below), every block type spread over
+         whole ~45 min
+         drift cycles (like `fhd_ab2.ps1`), then the first side again;
+         never a conclusion from a short take. Plan §7's ≥ 46 blocks were
+         one drift cycle with one content per side; judged at ≥ 5 blocks
+         a side per content, one Arena content takes about 60: (A)'s four
+         SongPlayer contents × G / S × 5 = 40, the Arena clip's G / S
+         × 5 = 10 and its (A) Blank 5, (B)'s Blank 5, plus (B)'s G / S
+         control. So each Arena content runs TWO drift cycles (about 80
+         blocks of ~65 s), or fewer SongPlayer contents per cycle; a
+         content or a
+         bin short of 5 blocks a side is reported, not judged;
+       - **a block's procedure** (review rounds 7-17). A PATCH alone does
+         not switch the decode path: `video_decode` = `gpu` applies at the
+         NEXT song's open, while `software` retires the producers within
+         one 5 s poll. The take never changes `program_transition` /
+         `program_transition_ms`: it records the values found, and runs
+         only with a fade of at most 4 s (the 10 s lead below; the
+         default is 300 ms). A content block (G or S):
+         1. PATCH `video_decode`, then wait until `GET /api/v1/status`
+            `video_decode.video_decode` reads the PATCHed value (as last
+            applied: the settings task sleeps 5 s after each apply, so a
+            fixed 5 s wait can open the restart in the old mode).
+         2. Restart the content: `POST /api/v1/test-item/start {"clip"}`,
+            or play the song again. A Play claims no program, so on a
+            playlist off program it plays off program.
+         3. Cut the program to the content's playlist when it is not on
+            program (`POST /api/v1/program/cut {"source": <playlist id>}`:
+            the test playlist for the clips; after a Blank block, or
+            between contents of different playlists). Restart first, then
+            cut, as `post-deploy-wall-frames.spec.ts` does: cutting first
+            would let the paused playlist's ON pick a song of its own
+            (`WaitingForScene` + `SceneOn` → `SelectAndPlay`), while a
+            playlist already `Playing` keeps its song through the ON.
+         4. (The driver runs on SNV, a box script like `fhd_ab2.ps1`,
+            so its instants and SongPlayer's wire stamps share SNV's
+            clock: SNV's date can sit up to ~1.5 s off another box's,
+            dantesync's nightly step, `genlock.md`.) Wait for the
+            restart's FRESH mark: `GET /api/v1/program`
+            `on_air_item` names the item with a `started_at_utc_ns` later
+            than the restart request. The wall gate's check of the row and
+            `position_ms` alone passes on the OLD play when two blocks in a
+            row share a content; a 60 s clip's own loop landing between the
+            request and the restart is a fresh mark too, at most one
+            pre-roll early. No fresh mark within 30 s of the restart (a
+            refused cut, 409; a Play that never started) drops the block.
+         5. The 45 s take starts at a FIXED lead on the content's own
+            clock, `started_at_utc_ns` + 10 s, so every analysed span runs
+            + 15 s to + 55 s into its content whichever block came before
+            (a 60 s clip ends after it). The lead fits the slowest
+            cut-over: the fade, the outgoing playlist's hold of up to 15
+            cue slots, one 5 s heartbeat (≈ 5.8 s at 300 ms; the fade
+            + 6 s at most, so a fade of up to 4 s).
+         6. By that instant both must hold, else the block is dropped and
+            run again (at most twice, a G re-run after the 30 s rebuild
+            backoff): the `status.video_decode.pipelines[]` row whose
+            `playlist_id` is `on_air_item.playlist_id` reads its side (G:
+            `gpu_decoding` true; S: false or no row), and the cut is over,
+            as a Blank block waits (no `transition.active`, the outgoing
+            playlist's `transport` no longer `Playing`, read on its
+            `/api/v1/ndi/health` row, refreshed at the pipeline's 5 s
+            heartbeat). `gpu_decoding` alone is a level, and only that row
+            says anything: it can read the side before the new song's
+            first frame (a G row stays true until `song_ended`), and
+            another pipeline's row is stale (a paused pipeline keeps
+            `true`: `retire_producers` leaves the flag, and `song_ended`
+            never runs for a paused song). `on_air_item` follows a fade's
+            incoming side from its first mixed boundary, and the outgoing
+            playlist is paused only after its hold.
+         7. A G block whose row is not true (false, or absent: a G open
+            that got no producer leaves no row) 30 s after its restart is a
+            FAILED G OPEN, checked before any re-run, reported, never
+            measured. Its cause is in the log: the producer's WARN `gpu
+            resident: the producer device was lost` / `… could not be
+            made`, its DEBUG `gpu resident: no producer device yet` (the
+            30 s rebuild backoff), a retired producer's INFO, a blocked
+            precondition (`gpu_resident_blocked`), the reader's open fall
+            back (WARN `mf_reader: hardware decode did not open; this file
+            decodes in software`, `open_fallbacks` +1: that song decodes in
+            SOFTWARE, judged by gate 3's rule), or a picture in system
+            memory (the producer's per-song INFO `paced producer: the
+            song's pictures` with `path="ram"`; `mf_software` +1 only on
+            an unscaled open: a scaled open, the 4K song at the 1440 cap,
+            counts nothing there, `decoder_path_visible`).
+         8. Steps 7 and 8 are told apart by the COUNTERS and the log since
+            the restart, never by what a poll of the row happened to see:
+            - `mid_stream_fallbacks` +1 (with the WARN `mf_reader: a
+              decode error on the D3D11 path; this file goes on in
+              software`): a MID-STREAM fall back (a ring full past
+              `RING_WAIT`, a dead ring, a refused picture, a lost
+              device), whenever it came (a first copy that failed reads
+              like a failed open at the poll, its `path="ram"`
+              included); it is judged by gate 3's rule;
+            - that WARN with the count +0, then the ERROR `paced
+              producer: decode error`: the software reopen itself
+              failed, and the song ENDS there (the producer marks its
+              end, `Ended`; no error event, no `open_failures`; then
+              what the playlist's mode does: Continuous plays its next
+              song, Loop the same song with a new mark, Single plays
+              black with no new item): a lost song, reported as one
+              though gate 3's counter reads +0;
+            - the producer's WARN `the song's pictures changed kind
+              mid-song (… or its producer retired)` with the count +0
+              and no `mf_reader` decode-error WARN: a retire when the
+              settings task logged `settings applied` and `gpu
+              resident: video_decode=gpu stopped taking effect - …`
+              since the restart (someone changed `video_decode` or
+              `program_ndi_source` under the take, which voids it);
+              without them, an unexplained change of kind (Media
+              Foundation handing a system-memory picture mid-file), not
+              a setting.
+
+            Each such block is reported, never measured.
+
+         A Blank block PATCHes nothing (it keeps the block before's
+         `video_decode`): it cuts the program to Blank (source -2,
+         SongPlayer's own black) and pauses every pipeline, opening no
+         song; its take starts once `GET /api/v1/program` reads `source`
+         -2 with no `transition.active` and no pipeline's `transport` is
+         `Playing` (the engine pauses the outgoing playlist only after its
+         fade's hold). EVERY block's take (G, S and Blank alike) runs 45 s
+         and only its last 40 s are analysed (a margin). A reader with
+         no span option, `wall_frames.py`, captures only those 40 s
+         (`--seconds 40`). Its 40 s start only after its import and
+         `dxcam.create`, and it has no start option, so it is launched
+         at + 5 s minus the box's measured start-up: its first poll
+         lands at or just before + 5 s. The take's end is read after
+         the reader exits, and for a clip still before + 60 s. A content
+         block reads `on_air_item` at its take's START and at its END
+         (for a clip before + 60 s, where the 60 s loop re-marks), and
+         the block is dropped and reported unless, at the end: the item
+         is the same, its `started_at_utc_ns` equal to the start's (it
+         does not move while the play goes on: `ItemTrack::observe`
+         re-anchors only at a new mark, a pts that went back or a
+         source change, so a Loop replay inside the take moves it by
+         the song's length), and its `position_ms` and `frame_utc_ns`
+         each grown by the elapsed time between the two reads, timed on
+         a MONOTONIC clock (`[Diagnostics.Stopwatch]`, never the date),
+         within ~0.2 s (a slot of newest-frame jitter plus the reads'
+         latency). A block spanning dantesync's nightly date step
+         (04:00 local, `genlock.md`; up to ~1.5 s, which relabels
+         `frame_utc_ns`) is dropped. An ended song
+         leaves `on_air_item` as it was (a boundary with no item frame
+         keeps it): only the still-advancing position tells it apart,
+         a Single-mode playlist showing black for the rest of the take
+         included. An item STOPPED (its `position_ms` not grown: a
+         producer, or the program path, stalled through the end read)
+         or SHORT (grown more than 1 s short of the elapsed time: a
+         stall still going, or the content re-anchored) or the
+         on-program pipeline's `pacing.resyncs` grown (the emit thread
+         more than 8 slots behind: a re-anchor after 1 s with a frame
+         buffered, or at once a grid resync, `genlock.md`), with no
+         ERROR `paced producer: decode error` in its log, is a dead
+         stretch (the
+         metrics), never only dropped. A producer stall that ENDED
+         inside the take passes the end check once the producer has
+         caught up (until then the position reads short, with
+         `pacing.repeats` above the content's own share, read from S's
+         blocks of that content: none at 30 fps, a sixth of the
+         boundaries at 25 fps; and `resyncs` +0: the
+         producer's, not the emit side's): while the queue is
+         empty the emit thread repeats the last picture on time, and
+         when frames return the pacer shows the newest due one and drops
+         the rest (`pacer_prepare.rs`), so the position catches up and
+         `resyncs` stays +0. It shows as `pacing.repeats` above that
+         share (recorded with the evidence, above), and on the wall as
+         a hold. Any content
+         block whose log since its restart holds
+         the ERROR `paced producer: decode error` is dropped and
+         reported too: step 8's failed reopen, a `FrameAlloc`, an
+         audio-side decode error, each of which ends its song with that
+         ERROR, then `Ended` (no error event).
+         `gpu.gpu_sides_per_s` and `max.upload_mb_s` are rates over the
+         last 30 s (`UPLOAD_RATE_SPAN`), so they confirm a side only 30 s
+         after the restart: read them at the block's end, never as its
+         start. A block is its switch (the PATCH's poll, the restart, the
+         cut, the 10 s lead) plus a 45 s take, about 65 s; a slow switch
+         runs the block longer, never shortens its take. The switch holds
+         the producer's build: a G song whose producer was retired or let
+         go since its pipeline's last G open (any S block's PATCH retires
+         EVERY pipeline's producer within one poll,
+         `precondition_changed`) builds a new one at its open, on the emit
+         thread, before `gpu_decoding` flips (`PipelineGpu::song_mode`),
+         and an S song after a G one lets the retired producer go there
+         too (`release_at_open`, in `decode_mode_with`, before the
+         pre-roll). The transients the 10 s lead holds, logged as facts,
+         never used as a trigger: the new ring slots made at the first
+         copies (`ring.slots`); the compositor re-opening a ring's slots
+         it closed after 90 undrawn composes
+         (`ring_state::OPENED_IDLE_COMPOSES`, 3 s: `gpu.gpu_opens` grows at
+         nearly every G block), and closing an old ring's slots up to 3 s
+         after their last draw;
+       - alongside: `max.upload_mb_s`, `ndi.repeats`,
+         `ndi.readback_us_p99` (the plan's `readback_mb_s` is not in this
+         build), Arena's CPU and FPS, and cg OBS's `genlock-fifo audit`;
+       - **acceptance (P3a's end state)**, for (A) under the same Arena
+         content and the same MAX levers:
+         - the backs of `wall-25`, `wall-30` and the 4K song: every phase
+           bin within their Blank band (the floors above: (B)'s Blank
+           blocks; plan §7 read 0–3 per 40 s there on a quiet box);
+         - the Arena clip's missing pictures in G's blocks within their
+           Blank band ((A)'s Blank blocks on the clip's region) over the
+           cycles;
+         - no "worse" test below fires.
+
+         P3a can at best bring a side to those floors, and the missing
+         pictures' floor ((A)'s Blank blocks) is #251's: while a layer
+         receives `SP-program-MAX`, Arena loses
+         38–58 % of its own clip's frames even with SongPlayer on Blank
+         and `max.upload_mb_s` 0 (509–746 of 1 200 per 40 s arrive, #251
+         comments 6264648133 and 6266710679), which no P3a side can lift:
+         neither the Spout hand-off nor MAX's size changes it (#251
+         comments 6270228777 and 6271531140), and any Spout sender's
+         receive costs the same, SongPlayer's or not (#251 comment
+         6275818478), and so does an NDI one (6279611039): the cause
+         is any live input in Arena on SNV, #251's open lane. So a met
+         P3a acceptance is
+         never reported as the room's judder fixed. This is the lane's
+         reading of plan §7; the main session may set another before the
+         take;
+       - **"worse"** (gate 4's revert), any of, judged for (A):
+         - the backs: per content (each SongPlayer content apart, one tool
+           per content) under each Arena content, a phase bin whose G mean
+           is over S's by more than one standard deviation of S's blocks
+           in that bin, judged only where each side has ≥ 5 blocks in the
+           bin. The blocks are shared by G, S, Blank and the contents (the
+           budget above), so size the bins (fewer, wider; one bin per
+           content when that is all the blocks allow) until each holds
+           ≥ 5 a side, or report the bin, not judged;
+         - the missing pictures: G's mean over S's by more than one
+           standard deviation of S's, per content (each SongPlayer content
+           and the Arena clip apart) under each Arena content, over ALL of
+           a side's blocks in its cycles, never per phase bin; with fewer
+           than 5 a side: reported, not judged;
+         - a dead stretch that the main session rules G's (the
+           metrics): one is enough.
+
+         This is the lane's reading of plan §7's "a worse A/B"; the
+         main session may set another test before the take;
+       - before the 72 h run, which runs `gpu` during services, the main
+         session decides on #279: the two follow-up candidates above (the
+         drop race; a ring killed on a healthy device, reopened in
+         software), and the run's deploy policy. Every dev push deploys to
+         SNV, whose `post-deploy-preview.spec.ts` and
+         `post-deploy-owner-path.spec.ts` fail on a GPU-decoded song before
+         P3b, and a 72 h deploy hold is a freeze the owner ruled out on
+         18.10 (green builds deploy). So the run comes after P3b, or runs
+         in segments: switched back (`video_decode` first) before each
+         deploy and on again after its E2E, the samples around it
+         excluded;
+       - then the 72 h continuous monitor (plan §9 P3a; its
+         `wall_monitor5.py` predates the missing pictures: extend it, or
+         run `wall_cadence.py` takes) on normal services. Each sample
+         logs the backs and the missing pictures, Arena's composition and
+         its playing clips or NDI sources, the worship NDI stream's own
+         frame timing at SNV (#251 comment 6263853064), SongPlayer's
+         program source (Blank, or which song) and the side. It is read
+         per Arena content like the A/B; the table and the raw log paths
+         go on #279.
+  4. **A worse A/B is reverted the same day** ("worse" as defined above;
+     `video_decode` back to `software` first, then NDI: the rollback order
+     above). A side no worse than software but outside the acceptance band
+     is no revert: P3a's end state is not reached, recorded on #279 for the
+     main session to decide.
+
+  Throughout: while `video_decode` = `gpu` is set on SNV,
+  `post-deploy-preview.spec.ts` and `post-deploy-owner-path.spec.ts` find
+  no live preview on a GPU-decoded song (none before P3b): a deploy is
+  never held; the A/B, and every gate-3 span run with `gpu` set, yields
+  to it through its `finally`, `video_decode` back first (the driver's
+  guards above); the 72 h run's deploy policy is above; never on PP
+  before P3b (above).
 
 ## Tests and gates
 

@@ -573,10 +573,13 @@ async fn a_scene_back_on_program_ends_the_hold() {
     playing(&mut rig.engine);
     {
         let pp = rig.engine.pipelines.get_mut(&OUT).unwrap();
-        pp.last_presenter_text = Some(crate::lyrics::renderer::PresenterLines {
-            current_en: "alpha".into(),
-            current_sk: "alfa".into(),
-            ..Default::default()
+        pp.last_presenter_text = Some(crate::presenter::PushedLine {
+            lines: crate::lyrics::renderer::PresenterLines {
+                current_en: "alpha".into(),
+                current_sk: "alfa".into(),
+                ..Default::default()
+            },
+            song: "Song".into(),
         });
         pp.last_resolume_subtitles_signature = Some("show|alpha".into());
     }

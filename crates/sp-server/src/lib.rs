@@ -6,7 +6,11 @@ pub mod api;
 pub mod audio_faults; // #257: every audio path's faults, persisted (the ledger)
 pub mod audio_host; // #233: every ASIO output runs in the sp-audio-host process (spawns nothing)
 pub mod background_hold; // #230: a sp-90s press holds the background jobs
+pub mod cache_sweep; // #261: the daily cache sweep (files no row needs) + the data dir's size
+pub mod cache_sweep_plan; // #261: what the sweep deletes, decided with no I/O
 pub mod dabing;
+pub mod daily_pass; // the daily timer (#260 retention, #256 usage-log prune, #261 bounds)
+pub mod data_size; // #261: the data dir's size on the status
 pub mod db;
 pub mod diag; // #223 S0: /api/v1/diag/* measurement benches
 pub mod downloader;
@@ -15,6 +19,7 @@ mod engine_command;
 mod engine_dispatch;
 pub use engine_command::EngineCommand;
 pub mod gemini_api; // #136: the Gemini key-list contract every Gemini caller shares
+pub mod log_rotate; // #261: the crash records and the ASIO host's log rotate to .1 at 10 MiB
 pub mod lyrics;
 pub mod mdns;
 pub mod metadata;
@@ -41,6 +46,7 @@ pub mod test_item; // #228: camera-box's measurement clip as a one-item test pla
 #[cfg(test)]
 mod test_log; // a scoped log capture shared by the tests
 mod tools_ready; // #144: publish the ready tools, then the slow follow-ups
+pub mod ui_usage; // #256: the dashboard's usage log - its 400-day prune
 pub mod video_upgrade; // #223 S11: a cached song's video upgraded in place
 pub mod wall; // #259: the LED wall report (Arena's own output setup vs the box; acts on nothing)
 
@@ -447,6 +453,22 @@ pub async fn start(
         pool.clone(),
         shutdown_tx.subscribe(),
     ));
+    // #256: the dashboard's usage log keeps 400 days, pruned daily.
+    tokio::spawn(ui_usage::run(pool.clone(), shutdown_tx.subscribe()));
+    // #261: the play history and the exchange's leftover records, daily.
+    tokio::spawn(playlist::history_bound::run(
+        pool.clone(),
+        shutdown_tx.subscribe(),
+    ));
+    tokio::spawn(peer::leftovers::run(pool.clone(), shutdown_tx.subscribe()));
+    let (sweep_cache, sweep_data) = (config.cache_dir.clone(), config.data_dir());
+    let sweep = cache_sweep::run(
+        pool.clone(),
+        sweep_cache,
+        sweep_data,
+        shutdown_tx.subscribe(),
+    );
+    tokio::spawn(sweep); // #261: the cache's files no row needs, daily
     tokio::spawn(async move {
         match tools_mgr.ensure_tools().await {
             Ok(paths) => {

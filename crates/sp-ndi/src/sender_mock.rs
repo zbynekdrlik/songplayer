@@ -39,6 +39,10 @@ pub struct MockNdiBackend {
     /// Linux test pin the standby BGRA frame's exact byte length
     /// (`width * height * 4`) so a wrong size arithmetic cannot survive.
     last_sync_video_len: StdMutex<Option<usize>>,
+    /// #279 P1b: the FourCC of the LAST `send_video_async` call (`SP-program`
+    /// sends NV12 from the CPU canvas, UYVY from the GPU readback). `None`
+    /// until the first async video send.
+    last_async_video_fourcc: StdMutex<Option<FourCCVideoType>>,
 }
 
 impl MockNdiBackend {
@@ -74,6 +78,12 @@ impl MockNdiBackend {
     /// `data.len()` of the last synchronous `send_video`, `None` before the first.
     pub fn last_sync_video_len(&self) -> Option<usize> {
         *self.last_sync_video_len.lock().unwrap()
+    }
+
+    /// #279 P1b: the FourCC of the last `send_video_async`, `None` before the
+    /// first.
+    pub fn last_async_video_fourcc(&self) -> Option<FourCCVideoType> {
+        *self.last_async_video_fourcc.lock().unwrap()
     }
 
     pub fn set_tally(&self, on_program: bool, on_preview: bool) {
@@ -147,6 +157,7 @@ impl NdiBackend for MockNdiBackend {
         self.video_timecodes.lock().unwrap().push(tc);
         // #203: record the exact borrowed slice the backend received.
         *self.last_async_video_slice.lock().unwrap() = Some((data.as_ptr() as usize, data.len()));
+        *self.last_async_video_fourcc.lock().unwrap() = Some(four_cc);
     }
 
     fn send_video_flush(&self, handle: usize) {

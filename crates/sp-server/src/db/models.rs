@@ -220,7 +220,8 @@ pub async fn record_play(
     Ok(())
 }
 
-/// Return youtube_ids of videos in the playlist that have never been played.
+/// Return youtube_ids of videos in the playlist never played ON IT (#261: a
+/// play on a custom set list is no play of the song's home playlist).
 pub async fn get_unplayed_video_ids(
     pool: &SqlitePool,
     playlist_id: i64,
@@ -228,7 +229,7 @@ pub async fn get_unplayed_video_ids(
     let rows = sqlx::query(
         "SELECT v.youtube_id
          FROM videos v
-         LEFT JOIN play_history ph ON ph.video_id = v.id
+         LEFT JOIN play_history ph ON ph.video_id = v.id AND ph.playlist_id = v.playlist_id
          WHERE v.playlist_id = ? AND v.removed_at IS NULL AND ph.id IS NULL
          ORDER BY v.id",
     )
@@ -255,7 +256,8 @@ pub async fn get_normalized_video_ids(
     Ok(rows.iter().map(|r| r.get("id")).collect())
 }
 
-/// Return IDs (from videos table) of normalized videos that have not been played.
+/// Return IDs (from videos table) of normalized videos not played ON this
+/// playlist since its rotation began (#261: the rotation counts its own plays).
 pub async fn get_unplayed_normalized_video_ids(
     pool: &SqlitePool,
     playlist_id: i64,
@@ -263,7 +265,7 @@ pub async fn get_unplayed_normalized_video_ids(
     let rows = sqlx::query(
         "SELECT v.id
          FROM videos v
-         LEFT JOIN play_history ph ON ph.video_id = v.id
+         LEFT JOIN play_history ph ON ph.video_id = v.id AND ph.playlist_id = v.playlist_id
          WHERE v.playlist_id = ? AND v.normalized = 1 AND v.removed_at IS NULL AND ph.id IS NULL
          ORDER BY v.id",
     )
@@ -617,13 +619,14 @@ pub struct PlaylistItem {
 }
 
 /// Append a video to a custom playlist's set list. Returns the assigned
-/// position. Errors if `(playlist_id, video_id)` already exists.
+/// position. Errors if `(playlist_id, video_id)` already exists. `BEGIN
+/// IMMEDIATE` (#261): it reads before it writes (`models_set_list`).
 pub async fn append_playlist_item(
     pool: &SqlitePool,
     playlist_id: i64,
     video_id: i64,
 ) -> Result<i64, sqlx::Error> {
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let next_pos: i64 = sqlx::query_scalar(
         "SELECT COALESCE(MAX(position) + 1, 0) FROM playlist_items WHERE playlist_id = ?",
     )
@@ -641,7 +644,8 @@ pub async fn append_playlist_item(
 }
 
 /// Remove a video from a custom playlist's set list and compact positions
-/// so there are no gaps afterwards.
+/// so there are no gaps afterwards; the current position follows its item
+/// (`models_set_list::compact`, #261: shared with a playlist's DELETE).
 pub async fn remove_playlist_item(
     pool: &SqlitePool,
     playlist_id: i64,
@@ -653,49 +657,7 @@ pub async fn remove_playlist_item(
         .bind(video_id)
         .execute(&mut *tx)
         .await?;
-
-    // Compact: rewrite positions 0..N-1 preserving order. Two-step to avoid
-    // PRIMARY KEY collisions: first negate all positions, then assign
-    // sequential non-negative positions based on the negated ordering.
-    sqlx::query(
-        "UPDATE playlist_items SET position = -position - 1
-         WHERE playlist_id = ?",
-    )
-    .bind(playlist_id)
-    .execute(&mut *tx)
-    .await?;
-    let rows = sqlx::query(
-        "SELECT video_id FROM playlist_items
-         WHERE playlist_id = ? ORDER BY position DESC",
-    )
-    .bind(playlist_id)
-    .fetch_all(&mut *tx)
-    .await?;
-    for (new_pos, r) in rows.iter().enumerate() {
-        let vid: i64 = r.get("video_id");
-        sqlx::query(
-            "UPDATE playlist_items SET position = ?
-             WHERE playlist_id = ? AND video_id = ?",
-        )
-        .bind(new_pos as i64)
-        .bind(playlist_id)
-        .bind(vid)
-        .execute(&mut *tx)
-        .await?;
-    }
-
-    // Clamp current_position to the new valid range.
-    sqlx::query(
-        "UPDATE playlists
-         SET current_position = MIN(current_position,
-             COALESCE((SELECT MAX(position) FROM playlist_items WHERE playlist_id = ?), 0))
-         WHERE id = ?",
-    )
-    .bind(playlist_id)
-    .bind(playlist_id)
-    .execute(&mut *tx)
-    .await?;
-
+    super::models_set_list::compact(&mut tx, playlist_id).await?;
     tx.commit().await?;
     Ok(())
 }

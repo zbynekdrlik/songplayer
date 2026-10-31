@@ -15,6 +15,14 @@
 //! against software on the same samples; the report says which path really
 //! decoded ([`DecodeFacts`]).
 //!
+//! #279 P3a: an optional `"resident": true` opens it GPU-resident instead,
+//! on a producer device of the run's own (`sp_gpu::ProducerGpu`, made on
+//! the production adapter like a pipeline's): every GPU-decoded picture is
+//! copied into the producer's ring and never comes to RAM, so the timings
+//! are what a GPU-resident song pays (the decode and the ring copy). The
+//! report adds `gpu_resident` and the ring after the run ([`BenchMode`],
+//! [`decode_mode`]).
+//!
 //! This file is the cross-platform part, Linux-tested:
 //!
 //! - [`DecodeBench`]: the sample dir and the one-run-at-a-time gate;
@@ -32,8 +40,10 @@ use std::time::Duration;
 
 use serde::Serialize;
 use sp_decoder::{DecodeMode, DecodePath, VideoStream};
+use sp_gpu::{GpuError, ProducerGpu, RingStats};
 
 use crate::playback::decode_thread::spawn_decode_thread;
+use crate::playback::gpu_resident::RingStatus;
 use crate::playback::loop_stats::percentile_ceil;
 
 /// The longest run a request may ask for, in seconds.
@@ -347,11 +357,74 @@ pub struct StreamFacts {
     pub codec: Option<String>,
 }
 
+/// The decode mode a run asks for: `"hw": true` (#223 S3b) or
+/// `"resident": true` (#279 P3a), never both (`gpu_probe::ask`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BenchMode {
+    /// Media Foundation's software decoder.
+    #[default]
+    Software,
+    /// The GPU decoder, each picture read back to RAM (`DecodeMode::Hardware`).
+    Hardware,
+    /// #279 P3a: the GPU decoder, each picture copied into a producer's ring
+    /// (`DecodeMode::GpuResident`).
+    Resident,
+}
+
+impl BenchMode {
+    /// The mode of a request's two flags (`resident` first).
+    pub fn of(hw: bool, resident: bool) -> Self {
+        if resident {
+            Self::Resident
+        } else if hw {
+            Self::Hardware
+        } else {
+            Self::Software
+        }
+    }
+
+    /// The run decodes on the GPU.
+    pub fn on_gpu(self) -> bool {
+        self != Self::Software
+    }
+
+    /// The mode's name in the logs (`DecodeMode::as_str`'s).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Software => "software",
+            Self::Hardware => "hardware",
+            Self::Resident => "gpu_resident",
+        }
+    }
+}
+
+/// The reader's mode for a run, and the producer a resident run decodes on.
+pub type RunMode = (DecodeMode, Option<Arc<ProducerGpu>>);
+
+/// #279 P3a: the reader's mode for a run of `mode`. A resident run makes its
+/// producer device (`make`: `sp_gpu::ProducerGpu::new`, the production
+/// adapter) and keeps it, to read its ring after the run; `make` runs for
+/// no other mode.
+pub fn decode_mode<M>(mode: BenchMode, make: M) -> Result<RunMode, GpuError>
+where
+    M: FnOnce() -> Result<ProducerGpu, GpuError>,
+{
+    match mode {
+        BenchMode::Software => Ok((DecodeMode::Software, None)),
+        BenchMode::Hardware => Ok((DecodeMode::Hardware, None)),
+        BenchMode::Resident => {
+            let producer = Arc::new(make()?);
+            let mode = DecodeMode::GpuResident(Arc::clone(&producer));
+            Ok((mode, Some(producer)))
+        }
+    }
+}
+
 /// What the reader says about its decode path after the run (#223 S3b).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DecodeFacts {
-    /// What the request asked for (`"hw": true` = `Hardware`).
-    pub mode: DecodeMode,
+    /// What the request asked for.
+    pub mode: BenchMode,
     /// The path of the last picture (`None`: no picture).
     pub path: Option<DecodePath>,
     /// How often a picture's path differed from the one before it.
@@ -360,6 +433,14 @@ pub struct DecodeFacts {
     pub adapter: Option<String>,
     /// Why the file left the GPU path (`"open: …"` / `"mid-stream: …"`).
     pub fallback: Option<String>,
+    /// #282: the decode cap the run opened under (`max_resolution`'s rule,
+    /// the producer's).
+    pub max_height: Option<u32>,
+    /// #282: the stream's own size when the run decoded it scaled to the
+    /// cap (the report's `width` / `height` are then the scaled size).
+    pub scaled_from: Option<(u32, u32)>,
+    /// #279 P3a: a resident run's ring after the run (`None`: no producer).
+    pub ring: Option<RingStats>,
 }
 
 /// One run's answer.
@@ -411,6 +492,21 @@ pub struct BenchReport {
     pub adapter: Option<String>,
     /// Why the file left the GPU path, if it did.
     pub hw_fallback: Option<String>,
+    /// #282: the decode cap the run opened under (rows).
+    pub max_height: Option<u32>,
+    /// #282: the stream's own `[width, height]` when the run decoded it
+    /// scaled to the cap; `null` at its own size. A scaled run's
+    /// `decode_path` `"hardware"` says the picture lay on the GPU, not that
+    /// NVDEC decoded it: judge that by the timings.
+    pub scaled_from: Option<(u32, u32)>,
+    /// #279 P3a: the request asked for a GPU-resident run (`"resident":
+    /// true`; `hw_requested` is then true too). Its `decode_path`
+    /// `"hardware"` = the pictures were copied into the ring.
+    pub gpu_resident: bool,
+    /// #279 P3a: a resident run's ring after the run (its slots, waits,
+    /// copy p99, VRAM); `null` for any other run, or when the producer
+    /// device could not be made.
+    pub ring: Option<RingStatus>,
 }
 
 impl BenchReport {
@@ -450,6 +546,10 @@ impl BenchReport {
             adapter: None,
             hw_fallback: None,
             path_changes: 0,
+            max_height: None,
+            scaled_from: None,
+            gpu_resident: false,
+            ring: None,
         }
     }
 
@@ -460,11 +560,15 @@ impl BenchReport {
     pub fn with_decode(self, decode: DecodeFacts) -> Self {
         let hardware = decode.path == Some(DecodePath::Hardware);
         Self {
-            hw_requested: decode.mode == DecodeMode::Hardware,
+            hw_requested: decode.mode.on_gpu(),
+            gpu_resident: decode.mode == BenchMode::Resident,
+            ring: decode.ring.map(RingStatus::of),
             decode_path: decode.path.map(DecodePath::as_str),
             adapter: decode.adapter.filter(|_| hardware),
             hw_fallback: decode.fallback,
             path_changes: decode.path_changes,
+            max_height: decode.max_height,
+            scaled_from: decode.scaled_from,
             ..self
         }
     }
@@ -498,6 +602,10 @@ impl BenchReport {
             adapter: None,
             hw_fallback: None,
             path_changes: 0,
+            max_height: None,
+            scaled_from: None,
+            gpu_resident: false,
+            ring: None,
         }
     }
 
@@ -526,7 +634,7 @@ impl BenchReport {
         };
         format!(
             "file={} {}x{} codec={} fps={fps} open_ms={} frames={} wall_ms={} ended={:?} \
-             mean_us={} p50_us={} p99_us={} max_us={} {budget}{}{error}",
+             mean_us={} p50_us={} p99_us={} max_us={} {budget}{}{}{error}",
             self.file,
             self.width,
             self.height,
@@ -540,22 +648,59 @@ impl BenchReport {
             self.decode_us.p99,
             self.decode_us.max,
             self.hw_summary(),
+            self.scaled_summary(),
         )
     }
 
+    /// The end line's scaled part (#282), only for a run decoded scaled to
+    /// the cap, so an unscaled run's line is unchanged.
+    fn scaled_summary(&self) -> String {
+        match self.scaled_from {
+            Some((width, height)) => format!(
+                " scaled_from={width}x{height} max_height={}",
+                self.max_height.unwrap_or_default()
+            ),
+            None => String::new(),
+        }
+    }
+
     /// The end line's hardware part (#223 S3b), only for a `"hw": true`
-    /// run, so a software run's line is the S0 baseline's.
+    /// run, so a software run's line is the S0 baseline's; #279 P3a: a
+    /// resident run's adds its ring.
     fn hw_summary(&self) -> String {
         if !self.hw_requested {
             return String::new();
         }
-        format!(
+        let line = format!(
             " hw=requested decode_path={} path_changes={} adapter={} hw_fallback={}",
             self.decode_path.unwrap_or("?"),
             self.path_changes,
             self.adapter.as_deref().unwrap_or("-"),
             self.hw_fallback.as_deref().unwrap_or("-"),
-        )
+        );
+        if self.gpu_resident {
+            line + &ring_summary(self.ring.as_ref())
+        } else {
+            line
+        }
+    }
+}
+
+/// #279 P3a: a resident run's ring on the end line.
+fn ring_summary(ring: Option<&RingStatus>) -> String {
+    match ring {
+        Some(r) => format!(
+            " gpu_resident ring_slots={} ring_waits={} ring_full={} ring_dead={} \
+             copy_us_p99={} vram_mb={}",
+            r.slots,
+            r.waits,
+            r.full,
+            r.dead,
+            r.copy_us_p99
+                .map_or_else(|| "-".to_string(), |us| us.to_string()),
+            r.vram_mb,
+        ),
+        None => " gpu_resident ring=-".to_string(),
     }
 }
 
@@ -629,7 +774,7 @@ pub async fn run(
     path: PathBuf,
     file: String,
     max_wall: Duration,
-    mode: DecodeMode,
+    mode: BenchMode,
     slot: BenchSlot,
 ) -> BenchOutcome {
     run_on_decode_thread(slot, move || {
@@ -644,7 +789,7 @@ pub async fn run(
     _path: PathBuf,
     _file: String,
     _max_wall: Duration,
-    _mode: DecodeMode,
+    _mode: BenchMode,
     _slot: BenchSlot,
 ) -> BenchOutcome {
     BenchOutcome::Unsupported

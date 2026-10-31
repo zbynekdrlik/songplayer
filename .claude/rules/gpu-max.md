@@ -5,6 +5,13 @@ paths:
   - "crates/sp-server/src/playback/program_max*.rs"
   - "crates/sp-server/src/playback/program_output_tests_max.rs"
   - "crates/sp-server/src/api/program_tests_max.rs"
+  - "crates/sp-server/src/playback/ndi_feed*.rs"
+  - "crates/sp-server/src/playback/program_output_ndi*.rs"
+  - "crates/sp-server/src/playback/program_output_tests_ndi*.rs"
+  - "crates/sp-server/src/api/program_tests_ndi.rs"
+  - "crates/sp-server/src/playback/picture*.rs"
+  - "crates/sp-server/src/playback/pacer_tests_gpu.rs"
+  - "crates/sp-server/src/playback/frame_buf.rs"
   - "src-tauri/resources/THIRD-PARTY-NOTICES.txt"
   - "e2e/post-deploy-max.spec.ts"
   - "e2e/max-gate*.ts"
@@ -14,13 +21,22 @@ paths:
 # The `SP-program-MAX` GPU compositor and Spout sender: `crates/sp-gpu` (#223 S1a, S1b) and its runtime wiring (S2)
 
 Design: #223 revision 3, R3-2 (comment 5979609879). `SP-program-MAX` is a
-FIXED 3840×2160 canvas (owner, 3.10.2026: "4k", "both outputs static"). A 4K
+FIXED 3840×2160 canvas (owner, 3.10.2026: "4k", "both outputs static"; since
+#251 the runtime `program_max_size` can set another for the wall's A/B,
+"Arena loses its OWN frames" below). A 4K
 fade costs ~40–45 ms on the CPU, over the 33.3 ms slot, so MAX is composed on
 the GPU. This crate is the compositor (device, upload, draw, readback) and,
 since S1b, its Spout sender (below); S2 wires both into the program output
 (sp-server `playback/program_max.rs` + `program_max_worker.rs`, "Runtime
 wiring" below). #239: the same thread also sends the FHD program as the
-Spout sender `SP-program` (1920×1080), "The FHD Spout sender" below.
+Spout sender `SP-program` (1920×1080), "The FHD Spout sender" below; #251
+step 2: from a SECOND TARGET of the same compositor (one device, one upload
+of each picture, both targets drawn at the compose phase). #279 P1b: the
+FHD program is that compositor's PRIMARY target and MAX's the ADDED one, and
+the FHD target also feeds NDI `SP-program` (a UYVY readback, one slot late:
+"NDI `SP-program` from the GPU readback" below). #279 P2: the picture
+ring, `GpuFrame` and a composition's ring-frame sides ("The picture ring"
+below).
 
 ## What one boundary draws (`composition.rs`)
 
@@ -78,16 +94,33 @@ Spout sender `SP-program` (1920×1080), "The FHD Spout sender" below.
   - **Rejected:** a quad that extends past the target, or a scissor. Either
     needs a signed `Placement` through the layers, the reference's coverage
     and the WARP edge points.
-- #239 / #267: the target AND its rule belong to the compositor and are
-  fixed for its life.
+- #239 / #267 / #251 step 2: a TARGET is a size and its rule
+  (`Target { width, height, fit }`, `MAX_TARGET` = 3840×2160 `MAX_FIT`,
+  `FHD_TARGET` = 1920×1080 `FHD_FIT`), fixed for the target's life.
   - `Compositor::new()` / `new_warp()` / `new_on_listed_adapter(i)` build
-    MAX's: `CANVAS_*` with `MAX_FIT`.
-  - `with_size(w, h, fit)` / `new_warp_with_size(w, h, fit)` name the rule.
-    sp-server builds the FHD side with
-    `with_size(FHD_WIDTH, FHD_HEIGHT, FHD_FIT)`.
-  - `layers()` is `layers_in(CANVAS_WIDTH, CANVAS_HEIGHT, MAX_FIT)`.
-    `layers_in(w, h, fit)` places into any target (`FHD_WIDTH` ×
-    `FHD_HEIGHT` = 1920×1080 for `SP-program`).
+    a compositor whose PRIMARY target is MAX's; `with_size(w, h, fit)` /
+    `new_warp_with_size(w, h, fit)` name another primary (tests). The
+    primary is the compositor's for its life (`TargetId::PRIMARY`).
+  - #251 step 2: `add_target(target) -> Result<TargetId, GpuError>` adds a
+    target (a shared BGRA render target + its own event query) drawn by
+    every later compose; `remove_target(id)` stops it (never the
+    primary). sp-server's production compositor's primary is
+    `FHD_TARGET` and it adds `MAX_TARGET` while MAX is on (#279 P1b; #251
+    step 2 added `FHD_TARGET` to MAX's; since #251's `program_max_size`
+    MAX's target is `max_target()`, 3840×2160 unless the setting names
+    another). The ids and
+    the draw order (primary first, then as added; an id never reused) are
+    the pure `targets.rs` `Targets<T>`, which `win/mod.rs` holds its
+    targets in.
+  - `layers()` is `layers_on(MAX_TARGET)`; `layers_on(target)` =
+    `layers_in(w, h, fit)`, which places into any target.
+  - `pictures()` (test-only since #279 P2) = the (slot, side) pairs one
+    compose draws, in draw
+    order, whatever the targets; every target's layers sample exactly
+    those (`composition_tests.rs::every_target_draws_the_pictures_one_compose_uploads`).
+    #279 P2: of those, `uploads()` (the CPU sides) is what one compose
+    uploads, and `frames()` (the ring sides, each slot once) what it opens
+    and acquires.
   - The target size also drives `QuadConstants::new(place, uv_rect,
     weight, w, h)`, the viewport, the render target, the staging copy and
     the readback.
@@ -177,10 +210,43 @@ Spout sender `SP-program` (1920×1080), "The FHD Spout sender" below.
   `program_transition::nv12_whole` checks too: one rule for the CPU and the
   GPU path. Both saturate at `usize::MAX`, so the check that guards the
   `unsafe` upload reads can never pass on a wrapped product.
-- The slot is per side, as dispatched. At a fade's end the incoming picture
-  is drawn as a plain picture from the `Outgoing` slot, so a held incoming
-  picture is uploaded once more (one upload; a live song brings a new id
-  every boundary anyway).
+- The slot is per side, as dispatched. Before its uploads `compose` lets the
+  two slots TRADE PLACES when that saves uploads (#251, pure
+  `residency::swap_slots(resident ids, wanted ids)`: fewer uploads after the
+  trade), so a picture resident in the other slot is never uploaded again:
+  a fade's incoming picture is the next fade's outgoing one (every boundary
+  of a 24/25 fps song is such a fade, #251's blend), and a fade's end draws
+  its incoming picture alone from `Outgoing`. Without the trade every
+  picture of a blended song went up twice (~60 4K uploads/s instead of 25).
+  WARP pin: `tests/warp.rs::a_chain_of_fades_uploads_each_picture_once`.
+- **Uploads are what disturbs Arena** (#251 comment 6212436810, SNV
+  16.10.2026). An INDEPENDENT Spout sender was shown on the wall, and
+  SongPlayer's program work alone was varied:
+  - SongPlayer blending a 25 fps clip: 56-86 jumps back per 40 s;
+  - one picture per boundary: 20-31;
+  - Blank (MAX still composing and sending black): 0-3;
+  - MAX off: 5-14.
+
+  the GPU scheduling priority class (D3DKMT), HAGS,
+  Arena's CPU priority or cores and NVIDIA threaded optimization changed
+  nothing. An upload is a CPU copy into driver memory plus a PCIe DMA,
+  which is memory bandwidth, like the synthetic `paced_burner.py`. Every
+  upload saved is measurable on the wall. The end state is GPU decode
+  straight into the compositor's textures, with no upload at all.
+- #251 step 2: the slots belong to the COMPOSITOR, not to a target.
+  `compose` checks and uploads `uploads()` once (#279 P2: and holds the
+  ring slots of `frames()`), then draws every target
+  from those textures (each through its own viewport, `QuadConstants` and
+  render target), ends each target's event query after its draw, flushes
+  ONCE and waits for them in order (`pipeline::wait_until_each_done`).
+  `ComposeStats::draw_us` covers every target (#279 P1a: and a UYVY pass
+  with its copy); `draw_us(id)` is a target's
+  OWN part (from the end of the target before, the first draw command for
+  the first, until its query passed: the pure `stats::target_draws_us`).
+  WARP pins: `tests/warp.rs` "one compose fills both targets", "each
+  picture is uploaded once for both targets" (the same `uploads` as MAX
+  alone), "a 4:3 picture fills MAX's width and keeps FHD's bars in one
+  compose", "a removed target is no longer drawn".
 
 ## Device, render target, Spout facts
 
@@ -216,9 +282,10 @@ Spout sender `SP-program` (1920×1080), "The FHD Spout sender" below.
   - so Spout needs no keyed mutex, and `SendTexture` does not even need our
     target to be shared;
   - it is shared anyway, with Spout's own description. S1b SENDS it
-    (`SendTexture`, a GPU copy) rather than registering its handle: Spout's
+    (a GPU copy; #251 step 3: the shim's `SendSynced`, not `SendTexture`) rather than registering its handle: Spout's
     own texture is guarded by the sender mutex a receiver takes, so Arena
-    never reads a frame the compositor is drawing.
+    never reads a frame the compositor is drawing (#251 step 3: nor one
+    Spout's copy is still writing, below).
 - WARP supports shared resources since Windows 8 (D3D11_RESOURCE_MISC_FLAG
   docs). `tests/warp.rs` asserts the flag and a non-null `GetSharedHandle`,
   and it fails (never skips) if WARP refuses.
@@ -295,6 +362,12 @@ anchors are on #223 (comment 5984577044).
 - `SpoutSender::new(&Compositor)` → `send()` after each `compose()`, on the
   same thread → `SpoutSendStats { send_us }`. `with_name` is doc-hidden, for
   tests. `registration()` says where it is (`spout_state::Registration`).
+  #251 step 2: `for_target(&c, target, name)` sends a given target (its
+  own reference to that texture; an id the compositor does not hold is
+  `GpuError::NoObject` before Spout); `new` = the primary,
+  `new_fhd(&c, target)` = `SP-program` of the FHD target. Two senders on
+  one compositor share its immediate context and each waits for its own
+  copy (`tests/spout.rs::two_senders_on_one_compositor_are_listed_with_their_own_sizes`).
 - **Neither the sender nor the `Compositor` is `Send` (nor `Sync`).** The
   sender drives the compositor's immediate context (spoutDX takes it with
   `GetImmediateContext`), which is not thread-safe; if either could cross
@@ -312,6 +385,25 @@ anchors are on #223 (comment 5984577044).
   under the named mutex `<name>_SpoutAccessMutex`, then `Flush`es. If a
   receiver holds that mutex over 67 ms Spout SKIPS the copy and still
   returns true: nothing tells the caller, `send_us` shows the wait.
+- **#251 step 3: the shim never calls `SendTexture`.** `SendTexture`
+  announces the frame (`SetNewFrame`) and releases the mutex right after
+  `Flush`, which only SUBMITS the copy: a receiver could take a frame the
+  GPU was still writing. On SNV's wall that was the new picture for one
+  refresh (often only its top part), then the old one again, `-1 [0] -1
+  +1`, 8-18x more often under background CPU load (#251 comment
+  6202137095). The shim's `Sender` holds `SyncedDX` (a subclass, the
+  vendor unmodified), whose `SendSynced` runs the same steps on the same
+  members and WAITS for the copy (an event query of the device, `GetData`
+  + `SwitchToThread`, bounded by `FRAME_WAIT_LIMIT`) before `SetNewFrame`
+  and `AllowTextureAccess`, still under the mutex. Code 6
+  (`status::COPY_NOT_DONE`) = not done in time: NOT announced (the mutex is
+  let go all the same), a lost frame through `spout_state::after_send` (so
+  a first send's registration is still recorded), then
+  `spout::lost_send_error` → `GpuError::Timeout`; a lost device is read
+  first. The process-wide `SDK` lock spans the wait (only `program-max`
+  sends).
+  `spout_tests.rs::the_shim_announces_a_frame_only_after_the_gpu_wrote_it`
+  reads the shim source for the order (the shim compiles only on Windows).
 - Registration is lazy: Spout lists the sender at its FIRST send (it needs
   the texture's size and format). Before that `spout_sender_info` is `None`.
 - `spoutDX::OpenDirectX11(device)` keeps the device pointer WITHOUT AddRef
@@ -323,7 +415,7 @@ anchors are on #223 (comment 5984577044).
   and Linux-tested (the mutation gate sees them). `spout_shim.cpp` only does
   one SpoutDX step per call: `open` (+ Spout's own `CleanSenders`), `listed`
   (yes / no / unreadable), `claim_name` (`SetSenderName`: kept or renamed),
-  `send` (`SendTexture`), `state` (`IsInitialized`, the name kept),
+  `send_synced` (`SyncedDX::SendSynced`, #251 step 3), `state` (`IsInitialized`, the name kept),
   `refuse` (release), `size`, `release`.
 - **A second sender with the same name is REFUSED** (Spout would rename it
   `SP-program-MAX_1`, which Arena's layer never shows), and a refusal is for
@@ -344,7 +436,7 @@ anchors are on #223 (comment 5984577044).
     lock timed out during the registration: Spout's `RegisterSenderName`
     then registers nothing and `CreateSender` ignores that; or another
     program's `CleanSenders` dropped it mid-registration); nothing
-    registered (`SendTexture` failed or threw before the registration) →
+    registered (the send failed or threw before the registration) →
     `REGISTRATION_FAILED`: a retry would meet its own half-made
     registration and be renamed `_1`. A send that fails AFTER the
     registration loses one frame and leaves the sender `Unconfirmed` (never
@@ -498,7 +590,7 @@ abandoned 41 ms later and released it). A receiver cannot be fixed, so:
    offered while it holds, and the `program-max` thread's next step is
    `MaxNext::Quiesce` (after a stop, before everything else, whatever the
    setting), once per quiesce. `MaxWorker::quiesce` drops both senders
-   (MAX, then `SP-program`, each before its compositor), stops the list
+   (MAX, then `SP-program`; #251 step 2: then their one compositor), stops the list
    sentinel and reports `quiesced`; the thread then waits: no Spout call
    runs when the kill lands. Every workflow step that kills SongPlayer
    runs `scripts/spout-quiesce.ps1` first (`ci-workflows.md`). Not limited
@@ -669,10 +761,12 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   GPU's compose held behind a gate, six more boundaries reach NDI and VBAN
   within the bound, `coalesced` 4, MAX then draws boundary 0 and the newest
   two).
-- The consumer's `next(holding)`: `Stop` wins; while off, `Release` when it
+- The consumer's `next(holding)`: `Stop` wins; while nothing wants the
+  compositor (#279 P1b: MAX off AND NDI on the canvas), `Release` when it
   holds GPU objects; else the next job. `set_enabled(false)` drops the
-  queued jobs and wakes it; `attach()` returns the guard whose drop stops
-  the offers (a dead thread never leaves a stale "running").
+  queued jobs (unless NDI still wants the compositor) and wakes it;
+  `attach()` returns the guard whose drop stops the offers (a dead thread
+  never leaves a stale "running").
 - The queue and the stats are two locks: an API read takes the queue lock
   only to copy two fields (`enabled`, `coalesced`), copies the p99 windows
   under the stats lock and sorts them after it.
@@ -680,16 +774,46 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
 ### The `program-max` thread (`program_max_worker.rs`)
 
 - `run_max_loop(out, gpu)`: `attach`, then `next` → `serve` / `release` /
-  exit. The GPU is the `MaxGpu` trait (`compositor()`, `sender(&c)`, each
-  object `MaxCompositor::compose` / `MaxSender::send`), so every decision is
-  Linux-tested on a fake (`program_max_worker_tests.rs`). Production is
-  `SpoutGpu` (`Compositor::new()` on the picked adapter, `SpoutSender::new`
-  = `SP-program-MAX`), spawned by `start_max` on Windows as thread
-  `program-max`.
-- Both objects are built ON the thread at the first job (neither is `Send`)
-  and dropped sender first (it holds references into the compositor's
-  device and render target).
-- **Picture ids (`PictureIds`).** S1a's residency skips the upload of an id
+  exit. The GPU is the `MaxGpu` trait (`compositor()`, `sender(&c,
+  target)`, `fhd_sender(&c, target)`; `MaxCompositor::{compose, adapter,
+  add_target, remove_target, draw_us, enable_uyvy, disable_uyvy,
+  read_uyvy}`, `MaxSender::{send, listed_size}`; since #251 step 2 in
+  `program_max_gpu.rs`, re-exported by the worker), so every decision is
+  Linux-tested on a fake (`program_max_worker_tests.rs`: ONE
+  `FakeCompositor` minting target ids with the real `sp_gpu::Targets`).
+  Production is `SpoutGpu` (#279 P1b: `Compositor::with_size` of
+  `FHD_TARGET` on the picked adapter, `SpoutSender::for_target(&c, max,
+  SPOUT_SENDER_NAME)` = `SP-program-MAX` of the MAX target the worker adds),
+  spawned by `start_max` on Windows as thread `program-max`.
+- The objects are built ON the thread at the first job (none is `Send`)
+  and dropped senders first (MAX's, then the FHD one), then the compositor
+  (they hold references into its device and targets).
+- #251 step 2, the per-job order (`attempt`): build what is missing, each
+  unless its own backoff runs (the compositor = `Device`; MAX's sender),
+  pace, wait for `compose_at`, ONE compose (every target the compositor
+  holds), MAX's send at `due`, then the FHD one's. **MAX goes first, whole
+  (#239):** an FHD output still to build (its target, its sender: a Spout
+  open with `CleanSenders`, up to 67 ms per kept lock) is built AFTER MAX's
+  send (`build_fhd_after`) and drawn from the next compose; its build
+  boundary reports nothing for it. So the build never delays THIS
+  boundary's MAX; it still runs on the thread before the next job, so an
+  open longer than the wait to the next compose instant (33.3 ms − K)
+  makes that compose late (`compose_late`), longer by K its send too
+  (`send_late`). Only when MAX's boundary is not drawn at all (its build
+  failed, lost the device or waits a backoff, `fhd_first`) is the FHD
+  output built first and sent alone at the due instant. A device lost
+  while building the FHD output first fails MAX with it, nothing drawn. A
+  device the FHD side loses AFTER MAX's boundary went out (its send, or its
+  build after MAX's send) is MAX's too: the boundary stays counted as sent,
+  never failed, and MAX's state (`MaxOut::record_lost`) and log name the
+  loss, so MAX never reads `running` while it waits for the device. Every failure
+  is recovered from where it happens (`output_failed`, `lose_device`),
+  once: a lost device is ONE event for both outputs (`device_resets` +1,
+  both fail with it, `device_lost` hands MAX's to the FHD side), and
+  `lost_unsent` is cleared by a send of EITHER output that went out (in
+  `send_max` / `send_fhd`, so a MAX boundary sent before the FHD send lost
+  the device never counts as one after it).
+- **Picture ids (`PictureIds`, `program_max_ids.rs`).** S1a's residency skips the upload of an id
   the slot holds, so an id must never name other bytes: ids come from a
   counter. A picture that is the same allocation (`SharedFrame::ptr_eq`) as
   one of the last composed boundary's keeps its id; those `Arc`s are held
@@ -699,7 +823,8 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   the outgoing slot when the fade ends and is uploaded there once). Never
   key an id on an address or on address + stamp (the latter re-uploads
   every held picture).
-- **Failures** (`serve` → `recover`, never a panic):
+- **Failures** (recovered where they happen, `output_failed` /
+  `lose_device`, never a panic):
   - a lost device at compose or send drops both; rebuilt at once on the
     next job (`device_resets`), unless the rebuilt pair is lost again
     before a boundary went out (`lost_unsent`): then the rebuild waits the
@@ -744,7 +869,7 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   stutter, with ONE Spout layer too. Now `MaxOut::offer_with` stamps each
   job with its offer `Instant` (`MaxNext::Job(job, offered)`), the worker
   composes at once and `send_at` waits until the due instant on its
-  `SendClock`, then `SendTexture`; a compose that ran past it sends at once
+  `SendClock`, then sends (`SendSynced`); a compose that ran past it sends at once
   and counts `send_late`. Production waits on `SpinClock` (sleep to
   `SEND_SPIN_MARGIN` = 2 ms short, then spin; the decision is the pure
   `send_wait_step`); `MaxWorker::new` uses `NoWait` (tests pass made-up
@@ -782,7 +907,9 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   boundary in a slot `vblank + phase` (setting
   `program_max_vblank_phase_ms`, default 14 ms: measured, see below) and KEEPS its lead (due −
   offer) from one boundary to the next while it stays in
-  [`LEAD_MIN` 12 ms, 12 ms + one period + `LEAD_HYSTERESIS` 3 ms]: the
+  [K, K + one period + `LEAD_HYSTERESIS` 3 ms] (#251: K =
+  `compose_offset`, "The compose phase" below; it was a constant
+  `LEAD_MIN` 12 ms floor before): the
   30 fps boundaries then sit on every second refresh, and only the slow
   drift carrying the lead out of the window picks a new slot (one
   `slot_repick` = one picture held one refresh more or less, hours apart;
@@ -807,6 +934,94 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   30 s**: the default. The same 8-vs-14 contrast is the causal check that
   Arena shows MAX at all: after an Arena relaunch (its clips reconnected)
   16 + 39 vs 5 + 0, after a forced SongPlayer kill 25 + 41 vs 0 + 0.
+- **The compose phase** (#251, SNV 15.10.2026, design on #251, "Design-by"
+  comment 6181037052). The SEND was on the grid, but the COMPOSE (the 4K
+  uploads and the blend draw; every 24/25 fps boundary is a two-picture
+  `Fade` since #251's frame blending) started at the OFFER, which drifts
+  against the refresh (~0.4 ms/min, a full turn ~45 min). The wall then
+  showed the previous picture for one refresh (`IH` pattern) whenever that
+  GPU work landed where Arena renders and reads Spout. Measured with the
+  `wall-25` frame-ID clip over two drift cycles (wall jumps back per
+  minute against where the compose started after the PRIMARY's vblank):
+
+  | compose start | jumps back / min |
+  |---|---|
+  | +10.4 … +15.2 ms | 0–2 |
+  | +15.6 … +0.4 ms (around the vblank) | 4–19 |
+  | +0.9 … +4.0 ms | 0–3 |
+  | +4.4 … +9 ms | 7–30 (worst +6.7 … +8.9) |
+
+  The FHD sender is not the cause (A/B: off gave both 3 and 113); the old
+  12 ms lead floor added late sends at the window's bottom, a secondary
+  effect. So now:
+  - `VblankPacer::due(offered, grid, send_phase, compose_phase)` also
+    returns `Due::compose_at` = due − K, `None` off the grid (composed at
+    once: exactly the old behaviour, the constant `MAX_SEND_LEAD`);
+  - K = `compose_offset(period, send_phase, compose_phase,
+    COMPOSE_BUDGET)`: from the compose phase FORWARD to the send phase,
+    both modulo the period, plus whole periods until K ≥ `COMPOSE_BUDGET`
+    (14 ms, above the measured upload p99 ~5–6 ms + draw p99 ~5–9 ms).
+    SNV (send 19 ms = 2.333 ms into a 16.667 ms refresh, compose 13 ms):
+    K = 6 ms + one period = **22.667 ms**; the default send phase 14 ms:
+    K = 1 ms + one period = **17.667 ms** (the design's 23.17 / 18.17 were
+    0.5 ms over its own definition; with them the compose would start at
+    12.5 ms, comment 6181128848);
+  - the lead window's floor is K, so the compose instant is never before
+    the offer; the top is K + one period + 3 ms; `LEAD_MIN` is deleted;
+  - the worker paces FIRST, waits on its `SendClock` until `compose_at`
+    (`program_max_send::wait_for`, the wait `send_at` shares: a job taken
+    after that instant composes at once and counts `compose_late`),
+    composes, then sends at `due` as before. Step 1 left the FHD side
+    (its own device: a second upload, its draw and GPU wait) right after
+    MAX's send, in Arena's window, and that carried a large part of the
+    residual jumps (A/B on SNV, comment 6192123775: FHD on 5.35 jumps back
+    per minute, off 3.09, the difference in the offer band ~14 → 4 ms).
+    **Step 2** (design comment 6192134240, Approach 1): ONE compose at
+    `compose_at` draws BOTH targets of the one compositor from one upload;
+    at `due` MAX's send runs, then the FHD one's (plain copies, its
+    `send_at` meets a passed instant). Rejected: pacing a second device's
+    compose to the compose phase too (two uploads and two contexts at
+    13 ms), and switching the FHD sender off (doing less, #239 asked for
+    it);
+  - setting `program_max_compose_phase_ms` (`sp_core::config`, default 13,
+    `program_max_compose_phase_us`, the send phase's parse rule), read
+    with MAX's settings every 5 s (`program_max_phase.rs`, a child of
+    `program_max.rs`, holds both phases). Tune it on the box like the send
+    phase: PATCH it, measure the wall over a whole drift cycle (never a
+    short take: the effect comes in waves).
+  - **Judging a deploy on the wall (#279 P2, 17.10.2026):** two 40 s takes
+    15 min after a deploy read 11 / 11 against a baseline of 2 / 2; the
+    revert, then a whole hour on each build starting after its E2E, read the
+    same distribution (dev.12 23 / 30 takes at 0–2, worst 13 and 61; dev.13
+    22 / 30, worst 6). A first post-deploy take decides only whether to
+    revert at once; whether a build is worse needs an hour on each side.
+    The read-only watch: `diag\wall-bridge\drift_watch.ps1` (one take per
+    2 min with the song and MAX's counters), run as an interactive task of
+    the Resolume user (`schtasks /create … /ru Resolume /it`, then `/run`;
+    `/change` hangs asking for a password), deleted after.
+    **Delete every such task as soon as its run ends, in the same turn: a
+    `/sc once /st 23:59` trigger FIRES AGAIN at 23:59 that day** (19.10.2026:
+    four A/B tasks ran at once at 21:59Z, in the middle of a deploy's E2E;
+    each took the state the one before had changed as "the operator's",
+    so their restores left the program on Blank and Arena's group 2
+    soloed, and three post-deploy tests failed for it). Read the trigger
+    back (`schtasks /query /tn X /v /fo list` → "Next Run Time"), or end
+    the script with its own `schtasks /delete /tn X /f`.
+  - The cost: the picture leaves later (mean lead ~K + 10 ms, up from
+    ~22 ms) and the thread waits up to one period + 3 ms after the offer
+    before it composes. Two outstanding jobs never coalesce: a lead under
+    ~50 ms leaves at most one job queued.
+  - A lead at the window's floor makes `compose_at` the offer itself, so
+    the thread's wake-up latency (~0.1–0.2 ms) makes those composes late
+    by that much (`compose_late` counts them, the phase median barely
+    moves) for the ~30 s of each drift cycle the lead sits there.
+  - Tests: `program_max_vblank_tests.rs` (the K pins, the window's two
+    edges, the drift sweep over every phase with two re-picks each way:
+    compose exactly at 13 ms, send at 2.333 ms, never before the offer),
+    `program_max_worker_tests_send.rs` (the compose waits for its instant
+    and never runs at the offer, a late job composes at once and counts,
+    off the grid unchanged, three offer phases), the pins from a scratch
+    Python model.
 - **A dropped Spout name is put back** (#243, SNV 13.10.2026 ~12:52):
   ANY Spout program that lists or checks senders (vendored
   `SpoutSenderNames.cpp`: `GetSenderNames` + `getSharedInfo` in the
@@ -866,7 +1081,10 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   (not Spout-specific); once reconnected through the REST API
   (`POST /composition/layers/<n>/clips/<c>/connect`), the Spout clip showed
   MAX at once. Before a relaunch, read the connected clips
-  (`ops\arena_layers.py`) so they can be restored.
+  (`ops\arena_layers.py`) to REPORT them, never to restore them
+  (`wall.md`: no clip runs until the operator presses a scene); a test
+  reconnects only the clip it tests (the A/B's receiving clip included)
+  and undoes that.
 - **A forced kill can leave Spout's list to a receiver for good** (#243
   follow-up, PP 12.10.2026): hence the deploy's quiesce, the list sentinel
   and `max.list_holder` ("Spout locks handed over abandoned" above).
@@ -883,12 +1101,19 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   Toggle it with `PATCH /api/v1/settings {"program_max_enabled": "false"}`
   (a flat body; `api/program_tests_max.rs` saves it through the router and
   reads it back); no restart.
-- `GET /api/v1/program` (and the cut answer) → `max {enabled, state, width:
-  3840, height: 2160, submitted, coalesced, failed, upload_us_p99,
-  draw_us_p99, send_us_p99, send_at_us_p50/p99/max, send_late,
+- `GET /api/v1/program` (and the cut answer) → `max {enabled, state, width,
+  height (the applied `program_max_size`, 3840×2160 by default),
+  submitted, coalesced, failed, upload_us_p99, draw_us_p99, send_us_p99,
+  upload_mb_s, uploads_per_s (#279 P0, below),
+  send_at_us_p50/p99/max, send_late,
   vblank_output, vblank_state, vblank_tracking, vblank_period_ns, vblank_phase_us,
-  send_off_grid, send_phase_us_p50/p99, slot_repicks, device_resets,
+  compose_phase_us, send_off_grid, send_phase_us_p50/p99,
+  compose_phase_us_p50/p99, compose_late, slot_repicks, device_resets,
   sender_backoffs, spout_name, adapter, list_holder, fhd}` (`MaxStatus`;
+  #251: `compose_phase_us` = the setting, `compose_phase_us_*` = where
+  after the vblank the aligned boundaries' composes started, over the same
+  window as the send phase, `compose_late` = grid boundaries whose job came
+  after their compose instant;
   `list_holder` = #243 follow-up, above; `fhd` = #239,
   "The FHD Spout sender" below;
   `send_at_us_*` = send done − offer over the window, `send_late` = composes
@@ -912,7 +1137,8 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   the thread:
   `running` (it
   takes jobs and its last boundary went out), `error: <why>` (its last
-  boundary did not; `error: the program-max thread is not running` before
+  boundary did not, or #251 step 2 the device was lost after it went out,
+  `MaxOut::record_lost`; `error: the program-max thread is not running` before
   it attached or after it ended). `submitted + failed` = the jobs it took
   (an `unsupported` platform counts neither). The p99s
   cover the last 900 sent frames (30 s). The mock (`e2e/mock-api.mjs`)
@@ -932,7 +1158,11 @@ a `vblank_output`, `vblank_tracking` and `send_off_grid` +0 (every
 boundary on the wall's grid; a `vblank_state` `not_ticking` is named as a
 dark output, #243), the median start after the vblank
 (`send_phase_us_p50`) in [`vblank_phase_us`, + `SEND_PHASE_SLACK_US`
-1 500 µs], and `slot_repicks` +1 at most (`MAX_SLOT_REPICKS`). The
+1 500 µs], #251: while `vblank_state` is `ticking`, the median compose
+start (`compose_phase_us_p50`) in [`compose_phase_us`, +
+`COMPOSE_PHASE_SLACK_US` 1 500 µs] (both read modulo the refresh,
+`phaseInRefresh`; `compose_late` is logged, not gated), and
+`slot_repicks` +1 at most (`MAX_SLOT_REPICKS`). The
 first read comes after the first boundary went out, so the build's own
 time never counts. A coalesce can also come from the PROGRAM: after a
 program-side stall its thread serves several boundaries back to back, and
@@ -945,18 +1175,31 @@ and Arena's side stay in the box gate below.
 ### The WARP proof (`program_max_tests_warp.rs`, Windows only)
 
 A `ProgramOutput` (mock NDI) offers to a real `run_max_loop` whose GPU is
-`Compositor::new_warp()` + `SpoutSender::with_name(…, "SP-program-MAX-s2-warp-test")`.
+the production topology on WARP (#279 P1b): `Compositor::new_warp_with_size`
+of the FHD target + `SpoutSender::for_target(…, max, "SP-program-MAX-s2-warp-test")`
+of the MAX target the worker adds.
 A 1280×720 Source boundary, then a 21:9 → 720p Mix boundary (slot 4 of 9):
 Spout's registry lists the sender at 3840×2160 format 87, and its shared
 texture read on a SECOND WARP device (`sp_gpu::read_shared_texture`,
 doc-hidden, `win/receiver.rs`) matches S1a's reference within its tolerance;
-after the stop the sender is unlisted. Each picture is served TWICE and read
-after the second went out: the readback takes no Spout mutex, and the second
-draw's wait for the GPU proves the first send's copy done (the second copy
-writes the same bytes). #267: then a 4:3 Source boundary (960×720). MAX
+after the stop the sender is unlisted. Each picture is served until both
+senders sent it TWICE (`serve_twice`; the run's first picture one boundary
+more, the FHD output being built after MAX's first send) and read after
+that: the readback takes no Spout mutex, and the last draw's wait for the
+GPU proves the earlier send's copy done (the last copy writes the same
+bytes). #267: then a 4:3 Source boundary (960×720). MAX
 fills its width: the layer covers columns 0..3840, and no pixel of either
 edge column is black. The FHD sender keeps its bars, black at columns 239
-and 1680.
+and 1680. The FHD sender is `for_target` of the WARP compositor's primary
+(#279 P1b; MAX's target is the one the worker adds, the production
+`add_target` of `sp_gpu::Compositor`), so both read-backs come from one
+compose. #279 P1b: then NDI `SP-program` from the GPU readback
+(`check_ndi_from_the_readback`): a 1920×1080 `ProgramOutput` in gpu mode
+on the same thread sends each boundary one boundary late as UYVY 1920×1080
+stride 3840, and every byte is within `UYVY_TOLERANCE` of
+`sp_gpu::uyvy::reference` of the FHD sender's texture (the same picture),
+for a Source boundary and a fade; `ndi` reads `gpu`, one switch, 0
+repeats / late / coalesced.
 
 ### The FHD Spout sender `SP-program` (#239)
 
@@ -964,42 +1207,53 @@ Design: #239 "## Design" (the last comment). The FHD program goes out over
 Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
 1920×1080 program without NDI.
 
-- sp-gpu: `Compositor::with_size(w, h)` (the picked adapter, like `new`,
-  which is `with_size(CANVAS_*)`), doc-hidden `new_warp_with_size` for CI,
-  `size()`; `SpoutSender::new_fhd(&c)` = `SPOUT_FHD_SENDER_NAME` =
-  `SP-program` (Arena: `SPOUT_SP-program`). The sender shares whatever its
-  compositor draws: pair `new_fhd` with a 1920×1080 compositor.
+- sp-gpu: `SpoutSender::new_fhd(&c, target)` = `SPOUT_FHD_SENDER_NAME` =
+  `SP-program` (Arena: `SPOUT_SP-program`), the sender of the compositor's
+  target `target`. #279 P1b: that target is the compositor's PRIMARY,
+  `FHD_TARGET` (1920×1080, `FHD_FIT`; #251 step 2 had added it to MAX's
+  compositor), never a second compositor: one device, one upload of each
+  picture, one compose.
+  `Compositor::with_size(w, h, fit)` / doc-hidden `new_warp_with_size` stay
+  for tests (a compositor whose primary is another size).
   `read_shared_texture` reads at the size the sender's map lists.
-- #267: its compositor places by `FHD_FIT` (`aspect_fit`, bars included),
+- #267: its target places by `FHD_FIT` (`aspect_fit`, bars included),
   never MAX's fill. It is the same program as the NDI `SP-program`, which
   OBS, the Presenter and the stream take; the wall's Spout feed is MAX.
   Making the FHD feeds fill too would be one constant, but the NDI canvas
   (`program_canvas.rs`, CPU) would then have to follow, to stay one
   program.
 - The `program-max` thread (`program_max_worker.rs`): while
-  `MaxOut::fhd_wanted` (the setting AND MAX on), each job also goes to a
-  second `Side` (compositor + sender, `MaxGpu::fhd_compositor` /
-  `fhd_sender`), built on the thread like MAX's. Both compose the SAME
-  labelled composition (one `PictureIds`: ids are global, so each
-  compositor's residency stays right). **MAX goes first, whole** (review
-  of #239): MAX composed, its paced wait, its send; only THEN is the FHD
-  side built, composed and sent (`fhd_boundary`), so the FHD upload / draw /
-  GPU wait never eat MAX's lead or make its send late (the #223 stutter
-  fix). The FHD send goes out at once after MAX's (its `send_at` meets a
-  passed instant), never paced on its own; when MAX's boundary is not
-  drawn at all (its build failed or waits a backoff), the FHD side is
-  built first (`fhd_first`, it decides the labelling) and sent at the due
-  instant (`pace` once per job). Pinned by
-  `max_is_sent_at_its_due_instant_before_the_fhd_sender_is_even_composed`
-  (fake clock, the fake's `order` log) and
-  `a_slow_fhd_compose_never_holds_max_back` (the real loop, the FHD compose
-  held behind a gate while MAX is already out). Each `Side` keeps its own backoff and lost-device state
-  (`Side::recover`, shared with MAX): a refused FHD sender, a failed FHD
-  build or a lost FHD device never stops MAX, and the other way round.
-  The pictures are labelled only when one side is built (`ready`).
-  Switched off (`fhd_wanted` false), the FHD side is dropped at the next
-  boundary and its backoff forgotten (`release_fhd`); MAX off releases
-  both (MAX first, each sender before its compositor).
+  `Wants::fhd` (the setting AND MAX on), the FHD OUTPUT (its
+  sender of the compositor's primary, `Output`, built on the thread:
+  `MaxGpu::fhd_sender(&c, TargetId::PRIMARY)`) is drawn by the same compose
+  as MAX, from the same labelled
+  composition and the same uploaded textures (#251 step 2). The FHD
+  output is built AFTER MAX's send (#239, "MAX goes first, whole": its
+  Spout open never delays that boundary's MAX, at most the next compose,
+  `compose_late`; rare: the start, a backoff's end, a lost device) and
+  drawn from the next compose; the
+  compose waits for `compose_at` and draws both targets; at `due` MAX's
+  send runs, then the FHD one's (its `send_at` meets a passed instant).
+  When MAX's boundary is not drawn (its build failed, lost the device or
+  waits a backoff) the FHD output is built first and goes out at the due
+  instant alone.
+  Pinned by
+  `both_targets_are_composed_at_the_compose_instant_then_sent_max_first`
+  (a grid, the fake clock's waits [compose_at, due, due] once both are
+  built, the fake's `order` at each wait),
+  `the_fhd_output_is_built_after_max_s_send_then_drawn_by_the_same_compose`
+  and `the_fhd_build_never_delays_max_s_send`.
+  #279 P1b: the FHD target is the primary, drawn by every compose whatever
+  its sender does; it is MAX's target that exists only while MAX's sender
+  lives: a refused or failed MAX build drops MAX's sender and takes its
+  target off (`drop_max`), so nothing is drawn for MAX during its backoff.
+  A refused or failed FHD sender drops that sender only (`drop_fhd`); a
+  refused or failed MAX sender never stops the FHD output, and the other
+  way round. Switched off (`Wants::fhd` false), the FHD sender goes at the
+  next boundary and its backoff is forgotten (`release_fhd`); MAX off with
+  NDI on the canvas releases everything (MAX's sender, the FHD sender, then
+  the compositor), MAX off with NDI from the GPU only MAX's sender and
+  target (`release_max`).
 - After its first good boundary the thread reads Spout's registry entry of
   the FHD sender once (`MaxSender::listed_size` →
   `spout_sender_info(name)`, a receiver's read; `None` = read again next
@@ -1012,10 +1266,15 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   then its own setting (`setting_off`).
 - `GET /api/v1/program` → `max.fhd {enabled, state, reason, spout_name,
   listed_width, listed_height, submitted, failed, sender_backoffs,
-  upload_us_p99, draw_us_p99, send_us_p99}` (`FhdStatus`; the uploads go
-  onto the FHD compositor's own device, so its extra cost is visible;
-  `program_max_fhd.rs`, a CHILD
-  module of `program_max.rs`: it reads the queue and the private `Window`).
+  spout_relists, draw_us_p99, send_us_p99}` (`FhdStatus`;
+  `program_max_fhd.rs`, a CHILD module of `program_max.rs`: it reads the
+  queue and the private `Window`). #251 step 2: no `upload_us_p99` (the
+  FHD target uploads nothing of its own: MAX's upload serves both, and
+  `max.upload_us_p99` / `max.draw_us_p99` cover the whole compose);
+  `draw_us_p99` is the FHD target's own part of the draw
+  (`record_fhd_sent(draw_us, send)`). `fhdGateFailures` never read the
+  upload figure; `max-gate.ts`'s `FhdStatus`, the mock and the post-deploy
+  log no longer name it.
   `state` = MAX's `state_label` over the FHD side's own phase (attach /
   end / unsupported follow MAX's) with `reason.is_none()` as "on". Its
   own lock, never held with the queue's or MAX's stats lock.
@@ -1034,13 +1293,28 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   setting on, no reason, `running`, listed 1920×1080, ≥ 30 out, `failed`
   and `sender_backoffs` +0. It runs on SNV and in PP's subset.
 - Tests: `program_max_fhd_tests.rs` (rule, records, JSON names, setting,
-  task), `program_max_worker_tests_fhd.rs` (fake GPU: the fake's objects
-  carry an FHD flag, `Log.fhd_*` / `sends` / `listed_reads`,
-  `Script.fhd_*` / `listed`, `order` = draws / sends / the FHD build in
-  order, `hold_next_fhd_compose`), WARP: sp-gpu `tests/warp.rs` (a 1920×1080
-  compositor against the reference), `tests/spout.rs` (the `SP-program`
-  sender listed at 1920×1080, read back on a second device) and
-  sp-server `program_max_tests_warp.rs` (the real loop with both senders).
+  task), `program_max_worker_tests_fhd.rs` (the fake GPU: ONE
+  `FakeCompositor` whose primary is the FHD target and which draws MAX's
+  while one was added, `Log` `targets_added` / `targets_removed` /
+  `fhd_drawn` / `fhd_*` / `order` ("fhd sender built", "fhd draw", "max
+  draw" — the primary first —, "max send", "fhd send", "max target
+  removed"; #279 P1b also "ndi on", "ndi read", "ndi off"),
+  `Script.add_target` / `fhd_sender` / `fhd_send` / `listed`: the FHD output
+  built after MAX's send, both targets at `compose_at`, MAX first, FHD off
+  sends nothing, an FHD refusal or failed build never stops MAX, a failed
+  MAX target or sender waits MAX's own backoff while the FHD output goes
+  out),
+  `program_max_worker_tests_fhd_lost.rs` (a lost device anywhere, building
+  the FHD output first or after MAX's send included, rebuilds both; a loss
+  after MAX's boundary went out leaves it sent and MAX's state and log name
+  it; a MAX boundary sent before the loss never counts after it), WARP:
+  sp-gpu `tests/warp.rs`
+  (one compose fills both targets, one upload per picture, a 4:3 picture
+  fills MAX's width and keeps FHD's bars, a removed target), `tests/spout.rs`
+  (the `SP-program` sender of the FHD target listed at 1920×1080 and read
+  back on a second device; two senders on one compositor, each listed at
+  its own size) and sp-server `program_max_tests_warp.rs` (the real loop
+  with both senders on one WARP compositor).
 
 ### The box gate after the deploy (the main session runs it)
 
@@ -1064,7 +1338,12 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   the installer carries `resources/THIRD-PARTY-NOTICES.txt`;
 - #239: Arena lists `SPOUT_SP-program` too, `spout_sender_info("SP-program")`
   reads 1920×1080 format 87, and MAX's budget and `coalesced` +0 hold with
-  both senders on.
+  both senders on (#251 step 2: `max.draw_us_p99` is then both targets'
+  draw).
+- #251 step 2: the same A/B as comment 6192123775 (`fhd_ab2.ps1`, 46
+  one-minute blocks, a whole drift cycle) must read FHD on like FHD off,
+  both at or under the off-rate of 3.09 jumps back per minute; then the
+  continuous monitor on normal songs.
 
 ## Telemetry (`ComposeStats`, behind `max.*_p99`)
 
@@ -1075,26 +1354,948 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   any ready thread runs first), bounded at 10 s (`GpuError::Timeout`). A 4K
   quad on the RTX is well under a millisecond. If S2 measures the spin as a
   cost, it can read the query a boundary later instead: Spout's copy is
-  ordered after the draw on the same context and needs no wait.
-- `uploads`: 0, 1 or 2 pictures uploaded.
-- `SpoutSendStats::send_us` (S1b, for `max.send_us_p99`): `SendTexture`
-  (the sender-mutex wait, the copy, the flush; at the first send also the
-  shared texture's creation and the registration) and, since the #223
-  follow-up, the wait until the GPU has DONE that copy (an event query on
-  the compositor's context, `pipeline::wait_until_done_on`), so
+  ordered after the draw on the same context and needs no wait. #251 step
+  2: every target drawn (one query per target, one flush, one wait;
+  #279 P1a: a UYVY pass and its staging copy after them, its own query);
+  `Compositor::draw_us(id)` = a target's own part (`target_draws_us`), the
+  FHD one is `max.fhd.draw_us_p99`.
+- `uploads`: 0, 1 or 2 pictures uploaded, whatever the targets.
+- #279 P1a `uyvy_us`: the UYVY pass's own part of the draw (its pass and
+  staging copy, after the targets' parts), `None` with no pass enabled.
+  #279 P1b publishes it as `ndi.uyvy_us_p99` (over the last 900
+  readbacks).
+- #279 P0 `upload_bytes`: the plane bytes those uploads wrote
+  (`Planes::upload_bytes`: luma a byte a texel, chroma two a U/V pair, the
+  stride's padding not counted; 0 when every picture was resident). The
+  worker records it with `uploads` for EVERY compose that ran, at the
+  instant it served the boundary (`MaxWorker::draw` →
+  `MaxOut::record_compose` since #279 P3a; `record_uploads` is the tests'
+  plain upload record), `program_max_upload.rs`, a child of
+  `program_max.rs`): a boundary whose Spout send then failed moved its
+  bytes all the same; a failed compose is not counted. `max.upload_mb_s`
+  (10^6 bytes) and `max.uploads_per_s` = everything after the oldest of
+  the last 900 composes, at most `UPLOAD_RATE_SPAN` (30 s) before the
+  newest, over the time since it, to a tenth. While the compositor
+  composes nothing (MAX off with NDI on the canvas, quiesced, a backoff)
+  they keep their last value: read them with `max.state` `running`. #279
+  P1b: with MAX off and NDI from the GPU the FHD composes still upload, so
+  they move while `max.state` reads `off`. One upload serves both targets: the FHD sender
+  adds none (`max.fhd` has no upload figure). The GPU-resident path's
+  number: `upload_mb_s` = 0 with a hardware-decodable song on program.
+  Tests: the window on made-up instants (`program_max_upload_tests.rs`),
+  the worker over the fake GPU (`program_max_worker_tests_upload.rs`; the
+  fake's compose uploads every picture of its composition by sp-gpu's
+  rule, it keeps no residency), the WARP pins in `tests/warp.rs`.
+- `SpoutSendStats::send_us` (S1b, for `max.send_us_p99`): the shim's
+  `SendSynced` (the sender-mutex wait, the copy, the flush, the wait until
+  the GPU has DONE that copy, then the announce; at the first send also the
+  shared texture's creation and the registration; #251 step 3 moved the
+  #223 follow-up's wait from after `SendTexture` to before the announce), so
   `max.send_at_us_*` is when Spout's shared texture really holds the frame,
   relative to the program's offer: its spread is the GPU's delay of the
   copy (Arena reads the texture on its own 60 Hz clock).
+
+## The capability probe (#279 P0, `probe.rs` + `win/probe.rs`)
+
+The GPU-resident design of epic #279 (its plan §4.2–§4.3; the P0 design
+comment 6215400662) shares NV12 textures from per-playlist producer devices
+to the one compositor device. `probe_gpu()` asks the picked adapter whether
+that holds, on TWO devices of it (A = a producer, made with the video API
+like Media Foundation's decode device, `DeviceUse::VideoDecode`; B = the
+compositor, `DeviceUse::Probe`: BGRA, adapter list at DEBUG; `probe_warp` and
+`probe_on_listed_adapter` make A BGRA too, since WARP refuses the video
+API), each step on its own (a step that needs the shared texture makes its
+own):
+
+1. `extended_resource_sharing`: `CheckFeatureSupport(D3D11_OPTIONS)`
+   `.ExtendedResourceSharing` on A and B;
+2. `nv12_shared_nthandle`: a 256×144 NV12 texture on A,
+   `BIND_SHADER_RESOURCE`, `SHARED_NTHANDLE | SHARED_KEYEDMUTEX`,
+   `IDXGIResource1::CreateSharedHandle`, `ID3D11Device1::OpenSharedResource1`
+   on B (the NT handle closed after the open);
+3. `nv12_keyed_mutex_roundtrip`: A `AcquireSync(0, 1000 ms)`, copies an
+   NV12 picture in (`probe_picture`: byte i = i mod 251), flushes,
+   `ReleaseSync(1)`; B `AcquireSync(1, 0 ms)`, copies the texture to an NV12
+   staging copy, maps it (the UV plane at `RowPitch × Height`), releases
+   key 1, and its packed bytes must be A's (`content_step`): sharing proven
+   by content, not only by an open. **`AcquireSync`'s `WAIT_TIMEOUT`
+   (0x102) and `WAIT_ABANDONED` (0x80) are SUCCESS codes: the `windows`
+   crate's `Result` reads them `Ok`.** The glue calls the vtable entry for
+   the raw HRESULT and the pure `acquire_step` accepts only `S_OK`;
+4. `nv12_srv_r8_r8g8`: R8_UNORM and R8G8_UNORM views on B's opened NV12;
+5. `uyvy_target_and_staging_do_not_wait`: on B an R8G8B8A8 960×1080 render
+   target, cleared, copied to staging, the copy waited for (an event query,
+   `pipeline::wait_until_each_done`), mapped `READ` +
+   `D3D11_MAP_FLAG_DO_NOT_WAIT`, its first texel read back as the clear.
+
+Each step is `Ok` or a `ProbeError { call, hresult, detail }` (hresult 0 =
+the call succeeded but answered no); `ProbeReport::verdict` =
+`gpu_resident_ok`, or `needs_fallback` naming the first failed step in the
+report's order (the design's R1 fallback). A device that cannot be made
+fails the whole probe (`GpuError`). `GpuProbe` also carries the adapter,
+every adapter DXGI lists and the adapter's local VRAM
+(`IDXGIAdapter3::QueryVideoMemoryInfo`, `Vram {budget_mb, used_mb}`, or the
+error). Pure + serde in `probe.rs` (Linux-tested, `probe_tests.rs`); the
+stub's `probe_gpu` is `Unsupported`; `probe_warp` / `probe_on_listed_adapter`
+are doc-hidden, Windows only. The box runs it through
+`POST /api/v1/diag/decode-bench {"probe": true}` (`diag-bench.md`).
+
+WARP (`tests/probe.rs`): two WARP devices, the listed Basic Render Driver
+and the picked adapter (none on `windows-latest`: `NoAdapter`). What WARP
+answers per step is NOT documented, so the test asserts only the proven
+(the devices, their adapter, a definite answer naming its call per step, a
+verdict consistent with the steps) and writes every answer, the verdict and
+the report's JSON to stderr: read WARP's answer in the CI log.
+
+## The UYVY pass (#279 P1a: `uyvy.rs`, `uyvy.hlsl`, `win/uyvy.rs`)
+
+Design: #279 comment 6216639388; plan
+`docs/superpowers/plans/2026-10-16-gpu-video-path.md` §4.4, §5.5. #279
+P1b wires it: NDI `SP-program` from the readback, one slot late, the `UYVY`
+FourCC, the burn on UYVY (next section), switched by `program_ndi_source`
+(default: the CPU canvas, `program_canvas.rs`, `nv12_mix.rs`).
+
+- **What it makes.** `Compositor::enable_uyvy(target)`, for a target of
+  EVEN width (`uyvy::uyvy_size`, else `GpuError::UyvyOddWidth`; an id the
+  compositor does not hold is `NoObject`): an `R8G8B8A8_UNORM` texture of
+  width/2 × height (one texel per pixel pair) and its RTV, an SRV of the
+  target's BGRA texture, an immutable 48-byte cbuffer
+  (`uyvy::constants_bytes`), its own event query, and `UYVY_STAGING` = 3
+  staging textures (`CPU_ACCESS_READ`). One pass per compositor: enabling
+  again replaces it (a new ring: nothing to read before the next compose),
+  `disable_uyvy` drops it, and `remove_target` of its target drops it too.
+  A refused or failed enable leaves the compositor as it was.
+- **The pass.** One full-target triangle (`SV_VertexID`, no vertex buffer,
+  `pipeline::raster`: no culling). The pixel shader at texel (x, y)
+  `Load`s the target's pixels (2x, y) and (2x + 1, y), no filter, and
+  writes `saturate(float4(U, Y0, V, Y1))`: a texel's four bytes in memory
+  are one UYVY pair. Y′ is each pixel's own; Cb/Cr are the conversion of
+  the pair's AVERAGE RGB (the conversion is linear, so this equals the
+  average of their Cb/Cr): a chroma sample centred between the pair, not
+  BT.709's co-sited one (the design's choice: two exact `Load`s, no
+  filter tap).
+- **Binding order matters.** The pass binds its own RTV FIRST, which takes
+  the program target off the output stage, and only then the target's SRV:
+  D3D11 force-unbinds an input that is still bound as an output, and the
+  pass would read zeros. Both are unbound after the draw. Its blend state
+  is the default (`OMSetBlendState(None, ..)`): the compositor's blend
+  adds onto the last frame AND writes R, G, B only, so the alpha byte
+  (Y1) would never be written.
+- **In `compose`.** After the targets' draws: the pass, a `CopyResource`
+  into `staging[ring.slot_to_write()]` and its event query, all inside the
+  ONE flush and wait (`wait_until_each_done`: the targets' queries, then
+  the pass's). Only once that wait passed and `GetDeviceRemovedReason` is
+  clean does the ring move on (`StagingRing::written`), so a failed compose
+  leaves the newest copy readable. `ComposeStats::uyvy_us` is the pass's
+  own part of the draw (the pure `stats::split_uyvy_part`: the part after
+  the targets' in `target_draws_us`), `None` with no pass;
+  `ComposeStats::draw_us` then covers the pass and its copy too.
+- **`read_uyvy(&mut out)`.** `Ok(false)`, `out` untouched, before any
+  compose finished since the enable. Otherwise it maps
+  `staging[ring.newest()]` with `READ | D3D11_MAP_FLAG_DO_NOT_WAIT` (the
+  copy is complete: the compose waited) through `textures::map_rows_into`
+  (the compositor's mapped-rows reader, `read_back`'s too; it refuses
+  more rows than the texture has: `out` cleared once mapped,
+  `unpad_rows_into`, width × 2 bytes a row, packed, unmapped), `Ok(true)`.
+  On `Ok(false)` or an error `out` keeps what it held: P1b must never
+  send it then.
+  `DXGI_ERROR_WAS_STILL_DRAWING` is a `GpuError::Api` whose call
+  (`uyvy::STILL_DRAWING_CALL`) names it, never a wait (`uyvy::map_failed`;
+  a lost device stays `DeviceLost`). No pass is `NoObject`.
+- **The colour.** `uyvy::RGB_FULL_TO_BT709_LIMITED`: rows Y′, Cb, Cr over
+  the full-range `(r, g, b, 1)`, already divided by 255 (the UNORM the
+  target stores). It is derived from `KR` / `KB` and is the inverse of
+  `color.rs`'s `BT709_LIMITED_TO_FULL`. It reaches the shader as f32
+  (`uyvy::rows_f32`, `constants_bytes`); `uyvy.hlsl`'s `cbuffer Uyvy` is
+  `to_y`, `to_u`, `to_v`, in that order.
+- **The CPU model and its tolerance.** `uyvy::pack_pair(left, right)`
+  (BGRA in, `[U, Y0, V, Y1]` out, f32 like the shader, then
+  `reference::unorm8`) and `uyvy::reference(bgra, w, h)`. `UYVY_TOLERANCE`
+  = 1 code: two exact `Load`s, f32 maths, one rounding per byte. The WARP
+  pins compare with the reference computed from the SAME target's BGRA
+  readback, so the composite's own tolerance never adds to it, and any
+  picture works (smoothness is the composite's premise, not this one's).
+- **Tests.** Linux `uyvy_tests.rs`, every pin from a scratch Python model
+  with numpy f32:
+  - the rows from KR/KB, the inversion within 1e-9 both ways round, the
+    f32 pins and the cbuffer bytes;
+  - the HLSL source read for the cbuffer order, the two `Load` offsets,
+    the average and the output order;
+  - the BT.709 bars → their limited-range codes (`color_tests.rs`'s table
+    the other way), mixed pairs, alpha never read;
+  - the reference's rows, a short frame and an odd last column;
+  - the size rule, the map error, and the ring (wrap, read before any
+    write, write after a read).
+
+  WARP `tests/uyvy.rs`, on FHD targets: a 1440p picture; a 4:3 picture
+  whose bar pairs are exactly `[128, 16, 128, 16]` and whose picture pairs
+  are not, in rows 0, 540 and 1079 (a scratch model of the composite puts
+  each ≥ 11 codes from it there); a 50 % fade; Black. Each is within ±1 of
+  the reference of its own BGRA readback. Also: 10 composes in a row of
+  THREE pictures in turn, each `read_uyvy` `Ok(true)` with that compose's
+  picture (the ring wraps 3×, never `WAS_STILL_DRAWING`; with two pictures
+  over a ring of three, a read of the slot being written would hold the
+  same picture and pass); `Ok(false)` before a compose; an odd width
+  refused; the production shape (MAX's compositor with `FHD_TARGET` added,
+  the pass on it), where a removed target takes its pass; removing ANOTHER
+  target keeps the pass and its newest copy; disable and re-enable start
+  afresh. The worst difference goes to stderr: read it in the Build
+  (Windows) log.
+- **For P1b (review round 1, a property, not a defect).** The NDI picture
+  then goes NV12 limited → full-range 8-bit BGRA (saturated) → limited
+  UYVY. Sub-black, super-white and out-of-gamut values clip where today's
+  CPU NV12 canvas passes them through, and the two roundings cost about
+  ±1 code against today: P1b's colour and A/V gates must expect it.
+
+## NDI `SP-program` from the GPU readback (#279 P1b)
+
+Design: #279 comment 6218637444; plan
+`docs/superpowers/plans/2026-10-16-gpu-video-path.md` §4.4, §5.1, §5.5,
+§5.6, §5.8, §5.9, §8 R2, §9 P1b. The NDI picture was a CPU canvas picture
+(a fit, or a fused fade on the band pool: ~6 MB of RAM traffic per
+boundary, at the drifting offer phase). The compositor already draws the
+same FHD program, so NDI takes ONE 4 MB UYVY readback of it, made at the
+fixed compose phase. Switched by `program_ndi_source`; a deploy changes
+nothing on air (default `cpu`).
+
+### Topology
+
+- The production compositor's PRIMARY target is the FHD program
+  (`SpoutGpu::compositor` = `Compositor::with_size` of `FHD_TARGET`),
+  there for the compositor's life. MAX's target (3840×2160 unless
+  `program_max_size`, #251) is ADDED (`add_target` of `max_target()`,
+  `MaxWorker::make_max`) only while MAX is
+  wanted, with its sender `SpoutSender::for_target(&c, max,
+  SPOUT_SENDER_NAME)`, and taken off with it (`drop_max`: the sender
+  first, then `remove_target`). The FHD Spout sender is `new_fhd(&c,
+  TargetId::PRIMARY)`.
+- The thread takes jobs while ANYTHING wants the compositor. Who wants
+  it is ONE rule, `program_max::Wants` from one read of the queue
+  (`Queue::wants`, `MaxOut::wants`): MAX's own output by its setting
+  alone, the FHD Spout sender by its setting AND MAX on
+  (`fhd_off_reason`), NDI's readback by `program_ndi_source` = `gpu`.
+  `Wants::any` is what the queue's acceptance, its release and the setting
+  changes read (`set_enabled(false)` / `set_ndi_source(cpu)` drop the
+  queue only when nothing wants it, and wake the thread; with nothing
+  wanted it releases everything as before), and the worker reads the same
+  snapshot per job (`serve_lines`). Review rounds 3-4: the worker used to
+  restate it from three reads under three locks, and `fhd_wanted` /
+  `ndi_wanted` (test-only wrappers then) are gone. A job served
+  while NOTHING wants the compositor (MAX off and NDI on the canvas: the
+  setting changed after the thread took the job) builds and composes
+  nothing, and the next step releases. The lane's first cut inferred MAX
+  from the job (`max_wanted` = enabled OR NDI not on the GPU, "a job
+  means MAX on"); that inference is exact only under the dequeue's lock,
+  and read later it built MAX's 4K target and the `SP-program-MAX` Spout
+  sender for one stray boundary with MAX off (resume lane,
+  `a_job_served_when_nothing_wants_the_compositor_builds_nothing`). A
+  worker test that serves a job switches MAX on itself
+  (`max.set_enabled(true)`).
+- MAX off with NDI on the GPU: MAX's sender and target go (`release_max`),
+  the compositor keeps composing the FHD target for NDI, `max.state` reads
+  `off` and MAX counts nothing.
+- MAX's order (built first, sent first, whole, #239), its phases, its
+  backoffs and its telemetry are unchanged.
+
+### The readback (`program_max_ndi.rs`, a child of the worker)
+
+- `MaxWorker::ndi_pass(wanted)`: P1a's UYVY pass is enabled on the PRIMARY
+  while NDI is wanted, disabled otherwise (the canvas mode pays no
+  readback). A failed enable is tried again only after
+  `MAX_RETRY_BACKOFF` (it makes textures and compiles a shader).
+- **A device lost at the pass's enable is lost there** (review round 5
+  B5-1): `ndi_pass` calls `lose_device` (the compositor goes,
+  `device_resets` +1), and `MaxWorker::device_ready` (= `build_device` +
+  `ndi_pass`, the first step of `attempt`) fails the boundary as after a
+  failed build: MAX's build never runs on the gone compositor, which
+  would arm a spurious MAX backoff. Before, with MAX off nothing composed
+  until the pass was on, so nothing reached the compose's own device
+  check: the removed compositor was kept and its enable failed every 3 s,
+  NDI on the canvas for good. With MAX on the compose caught it one call
+  later. Round 6: the loss's kind follows the compositor's age
+  (`building` = `device_ready` built it for this boundary). The enable of
+  a fresh compositor is part of its build and waits the backoff. A
+  compositor that was up (NDI flipped to the GPU while MAX runs) is lost
+  like one a compose finds: rebuilt at the next job unless nothing went
+  out since the last loss. Round 5's fix first made every such loss wait
+  3 s (about 90 MAX boundaries), where the compose had rebuilt at once
+  (`with_max_off_a_device_lost_at_the_pass_s_enable_is_rebuilt_after_the_backoff`,
+  `a_device_lost_at_the_enable_of_a_running_compositor_is_rebuilt_at_once`).
+  Lesson: catch a device loss at a call after which nothing on the same
+  path would see it. With MAX off that is the enable, since nothing
+  composes until the pass is on. A READBACK's loss is left to the next
+  compose, which always runs while the pass is on (`read_back` only WARNs,
+  `a_failed_readback_pushes_nothing_and_costs_max_nothing`): never "fix"
+  that one too.
+- The pass has ONE log: a `StateLog<PassLine>` of its state (`pass_line`:
+  `Off` while NDI is not wanted, `On` while the pass is enabled, else
+  `Failing(why)` with the last enable error, an `Arc<str>` so a failing
+  boundary compares and stores it with no allocation), observed at every
+  boundary the thread holds a compositor; the line reaches
+  `Lines::ndi_pass`. An INFO when it goes on or off, a WARN per failing
+  spell, a change inside the 5 s window said after it as the state is
+  then, and no line outside it. Review rounds 3-4: an enable gate
+  observed only at an attempt never said a recovery inside its window
+  and stayed on the old failure, so a later spell with the same error was
+  never WARNed; and INFO lines written at every enable and disable,
+  outside the gate, could leave the log's last line contradicting the
+  pass ("on" while it failed) and flooded it under device churn.
+  Round 5 F2: every release (`release(now)`: nothing wants the
+  compositor, a quiesce, the thread's end) observes `Off` too
+  (`pass_released`, the one `say_pass`): with MAX off `serve_lines`
+  returns before the pass once NDI is on the canvas, so the log's last
+  line stayed "on" (`with_max_off_the_release_says_the_pass_is_off`).
+  Like `LogGate` it can stay one change behind: a release inside the
+  5 s window, or a pass gone with the device while the rebuild waits its
+  backoff (nothing observes it then).
+  The pass goes with the compositor (`NdiPass::forget` in `drop_gpu`): a
+  rebuilt compositor enables it again.
+- **The thread never lets the feed's pictures go** (review round 5 F1):
+  neither when its pass goes off nor at a release. It usually reads the
+  setting's switch to the canvas BEFORE the `SP-program` sender serves
+  the next boundary (with MAX off the switch wakes it at once to
+  release), so its clear took the held pair's picture and the flush
+  repeated the one before: review A's timing model put it at 99.6 % of
+  switches with MAX off, ~34 % with MAX on. The sender alone clears
+  (the delay line below). Lesson: when two threads share a hand-off and
+  a state change ends it, ONE side owns the cleanup, the consumer, which
+  alone knows when it no longer needs the last item; a producer-side
+  clear races the consumer's last take whichever thread reads the
+  change first (`program_output_tests_ndi_switch.rs`: the worker on the
+  fake GPU and the sender on one hand-off, the thread first, MAX on and
+  off). A residual repeat stays (review round 6, both passes, ~0.1-0.2 %
+  of switches with MAX off, ~5 % with MAX on in their models): the
+  thread reads `wants()` when it TAKES a job, the sender reads the
+  setting after the offer and the quiet wait, so a flip between the two
+  reads holds b as a GPU boundary that the thread never reads back, and
+  the flush at b + 1 repeats one picture (no audio lost; ROZHODNUTÉ
+  6232669201 item 1 counts it as a repeat). The structural fix, if a
+  manual flip's one repeat ever matters: the sender decides the
+  boundary's NDI source once, before `offer_max`, and the `MaxJob`
+  carries "read me back".
+- After each compose, at the compose instant and BEFORE the Spout sends
+  (a 67 ms Spout lock wait never delays NDI): `read_back` maps the newest
+  staging copy (`read_uyvy`, never a wait) into a `frame_pool` buffer of
+  `uyvy_len(1920, 1080)` = 4 147 200 B and pushes it into `MaxOut::ndi`
+  under the boundary's stamp, with the map + copy time and
+  `ComposeStats::uyvy_us`.
+- A `MaxJob::Black` maps nothing: the feed gets ONE cached constant UYVY
+  black (`BlackUyvy`, every pair `[128, 16, 128, 16]`).
+- Nothing is pushed for a boundary that is not composed (coalesced, a
+  failed compose, a lost device, a backoff) or whose readback fails (one
+  WARN per `MAX_LOG_EVERY_100NS`): the `SP-program` sender repeats.
+- The compose runs with no Spout output to go out while the pass is ON
+  (`attempt`: `max_ok || fhd_ready || self.ndi.on`). The design said
+  `|| ndi_wanted`: a pass that could not be enabled reads nothing back, so
+  that compose would draw for nobody.
+- A readback that came proves the device like a sent boundary: it clears
+  `lost_unsent` (with MAX off nothing else goes out), so a later loss
+  rebuilds at once; a failed readback proves nothing.
+- With MAX off, NDI's compose is the compositor's only one: a failed build
+  or compose is logged like MAX's (`MaxWorker::finish_ndi`, a third
+  `LogGate`, `Lines::ndi`: one WARN `the compositor does not compose for
+  NDI (MAX off)`, one INFO when it composes again), never hidden behind
+  MAX's `off`. With MAX on, MAX's own line names it.
+
+### The feed (`ndi_feed.rs`, pure, `MaxOut::ndi`)
+
+- `FeedCore`: a stamp-keyed map of at most `NDI_FEED_DEPTH` = 3 pictures,
+  over it the OLDEST goes (`feed_coalesced`); `take(stamp)` returns that
+  stamp's picture and drops every older one; a push at or before the last
+  stamp served is dropped (`readback_late`); `newest()` = the stamp of the
+  last picture KEPT (the readback's freshness). A late picture never
+  entered the feed, so a readback that only ever arrives late leaves it
+  behind and NDI falls back to the canvas after 30 slots (review round 1:
+  counting late pushes kept a frozen NDI "fresh" for good).
+- The p99s are MAX's `Window` (`program_max::Window`, the last 900); a
+  Black boundary's constant black is no readback and adds to neither.
+- `NdiFeed` = the core + NDI's telemetry under ONE short lock per call:
+  neither thread waits on the other.
+
+### The delay line (`program_output_ndi.rs`, an impl split of `ProgramOutput`)
+
+- `serve` = `split` → `limit` → `feed_outputs` (VBAN, b) → `offer_max`
+  (b) → the quiet wait → `submit_ndi`.
+- `ndi_source_for(setting, newest, b)` (pure): `gpu` while the setting
+  says `gpu` AND the feed's newest picture is at most
+  `NDI_FEED_STALE_SLOTS` = 30 grid slots (1 s) behind b; else `cpu` with
+  its why (`setting`, `no_readback`, `stale`). A compositor that cannot
+  run (off Windows — every Linux test and the CI box —, no adapter, a 3 s
+  device backoff) never freezes NDI. A readback that keeps arriving late
+  goes `stale` too: a late picture never enters the feed.
+- **The way back after a fallback** (ROZHODNUTÉ 6232669201 item 3,
+  `ndi_feed::ReturnGate`, `NDI_RETURN_ON_TIME` = 30). A fallback from the
+  GPU for any reason but the setting arms it. While armed, every boundary
+  on the canvas takes the boundary before's readback from the feed exactly
+  as the GPU path would (`take_on_time`: whole UYVY for the canvas; the
+  take at the returning boundary is the last picture there), and counts
+  the on-time ones in a row; a late or a
+  missing one starts the count again. A GPU pick before 30 in a row stays
+  on the canvas (`CpuWhy::Settling`). So a fallback never flaps boundary
+  by boundary: before the gate, the readback's first kept push after a
+  `stale` fallback brought NDI back at once (nobody took pictures on the
+  canvas, so every push was "fresh"), and a readback that stayed late
+  fell back again 30 slots later, round after round. The return to the
+  GPU and the setting's canvas disarm it; the setting's flip to `gpu` is a
+  first entry, not a return: it goes to the GPU as soon as the newest
+  picture read back is fresh, as designed. A quick gpu → cpu → gpu flip
+  within 1 s enters at once on the freshness of the pictures from before
+  (every canvas boundary under the setting let them go, `newest` stays), so
+  its switch's take finds nothing and a missing picture is the black
+  until the readback comes back (or the stale fallback after 30 slots).
+  On the canvas after a fallback `readback_late`
+  keeps counting the late pictures and `feed_coalesced` no longer climbs
+  (the canvas takes them).
+- cpu: `submit_video` as before (the NV12 canvas), stamped b.
+- gpu: the pair held at b − 1 goes out: its audio after the limiter
+  (moved in, no copy; the standby silence for a standby pair), its stamps
+  (a forwarded pair's audio stamp; the program's own block on its
+  boundary), its item frame (the burn), and `feed.take(b − 1)` as UYVY,
+  the canvas's size, stride `width · 2` (`PixelFormat::Uyvy`). Then b is
+  held. A picture that did not come, or is not whole UYVY for the canvas,
+  repeats the last one sent (`ndi.repeats`), the constant black before
+  any: never a wait. No canvas fit, no fade picture, no band-pool work: a
+  fade's audio is crossfaded in `split`, its picture is the compositor's
+  fade; a mixed boundary joins `MixRun.boundaries` when it goes out
+  (`fitted` and `max_picture_us` stay 0).
+- A switch to the GPU holds b and sends nothing (one missing frame).
+- **A switch to the canvas never drops an audio block** (ROZHODNUTÉ
+  6232669201 item 1; the owner's rule: popping audio is the worst
+  failure). The held pair goes out FIRST through `send_held` (its
+  readback, else the last picture, else the black: a repeat), then b on
+  the canvas: two submits back to back, contiguous stamps. The lane's
+  first cut dropped the held pair, which lost b − 1's limited 33 ms block
+  on `SP-program` (cg OBS, the stream) at every setting flip and every
+  automatic fallback; VBAN / FOH never lost it.
+- **The feed's pictures are let go by the sender alone** (review rounds
+  4-5): at EVERY canvas boundary under the setting (`CpuWhy::Setting`),
+  right after the held pair's flush took its picture (`NdiFeed::clear`;
+  pinned with `repeats == 0` in
+  `the_setting_s_switch_lets_the_feed_s_pictures_go`). Every boundary,
+  not only the switch: the thread can push one more picture after the
+  switch (it read the setting late), and nothing else would let it go.
+  An ARMED fallback (from the GPU) does not clear: the gate takes the
+  boundary before's picture at every canvas boundary, and every older one
+  goes with it. A first entry's `stale` / `no_readback` canvas neither
+  clears nor takes: a picture kept there is fresh, and moves NDI to the
+  GPU at the next boundary.
+- The last picture (what a missing one repeats): every boundary on the
+  canvas forgets it (after the held pair's flush; no 4 MB picture stays
+  pinned while NDI is on the canvas). A switch to the GPU takes the
+  boundary before's readback as the last picture (`take_on_time`; after a
+  fallback the gate already took it at that boundary), so a picture
+  missing right after any switch to the GPU repeats the boundary before,
+  the black only when the boundary before was not read back (an older
+  picture the take dropped is not kept), or was let go by a canvas
+  boundary between (a gpu → cpu → gpu flip within one boundary, which the
+  5 s settings poll never makes; review round 5 B5-4). Review round 3: a first entry
+  sent the black there, and round 2's "an automatic fallback keeps it"
+  had no effect left once the gate's takes set it before every return.
+- The lines (a `stat_window::StateLog<NdiSource>`, pure, the same
+  mechanism as the worker's `LogGate`, which keeps a
+  `StateLog<Option<String>>`; review round 3 deleted a second copy,
+  `SwitchLog`): a change of source is said at
+  most once per `NDI_SWITCH_LOG_EVERY_100NS` (5 s) of the timeline, and a
+  change held back is said by the first boundary after the window, as the
+  source is then (`held_back`), so the log never ends on a source NDI
+  left. An INFO to the GPU or for the setting; a WARN for an automatic
+  fallback (`reason`, `on_time_needed`): ROZHODNUTÉ 6233825414 (the
+  fallback is a fault the operator should see), pinned by a log capture
+  (`the_fallback_is_a_warn_and_the_way_back_an_info`, its lines spaced
+  past the 5 s window). A fallback that heals inside the window after
+  the last line is never WARNed (the log says only the state at the
+  window's end): read `ndi.switches` and `repeats`, which count every
+  switch, the setting flip included.
+- `health.timing.submit_us` is the NDI submit alone from the GPU (at a
+  switch to the canvas, the held pair's submit and b's canvas picture).
+  The trace's `wire_100ns` is the wire stamp of the stamp NDI got
+  (`TraceWriter::record_sent`; b's own when nothing went out, and b's own
+  at a switch to the canvas, where b − 1 went out just before it).
+- The quiet wait (`program_video_quiet.rs`) runs only while MAX is on
+  (`MaxOut::enabled`): with MAX off nothing goes out over Spout for Arena,
+  though the compositor still paces for NDI (round 2).
+- The canvas is `FHD_TARGET`'s size in production (a const assert in
+  `program_output_ndi.rs`); the tests use small canvases and fill the feed
+  themselves.
+
+### sp-ndi, the setting, the API
+
+- `FourCCVideoType::UYVY` = `0x5956_5955` (= `receive::FOURCC_UYVY`),
+  `PixelFormat::Uyvy` (`PixelFormat::four_cc`, one mapping for the sync
+  and the async sends), `FrameSubmitter::submit_frame_at_boundary_owned(..,
+  format)` (every caller passes `Nv12` but the delay line);
+  `MockNdiBackend::last_async_video_fourcc` (asserted in sp-ndi too: the
+  per-package mutation gate).
+- `program_ndi_source` (`sp_core::config::program_ndi_source`): exactly
+  `gpu` (trimmed) is the GPU, anything else the canvas; read with MAX's
+  settings every 5 s (`program_max_phase.rs`, `load_ndi_source`), no
+  restart. Temporary: deleted in P5.
+- `GET /api/v1/program` (and the cut answer) → `ndi {setting, source,
+  delay_slots, fourcc, repeats, readback_late, feed_coalesced, switches,
+  readback_us_p99, uyvy_us_p99}` (`NdiStatus`; `source` = the last
+  boundary's, `delay_slots` 1 from the GPU, `fourcc` `UYVY` / `NV12`; the
+  p99s over the last 900 readbacks). The mock serves `setting` from its
+  store and `source: "cpu"` (no GPU).
+- The burn on UYVY: `program_burn::burned_uyvy` (`test-item-burn.md`).
+
+### Tests
+
+`ndi_feed_tests.rs` (the depth, take and drop-older, late, coalesce,
+freshness, the 30-slot edge both ways, the gate's arming / count /
+restart / disarming, the switch lines, the status and its 900-window),
+`program_output_tests_ndi.rs` (over the mock NDI with a feed the test
+fills: b's audio to VBAN at b and to NDI at b + 1 with b's stamps, the
+repeat and the black, a short picture never sent, both switches with the
+held pair sent first and contiguous audio stamps, stale, a readback that
+stays late never flapping back, the 30-in-a-row return and its restart,
+the first entry at once, a fade, the trace's stamp,
+the first switch repeating the boundary before, the held pair sent
+before the setting's switch forgets the last picture — read inside a
+later submit through `HookedNdi`, whose hook sees the mock —, the switch's
+`submit_start`, the feed let go at the setting's switch and at every
+canvas boundary under it, the last picture back in the frame pool after a
+fallback),
+`program_output_tests_ndi_switch.rs` (round 5: the worker on the fake
+GPU and the sender on ONE hand-off, the thread reading the setting's
+switch first, MAX on and off — no repeat; the switch lines' levels by a
+log capture), `program_output_tests_order.rs` (VBAN before any NDI call
+from the GPU; `HookedNdi`), `program_max_tests_ndi.rs` (the queue's
+rules, the setting), `program_max_worker_tests_ndi.rs` (the fake's
+`order`: the readback after the compose and before MAX's send, Black,
+MAX off, the pass off, the enable's backoff, a device lost at the
+enable (a fresh compositor waits the backoff, a running one is rebuilt
+at once), the pass log's on / off / failing lines, a quick recovery and
+the release's "off", a failed readback, a lost device, `lost_unsent`, a
+coalesce's gap, a job with nothing wanted, the feed left to the sender),
+`stat_window_tests.rs` (`StateLog`),
+`api/program_tests_ndi.rs`,
+`program_burn_tests_uyvy.rs`, sp-ndi's FourCC tests, and the WARP proof
+above.
+
+### The gates on the box (the main session)
+
+1. Deploy in cpu mode: every existing gate holds; the wall measured
+   before and after.
+2. Tell camera-box what changes on `SP-program` (plan §8 R2): the FourCC
+   NV12 → UYVY, a constant +33.3 ms arrival lag, its genlock FIFO
+   `shallow_depth` +1 expected and stable.
+3. The delay's measurement (ROZHODNUTÉ 6232669201 item 2: the one-slot
+   delay stays, and only a measured miss justifies a bounded wait or a
+   2-slot delay; ROZHODNUTÉ 6233825414: NO `shadow` value). In `cpu`
+   mode nothing reads back and nothing is taken, so `ndi.repeats` /
+   `readback_late` stay 0: they say nothing before the flip. So the box
+   check flips SNV to `program_ndi_source=gpu` for its measurement
+   window, outside events, with the automatic fallback and its
+   30-readback hysteresis as the safety net, and reads `ndi.repeats` /
+   `readback_late` against `health.timing.ready_late_us_*` over a whole
+   ~45 min drift cycle, binned by offer phase. In it: an NDI receiver
+   reads 1920×1080 UYVY; `ndi.repeats` and `readback_late` +0 over songs
+   and fades; the A/V gate (`post-deploy-av-sync.spec.ts`), `max-gate`
+   and cg OBS's `genlock-fifo audit` hold. A miss flips it back to `cpu`.
+4. The plan's §7 A/B: `program_ndi_source` gpu vs cpu, ≥ 46 one-minute
+   blocks, binned by offer phase.
+
+The colour (P1a review round 1): NV12 limited → full-range BGRA (clipped)
+→ limited UYVY, about ±1 code against the canvas; sub-black and
+super-white clip. The A/V and colour gates must expect it.
+
+## The picture ring, `GpuFrame` and `Side::Gpu` (#279 P2)
+
+Design: #279 comment 6237269720; plan
+`docs/superpowers/plans/2026-10-16-gpu-video-path.md` §5.3, §5.4, §9 P2.
+Each playlist will decode on its own producer device and copy every
+picture into one slot of its pipeline's RING: an NV12 texture shared with
+the compositor's device by an NT handle and a keyed mutex (the P0 probe
+proved it). The picture then travels as a `GpuFrame` and MAX samples the
+slot in place: no readback, no upload. P2 builds the ring and the
+plumbing; NOTHING writes a ring in production until P3a (no runtime
+behaviour change).
+
+- **The decisions are pure (`ring_state.rs`, Linux-tested, gated):**
+  - slots: `RING_CAPACITY` = 20 (the decode queue's 12 + 8); a slot is in
+    use while a frame refers to it, written again only once free;
+  - size classes (`SizeClass::of`: the format and the picture's sides
+    rounded up to even): at most `MAX_SIZE_CLASSES` = 2 kept, the most
+    recently written first; a free slot of a class no longer kept is
+    emptied at once, an in-use one at its last drop; with no empty slot a
+    write takes a free slot of the other class;
+  - `RingState::take` → `Reuse {slot, alloc_gen, key}` / `Create {slot,
+    alloc_gen}` / `Full` / `Dead`; `release(slot, alloc_gen)` →
+    `Freed` / `Dropped` / `Stale` (a slot made again is another
+    allocation: a stale drop changes nothing);
+  - keys: a new texture's mutex holds `KEY_PRODUCER` (0), every release
+    leaves `KEY_CONSUMER` (1) (`producer_key(written)`); the writer
+    acquires the last key (`WRITER_ACQUIRE_MS`), the compositor key 1
+    with 0 ms (`CONSUMER_ACQUIRE_MS`: never blocks);
+  - `Acquired::of(raw HRESULT)` (the `windows` crate reads 0x102 / 0x80 as
+    `Ok`, P0);
+  - `copy_box(visible, surface)`: the even box inside the surface (a
+    decoder's 16-row padded texture), none for an empty picture or a side
+    over 16384;
+  - the writer: `writer_step` (its free slot's key within
+    `WRITER_ACQUIRE_MS` = 100 ms, = `RING_WAIT`; the compositor lets a key
+    go before the frame it draws drops, so any answer but held kills the
+    ring, with why), `make_texture` (a made slot, or no texture of the
+    slot's allocation) and `stale_texture` (a slot emptied or made again);
+  - the compositor: `slot_draw(SlotOpen, device_removed)` → `Draw` (held),
+    `Black` (busy), `Gone` (a dead ring's slot: black, closed), `KillRing`
+    (abandoned: a device was lost holding the key, the producer's or the
+    compositor's own before its rebuild — a compose cut short by a GPU
+    reset leaves the keys it held abandoned; the design's rule, P4
+    decides whether such a slot is made again instead; or a failed
+    acquire or open on a HEALTHY compositor), `DeviceLost` (a failed
+    acquire or open while the compositor's own device is removed, read
+    only then: the compose fails, the compositor is rebuilt), `why_killed`
+    for the kill's WARN (with `Acquired::hresult`, the raw HRESULT; a
+    failed open WARNs its error first); and `OpenedKeys` (a slot opened once per
+    `SlotKey {ring, slot, alloc_gen}`, an older allocation of the same
+    slot closed the moment the new one is drawn, at most `OPENED_MAX` =
+    40 = 2 × `RING_CAPACITY` open, the least recently drawn closed first,
+    and `begin_compose` closes every slot no compose drew for
+    `OPENED_IDLE_COMPOSES` = 90: the compositor keeps no texture alive that
+    its ring let go — a dead or dropped ring, a slot made again; an
+    off-program ring's own textures stay its producer's).
+- **`ring.rs`: the shared state and the frames.** `RingCore` = the state
+  under a poison-tolerant `Mutex` + a `Condvar` a drop notifies; a write
+  waits while every slot is in use (`wait_timeout_while(!has_room)`,
+  `RING_WAIT` = 100 ms, counted `waits`), then `GpuError::RingFull
+  {waited_ms}` (counted `full`); a dead ring is `RingDead` and wakes its
+  waiter; its first kill WARNs once with why and the HRESULT that told it
+  (`RingCore::kill`, from the writer or `GpuFrame::kill_ring`;
+  `ring_state::hresult_text`). `hand_over` marks the slot written and
+  makes the `GpuFrame(Arc<FrameInner>)`: a process-wide id (never reused: MAX's
+  label), the picture's size, its slot texture's even size, `key()`, a
+  doc-hidden `shared_handle()`; the LAST clone's drop frees the slot;
+  `keep` (Windows: the NT handle) lives exactly as long. `FakeRing`
+  (doc-hidden, every platform) takes and frees slots exactly like the real
+  ring, its handle `FAKE_HANDLE_BASE` (`isize::MIN`) `+ 4·(slot + 1)`, a
+  value no Windows handle has: sp-server's tests use it.
+- **`win/ring.rs` `PictureRing` (glue, out of the gate):**
+  `copy_from(source, subresource, visible)` refuses, before any slot is
+  taken, a source that is not NV12 (`RingSourceFormat`), a subresource
+  the source does not have (`missing_subresource` → `RingSubresource`:
+  Direct3D would drop the copy silently) or a picture with no copy box
+  (`RingPicture`); then it takes a
+  slot, makes its texture when told (`BIND_SHADER_RESOURCE`,
+  `MISC_SHARED_NTHANDLE | MISC_SHARED_KEYEDMUTEX`, `CreateSharedHandle`),
+  acquires the slot's key (the raw HRESULT through the vtable,
+  `writer_step`), `CopySubresourceRegion`s the even box (a texture-array
+  slice: the WARP test
+  `a_slot_is_copied_out_of_a_slice_of_a_decoder_like_texture_array`),
+  `Flush`es, `ReleaseSync(1)`, hands over. A key not held,
+  or a failed release, kills the ring; a failed write gives the slot
+  back.
+- **The compositor (`win/sides.rs` `RingSlots`, glue).** Each compose
+  first closes the idle slots (`begin_compose`), then every ring slot of
+  `Composition::frames()` (each slot once, a fade's two sides of one slot
+  too): a dead ring's is `SlotOpen::Dead`; else opened ONCE on its device
+  (`OpenSharedResource1`, R8 + R8G8 views, `gpu_opens`) and acquired with
+  key 1 / 0 ms; `slot_draw` decides, `ComposeStats::count_slot` counts:
+  `gpu_sides` (drawn), `km_acquire_timeouts` (busy), `abandoned` (a dead
+  ring's, abandoned, a failed acquire), `open_failures` (not opened);
+  held slots are released after the GPU wait. Only `Composition::uploads()`
+  (the CPU sides) are uploaded; residency ids are the CPU labels only (a
+  ring frame's id is another numbering: never compared with them).
+- **`Side { Cpu(Nv12Picture), Gpu(&GpuFrame) }`** is a layer's picture
+  (`Composition::Picture(Side)`, `Fade {from, to}`). `quad::uv_in_texture`
+  scales a layer's uv by picture / texture size, so the quad spans the
+  picture's own texels in its even slot (the identity for an uploaded
+  picture); the bilinear filter clamps at the TEXTURE's edge, so an
+  enlarged odd picture's last column (row) blends up to half a texel of
+  the slot's extra one. `reference.rs` reads `None` for a ring layer: model
+  the CPU picture written into the slot.
+- **sp-server: `playback/picture.rs`.** `Picture { Cpu(SharedFrame),
+  Gpu(GpuFrame) }` is the `video` of `PacedFrame`, `SubmitJob`,
+  `FrameBlend`, `MaxPicture`, the producer's `Held`, the pre-roll's
+  `StandbyBlack` / `FillFrame`, `Standby::Black` and the paced consumer's
+  `FillPicture`; every hop clones it by `Arc`, `ptr_eq` is an identity per
+  kind (never across kinds). `MaxPicture::side(id)` = an upload or the
+  frame itself; `PictureIds` labels a ring frame by `GpuFrame::id` and
+  spends no counter id on it (only CPU pictures are held by allocation).
+  The CPU-only consumers read through `Picture::cpu_for(CpuUse, &mut
+  CpuMisses)`: `SP-program`'s canvas shows black (a blend partner's side
+  black), a held step's preview tap gets no picture but its audio
+  (`DecodeTaps::offer_audio`); each miss is counted per consumer and
+  WARNed at most once a minute of the timeline with the count
+  (`stat_window::WarnLimiter`, `CPU_MISS_WARN_EVERY_100NS`), never a
+  panic (`ProgramOutput::canvas_misses` is the tests' view,
+  `DecodeProducer::preview_misses`). The standby blacks stay
+  CPU. Tests read CPU bytes through the test-only `Picture::expect_cpu`.
+- #279 P3a puts the slots' counts on `GET /api/v1/program` `gpu` and
+  each pipeline's `RingStats` on `status.video_decode.pipelines` (the
+  next section); the CPU misses stay WARNs (rate-limited) and the ring's
+  death a WARN. `RING_CAPACITY` = `pipeline_paced::DECODE_QUEUE_BOUND` + 8 is pinned by
+  a Windows test (`picture_tests.rs`).
+- **Tests.** sp-gpu: `ring_state_tests.rs`, `ring_tests.rs` (a write
+  waits for a drop, threads with a safe-direction window), the `Side` /
+  `uv_in_texture` / reference / `count_slot` pins, and WARP
+  `tests/ring.rs` (its NV12 sources shader-resource bound and made with
+  initial data, the two NV12 textures P0 made on WARP, in one): a slot written on one device drawn on another
+  within S1a's reference, opened once and uploading nothing; slice 1 of
+  a 2-slice 640×368 array (WARP makes an NV12 ARRAY of at most 2 slices,
+  at any size: 3 or more is E_INVALIDARG — the first CI of P2,
+  39066250195, failed on a 4-slice one; measured on SNV with a WARP
+  device through Python ctypes, `diag\wall-bridge\warp_probe2.py`; a
+  refusal fails that test, never skips it — read the Build (Windows) log); a fade of an upload and a slot, and of two
+  slots; a slot held by a third device drawn black and counted, then
+  drawn; a full ring's `RingFull` then a reuse; a new size written over
+  a free slot of the other (made again, drawn); the refusals; an odd
+  picture's even texture. sp-server (`FakeRing`): `picture_tests.rs`,
+  `pacer_tests_gpu.rs` (emit / repeat / blend / frozen / seek hold carry
+  the same frame, every slot free after), the consumer's fill, the bus,
+  `ProgramOutput`'s MAX offer and canvas miss, `PictureIds` and the
+  worker (`program_max_worker_tests_gpu.rs`), a held ring frame's
+  preview.
+
+## The producer device, the GPU sides on the API, the standby black (#279 P3a)
+
+Design: #279 comment 6244390810. The decode side (the setting, the lease,
+the copy) is `video-decode.md` "GPU-resident decode".
+
+- **`ProducerGpu`** (`win/producer.rs`; off Windows an uninhabited struct
+  whose `new` is `Unsupported`):
+  - one `VideoDevice` (`pick_adapter`, the video API,
+    multithread-protected) and one `PictureRing` on it, behind a `Mutex`;
+    `new_warp` (doc-hidden, tests) is a WARP device WITHOUT the video API
+    (WARP refuses it);
+  - `copy_from(source, subresource, visible)` is the ring's copy, timed
+    into `RingCore::record_copy` (the WHOLE call: the ring's lock, a wait
+    for a free slot, a new slot's texture, the key, the copy, its flush,
+    the release), then `GetDeviceRemovedReason`: a removed device kills the
+    ring ("the producer device was lost", its HRESULT) and returns
+    `GpuError::removed`;
+  - `ring_dead()` asks the device too (review round 1): Media Foundation's
+    decoder can meet a removed device first (its read fails, the reader
+    reopens in software and no copy runs), and the ring dies there then, so
+    the pipeline's next song still builds a new producer;
+  - `retire()` / `retired()` (review rounds 1-2): the reader asks
+    `retired()` before each copy, so a retired producer's songs read their
+    pictures back from their next one (the GPU decoder goes on: no reopen,
+    no gap); its ring and the frames in it stay valid (the compositor draws
+    them to their last drop). sp-server retires every producer when
+    `video_decode` = `gpu` stops taking effect and replaces a retired one
+    at the pipeline's next GPU-resident song (`video-decode.md`);
+  - `stats()` reads the ring's core without the ring's lock; `adapter()`,
+    `device()`.
+- **`RingStats`** adds `copy_us_p99` (`ring::p99`, nearest rank, over the
+  last `COPY_WINDOW` = 900 copies, `None` before the first; each copy's
+  whole `copy_from`, a slot's wait included, which `waits` counts too) and
+  `vram_bytes` (`RingState::vram_bytes`: every made slot's NV12 bytes,
+  `SizeClass::bytes`).
+- **`GET /api/v1/program` → `gpu`** (`program_max_upload.rs` `GpuStatus`,
+  `MaxOut::gpu_status`; each compose recorded by
+  `MaxOut::record_compose` from `MaxWorker::draw`):
+  - over the upload window (the last 900 composes within 30 s):
+    `gpu_sides_per_s` (ring slots drawn in place) and `cpu_sides_per_s`
+    (CPU pictures drawn, uploaded or resident: `Composition::cpu_sides`,
+    `uploads()`'s count with no allocation on the `program-max` thread);
+  - since the start (`ComposeStats`): `km_acquire_timeouts`, `abandoned`,
+    `open_failures`, `gpu_opens`;
+  - the mock serves zeros.
+- **A pipeline's standby black composes as Black** (`frame_buf.rs`
+  `SharedFrame::standby_black` / `is_standby_black`, marked by
+  `BlackNv12`; `program_max_ids.rs::is_black`): a boundary whose picture
+  is that black is `Composition::Black` (no upload, no draw), and a fade
+  side of it is `None` (black). Before, MAX uploaded and drew the black
+  of an idle playlist on program.
+- **Tests:** `ring_tests.rs` / `ring_state_tests.rs` (the p99, the copies
+  counted, the VRAM); WARP `tests/ring.rs` (a producer copies a slice into
+  its ring and counts it; the production producer takes the picked
+  adapter or none); `program_max_upload_tests.rs`,
+  `program_max_worker_tests_gpu.rs`, `api/program_tests_max.rs`.
+
+## Arena loses its OWN frames while it receives `SP-program-MAX` (#251, 19.10.2026)
+
+The owner saw the wall judder through the 18.10 service, while every A/B
+since #282 read 0–2 `exact_backs`. The judder was **missing frames**, not
+backs, and it hit every layer: the worship NDI background, Arena's clips.
+
+Measured on SNV (`diag\wall-bridge\sp_onoff_ab.ps1`, `max_ab.ps1`,
+`recv_ab.ps1`). Setup: L4 = Arena's own clip "Botanical Calm 4K", 30 fps,
+1200 pictures per 40 s when clean; L5 receives `SP-program-MAX` with blend
+Add; SongPlayer on Blank.
+
+| Condition | `pictures` per 40 s |
+|---|---|
+| SongPlayer running | 538–746 |
+| SongPlayer stopped | 1200–1203 |
+| MAX on (FHD on or off) | 509–740 |
+| `program_max_enabled` false | 1201–1203 |
+| MAX on, **no Arena layer receiving it** (L5 cleared) | 1201–1202 |
+| MAX on, L5 receiving it | 562–723 |
+
+A receiving Arena is the cause. The first suspect was the hand-off: since
+0.82.0 (PP, no reports) the shim's `SendSynced` holds Spout's texture-access
+mutex while it spins for the GPU copy, and every receiver takes that mutex
+to read. **Ruled out the same day** (`modes_ab.ps1`, `size_ab.ps1`): the
+three hand-offs (`send_us_p99` 0.2–2 ms) read 624 / 631 / 663 pictures, and
+a 1920×1080 MAX (`program_max_size`, below) reads 652 against the 4K's 632.
+Neither the mutex hold nor the texture size moves it; what does is open
+(`recv2_ab.ps1`: SongPlayer's FHD `SP-program` and an independent sender,
+`spout_test_sender.py`, received instead).
+
+**ANY receive, not SongPlayer's sender** (`recv3_ab.ps1`, `recv4b_ab.ps1`,
+19.10.2026, #251 comments 6275818478 / 6276709434). An independent SpoutGL
+sender (`diag\wall-bridge\spout_test_sender.py`, `black` sends an all-black
+picture) costs Arena the same ~45–55 % on the wall as `SP-program-MAX` or
+the FHD `SP-program`:
+- the sender's rate does not matter: 1 picture/s reads like 30/s, so the
+  cost is the receive being active every frame, not each copy;
+- Arena's own Composition Monitor in its UI keeps ~1140–1168 of ~1200
+  while the wall reads 520–720: the pictures are lost between Arena's
+  composition and the Advanced Output's `Display` window on the RTX's
+  Surround output, not in SongPlayer. Read it with
+  `diag\wall-bridge\cadence_out.py 0 100 1400 2200 1660 40` (dxcam output 0
+  = the primary, the VDD through the RTX); the wall is output 1;
+- in the normal state (L4/L5 receiving MAX with a song playing) the wall
+  read 1201 pictures in 40 s, 1196 runs of 2 (20:35Z): SongPlayer's moving
+  picture was clean; the loss shows on Arena's own content under a
+  receive;
+- Arena reports `FPS 60.0` throughout ("Show FPS & Stats" in its layout).
+  PresentMon 2.6.0 (`diag\tools\PresentMon-2.6.0-x64.exe --process_name
+  Arena.exe --output_file x.csv --timed 20 --terminate_after_timed`, ETW,
+  read only) sees three Arena swapchains at 60 presents/s, Composed: Flip,
+  every present displayed; the sync-1 one carries ~14.6 ms of GPU work per
+  16.7 ms frame. A receive changes none of that (`pm_ab.ps1`, #251 comment
+  6279484457: 600 vs 285 wall pictures, the same presents, modes and GPU
+  times): Arena hands its output window a stale composition picture, the
+  loss is inside Arena, not in DWM / the driver / the flip;
+- minimizing Arena's UI window does not bring the wall back (`ui_min_ab.ps1`
+  v2: 254 / 205 / 292 / 375 of 600), so drawing the UI is not the cause.
+- **`Get-Process Arena`'s `MainWindowHandle` is the `Display` window — the
+  wall output**, not the UI. Never minimize / move / focus a window found
+  that way: take the UI ("Resolume Arena - …") by its own handle
+  (`EnumWindows` + `GetWindowText`) and check the title before acting
+  (v1 minimized the wall twice, 19.10.2026 ~23:06Z).
+- **Any LIVE input, not only Spout** (`ndi_ab.ps1`, `gen_ab.ps1`, #251
+  comment 6279611039): an NDI input on L5 costs the same (205 / 294 of 600
+  per 20 s, Spout 250 / 281), while Arena's own non-live Blank generator on
+  the same layer costs nothing (601 / 601). Arena's "DMA Textures"
+  preference (`config.xml` `Texture Path`, Force ON vs the legacy
+  Autodetect) does not move it either (6279828121).
+- **Arena's SPOUT output keeps what its Display window loses**
+  (`comp_ab.ps1`, 6281387776): under the same live input, minutes apart,
+  the wall read 301 of 600 while a receiver of Arena's composition Spout
+  output (`spout_recv_count.py`) read 602 distinct pictures (601–603 in all
+  four takes). The loss is intermittent (another take under the same input
+  read 602). It supports the #259 bridge (Arena's wall screen → a `Spout`
+  output device → SongPlayer's presenter). But Arena's *composition output
+  sharing* itself made the cadence uneven (odd runs ~10 → ~200 per 20 s,
+  1- / 3-frame pictures), so measure an Advanced Output `Spout` device, on
+  count AND cadence, before building on it.
+- **Measured: an Advanced Output screen on the `Spout` device is clean**
+  (`aodev_ab.ps1`, 6281509748): the unused screen "dummy" switched to
+  Spout (`Arena - dummy`, 2580×360) carried 601–603 distinct pictures per
+  20 s under the live input, ~98 % held exactly 2 frames, while the
+  Display window read 267–273 of 600 in the same minutes. That is the
+  #259 bridge's input. Switch a screen's device in Output → Advanced… (JUCE
+  UI, no REST), back the preset up first
+  (`Presets\Advanced Output\<preset>.xml` + `Preferences\AdvancedOutput.xml`),
+  and put it back the same way; a Save & Close may rewrite a param's
+  `default` attribute, never its value.
+- **The Advanced Output screen "dummy" (20.10.2026, #251) was REMOVED on SNV (owner's decision, 15:22Z).**
+  - The screen: a Virtual Output 2580×360 with slice "fullsize", created 7.10.2026 10:40:17Z. No clip read it.
+  - Measured by `ab_long.ps1`, which alternates without / with it twice, both measurements each time. Without it:
+    - Arena's own clip under a live input: ndi 588–589, max 575 of 600 (with it: 386–387, 297–319);
+    - SongPlayer's wall-30 through MAX: 2 uneven, 0 back, 0 lost (with it: 14–15 uneven, 2 back, 2 lost).
+  - After the removal: 589 / 575 / 601, and wall-30 0 / 0 / 0.
+  - Without it, a MAX send phase of 12 ms read 54 uneven; 4, 8, 16 and today's 19 ms read 2–4 (`phase_ab.ps1`).
+  - It is NOT proven to be the whole judder. An intermittent disturbance (14:39–14:49Z: a frozen round, then 203 uneven / 100 back / 100 lost) has no cause yet, and that one take made me revert wrongly once.
+  - Judge EVERY wall change by BOTH measurements, Arena's own clip under a live input AND SongPlayer's wall-30 through MAX, over repeated A/B/A cycles. Never announce a cause from one kind of measurement or one take.
+  - Ruled out by the same A/B:
+    - HAGS;
+    - the NVIDIA driver 617.42 / 566.36;
+    - the display layout;
+    - Process Lasso and Sunshine;
+    - SongPlayer stopped;
+    - Arena 7.27.1;
+    - DMA textures;
+    - the NVIDIA GL present method.
+  - Diag scripts refuse to run while another one runs (`diag_guard.ps1`): a take started inside another's condition saves ITS Blank as the source to restore.
+- **Restarting Arena on SNV:** the operator's `NL_STARTUP.ahk` (AutoHotkey)
+  relaunches Arena within ~1 s of its end. A script that changes Arena's
+  config must write it BEFORE the kill (a kill writes nothing back), wait
+  only for the OLD process id, then reconnect the normal clips through REST
+  whoever relaunched it (`diag\wall-bridge\arena_tex.ps1`). A script that
+  waited for "no Arena" read the relaunched one as a hung exit and left
+  SongPlayer's L4/L5 disconnected ~2–3 min (20.10.2026 01:34Z).
+- A SongPlayer-side change cannot fix this; never ship one "for #251"
+  without a wall measurement that moves.
+
+**The size switch:** `program_max_size` = `WxH` (even sides, 640..=3840 ×
+360..=2160; anything else = the canvas 3840×2160), read with MAX's settings
+(`program_max_phase.rs`); a change drops MAX's sender, then its target, and
+the same boundary builds both at the new size (`program_max_release.rs::
+resize_max`; a change inside a refused sender's backoff keeps the backoff).
+`max.width/height` report it; the post-deploy MAX gate still requires
+3840×2160, so a forgotten A/B setting fails CI.
+
+**The switch:** `program_max_spout_send` = `synced` (default, unchanged) |
+`plain` (0.82.0's `SendTexture`) | `release_then_wait` (the mutex let go
+before the wait, a frame announced only once copied).
+- It is read with MAX's settings every 5 s (`apply_phase_settings`, an INFO
+  line on a change) and kept on MAX's queue (`MaxOut::spout_send`).
+- The worker gives it to both senders before every send
+  (`MaxSender::set_send_mode`), and the shim's mode is
+  `spout::shim_send_mode` (0 / 1 / 2, `kSend*` in `spout_shim.cpp`).
+- Tests: the parse (sp-core), the shim codes (sp-gpu), the apply
+  (`program_max_tests_ndi.rs`), and both senders per boundary
+  (`program_max_worker_tests_fhd.rs`).
+
+The hand-off mode changed nothing (#251 comment 6270228777: every mode
+lost ~45–50 % of the clip's frames), so the next lever tried was the size
+Arena receives (#251 comment 6270237157). It changed nothing either (#251
+comment 6271531140: 3840×2160 a mean 632, 1920×1080 a mean 652 of 1 200
+per 40 s). `recv2_ab` (#251 comment 6274680850: MAX or FHD `SP-program`
+received = loss in 18 of 20 takes, no receive = clean) and `recv3_ab`
+(6275818478, above) then showed it is any Spout receive, and
+`recv4_ab` / `recv4b_ab` (6276425317, 6276709434: 8 + 8 takes) that it
+is paid every frame, not per received copy (a black sender at one
+picture a second 546–656 on the wall, at 30 a second 548–723, MAX on
+Blank 522 / 587, no receive 1201), and lies mostly between Arena's
+composition and the wall output (Arena's composition monitor 1140–1168
+under a receive, 1199–1201 with none). Both settings stay, at their
+defaults:
+
+**The size:** `program_max_size` = `WxH` (trimmed; even sides, the width
+640..=3840, the height 360..=2160; anything else, absent included, is the
+canvas 3840×2160, `program_max_phase::program_max_size`).
+- It is read with MAX's settings every 5 s (`apply_phase_settings`, an INFO
+  line on a change) and kept on MAX's queue (`MaxOut::max_size`).
+- At each boundary the worker (`program_max_release.rs::resize_max`, a
+  child of `program_max_worker.rs`) compares it with the size MAX's target
+  was added at; on a difference it drops MAX's sender, then the target, and
+  the same boundary's build adds the target at the new size (`MAX_FIT`,
+  filling its width) with a new sender.
+- `GET /api/v1/program` `max.width` / `height` report the applied size. The
+  hand-off mode is on no field of `GET /api/v1/program`: `GET
+  /api/v1/settings` shows its STORED value (anything but exactly `plain`
+  or `release_then_wait`, trimmed, is the default `synced`), applied
+  within one 5 s poll (the INFO `program max: Spout hand-off applied`
+  names the applied `mode` at a change).
+- The post-deploy MAX gate (`e2e/max-gate.ts`) requires 3840×2160, so an
+  A/B value left set fails the next deploy's E2E.
+
+**How to judge any wall change from now on:**
+- count the MISSING pictures (the distinct forward pictures against what
+  the content shows on the wall, never the raw count: `video-decode.md`,
+  the main A/B's metrics), next to the backs;
+- measure on NON-SongPlayer content too: an Arena clip on one layer while
+  another layer receives SongPlayer's Spout;
+- a test that switches the bridge Arena puts every clip and setting back in
+  a `finally` and honours the rig lease (`lease_free.ps1` exit code).
 
 ## HLSL at runtime
 
 `compose.hlsl` (`include_str!`) is compiled by `D3DCompile`
 (d3dcompiler_47.dll, which ships with Windows 10/11 and windows-latest) once
-per `Compositor`, `vs_5_0` / `ps_5_0` at feature level 11.0+. No fxc/dxc
+per `Compositor`, `vs_5_0` / `ps_5_0` at feature level 11.0+. #279 P1a:
+`uyvy.hlsl` is compiled the same way when a UYVY pass is enabled
+(`pipeline::compile` takes the source and its name). No fxc/dxc
 build step, and WARP and the RTX run the same source. A compile error is
 `GpuError::Shader` with the compiler's log.
 
-## Tier-0 and the gates
+## The gates
 
 - `src/win/` is `#[cfg(windows)]` and excluded from the Linux mutation gate
   (`.cargo/mutants.toml`). Every decision lives in a pure, Linux-tested module:
@@ -1104,7 +2305,20 @@ build step, and WARP and the RTX run the same source. A compile error is
   (the sender's registration: every refuse / confirm decision), `spout_lock`
   (#243: the lock names, the releases owed, the holder's text and program
   name, the list sentinel's steps), `vblank`
-  (the output pick, the refresh count and fit, the staleness bound). Keep
+  (the output pick, the refresh count and fit, the staleness bound),
+  #251 step 2's `targets` (a compositor's targets: ids, draw order, the
+  primary kept), `stats::target_draws_us` (each target's part of the
+  draw; #279 P1a: `split_uyvy_part`, the UYVY pass's part), #279 P0's
+  `probe` (the report, the verdict, `acquire_step`,
+  `feature_step`, `pixel_step`, `content_step`, `probe_picture`, `Vram`)
+  and #279 P1a's `uyvy` (the conversion rows and their constant buffer,
+  the pair model and the reference, the size rule, the map error, the
+  staging ring), #279 P2's `ring_state` (the ring's slots, classes,
+  keys, the writer's and the compositor's answers, stale textures and
+  open slots), `ring` (its shared state, the frames, `FakeRing`) and
+  `stats::count_slot`; `win/ring.rs` and `win/sides.rs` only call
+  D3D11.
+  Keep
   it that way: logic added inside `win/` is untested by the gate.
   `win/vblank.rs` only calls DXGI / Win32 (`EnumOutputs`, `GetDesc`, which
   needs the `Win32_Graphics_Gdi` feature, `WaitForVBlank`,
@@ -1135,6 +2349,12 @@ build step, and WARP and the RTX run the same source. A compile error is
     `ID3D11Asynchronous`).
   - `None` for an optional interface or `HMODULE` parameter infers.
   - `GetData` maps `S_FALSE` to `Ok`: read the BOOL it writes.
+  - Any binding that ends in `.ok()` reads EVERY non-negative HRESULT as
+    `Ok`: `IDXGIKeyedMutex::AcquireSync`'s `WAIT_TIMEOUT` (0x102) and
+    `WAIT_ABANDONED` (0x80) included (#279 P0). Where a success code
+    means "not acquired", call the vtable entry
+    (`(Interface::vtable(x).AcquireSync)(Interface::as_raw(x), ..)`) and
+    judge the raw HRESULT in a pure fn (`probe::acquire_step`).
 - `tests/warp.rs` is `#![cfg(windows)]`. The `Build (Windows)` job runs it
   (`cargo test --workspace`). Linux compiles it to an empty test binary.
 - S2's sp-server side (`playback/program_max.rs`, `program_max_worker.rs`)
@@ -1145,9 +2365,15 @@ build step, and WARP and the RTX run the same source. A compile error is
   them on). `SpoutGpu::compositor` stays gated: off Windows it is
   `Unsupported`, which `off_windows_the_production_gpu_is_unsupported`
   pins through the worker. #239: `SpoutGpu::fhd_sender` and the
-  `listed_size` impl on `SpoutSender` are glue too (`mutants::skip`);
-  `SpoutGpu::fhd_compositor` stays gated
-  (`off_windows_the_production_fhd_compositor_is_unsupported`). #243
+  `listed_size` impl on `SpoutSender` are glue too (`mutants::skip`).
+  #251 step 2: the traits and `SpoutGpu` live in `program_max_gpu.rs`;
+  `MaxCompositor for sp_gpu::Compositor`'s `add_target` /
+  `remove_target` / `draw_us` are glue too (`mutants::skip`; the WARP
+  real-loop test drives them on Windows); `SpoutGpu::fhd_compositor` is
+  gone (no second compositor). #279 P1b: its `enable_uyvy` /
+  `disable_uyvy` / `read_uyvy` are glue too (the decisions are
+  `program_max_ndi.rs`'s, over the fake), and `SpoutGpu::sender` takes
+  the MAX target. #243
   follow-up: `SpoutListLock`'s `holder`, `sentinel_ended` and
   `stop_sentinel` are glue too (`mutants::skip`); its `start_sentinel`
   stays gated (`off_windows_the_production_list_is_neither_read_nor_waited_on`),

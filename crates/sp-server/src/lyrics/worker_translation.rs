@@ -24,7 +24,7 @@ impl LyricsWorker {
             line.sk = if sk_text.is_empty() {
                 None
             } else {
-                Some(sk_text)
+                Some(crate::lyrics::haleluja::haleluja(&sk_text).into_owned())
             };
         }
         track.language_translation = "sk".into();

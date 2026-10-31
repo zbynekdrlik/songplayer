@@ -50,12 +50,16 @@
 //! (`tests/video_device.rs`).
 //!
 //! #239: the FHD program goes out over Spout too, as `SP-program`
-//! ([`SPOUT_FHD_SENDER_NAME`], `SpoutSender::new_fhd`): a second compositor
-//! whose render target is [`FHD_WIDTH`] × [`FHD_HEIGHT`]
-//! (`Compositor::with_size`; the layers, the quads and the CPU reference
-//! take the target's size, [`Composition::layers_in`]). It carries the
-//! program the NDI `SP-program` carries, so it keeps `aspect_fit`
-//! ([`FHD_FIT`], #267).
+//! ([`SPOUT_FHD_SENDER_NAME`], `SpoutSender::new_fhd`), into a render
+//! target of [`FHD_WIDTH`] × [`FHD_HEIGHT`] (the layers, the quads and the
+//! CPU reference take the target's size, [`Composition::layers_on`]). It
+//! carries the program the NDI `SP-program` carries, so it keeps
+//! `aspect_fit` ([`FHD_FIT`], #267). #251 step 2: that target is a SECOND
+//! target of MAX's compositor ([`FHD_TARGET`], `Compositor::add_target`,
+//! ids and draw order in the pure [`Targets`]): one device, one upload of
+//! each picture ([`Composition::uploads`]), every target drawn from it,
+//! one wait; `SpoutSender::for_target` sends any one of them, and each
+//! target's own share of the draw is [`target_draws_us`].
 //!
 //! #223 follow-up: [`VblankTracker`] measures the primary display's refresh
 //! (DWM's clock, which Arena renders in) on its own thread, `WaitForVBlank`
@@ -65,20 +69,55 @@
 //! #243 follow-up: [`spout_list_holder`] names the program that holds
 //! Spout's sender list ([`LockHolder`]), and a [`ListSentinel`] waits on
 //! that lock to give it back the moment the holder exits ([`SentinelEnd`]).
+//!
+//! #279 P0: [`probe_gpu`] asks the picked adapter, on two devices of it,
+//! what the GPU-resident video path needs (shared NV12 by NT handle and
+//! keyed mutex, its plane views, a `DO_NOT_WAIT` readback); the report, its
+//! verdict and every rule that reads an answer are the pure [`probe`].
+//!
+//! #279 P1a: the compositor converts one target (the FHD program) to UYVY
+//! for NDI on the GPU (`Compositor::enable_uyvy`): a pass into a half-width
+//! `R8G8B8A8_UNORM` texture, copied into a ring of staging textures inside
+//! the compose, read back without a wait (`Compositor::read_uyvy`). Its
+//! conversion, its CPU model and its ring are the pure [`uyvy`].
+//!
+//! #279 P2: the GPU-resident video path's picture ring. A pipeline's
+//! decoded pictures will (P3a) be copied into slots of its ring: shared
+//! NV12 textures (an NT handle and a keyed mutex each), made on its
+//! producer device (`PictureRing`, Windows). Each picture travels as a
+//! [`GpuFrame`] (an `Arc`, like sp-server's `SharedFrame`; its drop frees
+//! the slot) and is drawn as a [`Side::Gpu`] of a composition: the
+//! compositor opens each slot once on its own device and samples it in
+//! place under the keyed mutex, with no upload. Every decision (slots,
+//! size classes, back-pressure, keys, a lost device, the open slots) is
+//! the pure [`ring_state`]; [`FakeRing`] (doc-hidden) makes frames without
+//! textures, for the tests of every platform.
+//!
+//! #279 P3a: `ProducerGpu` is a pipeline's producer device (the picked
+//! adapter, the video API, multithread-protected: what Media Foundation
+//! decodes on) and its ring: sp-decoder's GPU-resident reader copies each
+//! decoded picture into a slot of it (`ProducerGpu::copy_from`, Windows;
+//! off Windows it cannot be built). [`RingStats`] carries the copies'
+//! p99 and the slots' VRAM.
 
 mod adapter;
 mod color;
 mod composition;
 mod error;
 mod picture;
+pub mod probe;
 mod quad;
 mod readback;
 pub mod reference;
 mod residency;
+mod ring;
+pub mod ring_state;
 mod spout;
 mod spout_lock;
 pub mod spout_state;
 mod stats;
+mod targets;
+pub mod uyvy;
 mod vblank;
 
 #[cfg(not(windows))]
@@ -91,24 +130,29 @@ pub use adapter::{
 };
 pub use color::{BT709_LIMITED_TO_FULL, KB, KR, matrix_f32};
 pub use composition::{
-    CANVAS_HEIGHT, CANVAS_WIDTH, Composition, FHD_FIT, FHD_HEIGHT, FHD_WIDTH, Fit, Layer, MAX_FIT,
-    Q8_ONE, Slot,
+    CANVAS_HEIGHT, CANVAS_WIDTH, Composition, FHD_FIT, FHD_HEIGHT, FHD_TARGET, FHD_WIDTH, Fit,
+    Layer, MAX_FIT, MAX_TARGET, Q8_ONE, Side, Slot, Target,
 };
 pub use error::{
     DXGI_ERROR_DEVICE_HUNG, DXGI_ERROR_DEVICE_REMOVED, DXGI_ERROR_DEVICE_RESET,
     DXGI_ERROR_DRIVER_INTERNAL_ERROR, GpuError, is_device_lost,
 };
 pub use picture::{MAX_PICTURE_SIDE, Nv12Picture, PictureError, Plane, Planes};
-pub use quad::{QUAD_CONSTANTS_BYTES, QuadConstants, ndc_rect, uv_rect};
+pub use quad::{QUAD_CONSTANTS_BYTES, QuadConstants, ndc_rect, uv_in_texture, uv_rect};
 pub use readback::{mapped_len, unpad_rows, unpad_rows_into};
-pub use residency::{Resident, Upload, upload_for};
+pub use residency::{Resident, Upload, swap_slots, upload_for};
+#[doc(hidden)]
+pub use ring::FAKE_HANDLE_BASE;
+pub use ring::{COPY_WINDOW, FakeRing, GpuFrame, RingStats};
+pub use ring_state::{RING_CAPACITY, RING_WAIT, RingFormat, SizeClass, SlotKey};
 pub use spout::{
     NAME_SLOT_LEN, SENDER_NAMES_MAP, SHARED_TEXTURE_INFO_LEN, SPOUT_FHD_SENDER_NAME,
     SPOUT_NAME_MAX_LEN, SPOUT_SENDER_NAME, SharedTextureInfo, check_sender_name,
     parse_sender_names,
 };
 pub use spout_lock::{LockHolder, SentinelEnd};
-pub use stats::{ComposeStats, SpoutSendStats};
+pub use stats::{ComposeStats, SpoutSendStats, split_uyvy_part, target_draws_us};
+pub use targets::{TargetId, Targets};
 pub use vblank::{
     OutputInfo, Seen, VBLANK_BOOT_INTERVALS, VBLANK_IDLE_MAX, VBLANK_MAX_PERIOD, VBLANK_MIN_FIT,
     VBLANK_MIN_PERIOD, VBLANK_MIN_WAIT, VBLANK_NOT_TICKING, VBLANK_RECHECK, VBLANK_RESTART,
@@ -118,11 +162,12 @@ pub use vblank::{
 
 #[cfg(not(windows))]
 pub use stub::{
-    Compositor, ListSentinel, SpoutSender, VblankTracker, spout_list_holder, spout_sender_info,
-    spout_sender_names,
+    Compositor, ListSentinel, ProducerGpu, SpoutSender, VblankTracker, probe_gpu,
+    spout_list_holder, spout_sender_info, spout_sender_names,
 };
 #[cfg(windows)]
 pub use win::{
-    Compositor, ListSentinel, SpoutSender, VblankTracker, VideoDevice, adapters, mutex_holder,
-    read_shared_texture, spout_list_holder, spout_sender_info, spout_sender_names,
+    Compositor, ListSentinel, PictureRing, ProducerGpu, SpoutSender, VblankTracker, VideoDevice,
+    adapters, mutex_holder, probe_gpu, probe_on_listed_adapter, probe_warp, read_shared_texture,
+    spout_list_holder, spout_sender_info, spout_sender_names,
 };

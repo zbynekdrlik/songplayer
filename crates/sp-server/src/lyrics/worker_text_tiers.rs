@@ -294,6 +294,7 @@ impl LyricsWorker {
                 &row.song,
                 &row.artist,
                 started_at_unix_ms,
+                row.duration_ms,
             )
             .await?
         {

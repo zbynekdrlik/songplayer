@@ -25,17 +25,20 @@ mod clear_lyrics;
 pub mod clock_health;
 pub mod dashboard_replay; // #225: the engine's last dashboard state per playlist, replayed on WS connect
 pub mod decode_thread; // #223 S0: the one way a decode thread starts (producer + decode bench)
+pub mod early_end; // #277: a video that ends long before its duration is a failure (pure)
 mod engine_play;
 pub(crate) mod failure_backoff; // #229: the pause after failed opens (pure; the selector's pick too)
 mod failure_retry; // #229: the engine's retry of a playlist whose opens fail
 pub mod fleet_shift; // #224 part 2: a date step relabels (pure split + the relabel registry)
 pub mod frame_buf; // #203 shared-frame seam: Arc<Vec<u8>> holdover, no pixel copy
+pub mod gpu_resident; // #279 P3a: the precondition, the producer lease, the GPU pipelines' table
 mod handle_pipeline_event;
 pub mod lock_state;
 pub mod loop_stats; // the per-minute `pipeline: loop-stats` line + the shared percentile rule (pure)
 mod lyrics_loader;
 mod mix; // #184 round G set_mix (impl PlaybackEngine, 1000-line cap split)
 pub mod mmcss; // #210 part 2: a real-time sender thread as an MMCSS "Pro Audio" thread
+pub mod ndi_feed; // #279 P1b: NDI SP-program from the GPU readback (the feed + the source rule, pure)
 pub mod ndi_health;
 pub(crate) mod ndi_health_expect; // #221: SP-program's receiver (the program's degraded reason + log)
 mod ndi_health_transport; // #201 round 2: pure reported-label -> TransportState (Linux-tested)
@@ -49,6 +52,7 @@ pub mod pacer_queue; // #147 producer/consumer: pure bounded look-ahead frame qu
 pub mod pacer_sink; // #203 pacer scheduling + shared-frame standby submit helpers
 pub mod pacer_spin; // #147 the boundary wait's spin: yields once the wall stands still (pure, Linux-tested)
 pub mod pacing_stats; // #147 PacingStats (split out of ndi_health.rs, 1000-line cap)
+pub mod picture; // #279 P2: a boundary's picture, CPU (SharedFrame) or GPU (a ring frame)
 pub mod pipeline;
 #[cfg(windows)]
 pub(crate) mod pipeline_paced;
@@ -70,6 +74,8 @@ pub mod program_bus; // #209: the program bus (SongPlayer = master switcher, NDI
 pub mod program_canvas; // #223: SP-program's ONE picture layout (FHD) + the fit into it
 pub mod program_item; // #228: the item on air (marks, the sender's track) + the burn switch
 pub mod program_max; // #223 S2: SP-program-MAX hand-off, setting + telemetry
+pub mod program_max_gpu; // #251 step 2: the GPU traits (one compositor, a sender per target)
+pub mod program_max_ids; // #223 S2: the picture ids (an id never names other bytes)
 pub mod program_max_list; // #243 follow-up: Spout's list kept by another program, the sentinel
 pub mod program_max_send; // #223 follow-up: the Spout send at its due instant
 pub mod program_max_vblank; // #223 follow-up: the sends on the wall's refresh grid
@@ -82,6 +88,7 @@ pub mod program_trace; // #147: SP-program's per-boundary trace ring + clump det
 pub mod program_trace_log; // #147: the trace's once-a-minute clump summary (task)
 pub mod program_transition; // #215: transition window + crossfade math (pure, Linux-tested)
 pub mod program_transition_settings; // #221 L5: the transition settings → the bus's spec (task)
+pub mod program_video_quiet; // #251 step 4: SP-program's video side never starts in Arena's read window
 pub(crate) mod recovery; // + the RecoveryEvent → engine forwarder lib.rs spawns
 #[cfg(test)]
 pub(crate) mod resample_quality; // #233: the resamplers' measured quality (THD+N, images), tests only

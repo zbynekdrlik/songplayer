@@ -277,7 +277,9 @@ async fn a_pass_ending_in_a_track_retires_its_transcript() {
         youtube_id: "yt1".into(),
         song: "Amazing Grace".into(),
         artist: "A".into(),
-        duration_ms: Some(200_000),
+        // #283: two words are a track only in a song this short (6 a minute;
+        // under 5 a minute the base tier refuses the transcript).
+        duration_ms: Some(20_000),
         audio_file_path: None,
         youtube_url: String::new(),
         lyrics_override_text: None,

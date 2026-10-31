@@ -341,7 +341,7 @@ fn the_worker_reads_the_list_after_every_boundary() {
         max.status().list_holder.map(|h| (h.pid, h.since_s)),
         Some((other_pid(), 3))
     );
-    worker.release();
+    worker.release(Instant::now());
     assert_eq!(max.status().list_holder, None, "released: nothing shown");
     assert_eq!(list.state().stops, 0, "a release leaves the sentinel");
     worker.quiesce();

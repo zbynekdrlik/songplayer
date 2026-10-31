@@ -185,7 +185,8 @@ impl PlaybackEngine {
                 warn!(playlist_id, %msg, "pipeline error");
                 // #229 follow-up: the failure of an earlier Play is not the
                 // newer song's: it counts no failure and selects nothing.
-                if !self.answers_last_play(playlist_id) {
+                // #277: an early end after its song's start answers no Play.
+                if !self.takes_error(playlist_id, msg) {
                     info!(
                         playlist_id,
                         still_pending = self.plays_pending(playlist_id),

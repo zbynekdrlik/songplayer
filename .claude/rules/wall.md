@@ -2,6 +2,8 @@
 paths:
   - "crates/sp-core/src/wall*.rs"
   - "crates/sp-server/src/wall/**"
+  - "crates/sp-server/src/resolume/sp_clip*.rs"
+  - "crates/sp-server/src/resolume/driver_sp_clips*.rs"
   - "crates/sp-server/src/api/routes_status.rs"
   - "sp-ui/src/components/health_bar.rs"
   - "e2e/health-wall.spec.ts"
@@ -11,7 +13,7 @@ paths:
   - "e2e/mock-api.mjs"
 ---
 
-# The LED wall report (#259 lane 1: read and report; #254: the guard)
+# The LED wall report (#259 lane 1: read and report; #254: the guard; #275: SongPlayer's clip)
 
 ## The owner's rule — read this first
 
@@ -92,7 +94,7 @@ wall report read `ok`. Design: comment 6169337303.
   phase. `RULE_SK` names the exception. The gate's `wallSummary` logs
   `guard=ended Nx …` once the guard ended one.
 - **Never:** a clip (clips run only from the operator's Stream Deck; after
-  a relaunch none runs until he presses a scene — that report is #275), a
+  a relaunch none runs until he presses a scene — #275 reports it, below), a
   Resolume or display setting, a relaunch of our own (the operator's
   script does it), `Arena-Bridge.exe`.
 - **Known effects:** a debugger that suspends Arena (`cdb -pv`) for 30 s
@@ -117,6 +119,100 @@ wall report read `ok`. Design: comment 6169337303.
   `running 1 test`), `sp-core wall_tests.rs`
   (texts, label, wire), `e2e/health-wall.spec.ts` (red until it runs
   again, console clean), `e2e/wall-gate.spec.ts` (the summary).
+
+## #275: SongPlayer's clip on the wall (`songplayer_clip`)
+
+SNV 14.10.2026: Arena crashed, its script relaunched it at 11:51Z, and no
+clip runs after a relaunch until the operator presses a Stream Deck scene.
+The wall was black for 5.5 h with songs on program, and the report read
+`ok` (it reads WHERE Arena draws, never what). Design: #275 comment
+6184990972 (Approach 1).
+
+- **Read by the Resolume host driver**, not by `wall/` (it owns the Arena
+  client, the breaker and the 404 = stale map path): each full refresh
+  evaluates its own body, a 30 s by-id poll keeps it fresh
+  (`resolume-driver.md` "#275"). The pure rule is `resolume/sp_clips.rs`:
+  - SongPlayer's clip = `video.description` exactly `SP-program-MAX` or
+    `SP-program` (`sp_core::wall_clip::SPOUT_SOURCES`); an NDI clip
+    (`NDI Source`) is listed by name only — Arena does not name an NDI
+    source, so PP's `SP-program` over NDI reads `none` (the residual; the
+    note says "Spout");
+  - `running` = one is `connected` (`Connected`, `Connected & previewing`)
+    on a layer not bypassed with `video.opacity` > 0 AND its `master` fader
+    > 0, its layer group (if any) likewise, the composition's
+    `video.opacity` and `master` (each when the body has it) > 0; `none` =
+    no such clip (also a composition with none); `unknown` = not loaded (no
+    layers), a needed param with no id, a value that did not read, the
+    breaker open, or no Resolume host;
+  - the masters: read on SNV 15.10.2026 (Arena 7.28.1) by the coordinator —
+    every level carries a `master` ParamRange 0..1 with an id (the group
+    "G# Kontent" stands at 0.96484375, which shows);
+  - **NOT read: `solo` and the crossfader** (both unset on SNV: `solo`
+    false on every layer and group, the SP layers' `crossfadergroup`
+    "None"). A solo'd OTHER layer, or the composition's crossfader away
+    from an A/B-assigned SongPlayer layer, still reads `running`.
+- **The record** (`resolume/sp_clip_store.rs`, `global()`): each host's fact,
+  combined (running > unknown or no host > none); `since_ms` = when the
+  combined state began, on the server's clock. A `running` / `none` counts
+  from its start ACROSS `unknown` gaps (`Record::since`, review round 1:
+  one unread poll must not restart the note's "(12 min)"); an `unknown`
+  counts from when it began. The note itself is hidden for the ~30 s an
+  unread poll stands (the state is `unknown` then). Known limit (review
+  round 2): the start carries across a gap of ANY length, so `none`, a
+  2 h Arena outage, `none` again reads the whole span (a clip that ran
+  only while Arena's REST hung but Arena drew is not seen). `read_error` = the
+  first host's reason for an unknown, `reader_fault` = any host's reader
+  fault.
+- **Wire:** `GET /api/v1/wall` adds `songplayer_clip: {state:
+  running|none|unknown, clips: [{layer, clip, source}], ndi_clips: […],
+  since_ms, now_ms, read_error, reader_fault}`
+  (`sp_core::wall_clip::SongplayerClip`, `serde(default)`:
+  an older server reads `unknown`). The route copies the record in and
+  stamps `now_ms` at the answer. `wall::decide`, the state, the problem
+  codes and the wall's logs are UNCHANGED: the clip is never a fault.
+- **HealthBar:** amber `Stena: nebeží Spout klip SongPlayeru (12 min)`
+  (`HealthTone::Warn`, never red; `SongplayerClip::short_sk`, the span by
+  `audio_faults::duration_sk` against `now_ms`) only while (`wall::clip_note`)
+  a song plays on program (`wall_clip::song_on_program`: a told playlist,
+  WS state `Playing`, with a song — a `Memo` in sp-ui), the state is `none`,
+  the wall's state lets it through (`WallState::clip_note_shown`: `ok`,
+  `no_preset`, `unknown`; a red state, the screens off, Resolume not
+  running keep their words) and no guard end is pending. The tooltip ends
+  with the clip's sentence (running: which clips; none: how long, only the
+  operator starts clips, NDI cannot be told, the visible NDI clips),
+  nothing for `unknown`. The bar's `data-clip` = the state, the segment's
+  `data-clip-missing` = the note.
+- **Never acts:** no request of the clip read writes anything
+  (`sp_clips_tests.rs::the_clip_read_writes_nothing_to_arena` scans
+  `sp_clips.rs`, `sp_clip_store.rs`, `driver_sp_clips.rs` for `.put(`,
+  `.post(`, `/connect`, `/trigger`, `/clips/`, `set_text`, …).
+- **Gate:** `wall-gate.ts` `clipSummary` (in `wallSummary`; the spec's
+  `[#275 clip]` lines) LOGS the state; while Resolume runs, `pollClip`
+  reads the report until the clip reads or a reader fault shows
+  (`CLIP_WAIT_MS` 90 s: the driver reads at its start, a failed fetch is
+  retried after 60 s); `clipFailures` fails only on a report with no
+  `songplayer_clip` (a server without #275) or a `reader_fault` (SongPlayer
+  cannot read Arena's answer: the box is the reader's first real contact
+  with Arena's REST, review round 1). `running`, `none`, Arena not
+  answering and a composition still loading never fail.
+- **Mock:** `WALL_DEFAULT.songplayer_clip` is `unknown` (no existing spec
+  sees a note or a sentence); `/__mock/wall {songplayer_clip: {…}}`; the GET
+  stamps `now_ms` with the mock's clock. The default replay has playlist 1
+  on program with a song; `/__mock/set-playing` takes it off and back.
+- **Tests:** `sp-core wall_clip_tests.rs` (states, note, texts, wire, song
+  on program), `wall_tests.rs` (the note's precedence, tone, tooltip),
+  `resolume/sp_clips_tests.rs` (a composition trimmed from SNV's of
+  15.10.2026, `resolume/testdata/`: real names, states and values, 8 of the
+  18 Spout clips, param objects and ids derived — the masters the
+  coordinator read keep their real id and value (the test file's header):
+  running, all disconnected, a bypassed / opacity-0 /
+  master-0 layer, the group (bypassed, opacity 0, master 0, SNV's 0.96
+  shows), the composition (opacity 0, master 0), no group / no composition
+  levels, not loaded, a missing
+  id, a value that did not read or has another shape, the answer's typed
+  decode, the 30 s due), `sp_clip_store_tests.rs`,
+  `driver_sp_clips_tests.rs`, `api/routes_status_tests.rs` (the route),
+  `e2e/health-wall.spec.ts` (#275 tests), `e2e/wall-gate.spec.ts`.
 
 ## The reference: Resolume Arena's OWN saved output setup (`wall/resolume.rs`)
 
@@ -307,3 +403,13 @@ Each step reads only the facts it needs; a needed fact that failed =
   `win_tests.rs` (Windows job: the process list holds the test process,
   `EnumWindows` reads, the DPI context switched and given back, no Arena on
   the runner).
+
+## The wall's live source: Spout, never SongPlayer's NDI as a "fallback" (#251, measured 18.10.2026)
+
+- **Never switch SNV's wall clips to SongPlayer's NDI `SP-program` to "help" judder.** Measured on SNV's own two wall layers (a blurred backdrop + the sharp picture, Add) with `wall-30` through the CI gate's reader, in long blocks, 18.10.2026 (#251 comment 6231413198):
+  - NDI `SP-program`: 61–252 jumps back and 400–660 uneven holds per 40 s;
+  - Spout `SP-program-MAX`: 2–6 jumps back and 6–22 uneven.
+
+  Doing it during the 16.10 event made the wall worse.
+- **The two layers are the operator's design and stay** (owner, ROZHODNUTÉ 6229662077). They ran on cg OBS's NDI before Spout (Arena's own backups, comment 6231237165). Any fix of the two-read effect is SongPlayer's.
+- **The levels come in waves lasting hours:** 436 jumps back with an independent Spout sender and no load on 16.10 morning, 2–6 with MAX on 18.10 morning. Compare arms only interleaved, never across hours.

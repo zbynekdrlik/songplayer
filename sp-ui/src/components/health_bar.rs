@@ -38,6 +38,12 @@
 //! own setup in Resolume is the reference, nothing is ever changed. #254:
 //! after the guard ended a crashed or hung Resolume the segment names that
 //! end, red, until Resolume runs again (`data-guard`: the guard's phase).
+//!
+//! #275: while a song plays on program and no SongPlayer clip runs in
+//! Resolume (the report's `songplayer_clip`), the segment names that, amber,
+//! with how long (`sp_core::wall::label`; `data-clip-missing`); the bar's
+//! `data-clip` is the clip state the last poll said. It never acts: clips
+//! run only from the operator's Stream Deck.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -46,6 +52,7 @@ use sp_core::background_hold::{self, BackgroundHold};
 use sp_core::health;
 use sp_core::prod_env::{self, EnvironmentStatus};
 use sp_core::wall::{self, WallStatus};
+use sp_core::wall_clip;
 
 use crate::api;
 use crate::components::audio_faults::{AudioFaults, AudioFaultsPanel, AudioSegment};
@@ -115,6 +122,15 @@ pub fn HealthBar() -> impl IntoView {
     let _wall_poll = Effect::new(move |_| {
         poll_into("/api/v1/wall", 5_000, cancelled, wall_status);
     });
+    // #275: a song plays on program (a Memo: a position tick changes
+    // nothing, so the segment is not re-rendered twice a second).
+    let song_on_program = Memo::new(move |_| {
+        store.now_playing.with(|playing| {
+            playing.values().any(|np| {
+                wall_clip::song_on_program(np.state_known, np.state, np.has_now_playing_content())
+            })
+        })
+    });
     // #257: the audio fault history, one request at a time.
     let audio = AudioFaults::new();
     audio.start(cancelled);
@@ -148,6 +164,7 @@ pub fn HealthBar() -> impl IntoView {
             data-testid="health-bar"
             data-environment=move || prod_env::marker(&environment.get())
             data-wall=move || wall::marker(&wall_status.get())
+            data-clip=move || wall_status.get().songplayer_clip.state.name()
         >
             // WS
             {move || {
@@ -191,12 +208,16 @@ pub fn HealthBar() -> impl IntoView {
                 view! { <span class=cls title=title data-testid="health-resolume">{text}</span> }
             }}
             // #259: the LED wall against Resolume's own saved output; #254:
-            // `data-guard` = the guard's phase after its last end of Arena.
+            // `data-guard` = the guard's phase after its last end of Arena;
+            // #275: `data-clip-missing` = the segment names a missing
+            // SongPlayer clip.
             {move || {
                 let status = wall_status.get();
+                let song = song_on_program.get();
                 let state = status.state.name();
                 let guard = status.guard.phase.name();
-                wall::label(&status).map(|(tone, text, tip)| {
+                let missing = if wall::clip_note(&status, song) { "true" } else { "false" };
+                wall::label(&status, song).map(|(tone, text, tip)| {
                     let cls = format!("health-seg {}", tone.css_class());
                     view! {
                         <span
@@ -205,6 +226,7 @@ pub fn HealthBar() -> impl IntoView {
                             data-testid="health-wall"
                             data-state=state
                             data-guard=guard
+                            data-clip-missing=missing
                         >
                             {text}
                         </span>

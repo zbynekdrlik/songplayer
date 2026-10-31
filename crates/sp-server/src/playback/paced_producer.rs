@@ -16,14 +16,29 @@
 //! steps stop when the audio ended, or at `AUDIO_PAST_VIDEO_MAX_MS` (the rest
 //! is cut and the song's end counts one `underrun_end`).
 //!
+//! #277: a video whose picture stops long before the video reader's own
+//! duration has no held tail: the song ends there as a FAILURE
+//! ([`DecodeProducer::early_end`], `playback::early_end`), never as its
+//! natural end.
+//!
+//! #279 P3a: a frame the GPU-resident reader copied into its pipeline's
+//! ring (`DecodedVideoFrame::gpu`) becomes a `Picture::Gpu`; the preview
+//! taps get no picture of it before P3b, only its audio (a viewer watching
+//! then is a counted miss). Each change of the decoded frames' kind (the
+//! song's first frame's, a fall back mid-song) is reported once
+//! ([`DecodeProducer::take_kind_change`]) for the GPU-resident table.
+//!
 //! The Windows producer thread (`pipeline_paced::run_decode_producer`) only
 //! opens the readers and pushes what this hands it, so every item is built
 //! and tested here, on Linux.
 
 use sp_decoder::{DecodedAudioFrame, DecodedVideoFrame, DecoderError, SplitSyncedDecoder};
+use sp_gpu::GpuFrame;
 
+use crate::playback::early_end::EarlyEnd;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::pacer::PacedFrame;
+use crate::playback::picture::{CpuMisses, CpuUse, Picture};
 use crate::playback::pipeline::real_seek_ms;
 use crate::playback::preview::preview_stream::DecodeTaps;
 
@@ -39,7 +54,7 @@ struct Held {
     width: u32,
     height: u32,
     stride: u32,
-    video: SharedFrame,
+    video: Picture,
 }
 
 impl Held {
@@ -67,6 +82,28 @@ pub struct DecodeProducer {
     epoch: u64,
     /// The last picture handed on: what the held steps show (#257).
     held: Option<Held>,
+    /// #277: the video ended long before its own duration (since the start
+    /// or the last seek): the song failed.
+    early: Option<EarlyEnd>,
+    /// #279 P2: held steps whose GPU picture the preview taps could not
+    /// take (their audio still offered); #279 P3a: decoded GPU frames too,
+    /// while a viewer watches.
+    preview_misses: CpuMisses,
+    /// #279 P3a: whether the last decoded frame lay on the GPU.
+    gpu_kind: Option<bool>,
+    /// #279 P3a: a change of it not taken yet.
+    kind_change: Option<KindChange>,
+}
+
+/// #279 P3a: the decoded frames' kind changed ([`DecodeProducer::take_kind_change`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KindChange {
+    /// The frames lie on the GPU now (`false`: in CPU memory).
+    pub gpu: bool,
+    /// It is the song's first frame (else a change mid-song: a fall back).
+    pub first: bool,
+    /// The frame's size.
+    pub size: (u32, u32),
 }
 
 impl DecodeProducer {
@@ -78,6 +115,29 @@ impl DecodeProducer {
             current_ms: start_ms,
             epoch: 0,
             held: None,
+            early: None,
+            preview_misses: CpuMisses::default(),
+            gpu_kind: None,
+            kind_change: None,
+        }
+    }
+
+    /// #279 P3a: the kind of the decoded frames, when it changed since the
+    /// last take (the song's first frame always reports).
+    pub fn take_kind_change(&mut self) -> Option<KindChange> {
+        self.kind_change.take()
+    }
+
+    /// Note a decoded frame's kind ([`Self::take_kind_change`]).
+    fn note_kind(&mut self, video: &DecodedVideoFrame) {
+        let gpu = video.gpu.is_some();
+        if self.gpu_kind != Some(gpu) {
+            self.kind_change = Some(KindChange {
+                gpu,
+                first: self.gpu_kind.is_none(),
+                size: (video.width, video.height),
+            });
+            self.gpu_kind = Some(gpu);
         }
     }
 
@@ -86,17 +146,36 @@ impl DecodeProducer {
         self.epoch
     }
 
+    /// #277: the video ended long before its own duration since the start
+    /// or the last seek: the song is a failure, not over.
+    pub fn early_end(&self) -> Option<EarlyEnd> {
+        self.early
+    }
+
+    /// #279 P2: the held steps whose GPU picture the preview taps missed.
+    pub fn preview_misses(&self) -> u64 {
+        self.preview_misses.count()
+    }
+
     /// The next item for the queue, offered to the preview taps on the way
     /// (`preview.md`): the next decoded frame, or past the video's end a held
     /// step (#257). `Ok(None)` at the song's end: the audio ended, the held
     /// steps reached their bound, or no picture was ever decoded to hold.
+    /// #277: also when the video ended early ([`Self::early_end`]), with no
+    /// held step: measured at the last picture handed out (or the last frame
+    /// a seek's fast-forward decoded, else where the song plays from)
+    /// against the video reader's own duration.
     pub fn next_item(
         &mut self,
         decoder: &mut SplitSyncedDecoder,
         taps: &DecodeTaps,
     ) -> Result<Option<QueuedFrame>, DecoderError> {
         if let Some((video, audio)) = decoder.next_synced()? {
-            taps.offer_frame(&video, &audio);
+            match &video.gpu {
+                None => taps.offer_frame(&video, &audio),
+                Some(frame) => offer_gpu(&mut self.preview_misses, taps, frame, &audio),
+            }
+            self.note_kind(&video);
             let ms = video.timestamp_ms;
             self.current_ms = ms;
             let frame = to_paced_frame(video, audio, self.pts_offset_ms);
@@ -105,7 +184,15 @@ impl DecodeProducer {
         }
         // A seek to or past the last frame: the last frame its fast-forward
         // decoded is the picture to hold.
-        if let Some(last) = decoder.take_frame_before_end() {
+        let before_end = decoder.take_frame_before_end();
+        let at_ms = before_end
+            .as_ref()
+            .map_or(self.current_ms, |last| last.timestamp_ms);
+        if let Some(early) = EarlyEnd::of(at_ms, decoder.video_duration_ms()) {
+            self.early = Some(early);
+            return Ok(None);
+        }
+        if let Some(last) = before_end {
             self.held = Some(Held::of(&to_paced_frame(last, Vec::new(), 0)));
         }
         let Some(held) = &self.held else {
@@ -114,7 +201,14 @@ impl DecodeProducer {
         let Some((ms, audio)) = decoder.next_held()? else {
             return Ok(None);
         };
-        taps.offer_picture(held.width, held.height, held.stride, &held.video, &audio);
+        // #279 P2: a held GPU picture gives the taps no picture (P3b), only
+        // its audio.
+        match &held.video {
+            Picture::Cpu(nv12) => {
+                taps.offer_picture(held.width, held.height, held.stride, nv12, &audio)
+            }
+            Picture::Gpu(frame) => offer_gpu(&mut self.preview_misses, taps, frame, &audio),
+        }
         self.current_ms = ms;
         let frame = PacedFrame {
             pts_ns: pts_ns(ms, self.pts_offset_ms),
@@ -156,11 +250,28 @@ impl DecodeProducer {
         if moved {
             self.held = None;
         }
+        // #277: the video plays again from here.
+        self.early = None;
         self.pts_offset_ms = real;
         self.current_ms = real;
         self.epoch = epoch;
         real
     }
+}
+
+/// #279 P2 / P3a: a GPU picture gives the preview taps no picture (P3b),
+/// only its audio; while a viewer watches it is a miss, counted in
+/// `misses` (and WARNed, rate-limited).
+fn offer_gpu(
+    misses: &mut CpuMisses,
+    taps: &DecodeTaps,
+    frame: &GpuFrame,
+    audio: &[DecodedAudioFrame],
+) {
+    if taps.wants_picture() {
+        misses.note_now(CpuUse::Preview, frame);
+    }
+    taps.offer_audio(audio);
 }
 
 /// A 0-based PTS in ns: `ms` from the origin `pts_offset_ms` (a position
@@ -201,8 +312,11 @@ pub fn to_paced_frame(
         // Wrap the decoded NV12 buffer ONCE on the producer thread (#203 2b);
         // every downstream hop (pacer repeat, handoff, submit holdover, a held
         // step) is an `Arc` bump of this allocation, recycled to the frame pool
-        // on last drop.
-        video: SharedFrame::new(video.data),
+        // on last drop. #279 P3a: a frame in a ring slot travels as itself.
+        video: match video.gpu {
+            Some(frame) => Picture::Gpu(frame),
+            None => Picture::Cpu(SharedFrame::new(video.data)),
+        },
         audio: paced_audio(audio, pts_offset_ms),
     }
 }

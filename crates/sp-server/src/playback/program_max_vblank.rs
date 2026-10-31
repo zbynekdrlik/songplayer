@@ -16,20 +16,30 @@
 //!   ([`VblankSource`]);
 //! - each boundary is sent in a slot of that grid, `vblank + phase` (the
 //!   setting `program_max_vblank_phase_ms`, `sp_core::config`);
+//! - #251: each boundary is also COMPOSED at a fixed point of that grid,
+//!   `vblank + compose phase` (the setting `program_max_compose_phase_ms`),
+//!   [`compose_offset`] = K before its send slot. The compose (the 4K
+//!   uploads and the blend draw) used to start at the offer, which drifts
+//!   against the refresh; for minutes at a time that GPU work landed where
+//!   Arena renders and reads Spout, and the wall showed the previous
+//!   picture for one refresh (measured on SNV's wall, 15.10.2026, compose
+//!   start after the primary's vblank: +10.4 … +15.2 ms 0–2 jumps back a
+//!   minute, around the vblank 4–19, +4.4 … +9 ms 7–30);
 //! - [`VblankPacer`] keeps each boundary's slot in the SAME relation to its
 //!   offer as the last one's while that stays inside the lead window
-//!   [`LEAD_MIN`] … `LEAD_MIN` + one period + [`LEAD_HYSTERESIS`], so the
-//!   30 fps boundaries land on every second refresh. Only when the slow
-//!   drift between the two clocks carries the lead out of the window is a
-//!   new slot picked (a `slot_repick`: one picture held one refresh more or
-//!   less, about once per drift cycle, hours); the hysteresis keeps an
-//!   offer's jitter at the window's edge from picking back and forth.
+//!   K … K + one period + [`LEAD_HYSTERESIS`] (K ≥ [`COMPOSE_BUDGET`]; the
+//!   floor K keeps the compose instant at or after the offer), so the
+//!   30 fps boundaries land on every second refresh. Only when the slow drift between the two
+//!   clocks carries the lead out of the window is a new slot picked (a
+//!   `slot_repick`: one picture held one refresh more or less, about once
+//!   per drift cycle); the hysteresis keeps an offer's jitter at the
+//!   window's edge from picking back and forth.
 //!
 //! No grid (no tracker, or its output stalled) → the constant lead
-//! (`program_max_send::send_due`). #243: the tracker also says WHY
-//! (`sp_gpu::VblankState`, `max.vblank_state`); [`vblank_log`] decides the
-//! one WARN where the output stops ticking and the one INFO where it
-//! ticks again.
+//! (`program_max_send::send_due`) and the compose at once. #243: the
+//! tracker also says WHY (`sp_gpu::VblankState`, `max.vblank_state`);
+//! [`vblank_log`] decides the one WARN where the output stops ticking and
+//! the one INFO where it ticks again.
 
 use std::time::{Duration, Instant};
 
@@ -37,13 +47,32 @@ use sp_gpu::{VblankGrid, VblankState};
 
 use crate::playback::program_max_send::send_due;
 
-/// The earliest a boundary is sent after its offer: the constant lead the
-/// compose fits in (`program_max_send::MAX_SEND_LEAD`).
-pub const LEAD_MIN: Duration = Duration::from_millis(12);
+/// #251: the least time from a boundary's compose to its send: above the
+/// compose's measured p99 on SNV (upload ~5–6 ms + draw ~5–9 ms).
+pub const COMPOSE_BUDGET: Duration = Duration::from_millis(14);
 
 /// How far past one period the lead may grow before a new slot is picked:
 /// above an offer's jitter (p99 0.19 ms on SNV), so the pick never flaps.
 pub const LEAD_HYSTERESIS: Duration = Duration::from_millis(3);
+
+/// #251: K, how long before its send slot (phase `send_phase` after a
+/// vblank) a boundary is composed (at phase `compose_phase`): from the
+/// compose phase forward to the send phase, plus whole periods until it is
+/// at least `budget`. Both phases count modulo the period.
+pub fn compose_offset(
+    period: Duration,
+    send_phase: Duration,
+    compose_phase: Duration,
+    budget: Duration,
+) -> Duration {
+    let period = period.as_nanos().max(1);
+    // `send` is not reduced first: `send % period` would have the
+    // equivalent mutant `send + period` under the outer `% period`.
+    let gap = (send_phase.as_nanos() + period - compose_phase.as_nanos() % period) % period;
+    let short = budget.as_nanos().saturating_sub(gap);
+    let k = gap + short.div_ceil(period) * period;
+    Duration::from_nanos(u64::try_from(k).unwrap_or(u64::MAX))
+}
 
 /// The display refresh Arena renders in, as the `program-max` thread reads
 /// it.
@@ -105,6 +134,10 @@ pub struct Aligned {
     pub period: Duration,
     /// Where after the vblank the send started, µs.
     pub phase_us: u64,
+    /// #251: where after the vblank the compose started, µs.
+    pub compose_phase_us: u64,
+    /// #251: the job came after its compose instant: composed at once.
+    pub compose_late: bool,
     /// Its slot was picked anew ([`Due::repicked`]).
     pub repicked: bool,
 }
@@ -113,6 +146,9 @@ pub struct Aligned {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Due {
     pub at: Instant,
+    /// #251: when it is composed, [`compose_offset`] before `at`; `None`
+    /// off the grid (composed at once).
+    pub compose_at: Option<Instant>,
     /// The last boundary's lead left its window: a new slot was picked.
     pub repicked: bool,
 }
@@ -166,6 +202,11 @@ pub fn phase_after_vblank(grid: &VblankGrid, t: Instant) -> Duration {
     Duration::from_nanos(u64::try_from(phase).unwrap_or(0))
 }
 
+/// [`phase_after_vblank`] in µs (the telemetry's unit).
+pub fn phase_after_vblank_us(grid: &VblankGrid, t: Instant) -> u64 {
+    u64::try_from(phase_after_vblank(grid, t).as_micros()).unwrap_or(u64::MAX)
+}
+
 /// The slot each boundary is sent in; it remembers the last one's lead.
 #[derive(Debug, Default)]
 pub struct VblankPacer {
@@ -175,20 +216,29 @@ pub struct VblankPacer {
 
 impl VblankPacer {
     /// When the boundary offered at `offered` is sent: on `grid` (phase
-    /// `phase` after each vblank), in the slot nearest the last lead while
-    /// that lies in the lead window, else the first slot from [`LEAD_MIN`]
-    /// on; with no grid, at the constant lead (and the next grid starts
-    /// afresh).
-    pub fn due(&mut self, offered: Instant, grid: Option<VblankGrid>, phase: Duration) -> Due {
+    /// `send_phase` after each vblank), in the slot nearest the last lead
+    /// while that lies in the lead window, else the first slot from K on
+    /// ([`compose_offset`]), and (#251) composed K before it, at phase
+    /// `compose_phase`; with no grid, at the constant lead and composed at
+    /// once (and the next grid starts afresh).
+    pub fn due(
+        &mut self,
+        offered: Instant,
+        grid: Option<VblankGrid>,
+        send_phase: Duration,
+        compose_phase: Duration,
+    ) -> Due {
         let Some(grid) = grid else {
             self.lead = None;
             return Due {
                 at: send_due(offered),
+                compose_at: None,
                 repicked: false,
             };
         };
-        let slots = Slots::new(&grid, phase);
-        let earliest = offered + LEAD_MIN;
+        let slots = Slots::new(&grid, send_phase);
+        let lead_min = compose_offset(grid.period, send_phase, compose_phase, COMPOSE_BUDGET);
+        let earliest = offered + lead_min;
         let latest = earliest + grid.period + LEAD_HYSTERESIS;
         if let Some(lead) = self.lead {
             let kept = slots.nearest(offered + lead);
@@ -196,6 +246,7 @@ impl VblankPacer {
                 self.lead = Some(kept - offered);
                 return Due {
                     at: kept,
+                    compose_at: Some(kept - lead_min),
                     repicked: false,
                 };
             }
@@ -203,7 +254,11 @@ impl VblankPacer {
         let at = slots.at_or_after(earliest);
         let repicked = self.lead.is_some();
         self.lead = Some(at - offered);
-        Due { at, repicked }
+        Due {
+            at,
+            compose_at: Some(at - lead_min),
+            repicked,
+        }
     }
 }
 

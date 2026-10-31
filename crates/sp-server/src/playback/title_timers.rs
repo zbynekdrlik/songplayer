@@ -133,8 +133,11 @@ impl super::PlaylistPipeline {
     /// attempt, so a pending retry of a failed open ends, and no song is
     /// marked to be recorded until its caller marks this one. It is counted
     /// as a Play not answered yet (`pending_plays`): every Play goes through
-    /// here, so only its own `Started` / `Error` acts.
+    /// here, so only its own `Started` / `Error` acts. #281: the Presenter's
+    /// dedup key goes too: a song played again (Loop, the same song picked
+    /// again) is pushed again, its title included, after the song-end clear.
     pub(super) fn begin_play(&mut self, start_ms: u64) {
+        self.last_presenter_text = None;
         self.title_clock = None;
         self.cancel_title_timers();
         self.play_start_ms = start_ms;
@@ -144,6 +147,19 @@ impl super::PlaylistPipeline {
         self.failures.cancel_retry();
         self.record_on_start = None;
         self.pending_plays.sent();
+    }
+
+    /// #281: the song title the stage display may show: this Play's song
+    /// once its `Started` fixed the clock, and not while it is paused (the
+    /// pause cleared the display; a Position queued before the pause must
+    /// not bring the title back) — else none, so between a Play and its
+    /// `Started` the last song's title is never pushed.
+    pub(super) fn stage_title(&self) -> (&str, &str) {
+        if self.title_clock.is_some() && self.paused_at.is_none() {
+            (self.cached_song.as_str(), self.cached_artist.as_str())
+        } else {
+            ("", "")
+        }
     }
 }
 

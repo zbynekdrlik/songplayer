@@ -6,19 +6,11 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use sp_gpu::{ComposeStats, SpoutSendStats};
+use sp_gpu::SpoutSendStats;
 use tokio::sync::broadcast;
 
 use super::{FHD_OFF_MAX, FHD_OFF_SETTING, fhd_off_reason, load_fhd_enabled};
 use crate::playback::program_max::{MAX_NOT_RUNNING, MaxOut, run_max_settings_task};
-
-fn compose(upload_us: u64, draw_us: u64) -> ComposeStats {
-    ComposeStats {
-        upload_us,
-        draw_us,
-        uploads: 1,
-    }
-}
 
 /// MAX on, the FHD setting on.
 fn both_on() -> MaxOut {
@@ -48,7 +40,7 @@ fn the_fhd_sender_runs_only_with_max_and_its_own_setting_on() {
 fn a_new_max_has_the_fhd_sender_off_because_max_is_off() {
     let max = MaxOut::new();
     assert!(!max.fhd_enabled(), "off until the setting is applied");
-    assert!(!max.fhd_wanted());
+    assert!(!max.wants().fhd);
     let fhd = max.status().fhd;
     assert_eq!(
         (fhd.enabled, fhd.state.as_str(), fhd.reason),
@@ -61,11 +53,10 @@ fn a_new_max_has_the_fhd_sender_off_because_max_is_off() {
             fhd.submitted,
             fhd.failed,
             fhd.sender_backoffs,
-            fhd.upload_us_p99,
             fhd.draw_us_p99,
             fhd.send_us_p99
         ],
-        [0; 6]
+        [0; 5]
     );
 }
 
@@ -75,7 +66,7 @@ fn max_off_turns_the_fhd_sender_off_whatever_its_setting() {
     assert!(max.set_fhd_enabled(true), "off → on is a change");
     assert!(!max.set_fhd_enabled(true), "on → on is not");
     assert!(max.fhd_enabled());
-    assert!(!max.fhd_wanted(), "MAX is still off");
+    assert!(!max.wants().fhd, "MAX is still off");
     let fhd = max.status().fhd;
     assert_eq!(
         (fhd.enabled, fhd.state.as_str(), fhd.reason),
@@ -84,13 +75,13 @@ fn max_off_turns_the_fhd_sender_off_whatever_its_setting() {
     );
 
     max.set_enabled(true);
-    assert!(max.fhd_wanted());
+    assert!(max.wants().fhd);
     let _consumer = max.attach();
     let fhd = max.status().fhd;
     assert_eq!((fhd.state.as_str(), fhd.reason), ("running", None));
 
     assert!(max.set_fhd_enabled(false), "on → off is a change");
-    assert!(!max.fhd_wanted());
+    assert!(!max.wants().fhd);
     let fhd = max.status().fhd;
     assert_eq!(
         (fhd.enabled, fhd.state.as_str(), fhd.reason),
@@ -104,7 +95,7 @@ fn the_fhd_records_count_and_name_its_own_state() {
     let max = both_on();
     let _consumer = max.attach();
     max.record_fhd_sent(
-        compose(11, 22),
+        22,
         SpoutSendStats {
             send_us: 33,
             relisted: false,
@@ -113,9 +104,15 @@ fn the_fhd_records_count_and_name_its_own_state() {
     let fhd = max.status().fhd;
     assert_eq!((fhd.state.as_str(), fhd.submitted), ("running", 1));
     assert_eq!(
-        (fhd.upload_us_p99, fhd.draw_us_p99, fhd.send_us_p99),
-        (11, 22, 33),
-        "each cost in its own window"
+        (fhd.draw_us_p99, fhd.send_us_p99),
+        (22, 33),
+        "each cost in its own window: the FHD target's draw, its send"
+    );
+    let status = max.status();
+    assert_eq!(
+        (status.upload_us_p99, status.draw_us_p99, status.send_us_p99),
+        (0, 0, 0),
+        "never MAX's windows"
     );
 
     max.record_fhd_failed("why");
@@ -132,7 +129,7 @@ fn the_fhd_records_count_and_name_its_own_state() {
     );
 
     max.record_fhd_sent(
-        compose(1, 2),
+        2,
         SpoutSendStats {
             send_us: 3,
             relisted: false,
@@ -147,7 +144,7 @@ fn the_fhd_p99s_cover_the_last_900_frames() {
     let max = MaxOut::new();
     for us in 1..=1000 {
         max.record_fhd_sent(
-            compose(5 * us, 2 * us),
+            2 * us,
             SpoutSendStats {
                 send_us: 3 * us,
                 relisted: false,
@@ -155,10 +152,7 @@ fn the_fhd_p99s_cover_the_last_900_frames() {
         );
     }
     let fhd = max.status().fhd;
-    assert_eq!(
-        (fhd.upload_us_p99, fhd.draw_us_p99, fhd.send_us_p99),
-        (4955, 1982, 2973)
-    );
+    assert_eq!((fhd.draw_us_p99, fhd.send_us_p99), (1982, 2973));
 }
 
 #[test]
@@ -222,8 +216,8 @@ fn the_fhd_block_has_its_api_names() {
             "spout_relists",
             "state",
             "submitted",
-            "upload_us_p99",
-        ]
+        ],
+        "#251 step 2: no upload_us_p99 (the FHD target uploads nothing of its own)"
     );
     assert_eq!(json["fhd"]["reason"], "max_off");
     assert_eq!(json["fhd"]["spout_name"], "SP-program");
@@ -272,7 +266,7 @@ async fn the_settings_task_applies_every_fhd_change() {
         Duration::from_millis(5),
     ));
     eventually("the default ON applied", || max.fhd_enabled()).await;
-    assert!(max.fhd_wanted(), "MAX's default ON too");
+    assert!(max.wants().fhd, "MAX's default ON too");
     set_setting(&pool, "program_spout_fhd_enabled", "false")
         .await
         .unwrap();
@@ -287,7 +281,7 @@ async fn the_settings_task_applies_every_fhd_change() {
         .unwrap();
     eventually("MAX off", || !max.enabled()).await;
     assert!(max.fhd_enabled(), "its own setting stays on");
-    assert!(!max.fhd_wanted(), "but it needs MAX");
+    assert!(!max.wants().fhd, "but it needs MAX");
     assert_eq!(max.status().fhd.reason, Some(FHD_OFF_MAX));
     shutdown.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(20), task)
@@ -329,15 +323,15 @@ fn an_fhd_relisted_send_is_counted() {
         relisted: true,
     };
     max.record_fhd_sent(
-        compose(1, 2),
+        2,
         SpoutSendStats {
             send_us: 3,
             relisted: false,
         },
     );
     assert_eq!(max.status().fhd.spout_relists, 0);
-    max.record_fhd_sent(compose(1, 2), relisted);
-    max.record_fhd_sent(compose(1, 2), relisted);
+    max.record_fhd_sent(2, relisted);
+    max.record_fhd_sent(2, relisted);
     let status = max.status();
     assert_eq!((status.fhd.submitted, status.fhd.spout_relists), (3, 2));
     assert_eq!(status.spout_relists, 0, "FHD's count is its own");

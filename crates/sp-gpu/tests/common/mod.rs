@@ -10,7 +10,7 @@ pub mod locks;
 
 use sp_gpu::{
     CANVAS_HEIGHT, CANVAS_WIDTH, Compositor, FHD_FIT, FHD_HEIGHT, FHD_WIDTH, Layer, Nv12Picture,
-    reference,
+    Side, reference,
 };
 
 pub const W: u32 = CANVAS_WIDTH;
@@ -23,8 +23,9 @@ pub fn warp() -> Compositor {
     })
 }
 
-/// #239: the `SP-program` sender's 1920×1080 compositor (#267: placing by
-/// `FHD_FIT`, as production builds it), on WARP.
+/// #239: a compositor whose PRIMARY target is `SP-program`'s 1920×1080
+/// (#267: placing by `FHD_FIT`), on WARP. #251 step 2: production adds that
+/// target to MAX's compositor instead (`add_target(FHD_TARGET)`).
 pub fn warp_fhd() -> Compositor {
     Compositor::new_warp_with_size(FHD_WIDTH, FHD_HEIGHT, FHD_FIT)
         .unwrap_or_else(|e| panic!("WARP must build the 1920x1080 compositor: {e}"))
@@ -64,14 +65,16 @@ pub fn pattern(width: u32, height: u32, seed: u32) -> (u32, Vec<u8>) {
     (stride, data)
 }
 
-pub fn picture(id: u64, width: u32, height: u32, stride: u32, data: &[u8]) -> Nv12Picture<'_> {
-    Nv12Picture {
+/// An uploaded picture's side (#279 P2: a composition's sides are
+/// `Side`s; `Side::Gpu` is a ring frame's, `tests/ring.rs`).
+pub fn picture(id: u64, width: u32, height: u32, stride: u32, data: &[u8]) -> Side<'_> {
+    Side::Cpu(Nv12Picture {
         id,
         width,
         height,
         stride,
         data,
-    }
+    })
 }
 
 pub fn at(frame: &[u8], x: u32, y: u32) -> [u8; 4] {

@@ -20,6 +20,10 @@ async fn get_program_reports_the_max_block() {
     // nest the macro deep).
     let mut max_block = json["max"].clone();
     let fhd = max_block.as_object_mut().expect("an object").remove("fhd");
+    let video_quiet = max_block
+        .as_object_mut()
+        .expect("an object")
+        .remove("video_quiet");
     assert_eq!(
         max_block,
         serde_json::json!({
@@ -33,6 +37,8 @@ async fn get_program_reports_the_max_block() {
             "upload_us_p99": 0,
             "draw_us_p99": 0,
             "send_us_p99": 0,
+            "upload_mb_s": 0.0,
+            "uploads_per_s": 0.0,
             "send_at_us_p50": 0,
             "send_at_us_p99": 0,
             "send_at_us_max": 0,
@@ -42,9 +48,13 @@ async fn get_program_reports_the_max_block() {
             "vblank_tracking": false,
             "vblank_period_ns": 0,
             "vblank_phase_us": 14000,
+            "compose_phase_us": 13000,
             "send_off_grid": 0,
             "send_phase_us_p50": 0,
             "send_phase_us_p99": 0,
+            "compose_phase_us_p50": 0,
+            "compose_phase_us_p99": 0,
+            "compose_late": 0,
             "slot_repicks": 0,
             "device_resets": 0,
             "sender_backoffs": 0,
@@ -68,17 +78,39 @@ async fn get_program_reports_the_max_block() {
             "failed": 0,
             "sender_backoffs": 0,
             "spout_relists": 0,
-            "upload_us_p99": 0,
             "draw_us_p99": 0,
             "send_us_p99": 0,
         })),
-        "#239: the SP-program Spout sender, off while MAX is"
+        "#239: the SP-program Spout sender, off while MAX is; #251 step 2: no upload of its own"
+    );
+    assert_eq!(
+        video_quiet,
+        Some(serde_json::json!({
+            "from_us": 3000,
+            "to_us": 10500,
+            "grid": false,
+            "waits": 0,
+            "wait_us_max": 0,
+        })),
+        "#251 step 4: the video side's quiet window, no grid while MAX is off"
     );
     assert_eq!(json["ndi_name"], PROGRAM_NDI_NAME, "the program stays flat");
     assert!(json["outputs"].is_array(), "the other blocks stay");
     assert!(
         json.get("vban").is_none(),
         "#233: the VBAN telemetry is outputs[i].vban"
+    );
+    assert_eq!(
+        json["gpu"],
+        serde_json::json!({
+            "gpu_sides_per_s": 0.0,
+            "cpu_sides_per_s": 0.0,
+            "km_acquire_timeouts": 0,
+            "abandoned": 0,
+            "open_failures": 0,
+            "gpu_opens": 0,
+        }),
+        "#279 P3a: the compositor's sides, nothing composed yet"
     );
 
     // An Arc of its own: the thread guard below must not borrow `state`,
@@ -95,12 +127,18 @@ async fn get_program_reports_the_max_block() {
             upload_us: 700,
             draw_us: 300,
             uploads: 1,
+            upload_bytes: 3_110_400,
+            ..ComposeStats::default()
         },
         SpoutSendStats {
             send_us: 900,
             relisted: false,
         },
     );
+    // #279 P0: two boundaries 100 ms apart, an FHD picture each.
+    let t0 = std::time::Instant::now();
+    max.record_uploads(t0, 3_110_400, 1);
+    max.record_uploads(t0 + std::time::Duration::from_millis(100), 3_110_400, 1);
     max.record_device_reset();
     max.record_adapter("NVIDIA GeForce RTX 3070 Ti".into());
     let pid = add_playlist(&state.pool, "slow").await;
@@ -126,6 +164,11 @@ async fn get_program_reports_the_max_block() {
     );
     assert_eq!(m["device_resets"], 1);
     assert_eq!(m["adapter"], "NVIDIA GeForce RTX 3070 Ti");
+    assert_eq!(
+        (&m["upload_mb_s"], &m["uploads_per_s"]),
+        (&serde_json::json!(31.1), &serde_json::json!(10.0)),
+        "#279 P0: 3 110 400 bytes, one picture, in 100 ms"
+    );
 }
 
 /// #243 follow-up: `max.list_holder` names the program that kept Spout's
@@ -198,11 +241,7 @@ async fn get_program_reports_the_fhd_spout_sender() {
     max.set_enabled(true);
     let _consumer = max.attach();
     max.record_fhd_sent(
-        ComposeStats {
-            upload_us: 7,
-            draw_us: 400,
-            uploads: 1,
-        },
+        400,
         SpoutSendStats {
             send_us: 500,
             relisted: false,
@@ -229,7 +268,10 @@ async fn get_program_reports_the_fhd_spout_sender() {
             &serde_json::json!(500)
         )
     );
-    assert_eq!(fhd["upload_us_p99"], 7, "its own uploads");
+    assert!(
+        fhd.get("upload_us_p99").is_none(),
+        "#251 step 2: the FHD target uploads nothing of its own: {fhd}"
+    );
     assert_eq!(
         (&fhd["listed_width"], &fhd["listed_height"]),
         (&serde_json::json!(1920), &serde_json::json!(1080))
@@ -255,5 +297,37 @@ async fn the_fhd_setting_saves_through_the_settings_api_and_loads_back() {
     assert!(
         !load_fhd_enabled(&state.pool).await.unwrap(),
         "switched off"
+    );
+}
+
+/// #279 P3a: `gpu` on the program answer: the compositor's sides by kind
+/// over the window and the ring slots' failures since the start.
+#[tokio::test]
+async fn the_program_answer_carries_the_gpu_block() {
+    let state = test_state().await;
+    let max = state.program_bus.max().clone();
+    let compose = ComposeStats {
+        gpu_sides: 1,
+        gpu_opens: 1,
+        km_acquire_timeouts: 2,
+        abandoned: 1,
+        open_failures: 3,
+        ..ComposeStats::default()
+    };
+    let t0 = std::time::Instant::now();
+    max.record_compose(t0, &compose, 0);
+    max.record_compose(t0 + std::time::Duration::from_millis(100), &compose, 2);
+    let (status, json) = call(state, "GET", "/api/v1/program", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        json["gpu"],
+        serde_json::json!({
+            "gpu_sides_per_s": 10.0,
+            "cpu_sides_per_s": 20.0,
+            "km_acquire_timeouts": 4,
+            "abandoned": 2,
+            "open_failures": 6,
+            "gpu_opens": 2,
+        })
     );
 }

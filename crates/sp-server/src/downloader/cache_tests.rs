@@ -314,6 +314,7 @@ fn scan_cache_finds_a_crashed_downloads_temps() {
         "q_T_-Lh8AFI_video_temp.mp4",
         "q_T_-Lh8AFI_audio_temp.webm",
         "abcdefghijk_video_upgrade_temp.mp4",
+        "abcdefghijk_video_repair_temp.mp4",
         "Song_Artist_q_T_-Lh8AFI_normalized_video.mp4",
         "Song_Artist_q_T_-Lh8AFI_normalized_audio.flac",
         "short_video_temp.mp4",
@@ -332,6 +333,7 @@ fn scan_cache_finds_a_crashed_downloads_temps() {
     assert_eq!(
         temps,
         [
+            "abcdefghijk_video_repair_temp.mp4",
             "abcdefghijk_video_upgrade_temp.mp4",
             "q_T_-Lh8AFI_audio_temp.webm",
             "q_T_-Lh8AFI_video_temp.mp4",

@@ -66,6 +66,42 @@ pub(crate) mod status {
     pub const OK: i32 = 0;
     /// `claim_name`: Spout renamed the sender, a live sender holds the name.
     pub const RENAMED: i32 = 1;
+    /// #251: the synchronised send's copy was not done within its bound (or
+    /// its query failed); the frame was NOT announced.
+    pub const COPY_NOT_DONE: i32 = 6;
+}
+
+/// #251 (19.10.2026): the shim's code of each hand-off of a frame to Spout
+/// (`SyncedDX::SendSynced`'s `mode`, `src/win/spout_shim.cpp`, which must
+/// match): 0 `synced` waits for the copy holding Spout's texture mutex,
+/// 1 `plain` announces at once and never waits (spoutDX's `SendTexture`),
+/// 2 `release_then_wait` releases the mutex before it waits and announces
+/// only a finished copy.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn shim_send_mode(mode: sp_core::config::SpoutSend) -> i32 {
+    use sp_core::config::SpoutSend;
+    match mode {
+        SpoutSend::Synced => 0,
+        SpoutSend::Plain => 1,
+        SpoutSend::ReleaseThenWait => 2,
+    }
+}
+
+/// #251: the error of a synchronised send that `spout_state::after_send`
+/// read as one lost frame (its registration decided first, so a timed-out
+/// first send still records what Spout registered): a copy the GPU did not
+/// finish within `bound_ms` is the timeout every other GPU wait of this
+/// crate reports, any other code the shim's failure.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn lost_send_error(code: i32, bound_ms: u64) -> GpuError {
+    if code == status::COPY_NOT_DONE {
+        GpuError::Timeout(bound_ms)
+    } else {
+        GpuError::Spout {
+            call: "spout_sender_send_synced",
+            code: code as u32,
+        }
+    }
 }
 
 /// `name` as the NUL-terminated string Spout takes, if Spout can carry it:

@@ -1,6 +1,8 @@
 ---
 paths:
   - "crates/sp-server/src/playback/failure_*.rs"
+  - "crates/sp-server/src/playback/early_end*.rs"
+  - "crates/sp-server/src/playback/paced_producer*.rs"
   - "crates/sp-server/src/playback/handle_pipeline_event.rs"
   - "crates/sp-server/src/playback/engine_play.rs"
   - "crates/sp-server/src/playback/title_timers.rs"
@@ -67,6 +69,10 @@ the review finding on the selection: 6028419694.
   `failure_backoff::pick_pool`: unplayed minus avoid; else a restart (history
   cleared) from all minus avoid; only when every song is avoided, the old
   pick. Custom playlists (by position) and Loop ignore it.
+- "Unplayed" = not played ON this playlist since its rotation began (#261:
+  a play on ytlive's set list is no play of the song's home playlist), and
+  the daily `playlist::history_bound` keeps one row per playlist and song,
+  never a youtube / dabing playlist's rotation row (`playlist-membership.md`).
 - Residual: on a box fault, once every unplayed song has failed, the restart
   branch clears the play history one time (the alternative, a pick without a
   clear, would let one bad file fail every other song).
@@ -80,8 +86,9 @@ the review finding on the selection: 6028419694.
 - The pipeline answers every Play exactly once and in order. The stub
   answers each with one `Error`. On Windows a Play's pre-roll reads no
   command, so a later Play waits for the earlier one's `Started` or
-  failed-open `Error`, and after `Started` the emit loop has no `Error`
-  path. Only a `Shutdown` leaves a Play unanswered, and the pipeline is gone
+  failed-open `Error`, and after `Started` the emit loop's one `Error` path
+  (an early end, #277, below) is marked as no answer (` (after its start)`)
+  and counted off no Play. Only a `Shutdown` leaves a Play unanswered, and the pipeline is gone
   then. Keep it so: an answer that can come twice, or out of order, breaks
   the count. A Play id echoed in `Started` / `Error` (the design's rejected
   Approach 3) would be the fix then. The rule is restated where the
@@ -113,6 +120,55 @@ the review finding on the selection: 6028419694.
   inject the earlier answers too
   (`a_song_is_recorded_as_played_when_it_starts`: the skip's late `Started`,
   then Previous's).
+
+## A video that ends early is a failure, never the song's end (#277)
+
+Design comment 6185256383. Media Foundation stops on "late SEI" H.264
+files at once (no picture, end-of-stream), and the paced pipeline took that
+for the natural end: the song was skipped with an `underrun_end` at every
+play, with no WARN and no failure counted.
+
+- **The rule** (`playback/early_end.rs`, pure): a video whose picture stops
+  more than `EARLY_EOS_SLACK_MS` (10 000 ms) before the VIDEO reader's own
+  duration (`SplitSyncedDecoder::video_duration_ms`; `duration_ms()` is the
+  audio's) ends early (`EarlyEnd::of`; a duration of 0 never). Where it
+  stopped: the last picture handed out, else the last frame a seek's
+  fast-forward decoded, else where the song plays from
+  (`DecodeProducer::next_item`, `early_end()`; a seek clears it). No held
+  tail follows an early end.
+- **The pipeline:** the producer WARNs once (`file`, `ended_at_ms`,
+  `duration_ms`) and ends the stream as a failure
+  (`SharedQueue::producer_failed`, `PacedQueue::mark_failed`). Its text is
+  `EarlyEnd::reason`: `early_end: <file> ended at <at> ms of <d> ms`.
+  - before the first picture (the observed case: nothing decoded), the
+    emit thread finds it right after the pre-roll and answers the Play
+    with that `Error` (no `Started`), as a failed open does;
+  - after `Started`, the drained branch logs the song summary
+    `reason="early-end"` and sends the `Error` with `after_start`'s suffix
+    ` (after its start)`. No play-out: no `underrun_end` is counted.
+- **The engine:** the `Error` arm asks `takes_error` first. An early end
+  `is_after_start` answers no Play (its `Started` did): it acts only while
+  no Play is pending (`pending_plays.pending() == 0`) and leaves the count
+  alone; a newer Play under way = an earlier song's failure, ignored. Every
+  other `Error` goes through `answers_last_play` as before. Then
+  `video_failed` counts it (#229's run, `open_failures.last_error` names
+  the file) and, for any early end, `video_upgrade::repair::ask(video
+  row)` (`video-upgrade.md`, "The repair").
+- Residuals:
+  - the run is reset by `Started`, so consecutive early ends AFTER their
+    start never reach the pause; before the first picture (the case seen)
+    they count like failed opens;
+  - a decode ERROR (`next_item`'s `Err`, video or audio alike) still ends
+    the song as before (a play-out, `Ended`): which of those is a failure
+    and what to repair for it is not decided here;
+  - a file whose container says it is more than 10 s longer than its last
+    picture now fails at every play (before, the rest played on the held
+    last frame); watch the producer's WARN after a deploy.
+- Tests: `early_end_tests.rs`, `paced_producer_tests_early.rs` (the 10 s
+  edge on both sides, no tail, a seek's fast-forward, a seek clears it),
+  `pacer_queue_tests.rs` (the failure at the stream's end),
+  `failure_retry_tests_early_end.rs` (counted + repair asked, a plain
+  failed open asks none, after the start with and without a newer Play).
 
 ## Operator visibility
 

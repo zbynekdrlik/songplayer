@@ -852,8 +852,11 @@ old data until its next open). It never overwrites an existing `.prev`
 (exit 1, a JSON error naming it) and never deletes a file. stdout: ONE JSON
 line `{before_samples, after_samples, cut_ms}` (frames per channel; nothing
 is written when nothing is cut). `.prev` is not in the song's file set
-(`song-files.md`): a later title rename leaves it under the old name, and
-nothing deletes it; remove it by hand once the trimmed dub is verified.
+(`song-files.md`): a later title rename leaves it under the old name. #261's
+daily cache sweep deletes it 14 days after the LATER of its own and its
+dub's last write (the trim writes the cut dub), only while that dub is
+there (`cache-sweep.md`); a `.prev` left under an old name goes with the
+rest of its video once no row of it is left.
 Tests: `scripts/tests/test_dub_worker_trim.py`.
 
 **SNV, once after the deploy (MAIN SESSION OPS):** SNV has exactly ONE dub

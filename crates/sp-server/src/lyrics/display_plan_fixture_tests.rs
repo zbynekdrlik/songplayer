@@ -9,6 +9,9 @@
 //! win-resolume `/api/v1/videos/{id}/lyrics`. The pinned values were derived
 //! with a line-by-line reference model of `build_plan`. The sentence and fit
 //! checks use their own oracles below, written apart from `display_plan`.
+//! They read the lines the wall shows (#280: What A God and 221 hold lines
+//! that are only interjections, which leave the plan, and edge ones that
+//! go), from the plan's own `shown_lines`.
 
 use std::ops::Range;
 
@@ -17,6 +20,7 @@ use sp_core::lyrics::{LyricsLine, LyricsTrack};
 use super::{
     DisplayLine, DisplayPlan, DisplayProfile, GROUP_MAX_SPAN_MS, HOLD_TAIL_MS, LEAD_MAX_MS,
     LONG_GAP_MS, MAX_CHARS, MAX_LATE_MS, MIN_VISIBLE_MS, SUSTAIN_MARGIN_MS, build_plan,
+    shown_lines,
 };
 
 fn parse(raw: &str) -> LyricsTrack {
@@ -61,14 +65,42 @@ fn song_plan(lines: &[LyricsLine]) -> Vec<DisplayLine> {
     build_plan(lines, DisplayProfile::Song)
 }
 
+/// A fixture as the wall reads it (#280): the lines it shows, each with its
+/// index in the track.
+struct Shown {
+    lines: Vec<LyricsLine>,
+    kept: Vec<usize>,
+}
+
+impl Shown {
+    fn of(track: &LyricsTrack) -> Self {
+        let (kept, lines) = shown_lines(&track.lines, DisplayProfile::Song)
+            .into_iter()
+            .unzip();
+        Self { lines, kept }
+    }
+
+    /// The shown lines a display line spans, as a range of `self.lines`.
+    fn range(&self, d: &DisplayLine) -> Range<usize> {
+        let at = |i: usize| self.kept.partition_point(|&k| k < i);
+        at(d.src_range.start)..at(d.src_range.end)
+    }
+
+    /// The shown lines of a display line.
+    fn members(&self, d: &DisplayLine) -> &[LyricsLine] {
+        &self.lines[self.range(d)]
+    }
+}
+
 /// When the display line's first source line starts being sung.
-fn sung_start(lines: &[LyricsLine], d: &DisplayLine) -> u64 {
-    lines[d.src_range.start].start_ms
+fn sung_start(shown: &Shown, d: &DisplayLine) -> u64 {
+    shown.members(d)[0].start_ms
 }
 
 /// When the display line's last word is sung.
-fn sung_end(lines: &[LyricsLine], d: &DisplayLine) -> u64 {
-    lines[d.src_range.clone()]
+fn sung_end(shown: &Shown, d: &DisplayLine) -> u64 {
+    shown
+        .members(d)
         .iter()
         .map(|l| l.end_ms)
         .max()
@@ -193,8 +225,9 @@ fn fixture_335_first_wall_lines() {
 #[test]
 fn fixture_display_lines_never_run_past_a_sentence_end() {
     for (name, track) in fixtures() {
+        let shown = Shown::of(&track);
         for d in song_plan(&track.lines) {
-            let members = &track.lines[d.src_range.clone()];
+            let members = shown.members(&d);
             let inner_end = members[..members.len() - 1]
                 .iter()
                 .position(ends_a_sentence);
@@ -210,25 +243,27 @@ fn fixture_display_lines_never_run_past_a_sentence_end() {
 #[test]
 fn fixture_a_sentence_splits_only_where_it_does_not_fit() {
     for (name, track) in fixtures() {
-        let lines = &track.lines;
-        let plan = song_plan(lines);
+        let shown = Shown::of(&track);
+        let lines = &shown.lines;
+        let plan = song_plan(&track.lines);
         for pair in plan.windows(2) {
             let (prev, d) = (&pair[0], &pair[1]);
-            if ends_a_sentence(&lines[d.src_range.start - 1]) {
+            let (from, at) = (shown.range(prev), shown.range(d));
+            if ends_a_sentence(&lines[at.start - 1]) {
                 continue;
             }
             // A split inside a sentence needs a break before `d`, or the
             // line that did not fit: the last of `d` when `d` ends its
             // sentence, else the line after `d`.
-            let gap = sung_start(lines, d).saturating_sub(sung_end(lines, prev));
-            let last = d.src_range.end - 1;
+            let gap = sung_start(&shown, d).saturating_sub(sung_end(&shown, prev));
+            let last = at.end - 1;
             let through = if ends_a_sentence(&lines[last]) {
                 last
             } else {
                 (last + 1).min(lines.len() - 1)
             };
             assert!(
-                gap > LONG_GAP_MS || !fits_one_wall_line(&lines[prev.src_range.start..=through]),
+                gap > LONG_GAP_MS || !fits_one_wall_line(&lines[from.start..=through]),
                 "{name}: {:?} | {:?} splits a sentence that fits",
                 prev.en,
                 d.en
@@ -240,8 +275,9 @@ fn fixture_a_sentence_splits_only_where_it_does_not_fit() {
 #[test]
 fn fixture_every_wall_line_fits() {
     for (name, track) in fixtures() {
+        let shown = Shown::of(&track);
         for d in song_plan(&track.lines) {
-            let members = &track.lines[d.src_range.clone()];
+            let members = shown.members(&d);
             assert!(
                 members.len() == 1 || fits_one_wall_line(members),
                 "{name}: {:?} is over {MAX_CHARS} chars or {GROUP_MAX_SPAN_MS} ms",
@@ -256,10 +292,10 @@ fn fixture_every_wall_line_fits() {
 #[test]
 fn fixture_lead_is_at_most_800_ms_and_only_into_a_pause() {
     for (name, track) in fixtures() {
-        let lines = &track.lines;
-        let plan = song_plan(lines);
+        let shown = Shown::of(&track);
+        let plan = song_plan(&track.lines);
         for (i, d) in plan.iter().enumerate() {
-            let start = sung_start(lines, d);
+            let start = sung_start(&shown, d);
             let lead = start.saturating_sub(d.show_ms);
             assert!(lead <= LEAD_MAX_MS, "{name}: {:?} leads {lead} ms", d.en);
             let Some(prev) = i.checked_sub(1).map(|p| &plan[p]) else {
@@ -267,7 +303,7 @@ fn fixture_lead_is_at_most_800_ms_and_only_into_a_pause() {
             };
             if lead > 0 {
                 assert!(
-                    d.show_ms >= sung_end(lines, prev) + SUSTAIN_MARGIN_MS,
+                    d.show_ms >= sung_end(&shown, prev) + SUSTAIN_MARGIN_MS,
                     "{name}: {:?} leads while {:?} was sung under 1.5 s ago",
                     d.en,
                     prev.en
@@ -289,25 +325,29 @@ fn fixture_lead_is_at_most_800_ms_and_only_into_a_pause() {
 fn fixture_lead_counts() {
     // (full 800 ms leads, exact shows, late shows) per fixture. The one
     // late show is "What A God"'s second 0.3 s "What a God, what a God.",
-    // 100 ms after it starts being sung.
+    // 100 ms after it starts being sung. #280 (lines that are only
+    // interjections leave the plan): What A God loses "Yeah." (a full lead)
+    // and "Oh." (exact), and the "what a God, what a God." that followed its
+    // first "Oh," now leads (exact → full); 221 loses "Yeah. Yeah." (full)
+    // and "Hey." (exact).
     for ((name, track), counts) in
         fixtures()
             .into_iter()
-            .zip([(41, 79, 1), (13, 53, 0), (9, 40, 0)])
+            .zip([(41, 77, 1), (13, 53, 0), (8, 39, 0)])
     {
-        let lines = &track.lines;
-        let plan = song_plan(lines);
+        let shown = Shown::of(&track);
+        let plan = song_plan(&track.lines);
         let full = plan
             .iter()
-            .filter(|d| d.show_ms + LEAD_MAX_MS == sung_start(lines, d))
+            .filter(|d| d.show_ms + LEAD_MAX_MS == sung_start(&shown, d))
             .count();
         let exact = plan
             .iter()
-            .filter(|d| d.show_ms == sung_start(lines, d))
+            .filter(|d| d.show_ms == sung_start(&shown, d))
             .count();
         let late = plan
             .iter()
-            .filter(|d| d.show_ms > sung_start(lines, d))
+            .filter(|d| d.show_ms > sung_start(&shown, d))
             .count();
         assert_eq!((full, exact, late), counts, "{name}");
     }
@@ -317,11 +357,13 @@ fn fixture_lead_counts() {
 
 #[test]
 fn fixture_no_wall_line_is_up_for_less_than_1200_ms() {
-    // (wall lines, the shortest time one is up) per fixture.
+    // (wall lines, the shortest time one is up) per fixture. #280: What A
+    // God and 221 each lose two wall lines to their lines that are only
+    // interjections (335 has none, only the edge of "Yeah, let's dance.").
     for ((name, track), (count, shortest)) in
         fixtures()
             .into_iter()
-            .zip([(137, 1_200), (68, 1_682), (53, 1_253)])
+            .zip([(135, 1_200), (68, 1_682), (51, 1_253)])
     {
         let plan = song_plan(&track.lines);
         assert_eq!(plan.len(), count, "{name}");
@@ -338,9 +380,9 @@ fn fixture_no_wall_line_is_up_for_less_than_1200_ms() {
 #[test]
 fn fixture_no_wall_line_leaves_before_it_is_sung_to_the_end() {
     for (name, track) in fixtures() {
-        let lines = &track.lines;
-        for d in song_plan(lines) {
-            let end = sung_end(lines, &d);
+        let shown = Shown::of(&track);
+        for d in song_plan(&track.lines) {
+            let end = sung_end(&shown, &d);
             assert!(
                 d.hide_ms >= end,
                 "{name}: {:?} leaves at {} ms but is sung until {end} ms",
@@ -354,18 +396,21 @@ fn fixture_no_wall_line_leaves_before_it_is_sung_to_the_end() {
 #[test]
 fn fixture_the_wall_blanks_only_in_instrumental_breaks() {
     // (breaks over 8 s, total blank ms between the first and last line).
+    // #280: a line that is only interjections leaves the plan with its
+    // time, so a gap it filled can become a break: What A God's "Yeah."
+    // (222.7 s) and 221's "Yeah. Yeah." (31.7 s).
     for ((name, track), expected) in
         fixtures()
             .into_iter()
-            .zip([(3, 19_600), (2, 28_400), (4, 31_700)])
+            .zip([(4, 24_900), (2, 28_400), (5, 40_300)])
     {
-        let lines = &track.lines;
-        let plan = song_plan(lines);
+        let shown = Shown::of(&track);
+        let plan = song_plan(&track.lines);
         let mut breaks = 0;
         let mut blank_ms = 0;
         for pair in plan.windows(2) {
             let (cur, next) = (&pair[0], &pair[1]);
-            let gap = sung_start(lines, next).saturating_sub(sung_end(lines, cur));
+            let gap = sung_start(&shown, next).saturating_sub(sung_end(&shown, cur));
             if gap <= LONG_GAP_MS {
                 assert_eq!(
                     cur.hide_ms, next.show_ms,
@@ -374,10 +419,10 @@ fn fixture_the_wall_blanks_only_in_instrumental_breaks() {
                 );
             } else {
                 breaks += 1;
-                assert_eq!(cur.hide_ms, sung_end(lines, cur) + HOLD_TAIL_MS, "{name}");
+                assert_eq!(cur.hide_ms, sung_end(&shown, cur) + HOLD_TAIL_MS, "{name}");
                 assert_eq!(
                     next.show_ms + LEAD_MAX_MS,
-                    sung_start(lines, next),
+                    sung_start(&shown, next),
                     "{name}"
                 );
                 blank_ms += next.show_ms - cur.hide_ms;
@@ -390,9 +435,12 @@ fn fixture_the_wall_blanks_only_in_instrumental_breaks() {
 #[test]
 fn fixture_what_a_god_long_breaks_hide_3_s_after_the_line_ends() {
     let plan = DisplayPlan::build(&what_a_god().lines, DisplayProfile::Song);
-    // [start of the break's blank, next line's show) for the three breaks.
+    // [start of the break's blank, next line's show) for the four breaks.
+    // #280: the second is new. Line 61 "Yeah." (222.7 s) leaves the plan,
+    // and the gap from line 60's end to line 62's start is 9.1 s.
     for (blank_from, next_show, last_text) in [
         (205_800, 211_600, "To you are"),
+        (222_100, 227_400, "What a God, what a God."),
         (432_200, 440_000, "No."),
         (547_200, 553_200, "What a God, what a God."),
     ] {
@@ -417,22 +465,52 @@ fn fixture_what_a_god_long_breaks_hide_3_s_after_the_line_ends() {
 
 #[test]
 fn fixture_source_lines_tile_the_plan_in_order() {
+    // The shown lines tile the plan (#280: the left-out ones are skipped),
+    // and each `src_range` runs from its first shown line to its last.
     for (name, track) in fixtures() {
+        let shown = Shown::of(&track);
         let mut next = 0;
         for d in song_plan(&track.lines) {
-            assert_eq!(d.src_range.start, next, "{name}");
-            assert!(d.src_range.end > next, "{name}");
-            next = d.src_range.end;
+            let at = shown.range(&d);
+            assert_eq!(at.start, next, "{name}");
+            assert!(at.end > next, "{name}");
+            assert_eq!(d.src_range.start, shown.kept[at.start], "{name}");
+            assert_eq!(d.src_range.end, shown.kept[at.end - 1] + 1, "{name}");
+            next = at.end;
         }
-        assert_eq!(next, track.lines.len(), "{name}");
+        assert_eq!(next, shown.lines.len(), "{name}");
+    }
+}
+
+#[test]
+fn fixture_lines_of_only_interjections_are_in_no_wall_line() {
+    // #280: What A God's "Oh," / "Yeah." / "Oh." / "Oh," and 221's
+    // "Yeah. Yeah." / "Hey." (its last line) are in no wall line.
+    let left_out_per_fixture: [&[usize]; 3] = [&[11, 61, 127, 187], &[], &[9, 74]];
+    for ((name, track), dropped) in fixtures().into_iter().zip(left_out_per_fixture) {
+        let shown = Shown::of(&track);
+        let left_out: Vec<usize> = (0..track.lines.len())
+            .filter(|i| !shown.kept.contains(i))
+            .collect();
+        assert_eq!(left_out, dropped, "{name}");
+        for d in song_plan(&track.lines) {
+            for i in dropped {
+                assert!(
+                    !d.src_range.contains(i),
+                    "{name}: {:?} shows line {i}",
+                    d.en
+                );
+            }
+        }
     }
 }
 
 #[test]
 fn fixture_en_and_sk_stay_paired() {
     for (name, track) in fixtures() {
+        let shown = Shown::of(&track);
         for d in song_plan(&track.lines) {
-            let src = &track.lines[d.src_range.clone()];
+            let src = shown.members(&d);
             let en: Vec<&str> = src.iter().map(|l| l.en.trim()).collect();
             let sk: Vec<&str> = src
                 .iter()
@@ -476,4 +554,74 @@ fn fixture_what_a_god_sentences() {
     assert_eq!(by_src(130..131).en, "find nobody no.");
     assert_eq!(by_src(6..8).en, "You're nothing like I thought");
     assert_eq!(by_src(8..9).en, "you were you're better.");
+}
+
+#[test]
+fn fixture_interjections_at_a_line_edge_go_where_a_mark_separates_them() {
+    // #280 (design 6223162067): (fixture, source lines, EN, SK) of the
+    // wall lines whose source lines lost an edge interjection, or kept one.
+    let tracks = fixtures();
+    let plans: Vec<Vec<DisplayLine>> = tracks.iter().map(|(_, t)| song_plan(&t.lines)).collect();
+    for (fixture, range, en, sk) in [
+        // "Oh, what a God, what a God." / "Ó, aký Boh, aký Boh."
+        (0, 10..11, "What a God, what a God.", "Aký Boh, aký Boh."),
+        // The line after a left-out "Oh," that began a sentence takes its
+        // capital.
+        (0, 12..13, "What a God, what a God.", "Aký Boh, aký Boh."),
+        // After the left-out line 187 "Oh,", which began a sentence too.
+        (
+            0,
+            188..190,
+            "More than the silver and gold to you.",
+            "Viac než striebro a zlato, pre teba.",
+        ),
+        // One word would be left: whole.
+        (0, 77..78, "Oh, God.", "Ó, Bože."),
+        (1, 41..42, "Let's dance.", "Poďme tancovať."),
+        // Line 9 "Yeah. Yeah." is left out and hands its "." back to line 8.
+        (
+            2,
+            7..9,
+            "Now I'm on fire for you. Let's go for the.",
+            "Teraz horím pre teba. Poďme na to.",
+        ),
+        (
+            2,
+            30..31,
+            "There is no one like you.",
+            "Nikto nie je ako ty.",
+        ),
+        // "like you. Oh," / "ako ty. Ó,": the sentence end stays.
+        (
+            2,
+            47..49,
+            "There's no one like you.",
+            "Nikto nie je ako ty.",
+        ),
+        // No mark between "Say" and "whoa oh.": whole.
+        (2, 51..52, "Say whoa oh.", "Povedzte whoa oh."),
+        // "Oh, say whoa oh." / "Ó, povedzte whoa oh."
+        (2, 55..56, "Say whoa oh.", "Povedzte whoa oh."),
+        // "Say whoa oh. Yeah." / "Povedzte whoa oh. Áno."
+        (2, 57..58, "Say whoa oh.", "Povedzte whoa oh."),
+        (
+            2,
+            64..65,
+            "There is no one like you.",
+            "Nikto nie je ako ty.",
+        ),
+        (
+            2,
+            67..69,
+            "We lift you up. God, you're so good.",
+            "Vyvyšujeme ťa. Bože, si taký dobrý.",
+        ),
+    ] {
+        let name = tracks[fixture].0;
+        let d = plans[fixture]
+            .iter()
+            .find(|d| d.src_range == range)
+            .unwrap_or_else(|| panic!("{name}: no display line for source lines {range:?}"));
+        assert_eq!((d.en.as_str(), d.sk.as_deref()), (en, Some(sk)), "{name}");
+    }
 }

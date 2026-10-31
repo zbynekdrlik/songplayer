@@ -41,9 +41,10 @@ show) writes the wall lines, their clears and the Presenter; another
 playlist (the outgoing one of a cut until its OFF, or one played off
 program by hand) keeps only its own karaoke WS. The new owner's ON, and an
 OFF that leaves another playlist on program, push the owner's line to the
-Presenter at once, or clear it when it has none
-(`scene_off::resync_presenter`, review rounds 2-3), so the old owner's last
-line never stays on the stage display. With NO owner (nothing on air, or
+Presenter at once, or (#281) its song's title with no line when it has
+none, or clear it when it plays nothing (`scene_off::resync_presenter`,
+review rounds 2-3), so the old owner's last line never stays on the stage
+display. With NO owner (nothing on air, or
 "OBS manuál" on program) nobody writes them — a song played off program by
 hand feeds no Presenter — and the last owner's OFF blanks the stage display
 with the wall (ROZHODNUTÉ 6002459249, #221 lane 2).
@@ -60,13 +61,42 @@ loaded track (in `LyricsState::with_lead_and_offset`; `new` delegates to it).
   "" with no translation). `presenter::payload_for` sends them as
   `currentText`/`nextText` + `currentTranslation`/`nextTranslation` (all
   through `wrap_for_presenter`) and dedups on the WHOLE payload (current +
-  next, EN + SK) — `PlaylistPipeline.last_presenter_text` holds that
-  `PushedLine` (= the `PresenterLines` last pushed). So a Slovak line arriving
+  next, EN + SK) and, since #281, the song's title (`currentSong`) —
+  `PlaylistPipeline.last_presenter_text` holds that `PushedLine {lines,
+  song}`, so a new song is pushed even where its lines equal the last
+  song's (both blank). So a Slovak line arriving
   later under the same English one is pushed, and so is a sentence sung
   several times in a row whose NEXT line changed ("What a God, what a God."
   ×4: the 4th repeat carries the line after the repeats; release 0.69.0
   review, `a_repeated_line_is_pushed_again_when_its_next_line_changes`). A
   dedup on the current line alone left the stage display's "next" stale.
+  **#283: where the wall is blank the stage display's LINES go blank too**
+  (`presenter::sync_line`, every position update): before the first line,
+  in a break's blank stretch and after the last line's hide, ONE push of
+  empty lines, kept as the pushed key, so the next line is pushed again.
+  Before, a `None` from `presenter_lines` pushed nothing and the last line
+  stayed ("No tak." 45 s past its hide, SNV 18.10.2026). **#281: the song's
+  title stays** in that push (`currentSong`), and a song with NO lyrics
+  sends its title alone from its position updates; the title goes only at
+  the song's end (`clear_lyrics`, `push_empty`), at an OFF with no owner,
+  and for an owner that plays nothing
+  (`tests_wall_owner.rs::the_stage_display_s_line_goes_with_the_wall_s_and_the_title_stays`,
+  `a_song_with_no_lyrics_sends_its_title_to_the_stage_display`). Presenter
+  already maps `currentSong` to its snapshot's `songName`; whether its
+  translation text mode draws it is Presenter's call (presenter#867).
+  **The title is the song's only once it STARTED and while it is not
+  paused** (`PlaylistPipeline::stage_title`, review round 1): between a
+  Play and its `Started` the last song's `cached_song` is still set, and a
+  Position queued before a pause would bring the paused song's title back.
+  **Every Play forgets the dedup key** (`begin_play`): after the song-end
+  clear, a song played again (Loop, the same song picked again) is pushed
+  again. **Every push goes through `PresenterClient::send`**, never a
+  `tokio::spawn(client.push(..))`: one task per client sends the NEWEST
+  payload, one push at a time (spawned pushes could arrive the other way
+  round, a clear landing after the title sent after it), and a failed push
+  again after 1 s doubling to 60 s (`retry_wait`) until it goes or a newer
+  one replaces it — a song with no lyrics pushes its title once, and the
+  engine's dedup counts a failed push as sent.
   Presenter (its issue 799) picks per stage layout what to show; SongPlayer
   has no language setting for it. Read back on the box with Presenter's
   `GET /stage/snapshot?layout=api` (`current.main` = the EN,
@@ -88,6 +118,126 @@ loaded track (in `LyricsState::with_lead_and_offset`; `new` delegates to it).
   Grouping, hold and the break tail are the same.
 - The `lyrics: loaded` log line carries `display_lines` and
   `display_profile`.
+
+**#280: parenthesised asides are left out** (`display_plan_asides.rs`, a
+child of `display_plan.rs`). Genius writes ad-libs, backing vocals and the
+leader's calls in parentheses. Song 361 "Redeemed" had wall lines of up to
+84 chars, and the owner disliked them (16.10.2026).
+
+- `build_plan` reads every source line through `without_asides` BEFORE
+  grouping, EN and SK alike. So `fits`, the sentence end
+  (`free? (Yeah)` ends in `?`) and the shown text all see the shorter line.
+- What `drop_asides` does:
+  - every balanced `( … )` goes, nested ones included;
+  - the words join again with one space, and a lone `, . ; : ! ? …` is
+    glued to the word before it (dropped when it would come first);
+  - a line that is ONLY asides keeps its words without the brackets, so the
+    wall never blanks a line the room sings (`(Hallelujah)`); one whose
+    words are only interjections (`(Oh)`) then leaves by the rule below.
+    So does a line whose words OUTSIDE its asides are only interjections:
+    it is read with only its brackets gone (`asides::unbracketed`, part 2
+    review round 1): `Oh (Hallelujah)` → `Oh Hallelujah`, `Yeah, (I'm
+    free)` → `I'm free`, `Oh (yeah)` leaves;
+  - a line with no parenthesis, or with parentheses that do not pair up, is
+    returned untouched.
+- The fixtures hold no `(`.
+- The karaoke view keeps the raw text.
+
+**#280 part 2: bare interjections are left out**
+(`display_plan_interjections.rs`, a child of `display_plan.rs`, after the
+asides; design 6224751018 + the edge rule 6223162067). The owner saw "One
+more time we say" + "Oh." as "Ešte raz hovoríme Och." (16.10.2026); on SNV
+1353 EN lines (4.1 %) of 349 songs were only interjections.
+
+- `build_plan` takes `shown_lines(lines, profile)`: each line without its
+  asides (or with only its brackets gone, above), then through
+  `interjections::shown`, each kept line with its index in the track. It
+  groups and schedules the kept lines, then maps each group back:
+  `src_range = kept[first]..kept[last] + 1`. A left-out line inside a group
+  is in its range; one between two display lines is in none. No production
+  code reads `src_range`.
+- **Sung lyrics only (`Song`).** A dub line (`Speech`) is read only without
+  its asides (review round 2): its EN is the whole sentences matched to it
+  by time (#184 H5, `dabing.md`), not its translation, so a "Yeah." there
+  must not take the dub's own SK subtitle off the wall
+  (`a_dub_line_keeps_its_words_whatever_its_english`).
+- **The EN line is the judge.** The EN set: `oh ooh oooh oh-oh whoa woah woo
+  yeah yea hey ah aah uh mm mmm hmm na la ay ayy eh`, compared lower-case
+  with the marks around a word stripped. `yes` is NOT in it: a sung "yes" is
+  content.
+- **A line whose EN words are ALL interjections leaves the plan**, both
+  languages, with its time. The previous display line holds through it by
+  the hold rules (until the next line shows; a gap now over 8 s blanks the
+  wall). A line with NO EN words is never left out.
+- **Its sentence end goes back to the line before it**
+  (`interjections::hand_back`, review round 1): the last line kept takes
+  the left-out line's final `. ! ? …`, EN and SK each, unless it ends a
+  sentence itself or is empty, by the same `ended` as an end run inside a
+  line. Without it "One more time we say" + "Oh." + "I still believe it."
+  became ONE wall line lit 5 s before its second sentence was sung (the
+  #217 failure). A carried EN end closes the sentence, so it ends a
+  display line, and the wall and the Presenter strip that final mark; a SK
+  end carried while the EN group goes on (EN `Oh,` / SK `Ó.`) shows
+  mid-line, as the raw SK had it. 221's line 8 `for you. Let's go for the`
+  ends in the `.` of its left-out line 9. Only a sentence end goes back: a
+  soft `, ; :` would put commas on the kept words mid-line, and it only
+  moves where an over-long sentence splits (review round 2, declined).
+- **Edges go only where a mark (`, . ; : ! ? …`, the asides' `GLUED`)
+  separates them.**
+  - The LONGEST leading run of set words whose last word carries a mark:
+    `Yeah, let's dance.` → `Let's dance.`, `Oh, oh Lord, you are good` →
+    `Oh Lord, you are good`.
+  - The LONGEST trailing run of set words whose PRECEDING word ends in a
+    mark: `Say whoa oh. Yeah.` → `Say whoa oh.` (the whole set run `whoa oh.
+    Yeah.` is not separated from `Say`, the shorter one is).
+  - At least two words must stay, else the line stays whole (`Oh, God.`).
+  - Not cut: `Say whoa oh.`, `Oh Lord, you're beautiful` (no mark), and an
+    interjection in the middle (`clean, yeah, I'm free indeed`).
+  - The first word left takes a capital when the line's first word had one.
+    A capital raises the first letter OR DIGIT of a word (past quotes and
+    marks): a word that starts with a digit is left as it is (`Oh, 3rd day`
+    → `3rd day`, never `3Rd`; review round 4).
+  - **The last word keeps its own sentence end, else takes the line's
+    final sentence end** (`free indeed, yeah.` → `free indeed.`, `like you.
+    Oh,` → `like you.`, `Is he worthy? Yeah.` → `Is he worthy?`). The
+    design's literal "the run's mark replaces the kept one" would make
+    `like you,` of the last; its own example and reason ("a sentence end
+    survives") rule it. A cut can therefore END a sentence the raw line did
+    not (221's `like you. Oh,`).
+- **SK follows only an EN cut:** at most as many SK words at that edge, each
+  from `och ó o oh jé jej hej áno jeah yeah ach ah uh mm hm wow ou`, by the
+  same separation rule, down to ONE word (`MIN_KEPT_SK`, review round 2:
+  the EN cut already showed that edge to be separate, and the wall shows
+  the SK, so `Ó, slobodní` under `Oh, we are free` → `Slobodní`). So `áno` /
+  `o` never go on their own (`Yes, Lord` / `Áno, Pane` stays), and a line
+  with no SK changes only EN.
+- **A left-out line that BEGAN a sentence hands its capital on**
+  (follow-up 1, supervisor): `shown_lines` tracks whether the next line
+  begins a sentence (the first line does; then each line by its own
+  sentence end, `ends_sentence`, a kept line read AFTER its edge cut:
+  `like you. Oh,` ends in `.`). A left-out line that begins one gives
+  the next line kept its EN and SK capitals, each language by its own
+  (`interjections::capitals` / `with_capitals`), unless it ends its
+  sentence itself (`Oh.`). What A God's `what a God, what a God.` and
+  `more than the silver and gold to you.` now start with a capital; a
+  line left out inside a sentence hands none, so `We sing` + `Oh,` +
+  `what a God.` stays `We sing what a God.`, as a wall line that starts
+  mid-sentence does (`find nobody no.`).
+- **A lone mark is glued to the word before it** (follow-up 2): `shown`
+  reads a line's words through the asides' `join_words`, so a token made
+  only of `, . ; : ! ? …` never stops a run (`Oh , yeah, I'm free` →
+  `I'm free`, `Oh , oh` leaves). A dash is not a mark: `Oh - yeah` stays
+  whole. A line with nothing to cut is returned as it is.
+- **Kept as it is (noted):** a line with unpaired parentheses keeps them
+  (`We sing (oh,`). Compound chants (`whoa-oh-oh`, `uh-huh`) are not in the
+  decided set.
+- Display-only: NO `LYRICS_PIPELINE_VERSION` bump; the karaoke view keeps
+  the raw track.
+- Tests: `display_plan_interjections_tests.rs` (the census lines, the
+  hand-back, the capital and the lone mark, through `build_plan`), `display_plan_fixture_tests.rs`
+  `fixture_lines_of_only_interjections_are_in_no_wall_line` and
+  `fixture_interjections_at_a_line_edge_go_where_a_mark_separates_them`.
+  The fixture oracles read the shown lines through `shown_lines` (`Shown`).
 
 **Never bump `LYRICS_PIPELINE_VERSION` for a display change.** The stored JSON
 and the pipeline are untouched. Regrouping lines in the pipeline instead
@@ -166,7 +316,8 @@ one only together with the design record on #217.
     unsanitized overlapping ★-tier mtl times — can leave the middle one at
     zero length.) The chant's lines are up for 400–1200 ms each,
     and the sentence after it shows 400 ms late
-    (`a_chant_of_short_sentences_falls_at_most_400_ms_behind`).
+    (`a_chant_of_short_sentences_falls_at_most_400_ms_behind`; it chants
+    "Sing!" since #280 part 2, as a "Hey!" line now leaves the plan).
   - Four sentences 1 s apart still show −800, 0, +200 and +400 ms
     (`in_a_fast_run_of_short_sentences_each_keeps_1200_ms`).
   - Every fixture pin is unchanged. The worst delay on the fixtures is
@@ -198,7 +349,10 @@ one only together with the design record on #217.
   each line in `.`. Examples: `renderer.rs` `wall_track` / `two_line_track`,
   `dispatch_lyrics_tests.rs` `make_track`, `tests_hold.rs` `track`. The wall
   strips the period (`strip_display_punctuation`), but the karaoke WS sends
-  the raw text (`"alpha."`).
+  the raw text (`"alpha."`). And since #280 part 2 a `Song` test line made
+  only of interjections (`Hey!`, `Oh.`, `Yeah.`) leaves the plan: a chant
+  test needs a content word (`a_chant_of_short_sentences_falls_at_most_400_ms_behind`
+  chants `Sing!`).
 - **Dub subtitle tracks go through the same plan, as `Speech`.**
   `gemini-live-translate` tracks (#182/#184) are stored as the same
   `{youtube_id}_lyrics.json` (`dabing/subtitles_store.rs`, `StoredDubTrack`
@@ -231,14 +385,19 @@ one only together with the design record on #217.
   boundary (`x − 1` → old line, `x` → new line) for the mutation gate.
 - **The fixtures are real songs**, loaded via `include_str!` +
   `CARGO_MANIFEST_DIR` (`crates/sp-server/tests/fixtures/`):
-  - `lyrics_6KuPjo1diLg.json` (What A God, 191 lines): 137 wall lines,
-    19 600 ms blank (3 breaks), shortest up 1200 ms, 41 full leads / 79
-    exact / 1 late.
+  - `lyrics_6KuPjo1diLg.json` (What A God, 191 lines): 135 wall lines,
+    24 900 ms blank (4 breaks), shortest up 1200 ms, 41 full leads / 77
+    exact / 1 late. Lines 11 / 61 / 127 / 187 (`Oh,` `Yeah.` `Oh.` `Oh,`)
+    are left out (#280); without line 61 a 9.1 s gap blanks the wall from
+    222.1 s to 227.4 s.
   - `lyrics_335.json` (105 lines): 68 wall lines, 28 400 ms blank (2
     breaks), shortest up 1682 ms, 13 / 53 / 0; "Now his will be done." and
     "Lift up your banners and practice your praise." are whole.
-  - `lyrics_221.json` (75 lines): 53 wall lines, 31 700 ms blank (4
-    breaks), shortest up 1253 ms, 9 / 40 / 0.
+  - `lyrics_221.json` (75 lines): 51 wall lines, 40 300 ms blank (5
+    breaks), shortest up 1253 ms, 8 / 39 / 0. Lines 9 / 74 (`Yeah. Yeah.`,
+    `Hey.`) are left out (#280).
+  - Before #280 part 2 the pins were 137 / 68 / 53 wall lines, (3, 19 600)
+    / (2, 28 400) / (4, 31 700) and 41/79/1, 13/53/0, 9/40/0.
   - The pins: `fixture_no_wall_line_is_up_for_less_than_1200_ms` (wall
     lines, shortest), `fixture_lead_counts` (full / exact / late),
     `fixture_the_wall_blanks_only_in_instrumental_breaks` (breaks, blank).
@@ -248,11 +407,11 @@ one only together with the design record on #217.
     ≤ 800 ms and after a ≥ 1500 ms pause, and no line is up under 1200 ms.
 
   When the algorithm changes on purpose, re-derive the pins with a reference
-  model that mirrors `build_plan` step by step. The Tier-0 box cannot run the
-  tests.
+  model that mirrors `build_plan` step by step.
 - **The design record's counts (56/49/122 display lines on 335/221/What A
   God) are not the pins.** They were simulated at the old 72-char width, and
   that simulation skipped the char check for a line that ends a sentence (so
   such a line could push its display line past 72 chars); at 72 the code gave
   59/51/123 (review round 2). Since `MAX_CHARS` = 52 in BOTH languages
-  (29.9.2026) the pins are 68/53/137.
+  (29.9.2026) the pins were 68/53/137, and since #280 part 2 (lines of only
+  interjections leave the plan) they are 68/51/135.

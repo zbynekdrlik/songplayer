@@ -20,13 +20,13 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::time::Duration;
 
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
-use crate::background_hold::{self, Job};
+use crate::background_hold::Job;
+use crate::daily_pass;
 use crate::db::models_membership::{self, DueRow};
 use crate::downloader::cache::{self, SongFiles};
 
@@ -39,26 +39,10 @@ pub const RETENTION_BATCH: i64 = 50;
 
 const DAY_MS: i64 = 86_400_000;
 
-/// The first pass, after the start (the startup self-heal and the first
-/// syncs are done by then).
-const FIRST_PASS_AFTER: Duration = Duration::from_secs(300);
-
-/// A pass a day.
-const PASS_EVERY: Duration = Duration::from_secs(86_400);
-
-/// A pass the background hold found held is tried again this much later.
-const HELD_RETRY: Duration = Duration::from_secs(3_600);
-
 /// The newest mark a pass at `now_ms` deletes: a row marked at or before it
 /// has been out of its playlist [`REMOVED_RETENTION_DAYS`] days.
 pub fn cutoff_ms(now_ms: i64) -> i64 {
     now_ms - REMOVED_RETENTION_DAYS * DAY_MS
-}
-
-/// The wait before the next pass: a day, or an hour after a pass the
-/// background hold kept from running.
-pub fn next_wait(held: bool) -> Duration {
-    if held { HELD_RETRY } else { PASS_EVERY }
 }
 
 /// The files of a deleted row's song, each to be removed or kept.
@@ -212,26 +196,17 @@ async fn remove_files(row: &DueRow, paths: &[PathBuf]) -> Option<Vec<PathBuf>> {
     Some(removed)
 }
 
-/// The retention loop: a pass [`FIRST_PASS_AFTER`] the start, then
-/// [`next_wait`] after each, until shutdown. A pass asks the #230
-/// background hold first.
-#[cfg_attr(test, mutants::skip)] // the timer loop; `pass` and `next_wait` are tested
-pub async fn run(pool: SqlitePool, mut shutdown: broadcast::Receiver<()>) {
-    let mut wait = FIRST_PASS_AFTER;
-    loop {
-        tokio::select! {
-            _ = shutdown.recv() => return,
-            _ = tokio::time::sleep(wait) => {}
+/// The retention loop: a pass on the shared daily timer
+/// (`crate::daily_pass`: 5 min after the start, then once a day, an hour
+/// later when the #230 background hold held it), until shutdown.
+#[cfg_attr(test, mutants::skip)] // the timer is daily_pass's; `pass` is tested
+pub async fn run(pool: SqlitePool, shutdown: broadcast::Receiver<()>) {
+    daily_pass::run(pool, shutdown, Job::Retention, |pool, now_ms| async move {
+        if let Err(e) = pass(&pool, now_ms).await {
+            warn!(%e, "playlist retention: the pass failed - trying again tomorrow");
         }
-        let held = background_hold::holds(&pool, Job::Retention).await;
-        if !held {
-            let now_ms = chrono::Utc::now().timestamp_millis();
-            if let Err(e) = pass(&pool, now_ms).await {
-                warn!(%e, "playlist retention: the pass failed - trying again tomorrow");
-            }
-        }
-        wait = next_wait(held);
-    }
+    })
+    .await;
 }
 
 #[cfg(test)]

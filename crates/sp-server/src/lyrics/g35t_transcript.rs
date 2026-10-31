@@ -32,6 +32,33 @@ pub const SOURCE_G35T: &str = "gemini-3-5-transcribe";
 /// upgrade it to the ★ / isolated-vocal tier.
 pub const SOURCE_G35T_FULLMIX: &str = "gemini-3-5-transcribe/fullmix";
 
+/// #283: the fewest words per minute of the song a track must hold to be its
+/// lyrics. Measured on SNV's 347 transcripts (#283 comment 6275496825): four
+/// near-empty ones at 0–2.6 wpm, every other at 7.4 wpm and up. Song 242
+/// ("Homesick For Heaven", live) got 8 shouts over 254.7 s — 1.9 wpm — from
+/// its vocal, its stem and its full mix alike.
+pub const MIN_WORDS_PER_MINUTE: u64 = 5;
+
+/// #283: whether `words` over a song of `song_ms` are too few to be its
+/// lyrics (under [`MIN_WORDS_PER_MINUTE`]): a failed transcription, never a
+/// track. No judgement without the song's length.
+pub fn is_sparse(words: usize, song_ms: Option<i64>) -> bool {
+    let Some(song_ms) = song_ms.and_then(|ms| u64::try_from(ms).ok()) else {
+        return false;
+    };
+    words as u64 * 60_000 < MIN_WORDS_PER_MINUTE * song_ms
+}
+
+/// #283: the English words of `track`'s lines — what [`is_sparse`] judges a
+/// track by, the base tier's new one and the one a row serves alike.
+pub fn track_words(track: &LyricsTrack) -> usize {
+    track
+        .lines
+        .iter()
+        .map(|line| line.en.split_whitespace().count())
+        .sum()
+}
+
 /// Build an un-translated line-level `LyricsTrack` from a g35t word stream.
 ///
 /// Returns `None` when the transcript yields no usable lines (blank/empty

@@ -107,6 +107,17 @@ pub struct SendTiming {
     pub started: Instant,
 }
 
+/// Wait on `clock` until `at`, unless it passed (late: at once); returns
+/// the instant the work starts and whether it was late. #251: the compose
+/// of a boundary on the grid waits on it too.
+pub fn wait_for(clock: &mut dyn SendClock, at: Instant) -> (Instant, bool) {
+    let late = clock.now() > at;
+    if !late {
+        clock.wait_until(at);
+    }
+    (clock.now(), late)
+}
+
 /// Wait on `clock` for `due` (unless it passed: late), run `send`, and time
 /// it against the boundary's offer at `offered`.
 pub fn send_at<T, E>(
@@ -115,11 +126,7 @@ pub fn send_at<T, E>(
     offered: Instant,
     send: impl FnOnce() -> Result<T, E>,
 ) -> Result<(T, SendTiming), E> {
-    let late = clock.now() > due;
-    if !late {
-        clock.wait_until(due);
-    }
-    let started = clock.now();
+    let (started, late) = wait_for(clock, due);
     let sent = send()?;
     let at = clock.now().saturating_duration_since(offered);
     let at_us = u64::try_from(at.as_micros()).unwrap_or(u64::MAX);

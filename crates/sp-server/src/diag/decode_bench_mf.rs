@@ -2,7 +2,11 @@
 //!
 //! It opens the sample with `sp_decoder::MediaFoundationVideoReader` on this
 //! thread (COM's STA rule: the thread that opens a reader decodes and drops
-//! it), in the request's mode (#223 S3b: `"hw": true` = `Hardware`), reads
+//! it), in the request's mode (#223 S3b: `"hw": true` = `Hardware`; #279
+//! P3a: `"resident": true` = GPU-resident on a producer device of the
+//! run's own, whose ring is read after the run) and
+//! under the decode cap in force (#282, `max_resolution`: what playback
+//! runs; set it back to automatic to measure a 4K sample at 4K), reads
 //! the stream's facts, runs [`measure`] unpaced, reads the path the pictures
 //! really came out of, and logs one line at the start and one at the end (a
 //! WARN when the decoder failed). The
@@ -13,10 +17,10 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use sp_decoder::{DecodeMode, MediaFoundationVideoReader, VideoStream};
+use sp_decoder::{MediaFoundationVideoReader, VideoStream};
 use tracing::{info, warn};
 
-use super::decode_bench::{BenchReport, DecodeFacts, StreamFacts, measure};
+use super::decode_bench::{BenchMode, BenchReport, DecodeFacts, StreamFacts, decode_mode, measure};
 
 /// Decode `path` for at most `max_wall` and report what one picture cost.
 /// A decoder error ends the run and is in the report; nothing here panics on
@@ -26,10 +30,11 @@ pub(crate) fn bench_file(
     path: &Path,
     file: &str,
     max_wall: Duration,
-    mode: DecodeMode,
+    mode: BenchMode,
 ) -> BenchReport {
     let thread_priority = Some(current_thread_priority());
     let bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    let max_height = crate::playback::video_decode::global().max_height();
     // Logged BEFORE the open, so a run that wedges inside it (a 409 that
     // never clears) still names its file in the log.
     info!(
@@ -37,22 +42,38 @@ pub(crate) fn bench_file(
         bytes,
         max_wall_s = max_wall.as_secs(),
         thread_priority = thread_priority.unwrap_or_default(),
-        hw = mode == DecodeMode::Hardware,
+        mode = mode.as_str(),
+        max_height,
         "decode-bench: start"
     );
     let requested = DecodeFacts {
         mode,
+        max_height: Some(max_height),
         ..DecodeFacts::default()
     };
+    // #279 P3a: a resident run's producer device, made before the open (a
+    // pipeline makes it at its first GPU-resident song and keeps it).
+    let (reader_mode, producer) = match decode_mode(mode, sp_gpu::ProducerGpu::new) {
+        Ok(made) => made,
+        Err(e) => {
+            warn!(file, error = %e, "decode-bench: no producer device for a resident run");
+            let why = format!("producer device: {e}");
+            return BenchReport::open_failed(file, why, 0, thread_priority).with_decode(requested);
+        }
+    };
     let opening = Instant::now();
-    let opened = MediaFoundationVideoReader::open_with(path, mode);
+    let opened = MediaFoundationVideoReader::open_with(path, reader_mode, Some(max_height));
     let open_ms = u64::try_from(opening.elapsed().as_millis()).unwrap_or(u64::MAX);
     let mut reader = match opened {
         Ok(reader) => reader,
         Err(e) => {
             warn!(file, bytes, open_ms, error = %e, "decode-bench: the file did not open");
+            let decode = DecodeFacts {
+                ring: producer.as_ref().map(|p| p.stats()),
+                ..requested
+            };
             return BenchReport::open_failed(file, format!("open: {e}"), open_ms, thread_priority)
-                .with_decode(requested);
+                .with_decode(decode);
         }
     };
     let facts = StreamFacts {
@@ -74,10 +95,17 @@ pub(crate) fn bench_file(
         path_changes: reader.path_changes(),
         adapter: reader.hw_adapter().map(str::to_string),
         fallback: reader.hw_fallback().map(|f| f.describe()),
+        scaled_from: reader.scaled_from(),
         ..requested
     };
-    // The reader is dropped on the thread that opened it (COM STA).
+    // The reader is dropped on the thread that opened it (COM STA). Every
+    // picture went back at once (`measure`), so the ring reads its slots
+    // free.
     drop(reader);
+    let decode = DecodeFacts {
+        ring: producer.as_ref().map(|p| p.stats()),
+        ..decode
+    };
     let report =
         BenchReport::from_run(file, facts, run, open_ms, thread_priority).with_decode(decode);
     if report.error.is_some() {

@@ -522,16 +522,17 @@ fn in_a_fast_run_of_short_sentences_each_keeps_1200_ms() {
 
 #[test]
 fn a_chant_of_short_sentences_falls_at_most_400_ms_behind() {
-    // Eight "Hey!" sung 400 ms apart, then a sentence (ROZHODNUTÉ on #217,
+    // Eight "Sing!" sung 400 ms apart, then a sentence (ROZHODNUTÉ on #217,
     // Design-question 5868750224). The MIN_VISIBLE floor holds a line back
     // at most MAX_LATE_MS past its sung start. Unbounded, "We lift your
-    // name." showed 4.8 s late, and before a break the last "Hey!" left the
-    // wall before it ever showed.
+    // name." showed 4.8 s late, and before a break the last chant line left
+    // the wall before it ever showed. (The chant was "Hey!" until #280: a
+    // line that is only an interjection leaves the plan.)
     let chant = |next_start: u64| {
         let mut lines: Vec<LyricsLine> = (0..8u64)
             .map(|k| {
                 let start = 10_000 + 400 * k;
-                en(start, start + 400, "Hey!")
+                en(start, start + 400, "Sing!")
             })
             .collect();
         lines.push(en(next_start, next_start + 2_000, "We lift your name."));
@@ -552,7 +553,7 @@ fn a_chant_of_short_sentences_falls_at_most_400_ms_behind() {
             (14_400, 19_000)
         ]
     );
-    // Before a break over 8 s the last "Hey!" is shown, and the sentence
+    // Before a break over 8 s the last "Sing!" is shown, and the sentence
     // after the break leads by 800 ms as usual.
     let (plan, _) = chant(30_000);
     assert_eq!((plan[7].show_ms, plan[7].hide_ms), (13_200, 16_200));

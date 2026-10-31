@@ -10,13 +10,29 @@
 //!   output into the new one's over [`FX_RAMP_FRAMES`], so a change made
 //!   while the song plays never clicks. A change that lands while a fade
 //!   still runs waits for its end (the latest one wins).
+//! - #278: the new cascade first runs over the song's last [`WARM_MS`] of
+//!   input (kept in a ring), so it fades in SETTLED. From zero state a
+//!   narrow boost rang up inside every fade of a live drag (an edit every
+//!   50 ms): a wobble at -28 dB, modelled on #278 comment 6224608759.
 //! - At 0 dB with no enabled band and no ramp running, the samples are not
 //!   touched at all (bit-identical).
+
+use std::collections::VecDeque;
 
 use sp_core::audio_fx::{Biquad, PlaylistFx, coefficients};
 
 /// Frames a volume ramp and an EQ crossfade last: 50 ms at 48 kHz.
 pub const FX_RAMP_FRAMES: u32 = 2400;
+
+/// How much of its input the processor keeps to warm a new cascade, ms:
+/// a 120 Hz Q 5 peak settles to -131 dB in it; the limits' worst, a 20 Hz
+/// Q 10 peak, to -51 dB (#278 comment 6224608759).
+pub const WARM_MS: u32 = 300;
+
+/// The frames [`WARM_MS`] holds at `rate`.
+pub fn warm_frames(rate: u32) -> usize {
+    (u64::from(rate) * u64::from(WARM_MS) / 1000) as usize
+}
 
 /// The linear factor of `db`.
 pub fn db_to_gain(db: f64) -> f64 {
@@ -45,6 +61,14 @@ impl Cascade {
 
     fn is_empty(&self) -> bool {
         self.filters.is_empty()
+    }
+
+    /// Run the filters over `history` (interleaved, oldest first, starting
+    /// on a frame) and drop the output: their state as if they had played it.
+    fn warm(&mut self, history: &VecDeque<f32>, channels: usize) {
+        for (i, x) in history.iter().enumerate() {
+            self.run(i % channels, channels, f64::from(*x));
+        }
     }
 
     /// One sample of `channel` through every filter.
@@ -76,14 +100,19 @@ pub struct FxProcessor {
     fading: Option<(Cascade, u32)>,
     /// An EQ change that landed during a fade: it fades in at the fade's end.
     pending: Option<Cascade>,
+    /// The last [`warm_frames`] of input, interleaved, oldest first.
+    history: VecDeque<f32>,
+    /// The samples `history` holds once full.
+    history_cap: usize,
 }
 
 impl FxProcessor {
     /// A processor already at `fx` (no ramp from silence: a song starts at
     /// its playlist's sound).
     pub fn new(fx: &PlaylistFx, rate: u32, channels: u16) -> Self {
-        let rate = f64::from(rate);
         let channels = usize::from(channels.max(1));
+        let history_cap = warm_frames(rate) * channels;
+        let rate = f64::from(rate);
         let gain = db_to_gain(fx.gain_db);
         Self {
             rate,
@@ -95,6 +124,8 @@ impl FxProcessor {
             cascade: Cascade::new(fx, rate, channels),
             fading: None,
             pending: None,
+            history: VecDeque::with_capacity(history_cap),
+            history_cap,
         }
     }
 
@@ -114,8 +145,10 @@ impl FxProcessor {
         }
     }
 
-    /// Start fading from the current cascade into `next`.
-    fn fade_to(&mut self, next: Cascade) {
+    /// Start fading from the current cascade into `next`, warmed first on
+    /// the input kept.
+    fn fade_to(&mut self, mut next: Cascade) {
+        next.warm(&self.history, self.channels);
         let old = std::mem::replace(&mut self.cascade, next);
         self.fading = Some((old, FX_RAMP_FRAMES));
     }
@@ -128,10 +161,12 @@ impl FxProcessor {
     /// Run `samples` (interleaved, `channels` per frame) in place.
     pub fn process(&mut self, samples: &mut [f32]) {
         if self.is_passthrough() {
+            self.remember(samples);
             return;
         }
         let channels = self.channels;
         for frame in samples.chunks_mut(channels) {
+            self.remember(frame);
             let fade = self
                 .fading
                 .as_ref()
@@ -146,6 +181,17 @@ impl FxProcessor {
                 *sample = (y * self.gain) as f32;
             }
             self.step_ramps();
+        }
+    }
+
+    /// Keep `samples` (whole frames of input) in the history, forgetting
+    /// the oldest beyond [`warm_frames`].
+    fn remember(&mut self, samples: &[f32]) {
+        for x in samples {
+            if self.history.len() >= self.history_cap {
+                self.history.pop_front();
+            }
+            self.history.push_back(*x);
         }
     }
 

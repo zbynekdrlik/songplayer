@@ -5,7 +5,8 @@
 use super::{
     HRESULT_FILE_NOT_FOUND, NAME_SLOT_LEN, SENDER_NAMES_MAP, SHARED_TEXTURE_INFO_LEN,
     SPOUT_FHD_SENDER_NAME, SPOUT_NAME_MAX_LEN, SPOUT_SENDER_NAME, SharedTextureInfo,
-    check_sender_name, is_not_found, map_mutex_name, parse_sender_names, status, status_result,
+    check_sender_name, is_not_found, lost_send_error, map_mutex_name, parse_sender_names,
+    shim_send_mode, status, status_result,
 };
 use crate::error::GpuError;
 
@@ -247,4 +248,142 @@ fn only_a_missing_map_reads_as_absent() {
     for hresult in [0x8007_0005, 2, 0] {
         assert!(!is_not_found(hresult), "{hresult:#x}");
     }
+}
+
+/// #251 step 3 + 19.10.2026: the shim's send, in each hand-off mode
+/// (`program_max_spout_send`, `shim_send_mode`). spoutDX's own
+/// `SendTexture` announces right after `Flush`, while the copy may still run
+/// (step 3: a receiver then took a partly written picture). `synced` waits
+/// for the copy under the sender's mutex before it announces; holding the
+/// mutex through that wait made a receiving Arena lose its own frames
+/// (19.10.2026), so `release_then_wait` lets receivers in BEFORE the wait
+/// and still announces only a finished copy; `plain` is `SendTexture`'s
+/// order, for the A/B. The shim compiles only on Windows, so its source is
+/// read here.
+#[test]
+fn the_shim_hands_each_frame_to_spout_in_the_mode_asked() {
+    let shim = include_str!("win/spout_shim.cpp");
+    let body = shim
+        .split("int SendSynced(")
+        .nth(1)
+        .expect("spout_shim.cpp defines SyncedDX::SendSynced");
+    let wait = &body[body.find("int WaitDone(").expect("SyncedDX::WaitDone")..];
+    let body = &body[..body
+        .find("private:")
+        .expect("SendSynced ends before private:")];
+    fn in_order(text: &str, steps: &[&str]) {
+        let mut at = 0;
+        for step in steps {
+            let found = text[at..]
+                .find(step)
+                .unwrap_or_else(|| panic!("`{step}` after {at} bytes of {steps:?}"));
+            at += found + step.len();
+        }
+    }
+    // Every mode: the mutex first, then the one copy.
+    in_order(body, &["CheckTextureAccess(", "CopyResource("]);
+    assert_eq!(body.matches("CopyResource(").count(), 1, "one copy");
+    // plain: flush, announce, let receivers in, return: no wait.
+    let plain = body
+        .split("if (mode == kSendPlain) {")
+        .nth(1)
+        .expect("a plain branch");
+    let plain = &plain[..plain.find('}').expect("the plain branch ends")];
+    in_order(
+        plain,
+        &[
+            "Flush()",
+            "SetNewFrame()",
+            "AllowTextureAccess(",
+            "return kOk;",
+        ],
+    );
+    assert!(!plain.contains("WaitDone("), "plain never waits");
+    // The waiting modes, after the plain branch: the query, the flush, the
+    // wait, an announce only for a finished copy, then the mutex let go.
+    let rest = &body[body.find("if (mode == kSendPlain)").expect("checked")..];
+    let rest = &rest[rest.find("return kOk;").expect("checked")..];
+    in_order(
+        rest,
+        &[
+            "End(",
+            "Flush()",
+            "if (mode == kSendReleaseThenWait) {",
+            "AllowTextureAccess(",
+            "WaitDone(",
+            "if (result == kOk) {",
+            "SetNewFrame()",
+            "if (mode != kSendReleaseThenWait) {",
+            "AllowTextureAccess(",
+        ],
+    );
+    let announce = rest.find("SetNewFrame()").expect("checked");
+    let guard = rest[..announce]
+        .rfind("if (result == kOk)")
+        .expect("checked");
+    assert!(
+        !rest[guard..announce].contains('}'),
+        "SetNewFrame is inside the finished-copy branch"
+    );
+    // The wait ends on the query's answer, or past the bound.
+    in_order(wait, &["GetData(", "hr == S_OK && finished", "return kOk;"]);
+    assert!(
+        wait.contains("return kCopyNotDone;"),
+        "a copy not done in time is kCopyNotDone"
+    );
+    // The shim's mode codes are `shim_send_mode`'s.
+    use sp_core::config::SpoutSend;
+    for (constant, mode) in [
+        ("kSendSynced", SpoutSend::Synced),
+        ("kSendPlain", SpoutSend::Plain),
+        ("kSendReleaseThenWait", SpoutSend::ReleaseThenWait),
+    ] {
+        let line = format!("constexpr int {constant} = {};", shim_send_mode(mode));
+        assert!(shim.contains(&line), "the shim defines `{line}`");
+    }
+    assert!(
+        shim.contains("kCopyNotDone = 6;"),
+        "the shim's code for a copy not done is status::COPY_NOT_DONE"
+    );
+    assert!(
+        shim.contains("->dx.SendSynced(texture, done, bound_ms, mode)"),
+        "the shim's send goes through SendSynced with the mode"
+    );
+    assert!(
+        !shim.contains(".SendTexture("),
+        "the shim never sends through spoutDX's own SendTexture"
+    );
+}
+
+/// #251 step 3: a lost synchronised send whose copy did not finish within
+/// the bound is the crate's GPU timeout, naming the bound; any other lost
+/// code is the shim's failure under the call's own name.
+#[test]
+fn a_copy_not_done_in_time_is_a_timeout_and_other_lost_codes_name_the_shim() {
+    assert_eq!(status::COPY_NOT_DONE, 6, "the shim's kCopyNotDone");
+    assert!(matches!(
+        lost_send_error(status::COPY_NOT_DONE, 10_000),
+        GpuError::Timeout(10_000)
+    ));
+    assert!(matches!(lost_send_error(6, 250), GpuError::Timeout(250)));
+    for code in [1, 3, 4, 5, 7] {
+        assert_eq!(
+            lost_send_error(code, 10_000),
+            GpuError::Spout {
+                call: "spout_sender_send_synced",
+                code: code as u32
+            },
+            "code {code}"
+        );
+    }
+}
+
+/// #251: each hand-off reaches the shim as its own code (the shim's
+/// `SyncedDX::SendSynced` reads 0, 1 and 2).
+#[test]
+fn each_spout_hand_off_has_its_own_shim_code() {
+    use sp_core::config::SpoutSend;
+    assert_eq!(shim_send_mode(SpoutSend::Synced), 0);
+    assert_eq!(shim_send_mode(SpoutSend::Plain), 1);
+    assert_eq!(shim_send_mode(SpoutSend::ReleaseThenWait), 2);
 }

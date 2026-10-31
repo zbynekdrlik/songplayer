@@ -42,7 +42,7 @@ fn frame(w: u32, pts_ns: i64) -> PacedFrame {
         width: w,
         height: 2,
         stride: w,
-        video: SharedFrame::new(vec![0u8; (w * 2 * 3 / 2) as usize]),
+        video: SharedFrame::new(vec![0u8; (w * 2 * 3 / 2) as usize]).into(),
         audio: vec![AudioFrame {
             data: vec![0.25; 1600 * 2],
             channels: 2,
@@ -58,7 +58,7 @@ fn job(stamp: i64) -> SubmitJob {
         width: 8,
         height: 2,
         stride: 8,
-        video: SharedFrame::new(vec![0u8; 24]),
+        video: SharedFrame::new(vec![0u8; 24]).into(),
         audio: vec![AudioFrame {
             data: vec![0.5; 3200],
             channels: 2,
@@ -74,12 +74,12 @@ fn job(stamp: i64) -> SubmitJob {
 }
 
 /// The 4×2 standby black a fill would show.
-fn black() -> Picture {
-    Picture {
+fn black() -> FillPicture {
+    FillPicture {
         width: 4,
         height: 2,
         stride: 4,
-        video: SharedFrame::new(vec![16u8; 12]),
+        video: SharedFrame::new(vec![16u8; 12]).into(),
     }
 }
 

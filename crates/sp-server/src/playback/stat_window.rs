@@ -8,7 +8,11 @@
 //!   window never mixes lengths), so a figure covers the last one to two
 //!   buckets (60–120 s for a 60 s bucket);
 //! - [`WarnLimiter`]: at most one WARN per period of a timeline, counting
-//!   the ones it held back for the next WARN to report.
+//!   the ones it held back for the next WARN to report;
+//! - [`StateLog`] (#279 P1b review round 3): a state's changes for the
+//!   log, through a `WarnLimiter`, a change held back said after the
+//!   window as the state is then (the `program-max` thread's `LogGate`,
+//!   its UYVY pass's log, and NDI `SP-program`'s switch lines).
 
 /// A sample with a "worst of two": each figure's max.
 pub trait Worst: Copy + Default {
@@ -73,6 +77,52 @@ impl WarnLimiter {
         }
         self.last_100ns = Some(at_100ns);
         Some(std::mem::take(&mut self.suppressed))
+    }
+}
+
+/// What the log last said of a state, and its rate limit (pure; the
+/// caller writes the line). A line is due when the state differs from what
+/// the log last said, at most one per period of a timeline; a difference
+/// held back is due at the first observation after the window, as the
+/// state is then, so the log never ends on a state it left.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StateLog<S> {
+    limiter: WarnLimiter,
+    /// What the log last said (`S::default()` at the start).
+    logged: S,
+}
+
+impl<S> StateLog<S> {
+    /// What the log last said.
+    pub fn logged(&self) -> &S {
+        &self.logged
+    }
+
+    /// The state at `at_100ns` (`differs`: it is not what the log last
+    /// said; `state` builds it, only when its line is due): `Some(held
+    /// back)` = its line is due (the observations held back since the last
+    /// line), and the state is now what the log said; `None` otherwise.
+    pub fn change(
+        &mut self,
+        at_100ns: i64,
+        every_100ns: i64,
+        differs: bool,
+        state: impl FnOnce() -> S,
+    ) -> Option<u64> {
+        if !differs {
+            return None;
+        }
+        let held_back = self.limiter.admit(at_100ns, every_100ns)?;
+        self.logged = state();
+        Some(held_back)
+    }
+}
+
+impl<S: PartialEq> StateLog<S> {
+    /// [`change`](Self::change) for a state the caller holds by value.
+    pub fn observe(&mut self, at_100ns: i64, every_100ns: i64, state: S) -> Option<u64> {
+        let differs = self.logged != state;
+        self.change(at_100ns, every_100ns, differs, || state)
     }
 }
 

@@ -6,13 +6,13 @@ use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use sp_gpu::{ComposeStats, GpuError, SpoutSendStats};
+use sp_gpu::{ComposeStats, GpuError, Side, SpoutSendStats};
 use tokio::sync::broadcast;
 
 use super::{
     MAX_HANDOFF_BOUND, MAX_NOT_RUNNING, MAX_SETTINGS_POLL, MaxJob, MaxNext, MaxOut, MaxPhase,
-    MaxPicture, load_max_enabled, load_max_vblank_phase_us, run_max_settings_task, start_max,
-    state_label,
+    MaxPicture, load_max_compose_phase_us, load_max_enabled, load_max_vblank_phase_us,
+    load_video_quiet_us, run_max_settings_task, start_max, state_label,
 };
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_max_send::SendTiming;
@@ -235,6 +235,7 @@ fn compose(upload_us: u64, draw_us: u64) -> ComposeStats {
         upload_us,
         draw_us,
         uploads: 1,
+        ..ComposeStats::default()
     }
 }
 
@@ -328,6 +329,10 @@ fn the_max_block_has_its_api_names() {
         [
             "adapter",
             "coalesced",
+            "compose_late",
+            "compose_phase_us",
+            "compose_phase_us_p50",
+            "compose_phase_us_p99",
             "device_resets",
             "draw_us_p99",
             "enabled",
@@ -349,12 +354,15 @@ fn the_max_block_has_its_api_names() {
             "spout_relists",
             "state",
             "submitted",
+            "upload_mb_s",
             "upload_us_p99",
+            "uploads_per_s",
             "vblank_output",
             "vblank_period_ns",
             "vblank_phase_us",
             "vblank_state",
             "vblank_tracking",
+            "video_quiet",
             "width",
         ]
     );
@@ -368,7 +376,7 @@ fn a_jobs_stamp_is_its_boundary() {
         width: 2,
         height: 2,
         stride: 2,
-        video: SharedFrame::new(vec![0; 6]),
+        video: SharedFrame::new(vec![0; 6]).into(),
     };
     assert_eq!(black(11).stamp_100ns(), 11);
     let one = MaxJob::Picture {
@@ -391,7 +399,7 @@ fn a_picture_is_the_jobs_own_frame_and_layout() {
         width: 6,
         height: 4,
         stride: 8,
-        video: SharedFrame::new(vec![7; 48]),
+        video: SharedFrame::new(vec![7; 48]).into(),
         audio: Vec::new(),
         video_tc_100ns: 5,
         audio_tc_100ns: 5,
@@ -402,12 +410,18 @@ fn a_picture_is_the_jobs_own_frame_and_layout() {
     let picture = MaxPicture::of(&job);
     assert_eq!((picture.width, picture.height, picture.stride), (6, 4, 8));
     assert!(picture.video.ptr_eq(&job.video), "an Arc bump, no copy");
-    let nv12 = picture.nv12(42);
+    let Side::Cpu(nv12) = picture.side(42) else {
+        panic!("a CPU picture is uploaded");
+    };
     assert_eq!(
         (nv12.id, nv12.width, nv12.height, nv12.stride),
         (42, 6, 4, 8)
     );
-    assert_eq!(nv12.data.as_ptr(), job.video.as_ptr(), "the same bytes");
+    assert_eq!(
+        nv12.data.as_ptr(),
+        job.video.expect_cpu().as_ptr(),
+        "the same bytes"
+    );
     assert_eq!(nv12.data.len(), 48);
 }
 
@@ -457,6 +471,49 @@ fn the_vblank_phase_is_applied_and_reports_a_change() {
     assert_eq!(max.status().vblank_phase_us, 2_500);
 }
 
+/// #251: the compose phase is read with `sp_core::config`'s rule.
+#[tokio::test]
+async fn the_compose_phase_setting_is_read_in_microseconds() {
+    use crate::db::models::set_setting;
+    let pool = settings_pool().await;
+    assert_eq!(load_max_compose_phase_us(&pool).await.unwrap(), 13_000);
+    set_setting(&pool, "program_max_compose_phase_ms", "11.5")
+        .await
+        .unwrap();
+    assert_eq!(load_max_compose_phase_us(&pool).await.unwrap(), 11_500);
+}
+
+/// #251: the compose phase starts at its 13 ms default, apart from the
+/// send phase; applying a value says whether it changed.
+#[test]
+fn the_compose_phase_is_applied_and_reports_a_change() {
+    let max = MaxOut::new();
+    assert_eq!(max.compose_phase(), Duration::from_millis(13));
+    assert_eq!(max.status().compose_phase_us, 13_000);
+    assert!(!max.set_compose_phase_us(13_000), "the same value");
+    assert!(max.set_compose_phase_us(10_750));
+    assert_eq!(max.compose_phase(), Duration::from_micros(10_750));
+    assert_eq!(max.status().compose_phase_us, 10_750);
+    assert_eq!(max.vblank_phase(), Duration::from_millis(14), "its own");
+}
+
+/// #251 step 4: the video side's quiet window is read with
+/// `sp_core::config`'s rule, each end on its own.
+#[tokio::test]
+async fn the_video_quiet_window_is_read_in_microseconds() {
+    use crate::db::models::set_setting;
+    let pool = settings_pool().await;
+    assert_eq!(load_video_quiet_us(&pool).await.unwrap(), (3_000, 10_500));
+    set_setting(&pool, "program_video_quiet_from_ms", "2.5")
+        .await
+        .unwrap();
+    assert_eq!(load_video_quiet_us(&pool).await.unwrap(), (2_500, 10_500));
+    set_setting(&pool, "program_video_quiet_to_ms", "9")
+        .await
+        .unwrap();
+    assert_eq!(load_video_quiet_us(&pool).await.unwrap(), (2_500, 9_000));
+}
+
 /// Poll `done` on the runtime until it holds (bounded: 20 s).
 async fn eventually(what: &str, done: impl Fn() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -494,6 +551,21 @@ async fn the_settings_task_applies_every_change_and_stops_max_at_shutdown() {
         max.vblank_phase() == Duration::from_millis(6)
     })
     .await;
+    set_setting(&pool, "program_max_compose_phase_ms", "12")
+        .await
+        .unwrap();
+    eventually("the compose phase applied", || {
+        max.compose_phase() == Duration::from_millis(12)
+    })
+    .await;
+    set_setting(&pool, "program_video_quiet_to_ms", "8")
+        .await
+        .unwrap();
+    eventually("the video quiet window applied", || {
+        max.video.window().to == Duration::from_millis(8)
+    })
+    .await;
+    assert_eq!(max.video.window().from, Duration::from_millis(3));
 
     let _consumer = max.attach();
     assert!(max.accepting());
@@ -621,8 +693,9 @@ fn the_send_timing_reaches_the_telemetry() {
 /// #223 follow-up: how the sends were paced on the wall's refresh: its
 /// output, whether the last send was on the grid, the grid's period, the
 /// aligned sends' start after the vblank (p50 / p99) and the slot re-picks;
-/// a send at the constant lead ends the tracking and is counted off the
-/// grid.
+/// #251: where their composes started (p50 / p99) and how many came after
+/// their compose instant; a send at the constant lead ends the tracking
+/// and is counted off the grid.
 #[test]
 fn the_vblank_pacing_reaches_the_telemetry() {
     let max = MaxOut::new();
@@ -639,12 +712,27 @@ fn the_vblank_pacing_reaches_the_telemetry() {
         ),
         (false, 0, 0, 0, 0, 0)
     );
+    assert_eq!(
+        (
+            status.compose_phase_us_p50,
+            status.compose_phase_us_p99,
+            status.compose_late
+        ),
+        (0, 0, 0)
+    );
     max.record_vblank_output(r"\\.\DISPLAY2 7680x1080".to_string());
     let period = Duration::from_nanos(16_666_700);
-    for (phase_us, repicked) in [(8_010, false), (8_002, true), (9_500, false), (8_004, true)] {
+    for (phase_us, compose_phase_us, compose_late, repicked) in [
+        (8_010, 13_010, false, false),
+        (8_002, 13_002, true, true),
+        (9_500, 14_400, true, false),
+        (8_004, 13_004, false, true),
+    ] {
         max.record_vblank(Some(Aligned {
             period,
             phase_us,
+            compose_phase_us,
+            compose_late,
             repicked,
         }));
     }
@@ -664,10 +752,19 @@ fn the_vblank_pacing_reaches_the_telemetry() {
         ),
         (true, 16_666_700, 0, 8_004, 9_500, 2)
     );
+    assert_eq!(
+        (
+            status.compose_phase_us_p50,
+            status.compose_phase_us_p99,
+            status.compose_late
+        ),
+        (13_004, 14_400, 2)
+    );
     max.record_vblank(None);
     let status = max.status();
     assert!(!status.vblank_tracking, "the last send was off the grid");
     assert_eq!((status.send_off_grid, status.slot_repicks), (1, 2));
+    assert_eq!(status.compose_late, 2, "off the grid: no compose instant");
 }
 
 /// #243: the display output's state reaches the telemetry — `None` while no

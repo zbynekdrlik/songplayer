@@ -39,9 +39,11 @@ use sp_core::genlock::audio::samples_per_boundary;
 use sp_ndi::AudioFrame;
 
 use crate::playback::fleet_shift;
-use crate::playback::frame_buf::{BlackNv12, SharedFrame};
+use crate::playback::frame_buf::BlackNv12;
+use crate::playback::gpu_resident::PipelineGpu;
 use crate::playback::paced_grid::{GridStep, PacedGrid};
 use crate::playback::pacer::{FrameBlend, PacedFrame, PacedSink};
+use crate::playback::picture::Picture;
 use crate::playback::program_bus::{self, ProgramBus};
 use crate::playback::submit_handoff::{
     HandoffOutcome, SUBMIT_HANDOFF_BOUND, SubmitCounters, SubmitJob, SubmitQueue, submit_late_100ns,
@@ -364,14 +366,15 @@ impl PacedSink for HandoffSink<'_> {
     }
 }
 
-/// A picture the consumer can hold on a fill: an NV12 frame by shared
-/// reference (a refcount bump per fill, no pixel copy).
+/// A picture the consumer can hold on a fill: a boundary's picture by
+/// shared reference (a refcount bump per fill, no pixel copy; #279 P2: CPU
+/// or a ring frame).
 #[derive(Clone, Debug)]
-pub struct Picture {
+pub struct FillPicture {
     pub width: u32,
     pub height: u32,
     pub stride: u32,
-    pub video: SharedFrame,
+    pub video: Picture,
 }
 
 /// Where the consumer delivers each serviced boundary (#221 lane 3): the
@@ -425,9 +428,9 @@ pub struct PacedConsumer<O: BoundaryOut> {
     playlist_id: i64,
     wall: WallClock,
     /// The last delivered picture; a fill holds it.
-    held: Option<Picture>,
+    held: Option<FillPicture>,
     /// The standby black a fill shows when nothing was delivered yet.
-    black: Picture,
+    black: FillPicture,
     /// The channel layout of the last delivered audio block (the fill's
     /// silence follows it).
     channels: u32,
@@ -436,7 +439,7 @@ pub struct PacedConsumer<O: BoundaryOut> {
 impl<O: BoundaryOut> PacedConsumer<O> {
     /// A consumer of playlist `playlist_id` delivering to `out` on `wall`,
     /// filling with `black` until the first job.
-    pub fn new(out: O, playlist_id: i64, wall: WallClock, black: Picture) -> Self {
+    pub fn new(out: O, playlist_id: i64, wall: WallClock, black: FillPicture) -> Self {
         Self {
             out,
             playlist_id,
@@ -495,7 +498,7 @@ impl<O: BoundaryOut> PacedConsumer<O> {
 
     /// Remember `job`'s picture and audio layout for a later fill.
     fn hold(&mut self, job: &SubmitJob) {
-        self.held = Some(Picture {
+        self.held = Some(FillPicture {
             width: job.width,
             height: job.height,
             stride: job.stride,
@@ -638,12 +641,15 @@ impl Drop for PacedOutput {
 /// pipeline-lifetime consumer thread, spawned on the first paced scope and
 /// respawned when it is gone, plus the ONE standby black the idle fill, the
 /// pre-roll and the consumer's own fills show. Owned by the pipeline thread
-/// for its whole life; dropping it stops and joins the consumer.
+/// for its whole life; dropping it stops and joins the consumer. #279 P3a:
+/// it also holds the pipeline's GPU-resident side (its producer lease), so
+/// the producer device lives across the songs and goes with the pipeline.
 pub struct PipelineOutput<O: BoundaryOut + Clone + Send + 'static> {
     playlist_id: i64,
     out: O,
     paced: Option<PacedOutput>,
     black: BlackNv12,
+    gpu: PipelineGpu,
 }
 
 impl<O: BoundaryOut + Clone + Send + 'static> PipelineOutput<O> {
@@ -655,13 +661,21 @@ impl<O: BoundaryOut + Clone + Send + 'static> PipelineOutput<O> {
             out,
             paced: None,
             black: BlackNv12::default(),
+            gpu: PipelineGpu::new(playlist_id),
         }
     }
 
+    /// #279 P3a: the pipeline's GPU-resident side (the mode each song opens
+    /// in, the producer's idle release).
+    pub fn gpu(&mut self) -> &mut PipelineGpu {
+        &mut self.gpu
+    }
+
     /// The standby NV12 black for `width`×`height`, built once for the
-    /// pipeline's life (#147) and handed out by `Arc` clone.
-    pub fn standby_black_nv12(&mut self, width: u32, height: u32) -> SharedFrame {
-        self.black.get(width, height)
+    /// pipeline's life (#147) and handed out by `Arc` clone: a CPU picture
+    /// (#279 P2: the standby stays CPU).
+    pub fn standby_black_nv12(&mut self, width: u32, height: u32) -> Picture {
+        Picture::Cpu(self.black.get(width, height))
     }
 
     /// The handoff of this pipeline's consumer thread, spawning the thread on
@@ -682,7 +696,7 @@ impl<O: BoundaryOut + Clone + Send + 'static> PipelineOutput<O> {
         }
         // Dropping a finished output joins it (and logs its panic, if any).
         self.paced = None;
-        let black = Picture {
+        let black = FillPicture {
             width: black_w,
             height: black_h,
             stride: black_w,

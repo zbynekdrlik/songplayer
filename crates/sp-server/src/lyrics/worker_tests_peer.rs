@@ -217,3 +217,28 @@ async fn the_worker_fills_a_parked_row_from_the_peer() {
         assert_eq!(row, (1, Some("mtl+g35t".to_string())), "row {id}");
     }
 }
+
+/// #269: an operator corrected the song's title at SNV. PP's lyrics tick
+/// follows it too, right after the lyrics follow: every row of the video
+/// takes SNV's title as SNV's operator named it.
+#[tokio::test]
+async fn the_worker_follows_the_peers_corrected_title() {
+    let _lk = crate::lyrics::heavy_slot::DUB_FLAG_SERIAL.lock().await;
+    crate::lyrics::heavy_slot::set_dub_slot_wanted(false);
+    let (snv, pp, rows, _) = snv_lyrics_and_pp().await;
+    sqlx::query("UPDATE videos SET song = 'Way Maker (Live)', metadata_source = 'manual'")
+        .execute(snv.pool())
+        .await
+        .unwrap();
+    worker(&pp).process_next().await;
+    for id in rows {
+        let title: (String, Option<String>) =
+            sqlx::query_as("SELECT song, metadata_source FROM videos WHERE id = ?")
+                .bind(id)
+                .fetch_one(pp.pool())
+                .await
+                .unwrap();
+        let want = ("Way Maker (Live)".to_string(), Some("manual".to_string()));
+        assert_eq!(title, want, "row {id}");
+    }
+}

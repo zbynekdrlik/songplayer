@@ -374,31 +374,107 @@ body {
     padding: 4px 0;
 }
 .playlist-audio-toggle:hover { color: var(--text); }
-.playlist-audio-body { display: flex; flex-direction: column; gap: 8px; padding: 6px 0; }
-.playlist-audio-body input[type="number"] { width: 5.5em; }
+.playlist-audio-body { display: flex; flex-direction: column; gap: 10px; padding: 6px 0; }
+/* #278: the band types' colours (iemmixer's), one custom property each,
+   read by a band's own curve, its handle and its card. */
+.kind-high_pass { --eq-kind: #4ecdc4; }
+.kind-low_shelf { --eq-kind: #f4d35e; }
+.kind-peak { --eq-kind: #ff9f43; }
+.kind-high_shelf { --eq-kind: #ff6b6b; }
+.kind-low_pass { --eq-kind: #a06cd5; }
+/* #278: the curve takes the card's width and keeps the 800x300 box. No
+   border or padding: a handle's drag maps the pointer over the SVG's own
+   box (getBoundingClientRect), which a border would widen; the frame is an
+   outline drawn inside it. */
 .playlist-audio-curve {
-    max-width: 100%;
+    display: block;
+    width: 100%;
     height: auto;
+    aspect-ratio: 800 / 300;
     background: var(--bg-input);
-    border: 1px solid var(--border);
+    outline: 1px solid var(--border);
+    outline-offset: -1px;
     border-radius: 4px;
+    user-select: none;
+    -webkit-user-select: none;
 }
-.playlist-audio-curve .curve-grid { stroke: var(--border); stroke-width: 1; }
-.playlist-audio-curve .curve-zero { stroke: var(--text-dim); stroke-width: 1; stroke-dasharray: 4 3; }
-.playlist-audio-curve .curve-line { fill: none; stroke: var(--accent); stroke-width: 2; }
+.playlist-audio-curve .eq-grid { stroke: rgba(255, 255, 255, 0.08); stroke-width: 1; }
+.playlist-audio-curve .eq-zero { stroke: rgba(255, 255, 255, 0.35); stroke-width: 1.5; }
+.playlist-audio-curve .eq-grid-label {
+    fill: rgba(255, 255, 255, 0.4);
+    font-size: 11px;
+    pointer-events: none;
+}
+.playlist-audio-curve .eq-fill { fill: rgba(108, 99, 255, 0.16); stroke: none; pointer-events: none; }
+.playlist-audio-curve .eq-sum { fill: none; stroke: var(--accent); stroke-width: 2.5; pointer-events: none; }
+.playlist-audio-curve .eq-band-curve {
+    fill: none;
+    stroke: var(--eq-kind);
+    stroke-width: 1.5;
+    opacity: 0.75;
+    pointer-events: none;
+}
+.playlist-audio-curve .eq-handle-dot {
+    fill: var(--eq-kind);
+    stroke: #fff;
+    stroke-width: 2;
+    pointer-events: none;
+}
+/* The invisible grip on top of the dot takes the pointer and the wheel. */
+.playlist-audio-curve .eq-handle-grip {
+    fill: transparent;
+    cursor: grab;
+    touch-action: none;
+}
+.playlist-audio-curve .eq-handle.dragging .eq-handle-grip { cursor: grabbing; }
+.playlist-audio-curve .eq-handle.dragging .eq-handle-dot { stroke-width: 3; }
+.playlist-audio-curve .eq-handle.off .eq-handle-dot { opacity: 0.35; }
+.playlist-audio-curve .eq-handle-number {
+    fill: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    text-anchor: middle;
+    pointer-events: none;
+}
 .curve-legend { color: var(--text-dim); font-size: 0.75rem; }
-.playlist-audio-bands { display: flex; flex-direction: column; gap: 6px; }
+/* #278: a value row = label, slider, the value; a double-click resets it. */
+.eq-param {
+    display: grid;
+    grid-template-columns: 6.5em minmax(8em, 1fr) 6.5em;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+}
+.eq-param input[type="range"] { width: 100%; }
+.eq-param-label { color: var(--text-dim); }
+.eq-param-value { font-variant-numeric: tabular-nums; text-align: right; cursor: pointer; }
+.playlist-audio-bands { display: flex; flex-direction: column; gap: 8px; }
 .playlist-audio-band {
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px 10px;
-    padding: 6px;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
     border: 1px solid var(--border);
+    border-left: 4px solid var(--eq-kind);
     border-radius: 4px;
     font-size: 0.85rem;
 }
+.playlist-audio-band.off { opacity: 0.6; }
+.eq-band-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.band-number {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.6em;
+    height: 1.6em;
+    border-radius: 50%;
+    background: var(--eq-kind);
+    color: #111;
+    font-weight: 700;
+}
+.eq-band-remove { margin-left: auto; }
 .playlist-audio-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.eq-add-label { color: var(--text-dim); font-size: 0.85rem; }
 .playlist-audio-status { color: var(--text-dim); font-size: 0.85rem; }
 
 /* ---- Progress bar ---- */
@@ -532,6 +608,8 @@ body {
 .save-status { color: var(--text-dim); font-size: 0.85rem; }
 /* #239: a note under the Spout outputs (the FHD sender needs MAX on). */
 .settings-hint { color: var(--text-dim); font-size: 0.85rem; }
+/* #256: Nastavenia's line about the usage log. */
+.ui-usage-line { color: var(--text-dim); font-size: 0.85rem; }
 
 /* #233: "Zvukové výstupy" — the look of the form's fieldsets, one framed
    block per output, its cells in a grid that wraps on a narrow page. */

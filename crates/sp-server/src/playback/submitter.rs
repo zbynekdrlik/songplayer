@@ -125,6 +125,7 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             audio,
             video_tc_100ns,
             audio_tc_100ns,
+            PixelFormat::Nv12,
         );
     }
 
@@ -132,7 +133,8 @@ impl<B: NdiBackend> FrameSubmitter<B> {
     /// takes a [`SharedFrame`] whose `Arc` is MOVED straight into the async
     /// double-buffer holdover with NO pixel copy (#168 + #203). The send is by
     /// borrowed slice and the same handle becomes `prev_frame`, so the SDK's
-    /// pointer stays valid with zero copies.
+    /// pointer stays valid with zero copies. #279 P1b: `format` is the
+    /// picture's: NV12 from the CPU canvas, UYVY from the GPU readback.
     #[allow(clippy::too_many_arguments)]
     pub fn submit_frame_at_boundary_owned(
         &mut self,
@@ -143,6 +145,7 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         audio: &[AudioFrame],
         video_tc_100ns: i64,
         audio_tc_100ns: i64,
+        format: PixelFormat,
     ) {
         // #224 part 2: the ONE edge where the fleet labels go on. The video
         // stamp is an internal boundary b: on the wire it is b's boundary
@@ -172,7 +175,7 @@ impl<B: NdiBackend> FrameSubmitter<B> {
                 stride,
                 self.frame_rate_n,
                 self.frame_rate_d,
-                PixelFormat::Nv12,
+                format,
                 Some(video_tc_100ns),
                 &video[..],
             );
@@ -198,6 +201,22 @@ impl<B: NdiBackend> FrameSubmitter<B> {
     pub(crate) fn held_frame(&self) -> Option<&SharedFrame> {
         self.prev_frame.as_ref()
     }
+
+    /// #279 P2: what the tests' pacer sink puts on the wire for `video`: a
+    /// CPU picture's own bytes (an `Arc` bump); a ring frame has none for
+    /// NDI, so its boundary goes out as the black of its size.
+    #[cfg(test)]
+    fn wire_frame(
+        &mut self,
+        width: u32,
+        height: u32,
+        video: &crate::playback::picture::Picture,
+    ) -> SharedFrame {
+        match video.cpu() {
+            Some(frame) => frame.clone(),
+            None => self.standby_black_nv12(width, height),
+        }
+    }
 }
 
 /// A `FrameSubmitter` is a [`PacedSink`](crate::playback::pacer::PacedSink)
@@ -217,14 +236,16 @@ impl<B: NdiBackend> crate::playback::pacer::PacedSink for FrameSubmitter<B> {
         // `audio` is the boundary's media-aligned block (#148), NOT
         // `video.audio` — the pacer moves that into its grid buffer on pull.
         // #147 round 10: an Arc bump of the pacer's frame, never a pixel copy.
+        let frame = self.wire_frame(video.width, video.height, &video.video);
         self.submit_frame_at_boundary_owned(
             video.width,
             video.height,
             video.stride,
-            video.video.clone(),
+            frame,
             audio,
             video_tc_100ns,
             audio_tc_100ns,
+            PixelFormat::Nv12,
         );
     }
 
@@ -237,19 +258,21 @@ impl<B: NdiBackend> crate::playback::pacer::PacedSink for FrameSubmitter<B> {
         width: u32,
         height: u32,
         stride: u32,
-        video: SharedFrame,
+        video: crate::playback::picture::Picture,
         audio: &[AudioFrame],
         video_tc_100ns: i64,
         audio_tc_100ns: i64,
     ) {
+        let frame = self.wire_frame(width, height, &video);
         self.submit_frame_at_boundary_owned(
             width,
             height,
             stride,
-            video,
+            frame,
             audio,
             video_tc_100ns,
             audio_tc_100ns,
+            PixelFormat::Nv12,
         );
     }
 }

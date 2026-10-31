@@ -90,6 +90,9 @@ pub fn App() -> impl IntoView {
     let page = RwSignal::new(initial);
     provide_context(page);
 
+    // #256: record how the dashboard is used (never in an automated session).
+    crate::usage::install(page);
+
     // When the user clicks a tab, also update the address bar so a
     // subsequent reload lands on the same page.
     let go = move |target: Page| {

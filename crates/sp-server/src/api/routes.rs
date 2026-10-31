@@ -7,9 +7,10 @@ use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use tokio::fs;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 use super::routes_mode::{MODE_ORDER, requested_mode};
+use crate::db::models_membership::follow_activation;
 use crate::metadata::manual::refused_title;
 use crate::{AppState, EngineCommand, SyncRequest};
 
@@ -109,6 +110,10 @@ pub struct StatusResponse {
     /// Defender's real-time protection, the firewall). Missing key → not checked.
     #[serde(default)]
     pub environment: sp_core::prod_env::EnvironmentStatus,
+    /// #261: the data dir's size (`data_dir_bytes`, `cache_bytes`,
+    /// `data_dir_measured_ms` at the top level; null until the first measure).
+    #[serde(flatten)]
+    pub data_size: sp_core::data_size::DataSize,
 }
 
 // #136 / #223 S3b: moved to `routes_status` for the 1000-line cap.
@@ -308,11 +313,40 @@ pub async fn update_playlist(
     query = query.bind(id);
 
     let _order = MODE_ORDER.lock().await; // the row, then the engine (#225)
-    match query.execute(&state.pool).await {
-        Ok(result) => {
-            if result.rows_affected() == 0 {
+    // #261: an `is_active` write takes its playlist's marks with it, in one
+    // transaction, under the song-file lock (the sync's marks and #260's
+    // retention take it too: a reactivation never races a file delete),
+    // released with the block, before the engine is told.
+    let written = {
+        let _files = match body.is_active {
+            Some(_) => Some(crate::downloader::cache::SONG_FILES.lock().await),
+            None => None,
+        };
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        async {
+            let mut tx = state.pool.begin().await?;
+            let rows = query.execute(&mut *tx).await?.rows_affected();
+            // No row (an unknown id) has no songs to mark either.
+            let songs = match body.is_active {
+                Some(active) => Some(follow_activation(&mut tx, id, active, now_ms).await?),
+                None => None,
+            };
+            tx.commit().await?;
+            Ok::<_, sqlx::Error>((rows, songs))
+        }
+        .await
+    };
+    match written {
+        Ok((rows, songs)) => {
+            if rows == 0 {
                 StatusCode::NOT_FOUND.into_response()
             } else {
+                if let (Some(active), Some(songs)) = (body.is_active, songs) {
+                    info!(
+                        playlist_id = id,
+                        active, songs, "playlist activation: its songs' marks follow it (#261)"
+                    );
+                }
                 if let Some(mode) = mode {
                     super::routes_mode::tell_engine(&state.engine_tx, id, mode).await;
                 }
@@ -344,13 +378,10 @@ pub async fn delete_playlist(
 ) -> impl IntoResponse {
     // #225 unit 2: never between a mode change's write and its tell.
     let _order = MODE_ORDER.lock().await;
-    match sqlx::query("DELETE FROM playlists WHERE id = ?")
-        .bind(id)
-        .execute(&state.pool)
-        .await
-    {
-        Ok(result) => {
-            if result.rows_affected() == 0 {
+    // #261: every set list that held one of its songs is numbered again.
+    match crate::db::models_set_list::delete_playlist(&state.pool, id).await {
+        Ok(deleted) => {
+            if !deleted {
                 StatusCode::NOT_FOUND.into_response()
             } else {
                 // #132: tear down the deleted playlist's pipeline symmetrically.
@@ -721,6 +752,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
         paid_ai_enabled: paid_ai.enabled,
         paid_ai_held: paid_ai.held,
         environment,
+        data_size: crate::data_size::current(),
     })
 }
 
@@ -939,3 +971,7 @@ mod tests_patch_metadata;
 #[path = "routes_tests_lyrics_fetch.rs"]
 #[cfg(test)]
 mod tests_lyrics_fetch;
+
+#[path = "routes_tests_retention.rs"]
+#[cfg(test)]
+mod tests_retention;

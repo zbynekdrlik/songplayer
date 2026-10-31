@@ -6,6 +6,8 @@ pub mod asio_resampling; // #233: a running ASIO output's chips (the owner's res
 pub mod audio_faults; // #257: the audio fault ledger's answer, the HealthBar segment, the panel's texts
 pub mod audio_faults_timeline; // #257: the panel's timeline (buckets, bars, axis)
 pub mod audio_fx; // #242: a playlist's own volume + parametric EQ (model, filters, curve)
+pub mod audio_fx_send; // #278: the EQ panel's live sends (50 ms throttle, one in flight)
+pub mod audio_fx_view; // #278: the EQ panel's view maths (drag, sliders, labels, grid, order)
 pub mod audio_level;
 pub mod audio_outputs;
 pub mod audio_outputs_save; // #233 release review: the dashboard's save decisions
@@ -13,6 +15,7 @@ pub mod background_hold; // #230: a sp-90s press holds the background work 4 h /
 pub mod blend;
 pub mod clock_health;
 pub mod config;
+pub mod data_size; // #261: the data dir's size on the status, Nastavenia's line
 pub mod fit;
 pub mod genlock;
 pub mod health;
@@ -27,10 +30,13 @@ pub mod player_view;
 pub mod preview_lag;
 pub mod prod_env; // #233: the production environment's problems, status and health segment
 pub mod program_refusal;
+pub mod query_param; // #256: the one whole-count query parse (hours, days)
 pub mod seek_model;
 pub mod status_chip;
+pub mod ui_usage; // #256: the dashboard's usage log (wire, client rules, summary, Nastavenia line)
 pub mod video_upgrade_view; // #223 S13: Nastavenia's view of the 4K upgrade
 pub mod wall; // #259: the LED wall's state, problems, status and health segment
+pub mod wall_clip; // #275: SongPlayer's clip on the wall (the fact and the health bar's note)
 pub mod ws;
 
 #[cfg(test)]
@@ -262,20 +268,6 @@ mod tests {
         let json = serde_json::to_string(&h).unwrap();
         let back: models::ResolumeHost = serde_json::from_str(&json).unwrap();
         assert_eq!(h, back);
-    }
-
-    #[test]
-    fn resolume_clip_mapping_serde_roundtrip() {
-        let m = models::ResolumeClipMapping {
-            id: 1,
-            resolume_host_id: 1,
-            playlist_id: 1,
-            layer: 3,
-            column: 5,
-        };
-        let json = serde_json::to_string(&m).unwrap();
-        let back: models::ResolumeClipMapping = serde_json::from_str(&json).unwrap();
-        assert_eq!(m, back);
     }
 
     // ---- WebSocket messages ----

@@ -377,6 +377,7 @@ fn offer_frame_feeds_the_stream_video_and_audio_taps() {
         stride: 64,
         timestamp_ms: 0,
         pixel_format: sp_decoder::PixelFormat::Nv12,
+        gpu: None,
     };
     let audio = [sp_decoder::DecodedAudioFrame {
         data: vec![0.25f32, -0.25, 0.5, -0.5],

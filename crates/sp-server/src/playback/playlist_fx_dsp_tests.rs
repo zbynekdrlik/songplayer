@@ -5,7 +5,7 @@
 
 use sp_core::audio_fx::{BandKind, EqBand, PlaylistFx, response_db};
 
-use super::{FX_RAMP_FRAMES, FxProcessor, db_to_gain};
+use super::{FX_RAMP_FRAMES, FxProcessor, db_to_gain, warm_frames};
 
 const RATE: u32 = 48_000;
 
@@ -206,7 +206,9 @@ fn a_volume_change_ramps_and_lands_exactly() {
 
 /// An EQ change fades from the old cascade's output into the new one's: at
 /// frame k of the fade the output is w·old + (1 − w)·new, w = (2400 − k) /
-/// 2400, and from the end on it is the new cascade alone.
+/// 2400, and from the end on it is the new cascade alone. #278: the new
+/// cascade has already run over the song's last 300 ms (here all of its
+/// 100 frames, heard untouched before the change), so `fresh` hears them too.
 #[test]
 fn an_eq_change_crossfades_from_the_old_filters_to_the_new() {
     let hp = fx(0.0, vec![band(BandKind::HighPass, 100.0, 0.0, 0.707)]);
@@ -216,6 +218,7 @@ fn an_eq_change_crossfades_from_the_old_filters_to_the_new() {
     switched.update(&hp);
     assert!(!switched.is_passthrough());
     let mut fresh = FxProcessor::new(&hp, RATE, 1);
+    fresh.process(&mut [1.0f32; 100]);
     let mut out = vec![1.0f32; 3000];
     let mut new_only = vec![1.0f32; 3000];
     switched.process(&mut out);
@@ -283,4 +286,96 @@ fn a_volume_only_change_keeps_the_filters_state() {
     changed.process(&mut a2);
     steady.process(&mut b2);
     assert_eq!(a2, b2);
+}
+
+/// `frames` of stereo: the left channel a sum of `left` sines, the right of
+/// `right` (amplitude 0.5 split between a side's tones).
+fn tones(left: &[f64], right: &[f64], frames: usize) -> Vec<f32> {
+    let side = |freqs: &[f64], n: usize| -> f32 {
+        let t = n as f64 / f64::from(RATE);
+        let sum: f64 = freqs
+            .iter()
+            .map(|f| (2.0 * std::f64::consts::PI * f * t).sin())
+            .sum();
+        (0.5 * sum / freqs.len() as f64) as f32
+    };
+    (0..frames)
+        .flat_map(|n| [side(left, n), side(right, n)])
+        .collect()
+}
+
+/// `settings` run over `input` (stereo) from its first frame.
+fn run_all(settings: &PlaylistFx, input: &[f32]) -> Vec<f32> {
+    let mut out = input.to_vec();
+    FxProcessor::new(settings, RATE, 2).process(&mut out);
+    out
+}
+
+/// #278: a live drag sends an EQ change every 50 ms. A narrow boost moved
+/// next to a tone must fade into filters that are already SETTLED on the
+/// song: from zero state the new resonance rings up inside every fade, a
+/// wobble at the drag's rate (modelled at -28 dB rms below the signal on
+/// this case). Every frame of the fade and after it stays within 1e-4 of
+/// the fade between the two settled cascades.
+#[test]
+fn a_narrow_peak_moved_by_a_tone_fades_into_settled_filters() {
+    let before = fx(0.0, vec![band(BandKind::Peak, 100.0, 9.0, 5.0)]);
+    let after = fx(0.0, vec![band(BandKind::Peak, 120.0, 9.0, 5.0)]);
+    let change = 48_000;
+    let input = tones(&[110.0], &[160.0, 95.0], change + 9_600);
+    let old = run_all(&before, &input);
+    let new = run_all(&after, &input);
+
+    let mut switched = FxProcessor::new(&before, RATE, 2);
+    let mut out = input.clone();
+    let (head, tail) = out.split_at_mut(change * 2);
+    switched.process(head);
+    switched.update(&after);
+    switched.process(tail);
+
+    for (i, got) in tail.iter().enumerate() {
+        let k = i / 2;
+        let at = change * 2 + i;
+        let w = (2400usize.saturating_sub(k)) as f64 / 2400.0;
+        let want = w * f64::from(old[at]) + (1.0 - w) * f64::from(new[at]);
+        assert!(
+            (f64::from(*got) - want).abs() < 1e-4,
+            "frame {k} of the fade, sample {i}: {got} vs {want}"
+        );
+    }
+}
+
+/// #278: the new filters warm on EXACTLY the song's last 300 ms (14 400
+/// frames at 48 kHz) and both channels apart: after the fade the output is
+/// bit for bit that of the new settings fed only those frames. A 20 Hz
+/// Q 10 boost remembers ~160 ms, so one frame more or less of warm-up, or
+/// a window that never forgets, reads differently here.
+#[test]
+fn an_eq_change_warms_the_new_filters_on_exactly_the_last_300_ms() {
+    let after = fx(0.0, vec![band(BandKind::Peak, 20.0, 12.0, 10.0)]);
+    let change = 48_000;
+    let window = 14_400;
+    let input = tones(&[22.0, 300.0], &[31.0], change + 4_800);
+
+    let mut switched = FxProcessor::new(&PlaylistFx::default(), RATE, 2);
+    let mut out = input.clone();
+    let (head, tail) = out.split_at_mut(change * 2);
+    switched.process(head);
+    switched.update(&after);
+    switched.process(tail);
+
+    let mut fed = input[(change - window) * 2..].to_vec();
+    FxProcessor::new(&after, RATE, 2).process(&mut fed);
+    let want = &fed[window * 2..];
+    for (i, (got, want)) in tail.iter().zip(want).enumerate().skip(2400 * 2) {
+        assert_eq!(got, want, "sample {i} after the change");
+    }
+}
+
+/// #278: the warm-up window is 300 ms of frames at the stream's rate.
+#[test]
+fn the_warm_up_holds_300_ms_of_frames() {
+    assert_eq!(warm_frames(48_000), 14_400);
+    assert_eq!(warm_frames(44_100), 13_230);
+    assert_eq!(warm_frames(96_000), 28_800);
 }

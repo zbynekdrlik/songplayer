@@ -3,6 +3,7 @@ paths:
   - "crates/sp-server/src/downloader/cache*.rs"
   - "crates/sp-server/src/downloader/mod.rs"
   - "crates/sp-server/src/peer/download*.rs"
+  - "crates/sp-server/src/peer/follow_title*.rs"
   - "crates/sp-server/src/reprocess/**"
   - "crates/sp-server/src/startup.rs"
   - "crates/sp-server/src/song_relink*.rs"
@@ -63,10 +64,14 @@ Design record: #136 comment 5894034820.
     found this before it shipped. When a path cannot be canonicalized, the
     unit rolls back rather than guess.
   - A `.replaced` is left over by a crash mid-unit, a failed give-back, a stuck
-    move back, or a failed delete after the unit moved. It is never deleted and
-    never overwritten: the next set-aside of that name takes
+    move back, or a failed delete after the unit moved. It is never
+    overwritten: the next set-aside of that name takes
     `<name>.2.replaced`, and so on. The startup self-heal WARNs each one:
-    `self-heal: a replaced song file is still set aside …`.
+    `self-heal: a replaced song file is still set aside …`. #261's daily
+    cache sweep (`cache-sweep.md`) deletes one 30 days after its last
+    write, and only while the name it was set aside from holds a file (it
+    is then the stale copy the unit meant to delete); with that name empty
+    it may be the only copy, and it stays.
   - Tests force a failing step with `move_as_unit_with(…, &Failing{…})`.
     `FileOps` is the seam; production uses `RealFs`. `Failing` fails a chosen
     stat, rename, identity check or delete, or marks every set-aside name taken
@@ -93,14 +98,18 @@ Design record: #136 comment 5894034820.
     recorded the old set: the same video in another playlist is a second row
     pointing at the same files. The ONE statement for that is
     `SongColumns::record(pool, youtube_id, old_video, old_audio)`.
-  - Three renamers today, all under `cache::SONG_FILES`: the metadata repair
+  - Four renamers today, all under `cache::SONG_FILES`: the metadata repair
     (`reprocess/mod.rs`); an operator's title correction
-    (`metadata::manual::apply_to_video`, ROZHODNUTÉ 5908227964: every row of
-    the video, each row's set read right before its move and named after
-    that row's title; a row with no files, `SongFiles::is_empty`, is
-    skipped); and a finished download whose video was corrected while it
-    ran (`metadata::manual::record_download`, review round 1: the fresh
-    pair is renamed after the correction before it is recorded).
+    (`metadata::manual::apply_to_video` = `spread_title` + `rename_rows`,
+    ROZHODNUTÉ 5908227964: every row of the video, each row's set read
+    right before its move and named after that row's title; a row with no
+    files, `SongFiles::is_empty`, is skipped); a peer's title the exchange
+    follows (#269, `peer::follow_title`: the same `rename_rows`, named after
+    the peer's title, FIRST, and the title written by `spread_title` only
+    when every set moved, so a held file is retried); and a finished
+    download whose video was corrected while it ran
+    (`metadata::manual::record_download`, review round 1: the fresh pair is
+    renamed after the correction before it is recorded).
   - Read the old set from the DB right before the move, never from a batch
     snapshot (an earlier row may have moved it).
   - Hold `cache::SONG_FILES` (a process-wide async lock) from that read to the
@@ -178,7 +187,8 @@ Design record: #136 comment 5894034820.
   held open on Windows), the attempt drops its video temp (its audio temp
   went right after the normalize), and drops the audio only when no row
   records it (`cache::recorded_by_a_row`, the self-heal's own ownership
-  query, read and deleted under `cache::SONG_FILES`; a failed read keeps
+  query over the five recording columns, #261 `RECORDING_COLUMNS`, read
+  and deleted under `cache::SONG_FILES`; a failed read keeps
   it, WARNed). Pinned by
   `mod_tests.rs::a_failed_video_rename_keeps_the_audio_two_rows_record`
   (RED → GREEN), `…_drops_an_audio_no_row_records` (no orphan) and
@@ -222,7 +232,8 @@ Design record: #136 comment 5894034820.
   - Leftovers are never deleted by inference: an old stems pair not chosen,
     or a superseded dub the kept row did not adopt, stays on disk. It costs
     disk space, never correctness, and deleting by name could destroy the only
-    copy of an operator-requested dub.
+    copy of an operator-requested dub. #261's cache sweep keeps this: it
+    deletes a song's files only once NO row of its video is left.
 
 ## Box verification (after a deploy that runs the self-heal)
 
@@ -235,7 +246,9 @@ Design record: #136 comment 5894034820.
 - A `self-heal: a replaced song file is still set aside … <path>` WARN
   repeats at every start until someone acts. Compare that `.replaced` file
   with the file now under the name it was set aside from. Delete it by hand
-  if it is an older copy; restore it if the name is empty.
+  if it is an older copy (the cache sweep deletes it 30 days after its last
+  write anyway); restore it if the name is empty (the sweep never deletes
+  that one).
 - Tripwire WARN: `lyrics: stems are recorded done but the vocals file is
   missing under the audio's name`. The rename and the post-job re-link keep
   it quiet. One known cause remains outside the rename path:

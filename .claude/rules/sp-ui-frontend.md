@@ -179,8 +179,8 @@ Edition 2024's `impl Trait` captures ALL in-scope lifetimes, so
 for the `&DubRow` lifetime. Call it as `{row_view(&row)}` inside a `<For>`
 `children=move |row| view!{ … }` closure and rustc rejects it with
 `error[E0515]: cannot return value referencing function parameter 'row'` — the
-returned `view!` structure holds a reference to the closure's local `row`. The
-no-compile TIER-0 box can't see it; it failed #180's Build WASM job.
+returned `view!` structure holds a reference to the closure's local `row`. It
+failed #180's Build WASM job.
 
 Fix: pass the OWNED fields the helper needs instead of a borrow —
 `fn row_view(chain_state: String, dub_error: Option<String>) -> impl IntoView`,
@@ -386,8 +386,7 @@ it. Never re-implement a row, a status marker, or an import field per page.
   messages in the test's `finally` (or add it to that test's allow-list) — it is
   the point of the test, not a bug.
 - **`Option::<T>::new()` does not exist** — `Option` has no `new`; seed an
-  `RwSignal<Option<T>>` with `None::<T>`. The TIER-0 no-compile box can't catch
-  it; it fails Build WASM (`E0599`).
+  `RwSignal<Option<T>>` with `None::<T>`. It fails Build WASM (`E0599`).
 
 ### Cross-page review checklist (run for every lane that touches `sp-ui`)
 
@@ -631,8 +630,8 @@ deliberate 500's `Failed to load resource` console entry in the error test.
 `BANNED_PLACEHOLDERS`). A stronger POSITIVE gate ("fail any pure-ASCII chrome
 word not in a product-name allowlist") was deferred: the Slovak-without-diacritics
 allowlist (skladby, skladba, Interpret, adresa, osoba, Dabing, dabingu, Mix,
-Stemy, stemov, …) cannot be bounded ≤30 or verified complete from the Tier-0
-no-mock-run box — static source extraction can't separate rendered chrome from
+Stemy, stemov, …) cannot be bounded ≤30 or verified complete by static source
+extraction, which can't separate rendered chrome from
 comments / CSS / testids / format fragments, so a positive gate would false-
 positive and red CI. New denylist entries must be verified ABSENT from the view
 code first (grep the string literal, exclude comment/class/testid lines).
@@ -875,7 +874,7 @@ miesto"). The fix is a pending-target DISPLAY HOLD:
   displayed value never drops below the target during the hold, then follows
   live. The box proof is in `post-deploy-preview.spec.ts` (see `preview.md`).
 
-## Running the mock E2E locally for a JS-only sp-ui change (Tier-0: no trunk build)
+## Running the mock E2E locally for a JS-only sp-ui change (no trunk build)
 
 `sp-ui/*.js` shims (e.g. `preview_player.js`) are bundled by trunk into
 `dist/snippets/sp-ui-<hash>/<name>.js`, referenced from `dist/index.html` by a
@@ -889,6 +888,10 @@ from a shim can be imported node-side in a spec (`import { f } from
 "../sp-ui/preview_player.js"`); the class touches browser globals only inside
 methods. The mock hardcodes port 8920 — if another session's stale mock holds
 it, run a port-substituted scratch copy with a config override of `baseURL`.
+The copy must sit IN `e2e/` (e.g. `e2e/mock-api-8933.mjs`, deleted before the
+commit): the mock reads `../VERSION` and `fixtures/` relative to its own
+`__dirname`. A spec that only reads the mock's API (`request` fixture, no
+`page`, e.g. `max-gate.spec.ts`) needs no `dist/` at all (#251 step 2).
 In a fresh worktree run `cd e2e && npm ci && npx playwright install chromium`
 first (the cached browser build may not match the lockfile's Playwright). Stop
 the scratch mock by PID (`ss -ltnp | grep :<port>`), never `pkill -f <name>` —
@@ -1112,3 +1115,52 @@ the existing components (#256: no redesign); design record on #266.
   `e2e/player-paused.spec.ts` (the label, the preview offered only while
   decoding, the idle line, a running preview kept through a pause and the
   resume, same element); sp-core pins in `player_view_tests_status.rs`.
+
+## Pointer, wheel and focus on a live SVG control (#278, the playlist EQ)
+
+Learned on the EQ panel (`playlist-audio.md` has its own details); they
+hold for any draggable control the dashboard grows:
+
+- **A direct `on:wheel` is NOT passive.** Leptos CSR here attaches each
+  `on:` listener to its element (no delegation), so `preventDefault()`
+  in it keeps the page still. A spec proves it by reading `scrollY`
+  BEFORE the wheel and comparing after (comparing to 0 is a tautology).
+- **Never give a pointer-mapped SVG a CSS border or padding.**
+  `getBoundingClientRect` includes them, so `clientX − rect.left` mapped
+  over `rect.width` is off by the border (a level drag read −0,1 dB).
+  Draw the frame with `outline` + a negative `outline-offset`.
+- **A small hit target gets an invisible grip, and the drag keeps its
+  grab offset.** A 9-unit dot in an 800-unit box is ~4 px on a phone:
+  put a transparent circle on top that takes the pointer (`fill:
+  transparent`, `touch-action: none`, the dot `pointer-events: none`),
+  and move the value BY the pointer's travel from where it took hold —
+  an absolute mapping jumps the value to the pointer on the first move.
+- **A keyed `<For>` that MOVES a row takes the focus from a control in
+  it** (the browser re-inserts the node). Read `document.activeElement`
+  before the reorder and give it back in `request_animation_frame` with
+  `FocusOptions { preventScroll: true }` (web-sys feature `FocusOptions`),
+  so the page never jumps.
+- **Time a client-side throttle in the PAGE, not at the mock.** An
+  `addInitScript` that wraps `window.fetch` and records
+  `performance.now()` per request sees every send (gloo-net 0.6 calls the
+  GLOBAL `fetch` with a `Request` object: read `input.url` /
+  `input.method`); the mock's arrival times include the runner's load.
+- **A mock route that delays its answer needs a reset epoch.** A delayed
+  handler still waiting when the next test's `reset` runs must answer but
+  store nothing (`playlistAudioEpoch` in `e2e/mock-api.mjs`), or one test
+  writes into the next.
+
+## The dashboard also runs in SongPlayer's own hidden app window (#256)
+
+`src-tauri/tauri.conf.json` opens a window on `http://127.0.0.1:8920` at
+every start, hidden (`visible: false`) and unfocused (`focus: false`) until
+the tray shows it. Anything the dashboard does on load therefore starts at
+every SongPlayer start (each deploy) and runs with nobody looking for as
+long as SongPlayer runs: a poll, a preview (the #178 click-to-start rule
+exists for it), a usage record. WebView2 may
+still report that page `visible` (wry keeps its controller visible), so
+gate "somebody is looking" on `document.hasFocus()` too, and catch the
+moment it is shown with `window`'s `focus` event (`usage.rs`,
+`sp_core::ui_usage::PageViews`). A Playwright page reads visible AND
+focused (focus emulation): fake the app window by overriding
+`document.hasFocus` in an init script (`e2e/ui-usage.spec.ts`).

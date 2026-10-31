@@ -312,6 +312,15 @@ longer commands — redirect to a log file and read that instead.
 - `ProcessThread.IdealProcessor` is WRITE-ONLY in PowerShell — reading it throws
   per thread and empties the row set; use `BasePriority`/`CurrentPriority`/
   `ThreadState`/`WaitReason` only.
+- **Windows PowerShell 5.1 hands a top-level JSON ARRAY from `Invoke-RestMethod`
+  down the pipeline as ONE object** (#251, 16.10.2026). So
+  `Invoke-RestMethod …/ndi/health | Where-Object { $_.transport -eq 'Playing' }`
+  passes the whole array, and EVERY playlist reads as "playing". That false
+  finding was posted to the owner and retracted (#251 comment 6215383194).
+  Enumerate first, `(Invoke-RestMethod $u) | ForEach-Object { $_ } | Where-Object …`,
+  or `$r = Invoke-RestMethod $u; $r.Where({ $_.transport -eq 'Playing' })`.
+  Cross-check any surprising state against the SongPlayer log's per-playlist
+  `ndi: heartbeat … state=` lines.
 - Per-process page faults, the box-wide demand-zero rate and interrupts are the
   first counters to read when "everything is slow but the CPU is idle":
   `Get-Counter '\Process(*)\Page Faults/sec','\Memory\Demand Zero Faults/sec','\Processor(_Total)\Interrupts/sec' -SampleInterval 2 -MaxSamples 2`.
@@ -443,6 +452,13 @@ The REST deck-by-deck run failed. The safe path is an offline edit of the saved 
 - **When a display Arena outputs to vanishes** (screens off, a reboot with the screens off, a Surround change), Arena drops its output window and the Advanced Output screen falls back to `Virtual Output (800x600)`; it does NOT re-open the output when the display returns. Opening Output → Advanced… re-creates the output window (Save & Close keeps it). The dialog (and windows Windows moved) can open ON the wall: move it with `SetWindowPos` to the primary before clicking. `Ctrl+Shift+D` does nothing on 7.27.1. Arena's Advanced Output devices on SNV: Display 1 (the span), Display 2 (VDD), NDI, Spout, Virtual Output, DeckLink SDI 1–8 (SNV has a DeckLink card).
 - **Arena's output config on disk:** `Documents\Resolume Arena\Preferences\AdvancedOutput.xml` (`presetFile=`), `SimpleOutput.xml` (`advancedModeEnabled`), presets in `Presets\Advanced Output\*.xml` (`<OutputDeviceDisplay deviceId="\Registry\Machine\…\Video\{GUID}\000N" width= height=>` = Windows' `DISPLAY_DEVICE.DeviceKey`). SNV today: `snv surround 7680` (one screen on the 7680×1080 span); `snv 3 ultravide` (three separate 2560×1080 screens) is UNUSABLE — the three outputs are not in sync (owner).
 - **NVIDIA Surround on SNV (GeForce RTX 3070 Ti):** NVAPI works (`diag\wall-bridge\nvapi_grid_read.py` read-only; `nvapi_grid_cycle.py` dissolve + re-form, 4.6 s each). Enabling Surround (Control Panel or NVAPI) DETACHES the primary VDD within ~1 min and moves OBS / Arena windows onto the wall; `DisplaySwitch.exe /extend` brings back Windows' saved layout (VDD primary at 0,0, span at x 3840). The Control Panel's Surround dialog showed "Display connection error" and offered only 11520×2160 @ 30 Hz (two screens hang on DisplayPort adapters).
+- **A wall screen black while NVAPI reads it `active` (SNV 20.10.2026):** after reboots and an NVIDIA driver reinstall, the DP→HDMI adapter in front of the left screen (`0x80061086`) kept hot-plug high and sent nothing. The owner's power cycle of the screen changed nothing at the PC. The colour data was identical on all three outputs (RGB, full, 8 bpc; `diag\wall-bridge\nvapi_color.py` reads and sets it per display). The fix was re-seating the adapter at the PC: the span stayed formed. On driver 617.42, NVAPI reports the span as ONE 1×1 grid of `0x80061088` (7680×1080), not 1×3. Setting the 13.10 pinned 1×3 grid (`nvapi_grid_reform.py`) answered -1 and dropped the span to one display; `DisplaySwitch /extend` did not help, a reboot restored it. Never set a pinned grid on this driver.
+- **NVIDIA driver profiles on SNV (read with NVIDIA Profile Inspector 3.0.2.1 in `diag\npi\app`, `-exportCustomized`; merge-import a `.nip` with `-silentImport -mergeImport`):**
+  - Sunshine's `nvprefs` sets the GLOBAL "Vulkan/OpenGL present method" (`0x20D690F8`) to 1 (layered on DXGI) at every start, with its undo file in `C:\ProgramData\Sunshine\nvprefs_undo.json`.
+  - The Base profile also holds Ultra Low Latency = Ultra, max pre-rendered frames 1 and max-performance power, of unknown origin.
+  - Arena presents through its own DXGI swapchains (`d3d12.dll` loaded), so the GL present method changes nothing for it (#251 step 7).
+  - Change a GPU driver only with a reboot right after it: a live swap left Arena stuck in teardown.
+- **Repair-installing Arena:** a silent Inno setup aborts with exit 5 while Arena's crash reporter `BugSplatMonitor.exe` runs (RestartManager cannot close it). Stop it along with Arena (`diag\wall-bridge\arena_install.ps1`). Pass `/DIR=` explicitly, or setup installs into the folder the uninstall entry names. A side install (`C:\Program Files\Resolume Arena 7.27.1`) takes over the uninstall entry, the shortcuts and the `.avc` association until the main version is repair-installed.
 - **Measuring Arena's OWN frames (no screen capture):** switch on Output → Texture sharing (Spout) (sender `Arena - Composition`, 2580×360); `diag\wall-bridge\arena_vs_sp.py <s>` reads it next to `SP-program-MAX` (when Arena shows each new picture after our send) and `phase_sweep_arena.py <log> <s> <restore> <phase>…` PATCHes `program_max_vblank_phase_ms` and counts Arena's 1- and 3-frame pictures per phase. Run them with `Start-Process … -WindowStyle Hidden` (an MCP `Shell` call is cut at ~30 s). Switch the Spout output off again when done (it is the operator's Resolume setting).
 
 ## PP site — resolume-pp (#229 phase 0, 6.10.2026)

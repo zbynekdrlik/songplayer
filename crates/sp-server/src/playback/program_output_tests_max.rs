@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sp_core::genlock::{GENLOCK_GRID_FPS, floor_boundary_100ns, strict_next_boundary_100ns};
+use sp_gpu::FakeRing;
 use sp_ndi::test_util::MockNdiBackend;
 use sp_ndi::{AudioFrame, NdiSender};
 
@@ -42,7 +43,7 @@ fn source(width: u32, stamp: i64) -> SubmitJob {
         width,
         height: 2,
         stride: width,
-        video: SharedFrame::new(vec![90u8; width as usize * 3]),
+        video: SharedFrame::new(vec![90u8; width as usize * 3]).into(),
         audio: vec![AudioFrame {
             data: vec![0.0; 3200],
             channels: 2,
@@ -123,6 +124,71 @@ fn a_forwarded_boundary_offers_its_native_picture_and_ndi_gets_the_canvas() {
         ["send_video_async(42,NV12,2x2,stride=2,30/1)"],
         "NDI got the 2x2 canvas, not the 4x2 native picture"
     );
+}
+
+#[test]
+fn a_ring_frame_goes_to_max_itself_and_the_canvas_counts_a_miss() {
+    // #279 P2: a source pair whose picture is a ring frame (P3a's hardware
+    // decode). MAX gets the frame itself (an `Arc` bump, sampled in place);
+    // `SP-program`'s CPU canvas cannot read it, so NDI sends the canvas
+    // black and the miss is counted, never a panic, never a skipped
+    // boundary. A CPU frame blended toward a ring frame shows its own side
+    // faded toward black (the ring side) and counts that miss too.
+    let backend = Arc::new(MockNdiBackend::new());
+    let (vban, max) = (Arc::new(VbanOut::new()), taking());
+    let mut out = output(&backend, &vban, &max);
+    let ring = FakeRing::new(2);
+    let frame = ring.frame(4, 2, Duration::ZERO).expect("a free slot");
+    let job = SubmitJob {
+        video: frame.clone().into(),
+        ..source(4, at(0))
+    };
+    out.submit(ProgramJob::Source(job.clone()));
+    let MaxJob::Picture { picture, .. } = next_job(&max) else {
+        panic!("a forwarded boundary is a picture on MAX");
+    };
+    assert!(same_picture(&picture, &job));
+    assert!(
+        picture.video.gpu().is_some_and(|f| f.ptr_eq(&frame)),
+        "the ring frame itself"
+    );
+    assert_eq!(out.canvas_misses(), 1, "the canvas could not fit it");
+    let wire = out.wire_frame().map(|f| f[..].to_vec());
+    assert_eq!(
+        wire,
+        Some(vec![16, 16, 16, 16, 128, 128]),
+        "the canvas black"
+    );
+    let partner = ring.frame(2, 2, Duration::ZERO).expect("a free slot");
+    let blended = SubmitJob {
+        blend: Some(FrameBlend {
+            video: partner.clone().into(),
+            weight_q8: 64,
+        }),
+        ..source(2, at(1))
+    };
+    out.submit(ProgramJob::Source(blended));
+    assert_eq!(out.canvas_misses(), 2, "the blend's ring side");
+    // The 2x2 canvas picture (every byte 90) a quarter of the way to the
+    // black: (90 * 192 + 16 * 64 + 128) >> 8 = 72, (90 * 192 + 128 * 64 +
+    // 128) >> 8 = 100 (the sides swapped would read 35 / 119).
+    let wire = out.wire_frame().map(|f| f[..].to_vec());
+    assert_eq!(
+        wire,
+        Some(vec![72, 72, 72, 72, 100, 100]),
+        "the CPU side faded toward the ring side's black"
+    );
+    let MaxJob::Fade { to, .. } = next_job(&max) else {
+        panic!("a blended boundary is a fade on MAX");
+    };
+    let to = to.expect("the blend's next frame");
+    assert!(to.video.gpu().is_some_and(|f| f.ptr_eq(&partner)));
+    let sends = backend
+        .calls()
+        .into_iter()
+        .filter(|c| c.starts_with("send_video_async("))
+        .count();
+    assert_eq!(sends, 2, "both boundaries went out");
 }
 
 #[test]
@@ -334,7 +400,7 @@ fn a_stalled_max_thread_never_delays_vban_or_the_ndi_submit() {
 fn blended(stamp: i64, next: &SharedFrame, weight_q8: u32) -> SubmitJob {
     let mut job = source(2, stamp);
     job.blend = Some(FrameBlend {
-        video: next.clone(),
+        video: next.clone().into(),
         weight_q8,
     });
     job
@@ -359,7 +425,10 @@ fn a_blended_pair_offers_its_two_frames_as_a_fade_on_max() {
     };
     assert_eq!(stamp_100ns, at(0));
     assert!(same_picture(&from, &job), "the shown frame, an Arc bump");
-    assert!(to.video.ptr_eq(&next), "the next frame, an Arc bump");
+    assert!(
+        to.video.expect_cpu().ptr_eq(&next),
+        "the next frame, an Arc bump"
+    );
     assert_eq!(
         (to.width, to.height, to.stride),
         (2, 2, 2),
@@ -386,7 +455,7 @@ fn a_blended_pair_goes_out_on_ndi_as_one_mixed_canvas_picture() {
     out.submit(ProgramJob::Source(plain.clone()));
     let held = out.submitter.held_frame().expect("a picture was sent");
     assert!(
-        held.ptr_eq(&plain.video),
+        held.ptr_eq(plain.video.expect_cpu()),
         "an unblended canvas picture still goes out as it is"
     );
 }

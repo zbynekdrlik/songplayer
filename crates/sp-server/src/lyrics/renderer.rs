@@ -201,8 +201,9 @@ impl LyricsState {
     /// disagree about which line is current. `next_*` is empty on the last
     /// line, and an SK is empty when its line has no translation. Returns
     /// `None` where the wall is blank (before the first line, in an
-    /// instrumental break's blank stretch, after the last line), so the
-    /// caller can hold off pushing a duplicate.
+    /// instrumental break's blank stretch, after the last line): the caller
+    /// sends no line there, the song's title kept (#283 + #281,
+    /// `presenter::sync_line`).
     ///
     /// The lookup is shifted forward by `self.lead_ms` (0 unless operator-overridden).
     pub fn presenter_lines(&self, position_ms: u64) -> Option<PresenterLines> {

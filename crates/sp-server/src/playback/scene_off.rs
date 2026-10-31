@@ -99,10 +99,10 @@ impl PlaybackEngine {
     ///
     /// #221 review round 3: the stage display is re-synced to the wall owner
     /// too (`resync_presenter`), as at an owner's ON: that repeats the
-    /// owner's current line, or (review round 4) clears the stage display
-    /// while the owner is in a blank stretch, where its dispatch holds its
-    /// last line: the display goes blank like the wall until the owner's
-    /// next line.
+    /// owner's current line, or (review round 4) clears the stage display's
+    /// lines while the owner is in a blank stretch, where its dispatch holds
+    /// its last line: the display's lines go blank like the wall until the
+    /// owner's next line (#281: its song's title stays).
     pub(super) async fn wall_after_scene_off(&mut self) {
         let others_on_program = self
             .pipelines
@@ -168,28 +168,27 @@ impl PlaybackEngine {
     }
 
     /// The Presenter's stage display once `playlist_id` owns the wall: its
-    /// line at its last reported position, or cleared when it has none (no
-    /// lyrics, a blank position, nothing playing), so the old owner's last
-    /// line never stays there.
+    /// line at its last reported position, or (#281) its song's title with
+    /// no line where it has none (no lyrics, a blank position; the title only
+    /// once the song started and while it is not paused, `stage_title`);
+    /// cleared when it plays nothing. So the old owner's last line never
+    /// stays there.
     fn resync_presenter(&mut self, playlist_id: i64) {
         let client = self.presenter_client.as_ref();
         let Some(pp) = self.pipelines.get_mut(&playlist_id) else {
             return;
         };
-        let lines = match pp.state {
-            PlayState::Playing { .. } => pp
-                .lyrics_state
-                .as_ref()
-                .and_then(|lyrics| lyrics.presenter_lines(pp.cached_position_ms)),
-            _ => None,
-        };
-        pp.last_presenter_text = match lines {
-            Some(lines) => {
-                let (song, artist) = (&pp.cached_song, &pp.cached_artist);
-                crate::presenter::maybe_push_line(client, None, lines, song, artist)
+        pp.last_presenter_text = match pp.state {
+            PlayState::Playing { .. } => {
+                let lines = pp
+                    .lyrics_state
+                    .as_ref()
+                    .and_then(|lyrics| lyrics.presenter_lines(pp.cached_position_ms));
+                let (song, artist) = pp.stage_title();
+                crate::presenter::sync_line(client, None, lines, song, artist)
             }
-            None => {
-                crate::presenter::push_empty(client, "a new wall owner with no line");
+            _ => {
+                crate::presenter::push_empty(client, "a new wall owner that plays nothing");
                 None
             }
         };

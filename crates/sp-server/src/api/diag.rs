@@ -5,20 +5,30 @@
 //! decodes `<data dir>/bench/<name>` through SongPlayer's real video decoder
 //! and answers what one picture costs (`diag::decode_bench`). #223 S3b: an
 //! optional `"hw": true` decodes on the GPU (the reader's `Hardware` mode);
-//! the report says which path really decoded:
+//! #279 P3a: an optional `"resident": true` decodes GPU-resident, each
+//! picture copied into a producer device's ring (never both: a 400); the
+//! report says which path really decoded:
 //!
 //! - 200: the report;
 //! - 500 (JSON): the report of a run the decoder ended, with its error and
 //!   the pictures decoded so far;
 //! - 500 (text): a run with no report, its thread did not start or panicked;
-//! - 400: a `file` that is not a bare name, or `seconds` outside 1..=15;
+//! - 400: a `file` that is not a bare name, `seconds` outside 1..=15, or
+//!   `hw` and `resident` both;
 //! - 404: no such file in the sample dir;
 //! - 409: another run is in progress;
 //! - 501: a build without Media Foundation (Linux).
 //!
-//! axum answers a body that is not JSON (400), not the two fields or a `hw`
-//! that is not a bool (422), or not `application/json` (415) before this
-//! handler runs.
+//! #279 P0: `{"probe": true}` (and nothing else) runs the GPU capability
+//! probe on the box's own GPU instead (`diag::gpu_probe`): 200 with the
+//! verdict, every step, the adapters and the video memory; 409 while a bench
+//! runs; 500 when no adapter or device could be had; 501 off Windows. A
+//! request that is neither a probe nor names its `file` and `seconds` is a
+//! 400.
+//!
+//! axum answers a body that is not JSON (400), a field of the wrong type
+//! (`seconds` not a whole number, `hw`, `resident` or `probe` not a bool:
+//! 422), or not `application/json` (415) before this handler runs.
 
 use axum::Json;
 use axum::extract::State;
@@ -27,21 +37,27 @@ use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use tracing::{info, warn};
 
-use sp_decoder::DecodeMode;
-
 use crate::AppState;
 use crate::diag::decode_bench::{self, BenchFileError, BenchOutcome, BenchReport};
+use crate::diag::gpu_probe::{self, BenchAsk, ProbeOutcome};
 
 /// The body of `POST /api/v1/diag/decode-bench`.
 #[derive(Debug, Deserialize)]
 pub struct DecodeBenchRequest {
-    /// A bare file name in `<data dir>/bench/`.
-    pub file: String,
-    /// The run's wall-time bound, 1 to 15 s.
-    pub seconds: u64,
+    /// A bare file name in `<data dir>/bench/` (required for a decode run).
+    pub file: Option<String>,
+    /// The run's wall-time bound, 1 to 15 s (required for a decode run).
+    pub seconds: Option<u64>,
     /// #223 S3b: decode on the GPU (`Hardware` mode). Absent = software.
     #[serde(default)]
     pub hw: bool,
+    /// #279 P3a: decode GPU-resident (into a producer's ring), never with
+    /// `hw`.
+    #[serde(default)]
+    pub resident: bool,
+    /// #279 P0: run the GPU capability probe instead (no other field).
+    #[serde(default)]
+    pub probe: bool,
 }
 
 /// `POST /api/v1/diag/decode-bench`: check the request, take the bench, run
@@ -52,14 +68,25 @@ pub async fn post_decode_bench(
 ) -> Response {
     // Every refusal says why, and logs it (a failed run is a WARN below).
     let refuse = |status: StatusCode, why: String| {
-        info!(file = ?req.file, seconds = req.seconds, hw = req.hw, %status, %why, "decode-bench: no report");
+        info!(file = ?req.file, seconds = ?req.seconds, hw = req.hw, resident = req.resident, probe = req.probe, %status, %why, "decode-bench: no report");
         (status, why).into_response()
     };
-    let max_wall = match decode_bench::bench_seconds(req.seconds) {
+    let (file, seconds) = (req.file.as_deref(), req.seconds);
+    let ask = gpu_probe::ask(req.probe, file, seconds, req.hw, req.resident);
+    let (file, seconds, mode) = match ask {
+        Ok(BenchAsk::Decode {
+            file,
+            seconds,
+            mode,
+        }) => (file, seconds, mode),
+        Ok(BenchAsk::Probe) => return post_gpu_probe(&state).await,
+        Err(why) => return refuse(StatusCode::BAD_REQUEST, why.to_string()),
+    };
+    let max_wall = match decode_bench::bench_seconds(seconds) {
         Ok(max_wall) => max_wall,
         Err(why) => return refuse(StatusCode::BAD_REQUEST, why.to_string()),
     };
-    let path = match state.decode_bench.resolve(&req.file) {
+    let path = match state.decode_bench.resolve(file) {
         Ok(path) => path,
         Err(BenchFileError::BadName(why)) => {
             return refuse(StatusCode::BAD_REQUEST, why.to_string());
@@ -73,15 +100,45 @@ pub async fn post_decode_bench(
         let why = "a decode-bench run is in progress".to_string();
         return refuse(StatusCode::CONFLICT, why);
     };
-    let mode = DecodeMode::from_hw_flag(req.hw);
-    match decode_bench::run(path, req.file.clone(), max_wall, mode, slot).await {
+    match decode_bench::run(path, file.to_string(), max_wall, mode, slot).await {
         BenchOutcome::Report(report) => (report_status(&report), Json(report)).into_response(),
         BenchOutcome::Unsupported => {
             let why = "decode-bench needs Windows Media Foundation".to_string();
             refuse(StatusCode::NOT_IMPLEMENTED, why)
         }
         BenchOutcome::Failed(why) => {
-            warn!(file = ?req.file, %why, "decode-bench: the run failed");
+            warn!(file, %why, "decode-bench: the run failed");
+            (StatusCode::INTERNAL_SERVER_ERROR, why).into_response()
+        }
+    }
+}
+
+/// #279 P0: `{"probe": true}`: take the bench, run the GPU capability probe
+/// on the production adapter (`sp_gpu::probe_gpu`) on a blocking thread, and
+/// answer it (`diag::gpu_probe`).
+async fn post_gpu_probe(state: &AppState) -> Response {
+    let refuse = |status: StatusCode, why: String| {
+        info!(%status, %why, "decode-bench: no probe");
+        (status, why).into_response()
+    };
+    let Some(slot) = state.decode_bench.try_start() else {
+        return refuse(
+            StatusCode::CONFLICT,
+            "a bench run is in progress".to_string(),
+        );
+    };
+    info!("decode-bench: GPU probe start");
+    match gpu_probe::run(slot, sp_gpu::probe_gpu).await {
+        ProbeOutcome::Answer(answer) => {
+            info!("decode-bench: GPU probe done: {}", answer.summary());
+            Json(*answer).into_response()
+        }
+        ProbeOutcome::Unsupported => refuse(
+            StatusCode::NOT_IMPLEMENTED,
+            "the GPU probe needs Windows Direct3D 11".to_string(),
+        ),
+        ProbeOutcome::Failed(why) => {
+            warn!(%why, "decode-bench: the GPU probe failed");
             (StatusCode::INTERNAL_SERVER_ERROR, why).into_response()
         }
     }
@@ -165,3 +222,6 @@ mod tests;
 #[cfg(test)]
 #[path = "diag_tests_fit.rs"]
 mod tests_fit;
+#[cfg(test)]
+#[path = "diag_tests_probe.rs"]
+mod tests_probe;

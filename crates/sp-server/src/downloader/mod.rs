@@ -333,6 +333,28 @@ impl DownloadWorker {
         // The audio temp is normalized into `audio_final`: no path needs it.
         let _ = tokio::fs::remove_file(&audio_temp).await;
 
+        // #277: the video read through the reader that plays it, before any
+        // row names it: one Media Foundation stops on (late SEI) is remuxed
+        // in place, else the download fails and never reaches a playlist.
+        let steps = crate::video_upgrade::steps::Real::new(&self.tools, &self.cache_dir);
+        let repair_temp =
+            crate::video_upgrade::repair::repair_temp(&self.cache_dir, &row.youtube_id);
+        if let Err(why) = crate::video_upgrade::repair::check_download(
+            &steps,
+            &row.youtube_id,
+            &video_temp,
+            &audio_final,
+            &repair_temp,
+        )
+        .await
+        {
+            tracing::error!(video_id = %row.youtube_id, "download: {why}");
+            let _ = tokio::fs::remove_file(&video_temp).await;
+            drop_attempt_audio(&self.pool, &audio_final).await;
+            self.record_failure(row.id, &row.youtube_id, &why).await;
+            return false;
+        }
+
         // Move the video temp to its final pair name.
         if let Err(e) = place_video(&self.pool, &video_temp, &video_final, &audio_final).await {
             tracing::error!(video_id = %row.youtube_id, "video rename failed: {e}");
@@ -615,6 +637,14 @@ async fn place_video(
         return Ok(());
     };
     let _ = tokio::fs::remove_file(video_temp).await;
+    drop_attempt_audio(pool, audio_final).await;
+    Err(e)
+}
+
+/// A failed attempt's normalized audio goes, unless a row records it (rows
+/// of one video share files by name, #136): checked and deleted under
+/// `cache::SONG_FILES`, kept when the rows cannot be read.
+async fn drop_attempt_audio(pool: &SqlitePool, audio_final: &Path) {
     let _files = cache::SONG_FILES.lock().await;
     match cache::recorded_by_a_row(pool, audio_final).await {
         Ok(false) => {
@@ -622,14 +652,13 @@ async fn place_video(
         }
         Ok(true) => tracing::warn!(
             audio = %audio_final.display(),
-            "download: the video could not take its name - keeping the audio a row records"
+            "download: the attempt failed - keeping the audio a row records"
         ),
         Err(db) => tracing::warn!(
             audio = %audio_final.display(),
             "download: reading which rows record the audio failed - keeping it: {db}"
         ),
     }
-    Err(e)
 }
 
 fn cleanup_temps(video_temp: &Path, cache_dir: &Path, video_id: &str) {

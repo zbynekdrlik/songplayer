@@ -1,7 +1,8 @@
 //! #229: the lyrics job asks first. Never while an operator's mark here is
 //! one the lyrics queue acts on, on any row of the video (`kept_local`: a
 //! `lyrics_override_text` on a row of an active playlist, a reprocess or
-//! "Nesedí" flag on such a row that is not parked), and never for a video
+//! "Nesedí" flag on such a row that is not parked — the flag only while this
+//! node's paid AI is on, #264), and never for a video
 //! whose `{yt}_lyrics.json` here is a dub's subtitles (any row of it
 //! dub-requested or Live-Translate: the catalog's dub rule, Review
 //! Focus 5), and only when this node's audio IS the peer's
@@ -10,7 +11,9 @@
 //! The peer's row (`/videos`) must match its catalog and must
 //! not be the Live-Translate track; a copy of what the row already serves (the
 //! same source at the same version, e.g. the daily full-mix upgrade) is
-//! nothing newer: the job runs here. A video whose track here stands in for
+//! nothing newer: the job runs here (with paid AI off an operator's
+//! reprocess flag is then answered by that copy instead, #264,
+//! `nothing_newer`). A video whose track here stands in for
 //! a peer's copy (`peer::standin`) takes no copy through this hook: the
 //! copy goes into EVERY row of it (they serve one file), whatever its
 //! source, through the stand-in's own look, made due now; the row is put
@@ -30,7 +33,7 @@
 use std::sync::Arc;
 
 use sqlx::SqlitePool;
-use tracing::warn;
+use tracing::{info, warn};
 
 use super::Exchange;
 use super::ask::{Ask, FetchPlan, PeerStep};
@@ -85,7 +88,7 @@ pub async fn first(ex: Option<&Arc<Exchange>>, row: &VideoLyricsRow) -> PeerStep
                         .await;
                     PeerStep::Done
                 }
-                Ok(Adopted::NothingNewer) => ex.local(job, row.id, &row.youtube_id).await,
+                Ok(Adopted::NothingNewer) => nothing_newer(ex, row).await,
                 Err(e) => {
                     ex.after_failed_fetch(job, row.id, &row.youtube_id, &plan.peer.name, &e)
                         .await
@@ -95,15 +98,63 @@ pub async fn first(ex: Option<&Arc<Exchange>>, row: &VideoLyricsRow) -> PeerStep
     }
 }
 
-/// Binds, in text order: the YouTube id, the Live-Translate source, the
-/// current pipeline version (`LYRICS_NOT_PARKED`'s). Bare `?` only: sqlx
-/// binds by position, and a bare `?` after `?1` / `?2` would take the
-/// FIRST value (review round 9, `rust-workspace.md`). The dub and the
-/// Live-Translate track count on any row; an operator's mark only where the
-/// lyrics queue acts on it (review rounds 7-8): a text on a row of an
-/// active playlist (the worker makes no other row's lyrics), a reprocess
-/// flag on such a row that is not parked (bucket 1's own condition: the
-/// queue never takes another, so its flag is never cleared).
+/// The track here already has the peer's source at its version
+/// ([`Adopted::NothingNewer`]: source and version only, never the bytes):
+/// the job runs here (`Exchange::local`, held while paid AI is off). #264
+/// (ROZHODNUTÉ, option a): with paid AI off an operator's reprocess flag on
+/// the video can neither run here nor fetch anything newer, so the copy
+/// served here answers it: the flag is cleared on every row
+/// ([`answer_reprocess`]), the wait ends and the job is done. No origin is
+/// recorded: another copy of the same source at the peer (a retranslation,
+/// a register fix) is the follow's (`peer::follow`, `changed` /
+/// `untracked`), which a recorded sha would hide. With paid AI on nothing
+/// changes.
+async fn nothing_newer(ex: &Exchange, row: &VideoLyricsRow) -> PeerStep {
+    let job = Job::Lyrics;
+    if !ex.may_run_here(job).await && answer_reprocess(ex, &row.youtube_id).await {
+        ex.end_wait(job, &row.youtube_id).await;
+        info!(
+            video_id = row.id,
+            youtube_id = %row.youtube_id,
+            "exchange: an operator's reprocess is answered by the peer's copy served here"
+        );
+        return PeerStep::Done;
+    }
+    ex.local(job, row.id, &row.youtube_id).await
+}
+
+/// Clears an operator's reprocess flag on every row of `youtube_id`;
+/// whether one was set. A failed write WARNs and answers no (the job is
+/// then held, as before).
+async fn answer_reprocess(ex: &Exchange, youtube_id: &str) -> bool {
+    let cleared = sqlx::query(
+        "UPDATE videos SET lyrics_manual_priority = 0 \
+         WHERE youtube_id = ? AND lyrics_manual_priority != 0",
+    )
+    .bind(youtube_id)
+    .execute(&ex.pool)
+    .await;
+    match cleared {
+        Ok(done) => done.rows_affected() > 0,
+        Err(e) => {
+            warn!(youtube_id, %e, "exchange: clearing a reprocess flag failed");
+            false
+        }
+    }
+}
+
+/// Binds, in text order: the YouTube id, the Live-Translate source, this
+/// node's paid-AI switch (1 on, 0 off), the current pipeline version
+/// (`LYRICS_NOT_PARKED`'s). Bare `?` only: sqlx binds by position, and a
+/// bare `?` after `?1` / `?2` would take the FIRST value (review round 9,
+/// `rust-workspace.md`). The dub and the Live-Translate track count on any
+/// row; an operator's mark only where the lyrics queue acts on it (review
+/// rounds 7-8): a text on a row of an active playlist (the worker makes no
+/// other row's lyrics), a reprocess flag on such a row that is not parked
+/// (bucket 1's own condition: the queue never takes another, so its flag is
+/// never cleared) — and the flag only while paid AI is on (#264): it asks
+/// for a new run HERE, which a node with paid AI off cannot make, so the
+/// peer's copy answers it instead (the take clears it, `adopt_lyrics`).
 fn local_only_sql() -> String {
     format!(
         "SELECT EXISTS (SELECT 1 FROM videos v WHERE v.youtube_id = ? \
@@ -111,22 +162,27 @@ fn local_only_sql() -> String {
               OR (EXISTS (SELECT 1 FROM playlists p \
                           WHERE p.id = v.playlist_id AND p.is_active = 1) \
                   AND (TRIM(COALESCE(v.lyrics_override_text, '')) != '' \
-                       OR (v.lyrics_manual_priority != 0 AND {LYRICS_NOT_PARKED})))))"
+                       OR (? != 0 AND v.lyrics_manual_priority != 0 \
+                           AND {LYRICS_NOT_PARKED})))))"
     )
 }
 
 /// The lyrics of `youtube_id` stay this node's own: an operator asked THIS
-/// node (a reprocess, a "Nesedí") or gave it the text, where the lyrics
-/// queue acts on it, or its `{yt}_lyrics.json` is a dub's subtitles — on
-/// ANY row of the video, whose rows serve that one file (review round 5:
-/// the hook read the ask and the text on the asked row only). The hook and
-/// the stand-in's look ask it (V31's back-fill is a literal copy, without
-/// the version: a stand-in it made for a video with a pending reprocess is
-/// dropped by the look).
+/// node (a reprocess, a "Nesedí": only while its paid AI is on, #264) or
+/// gave it the text, where the lyrics queue acts on it, or its
+/// `{yt}_lyrics.json` is a dub's subtitles — on ANY row of the video, whose
+/// rows serve that one file (review round 5: the hook read the ask and the
+/// text on the asked row only). The hook, the lyrics follow and the
+/// stand-in's look ask it: one rule, the switch read once per call
+/// (`paid_ai::enabled`, an unreadable one = off). V31's back-fill is a
+/// literal copy of the rule as it was then, without the version: a stand-in
+/// it made for a video with a pending reprocess is dropped by the look.
 pub(crate) async fn kept_local(pool: &SqlitePool, youtube_id: &str) -> Result<bool, sqlx::Error> {
+    let paid_ai = crate::paid_ai::enabled(pool).await;
     sqlx::query_scalar(&local_only_sql())
         .bind(youtube_id)
         .bind(SOURCE_LIVE_TRANSLATE)
+        .bind(i64::from(paid_ai))
         .bind(i64::from(crate::lyrics::LYRICS_PIPELINE_VERSION))
         .fetch_one(pool)
         .await

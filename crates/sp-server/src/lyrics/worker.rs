@@ -320,6 +320,10 @@ impl LyricsWorker {
         if let Err(e) = self.ensure_script().await {
             error!("lyrics_worker: failed to write lyrics_worker.py: {e}");
         }
+        // #284: before the loop, so it never races a lyrics write.
+        if let Err(e) = crate::lyrics::haleluja::rewrite_stored(&self.pool, &self.cache_dir).await {
+            warn!("lyrics_worker: the haleluja pass could not list the songs: {e}");
+        }
 
         // Start with a fresh yt-dlp scratch directory. Each song's
         // fetch_subtitles call writes a .json3 and then deletes it, but
@@ -410,6 +414,8 @@ impl LyricsWorker {
         for video_id in crate::peer::follow::follow_next(self.peer.as_ref()).await {
             self.peer_lyrics_completed(video_id).await;
         }
+        // #269: then one song whose peer's title this node does not hold.
+        crate::peer::follow_title::follow_next(self.peer.as_ref()).await;
 
         // #184 G0.1: a dub owns the heavy slot — skip this heavy lyrics tick while
         // one is queued (isolation/mtl are not mid-run yielded; they defer here).
@@ -549,6 +555,7 @@ impl LyricsWorker {
         if crate::lyrics::worker_outcome::exceeds_duration_cap(row.duration_ms) {
             return self.mark_over_cap(&row).await;
         }
+        crate::lyrics::full_artist::expand_lookup_artist(&self.pool, &mut row).await; // #283
 
         let started_at_unix_ms = chrono::Utc::now().timestamp_millis();
         let start_instant = std::time::Instant::now();

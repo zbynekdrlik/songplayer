@@ -35,6 +35,12 @@ reach disk. Therefore the panic hook
 change the logging writer, keep the synchronous crash-file path — do not "simplify" it to
 tracing-only.
 
+**The crash file rotates (#261):** `songplayer-panic.log` (and the ASIO
+host's `sp-audio-host-panic.log`) is renamed to `<name>.1` once it holds
+10 MiB, at the hook's install and before each record
+(`log_rotate::rotate_if_over`, `cache-sweep.md`): after a panic storm
+read the `.1` too. A failed rotation never costs the record.
+
 **Where to look after a crash:** `C:\ProgramData\SongPlayer\songplayer-panic.log` (thread,
 `file:line:col`, message, backtrace, version+sha), and the main log for `target=panic`.
 The startup INFO line (`SongPlayer v<ver> (<sha>) — panic hook installed`) confirms the hook

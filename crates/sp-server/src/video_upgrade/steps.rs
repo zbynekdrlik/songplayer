@@ -1,9 +1,11 @@
 //! #223 S11: the production [`Steps`]: the box's yt-dlp, Media Foundation
-//! (the reader that plays the video) and Symphonia (the audio's).
+//! (the reader that plays the video) and Symphonia (the audio's); #277: the
+//! box's ffmpeg for a repair's remux.
 //!
 //! Glue only, out of the mutation gate by `mutants::skip`: the decisions
 //! are `video_upgrade`'s pure functions, Linux-tested with scripted steps.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -22,12 +24,16 @@ const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
 
 /// The longest an upgrade's download may take before it is killed.
 const DOWNLOAD_BOUND: Duration = Duration::from_secs(1800); // 30 min
+/// The longest a repair's remux (a stream copy of one file) may take.
+const REMUX_BOUND: Duration = Duration::from_secs(600); // 10 min
 /// The most of yt-dlp's error text an answer carries.
 const ERROR_MAX_CHARS: usize = 400;
 
 /// The box's tools, its cookie file and the playback decode mode.
 pub(crate) struct Real {
     pub ytdlp: PathBuf,
+    /// #277: the ffmpeg a repair remuxes with.
+    pub ffmpeg: PathBuf,
     pub ffmpeg_dir: PathBuf,
     pub cookies: Option<PathBuf>,
     pub mode: DecodeMode,
@@ -41,6 +47,7 @@ impl Real {
         let cookies = cache_dir.parent().unwrap_or(cache_dir).join("cookies.txt");
         Self {
             ytdlp: tools.ytdlp.clone(),
+            ffmpeg: tools.ffmpeg.clone(),
             ffmpeg_dir: tools
                 .ffmpeg
                 .parent()
@@ -63,7 +70,7 @@ impl Steps for Real {
 
     #[cfg_attr(test, mutants::skip)] // the real reader on a decode thread
     async fn facts(&self, path: &Path) -> Result<VideoFacts, String> {
-        facts_on_decode_thread(path.to_path_buf(), self.mode).await
+        facts_on_decode_thread(path.to_path_buf(), self.mode.clone()).await
     }
 
     #[cfg_attr(test, mutants::skip)] // spawns yt-dlp
@@ -131,18 +138,62 @@ impl Steps for Real {
         .await
         .map_err(|e| format!("the audio read did not finish: {e}"))?
     }
+
+    #[cfg_attr(test, mutants::skip)] // the real reader
+    async fn codec(&self, path: &Path) -> Result<String, String> {
+        codec_on_decode_thread(path.to_path_buf(), self.mode.clone()).await
+    }
+
+    #[cfg_attr(test, mutants::skip)] // spawns ffmpeg; its args are `repair::remux_args`, tested
+    async fn ffmpeg(&self, args: &[OsString]) -> Result<(), String> {
+        let mut cmd = tokio::process::Command::new(&self.ffmpeg);
+        // Below playback, with no console window (#223 S12a's class).
+        #[cfg(windows)]
+        cmd.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
+        cmd.args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true);
+        let output = match tokio::time::timeout(REMUX_BOUND, cmd.output()).await {
+            Ok(Ok(output)) => output,
+            Ok(Err(e)) => return Err(format!("ffmpeg did not start: {e}")),
+            Err(_) => {
+                return Err(format!(
+                    "ffmpeg did not finish in {} min",
+                    REMUX_BOUND.as_secs() / 60
+                ));
+            }
+        };
+        if output.status.success() {
+            return Ok(());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let last = stderr
+            .lines()
+            .rev()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or("no message");
+        Err(format!(
+            "ffmpeg exited with {}: {}",
+            output.status,
+            last.chars().take(ERROR_MAX_CHARS).collect::<String>()
+        ))
+    }
 }
 
 /// [`super::facts_of`] through Media Foundation, opened in `mode` on a
 /// decode thread (COM's STA rule: the thread that opens a reader decodes
-/// and drops it).
+/// and drops it). With no decode cap (#282): the facts are the FILE's, so a
+/// 4K file never reads as the cap's size (the worker would download it
+/// again).
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)] // the real reader; the facts are `facts_of`, tested
 async fn facts_on_decode_thread(path: PathBuf, mode: DecodeMode) -> Result<VideoFacts, String> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     crate::playback::decode_thread::spawn_decode_thread("video-upgrade".to_string(), move || {
         let facts = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let mut reader = sp_decoder::MediaFoundationVideoReader::open_with(&path, mode)
+            let mut reader = sp_decoder::MediaFoundationVideoReader::open_with(&path, mode, None)
                 .map_err(|e| format!("the open: {e}"))?;
             super::facts_of(&mut reader)
         }))
@@ -158,5 +209,32 @@ async fn facts_on_decode_thread(path: PathBuf, mode: DecodeMode) -> Result<Video
 #[cfg(not(windows))]
 #[cfg_attr(test, mutants::skip)] // a constant refusal
 async fn facts_on_decode_thread(_path: PathBuf, _mode: DecodeMode) -> Result<VideoFacts, String> {
+    Err("the video reader is Windows only".to_string())
+}
+
+/// #277: the codec Media Foundation names the file's video (`H264`),
+/// opened in `mode` on a decode thread (COM's STA rule, as the facts).
+#[cfg(windows)]
+#[cfg_attr(test, mutants::skip)] // the real reader
+async fn codec_on_decode_thread(path: PathBuf, mode: DecodeMode) -> Result<String, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    crate::playback::decode_thread::spawn_decode_thread("video-repair".to_string(), move || {
+        let codec = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let reader = sp_decoder::MediaFoundationVideoReader::open_with(&path, mode, None)
+                .map_err(|e| format!("the open: {e}"))?;
+            reader.codec().ok_or_else(|| "no codec".to_string())
+        }))
+        .unwrap_or_else(|_| Err("the reader panicked".to_string()));
+        let _ = tx.send(codec);
+    })
+    .map_err(|e| format!("the decode thread did not start: {e}"))?;
+    rx.await
+        .map_err(|_| "the decode thread ended with no answer".to_string())?
+}
+
+/// Without Media Foundation there is no reader to name the codec.
+#[cfg(not(windows))]
+#[cfg_attr(test, mutants::skip)] // a constant refusal
+async fn codec_on_decode_thread(_path: PathBuf, _mode: DecodeMode) -> Result<String, String> {
     Err("the video reader is Windows only".to_string())
 }

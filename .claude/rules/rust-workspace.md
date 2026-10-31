@@ -18,19 +18,45 @@ established split patterns:
   seam needs. worker.rs stays under the cap this way.
 - **Test split:** move a `#[cfg(test)] mod` out to `<file>_tests.rs` and include
   it via `#[path = "<file>_tests.rs"] #[cfg(test)] mod tests;`.
+- **Child impl split, no field opened** (#282 follow-up,
+  `sp-decoder/src/video/mf_reader_scaled.rs`): declare the sibling file as a
+  CHILD of the big file (`#[path = "x_part.rs"] mod part;` inside `x.rs`; the
+  path resolves next to `x.rs`). A child module reaches the parent's PRIVATE
+  fields, fns and types, so the moved `impl <Type>` block needs no
+  `pub(crate)` field. A method the parent calls is `pub(super)` there; a
+  `pub fn` stays public API.
+- **A merge of dev that pushes a file over the cap** (#279 P3a round 8:
+  sp-core `config.rs` 974 on dev + the lane's 63 = 1037): move the LANE's
+  own new items into a child module re-exported from the file
+  (`config_video_decode.rs`, `pub use video_decode_setting::{…}`), so
+  dev's lines stay put and the next integration has no conflict surface;
+  and do the split INSIDE the merge commit (resolve, split, `wc -l`, then
+  commit), so no commit in the history is over the cap (a separate split
+  commit leaves the merge a red bisect stop).
+
+## A function that starts returning a GUARD: move its callers in the same commit (#282 follow-up)
+
+`refuse_next_scaled_open_for_test()` went from `()` to a drop guard
+(`ScaledOpenRefusal`, `#[must_use]`) in the feat commit, while its test
+caller still called it as a statement until the test commit. In between,
+the guard dropped at once and disarmed the hook, so that commit's own
+test failed (and warned `unused_must_use`): a `git bisect` stop that is
+red on correct code. When a return type gains Drop semantics, rewrite
+every caller (`let guard = …; … drop(guard);`) in the SAME commit. Grep
+the callers across `crates/` (tests included) with the Grep tool first.
 
 ## A wider `let` binding in a file AT the 1000-line cap can push it over via rustfmt (#198 item 8)
 
 Changing a call site in a file already at exactly 1000 lines is only safe if it
 adds NO line — and a wider `let` pattern can force rustfmt to re-wrap the block
-and ADD one, which the no-compile box only learns at the CI cap check. `pipeline.rs`
+and ADD one, which then fails the CI cap check. `pipeline.rs`
 (1000/1000): widening `let (ndi_audio, audio_us) = …timed(|| …)` to
 `let ((ndi_audio, ring_depth), audio_us) = …` pushed the `let` line past ~100
 cols, and rustfmt re-indented the whole closure body (a diff, and a risk of an
 extra line). Fix: keep the binding SHORT — bind the tuple once
 (`let (audio_out, audio_us) = …`) and use `audio_out.0` / `audio_out.1` at the use
 sites, instead of destructuring in the `let`. Verify with
-`awk 'NR==<line>{print length($0)}'` + `cargo fmt --all --check` (both Tier-0-allowed)
+`awk 'NR==<line>{print length($0)}'` + `cargo fmt --all --check`
 and re-`wc -l` before committing.
 
 ## rustfmt breaks a `foo(long::path::bar(arg()))` nested call into 3 lines even under ~94 cols (#207)
@@ -41,8 +67,8 @@ single argument is ITSELF a call and whose args exceed ~60 cols — even when th
 whole line is well under 100. `lib.rs` (999→cap): a hand-written
 `tokio::spawn(crate::lyrics::host_commit::run_host_commit_logger(shutdown_tx.subscribe()));`
 (94 cols) was reflowed by `cargo fmt` into a 3-line form (`tokio::spawn(\n  arg,\n));`),
-silently taking the file to 1002 — the no-compile box only sees it via `wc -l` /
-the CI cap check, NOT `cargo fmt --all --check` alone (which passes on EITHER form,
+silently taking the file to 1002 — only `wc -l` /
+the CI cap check shows it, NOT `cargo fmt --all --check` alone (which passes on EITHER form,
 it just prefers the 3-line one). So near the cap: after writing any nested-call
 statement, run `cargo fmt --all` FIRST, then `wc -l`, and budget for the form
 rustfmt actually produces (a trailing `// comment` on the closing `));` line keeps
@@ -84,17 +110,15 @@ CI does NOT want. After any `cargo fmt --all`, `git checkout --
 crates/sp-server/src/db/models.rs` if you didn't intend to touch it, and confirm
 `cargo fmt --all --check` then flags ONLY models.rs (ignore that one). **When YOUR change edits `models.rs` itself, never `git checkout` it after the fmt** (#144 F1: the checkout silently threw away the GREEN edits of `mark_video_lyrics*`): run the fmt, then `git diff crates/sp-server/src/db/models.rs | grep -E '^[-+](mod|#\[path|pub use)'` — revert only a module-block reorder, if any shows (on 10.10.2026 the local rustfmt no longer reordered it). Never let
 the models.rs reorder ride in an unrelated diff — CI's newer rustfmt would fail
-`--check` on it. (TIER-0: `cargo fmt` is the only local cargo command allowed;
-CI compiles everything else.)
+`--check` on it.
 
 ## sp-ui / src-tauri are OUTSIDE the workspace
 Root `cargo fmt --all` / `clippy` do NOT touch `sp-ui/` or `src-tauri/`, and CI
 has no fmt/clippy step for them (only `trunk build`). Never blanket-`cargo fmt`
 sp-ui (it rewrites long-drifted files) — see `.claude/rules/sp-ui-frontend.md`.
 
-## RED commit on the TIER-0 (no local compile) box
-You can't run tests locally, so a RED test must FAIL against a version of the
-code you can only reason about, without leaving warnings CI's clippy
+## RED commit: real logic with ONE wrong constant
+A RED test must FAIL without leaving warnings CI's clippy
 (`--all-targets -D warnings`) would reject. The clean pattern (used for #161's
 `idle_gate_abort`): make the RED commit ship the REAL logic but with ONE WRONG
 CONSTANT (e.g. `const ABORT_CONSECUTIVE_BUSY: u32 = u32::MAX;` → GREEN sets `2`;
@@ -108,7 +132,7 @@ use `#[tokio::test(start_paused = true)]` (tokio `test-util` is a dev-dep) so th
 
 Pick the WRONG constant so it is NOT an arithmetic identity: shipping a RED
 `produced_ms() = count * 1` (GREEN `* 500`) trips `clippy::identity_op` under
-`-D warnings` (the Lint job the no-compile box can't see), reddening the RED
+`-D warnings` (the Lint job), reddening the RED
 commit itself. Use a wrong NON-identity value (a named const `FRAGMENT_MS = 250`
 → GREEN `500`, or a different literal) so the exact-value test still fails but
 the RED tree is clippy-clean.
@@ -137,13 +161,25 @@ guess), and never claim the RED reproduces the old behaviour unless it does.
 The tests that encode the new contract against the OLD code belong in their own
 earlier `test(#N)` commit that uses only the existing API (#217 `e66514a`).
 
-**Deriving exact expected values on the no-compile box (#217).** Do not
+**A new pure step inside an existing pipeline fn: test it THROUGH that fn, and
+ship the module as a shell in RED** (#280 part 2, `display_plan_interjections.rs`).
+Every case of the new rule was a one-line `build_plan` call (`wall(en, sk)` →
+the plan's EN/SK, `None` when the line left), so ALL its tests compile against
+the old code and sit in the RED commit; GREEN adds and edits no test. RED ships
+the structure (the `#[path]` module as its doc + `#[cfg(test)] mod tests`, the
+caller's new seam `shown_lines` and the index mapping) with the step not called
+— write the old spot as `.map(..)`, not a `filter_map` that always returns
+`Some` (`clippy::unnecessary_filter_map`). The module's private helpers are
+then killed by the plan-level tests; check that with a site-keyed Python
+harness before CI.
+
+**Deriving exact expected values (#217).** Do not
 hand-compute dozens of pins. Write a scratch Python model that mirrors the pure
 Rust function step by step, and derive every exact value from it: fixture
 counts, boundary show/hide times, what each mutant would do. Keep the model in
 the scratchpad, not the repo. When the Rust changes, update the model in the
 same step. Each fresh-context review pass should re-derive the pins with its own
-model; two independent models agreeing is the only local evidence available.
+model.
 A review dispatch's brief RESTATES the lane's machine bar ("never touch
 win-resolume, resolume-pp, fohabl or any `mcp__win-*` tool, not even a
 read"): a reviewer inherits none of the lane's dispatch rules, and #233
@@ -192,6 +228,26 @@ on exactly that. After the rewrite, list each `Type {` block's field values
 that are NOT in the new form (a scan over every file that names the type,
 non-literals included) and fix each one before the push.
 
+**A field that becomes an enum across ~50 files (#279 P2: `video:
+SharedFrame` → `Picture { Cpu, Gpu }` on 8 structs).** What kept the
+churn mechanical:
+
+- `impl From<Old> for New`, so every literal's value becomes `….into()`;
+- a `#[cfg(test)] pub(crate) fn expect_cpu(&self) -> &Old` accessor, so a
+  test that reads the old bytes becomes `.video.expect_cpu()[..]`, never
+  a `match` in every test;
+- a script that lists every struct literal's field value that is not yet
+  `.into()` / `New::…`, struct-update bases included (`..job(..)`);
+- a type of the same name already in a module (`paced_output.rs` had a
+  `Picture` struct) is renamed first (`FillPicture`), never shadowed;
+- a Windows-only file that only passes the value on (`pipeline_paced.rs`
+  `&black`) needs no edit when its producer's return type changes with
+  it.
+
+A child test module of a `#[path]` test file (`#[path = "x_tests_gpu.rs"]
+mod gpu;` at the end of `x_tests.rs`) resolves next to that file, and
+reaches its private helpers through `super::`.
+
 ## Moving a string or a call: grep the source-scan tests first (#144, 10.10.2026)
 
 Some tests read a source file with `include_str!` and assert it CONTAINS a
@@ -201,7 +257,7 @@ literal fails them with no behaviour change (CI 38048742066). Before moving a
 message or a call, `grep -rn '<the literal>' crates/*/src --include='*tests*'`
 and repoint the scan in the same push.
 
-## Linux clippy `-D warnings` traps a no-compile box can't catch locally (#162)
+## Linux clippy `-D warnings` traps that compile clean on Windows (#162)
 The ubuntu job runs `clippy --workspace --all-targets -D warnings`, so these
 compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
 
@@ -217,8 +273,7 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   because the replay now reads `s.transport`), a type that was named only through
   that helper (`TransportState`) is suddenly referenced ONLY inside
   `#[cfg(test)] mod tests`. The top-level `use` is then unused in the LIB target
-  (tests don't count), so `clippy --all-targets -D warnings` fails — the
-  no-compile box can't see it. Fix: move that name into a test-only import
+  (tests don't count), so `clippy --all-targets -D warnings` fails. Fix: move that name into a test-only import
   (`use …::TransportState;` INSIDE `mod tests`, not the top-level `use`). Grep the
   non-test region for every name in a `use` you touched when deleting a consumer.
 - **An RAII guard field held ONLY for its Drop is `dead_code` "never read" — a
@@ -244,8 +299,8 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   allow; adding one is a dead annotation (harmless, but don't add it "to be
   safe"). Count real params (free fns have no `&self`).
 - **`clippy::manual_slice_fill`** (rust 1.98, `-D warnings`): a `for x in &mut
-  slice { *x = <const> }` loop must be `slice.fill(<const>)`. The no-compile box
-  can't see it; it failed #186's Lint on `for e in &mut self.eos { *e = false }`.
+  slice { *x = <const> }` loop must be `slice.fill(<const>)`. It
+  failed #186's Lint on `for e in &mut self.eos { *e = false }`.
 - **`clippy::collapsible_if` in edition 2024 wants a let-chain** (#147 r9):
   `if cond { if let Some(x) = f() { … } }` with no `else` fails `-D warnings`.
   Write `if cond && let Some(x) = f() { … }` (the tree already uses let-chains,
@@ -253,7 +308,7 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
 - **`clippy::manual_div_ceil`** (warn-by-default → `-D warnings`): a hand-rolled
   ceil-division `(a + b - 1) / b` (or the `(a * p + 99) / 100` form) must be
   `a.div_ceil(b)`. `u64::div_ceil` is **const-fn since 1.73**, so it works inside
-  a `const fn` too — don't avoid it there. The no-compile box can't see it; it
+  a `const fn` too — don't avoid it there. It
   cost #192 round 3 a whole review round (three ceil-divs in `audio_emitter.rs`
   `block_ms`/`ring_capacity_blocks` + `loop_stats.rs` `percentile_ceil`). The tree
   already uses `.div_ceil()` (`loop_stats.rs`) — grep before
@@ -306,6 +361,11 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   takes `&mut T`, even to an `impl Fn(&mut T)`, is flagged under `-D
   warnings`. Write a typed binding instead: `let t: &mut T = &mut guard;
   f(t)`. It compiles in every call shape and leaves nothing for the lint.
+  The same for a sqlx `Transaction` handed to an own fn that takes
+  `&mut SqliteConnection` (#261, caught in review before CI): write
+  `compact(&mut tx, …)`, never `compact(&mut *tx, …)`; keep `&mut *tx` /
+  `&mut *conn` only where sqlx's GENERIC `Executor` takes it
+  (`.execute(&mut *tx)`), where no auto-deref happens.
 - **`clippy::field_reassign_with_default` on a test fixture** (#221 lane 3,
   CI Lint run 37399017815). `let mut s = Fake::default();` followed by
   `s.field = …;` is linted under `-D warnings` (`--all-targets` covers
@@ -336,6 +396,13 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   with no Linux caller is `dead_code` there, and a `pub(crate) use` of it is
   `unused_imports`. `pub use pipeline_types::{…, real_start_ms}` makes it
   crate API, so neither lint fires, and its Linux unit tests still gate it.
+- **`clippy::ptr_arg` on an off-Windows stub that mirrors a Windows
+  `&mut Vec` parameter** (#279 P1a, reasoned before CI). sp-gpu's
+  `Compositor::read_uyvy(&mut self, out: &mut Vec<u8>)` clears and refills
+  the caller's `Vec` on Windows, but the uninhabited stub (`match self.0
+  {}`) never touches its `_out`, so Linux clippy asks for `&mut [u8]` under
+  `-D warnings`. Put `#[allow(clippy::ptr_arg)]` on the STUB method with the
+  reason; never change the shared signature.
 
 ## Toolchain drift: CI's stable Rust moves under an unchanged tree (Rust 1.99, 3.10.2026)
 
@@ -344,8 +411,7 @@ Lint job on code that passed a day earlier. The 1.99 drift that broke run
 37145344169, and the fixes:
 
 - **`clippy::double_must_use` inside `#[async_trait]`:** bump the crate,
-  `cargo update -p async-trait --precise 0.1.92` (Tier-0-allowed, it compiles
-  nothing; dtolnay/async-trait#303). Never paper over it with allows on the
+  `cargo update -p async-trait --precise 0.1.92` (dtolnay/async-trait#303). Never paper over it with allows on the
   traits.
 - **`Atomic*::fetch_update` deprecated (renamed `try_update`):** `try_update`
   is newer than the workspace MSRV 1.87 (`clippy::incompatible_msrv`), so write
@@ -377,7 +443,7 @@ text order), or number the fragment too. A scratch `python3 -c "import
 sqlite3"` of the exact query, with the binds sqlx would give, shows it
 before CI does.
 
-## Two compile errors a no-compile review round cannot see (#218/#219 integration)
+## Two compile errors review rounds missed (#218/#219 integration)
 
 Six fresh-context review rounds passed both of these, and the first CI run
 failed on them (`36438006665`):
@@ -392,7 +458,10 @@ failed on them (`36438006665`):
   argument is a generic tuple, so no coercion site exists. Write
   `done(&*guard)`. A plain `fn f(s: &ObsState)` would coerce, which is why
   it reads as fine. The same holds for `&PathBuf` → `&Path` through a
-  generic `R: Fn(&Path, &Path)` seam: write `.as_path()`. A small private
+  generic `R: Fn(&Path, &Path)` seam: write `.as_path()`, and for `&mut
+  Vec<u8>` / `&Vec<bool>` → `&mut [u8]` / `&[bool]` through `paint: impl
+  FnOnce(&mut [u8], &[bool])`: write `paint(&mut out[..], &modules[..])`
+  (#279 P1b review round 1, `program_burn::burned_with`). A small private
   trait seam (`downloader::cache::FileOps`, #136) avoids the trap
   entirely, because trait method calls DO coerce their arguments.
 - **`f(&mut x.lock().await)` does NOT deref-coerce a guard → E0308** (#250,
@@ -416,6 +485,13 @@ failed on them (`36438006665`):
   `#[cfg(test)] mod tests` after a blank line) →
   `clippy::empty_line_after_doc_comments` under `-D warnings`. Delete the
   doc with the fn; re-read the cut site.
+- **A test file that newly names a parent type must import it: E0422**
+  (#251 step 2 review round 2). A `#[path]` test module sees only what its
+  `use` lines bring in (no `super::*` in this repo's convention), so a new
+  `assert_eq!(lines, Lines { max: None, fhd: None })` in a file whose import
+  is `use super::{LogLine, …}` broke the whole test target. After writing a
+  test, grep each type it names against the file's `use` lines, or compare
+  the fields instead (`(lines.max, lines.fhd)`).
 - **A new field on a struct that a TEST builds by literal is E0063 for the
   whole test target** (#224 part 2 review round 2: `SharedEmitterInner`
   gained `fleet`, `audio_emitter_tests.rs` still built one without it).
@@ -446,6 +522,13 @@ failed on them (`36438006665`):
   the opaque one is not. Use the helper as a temporary
   (`pool.run(&recorder(&log))`), bind it in a block, or take the data out
   without moving (`std::mem::take(&mut *log.lock().unwrap())`).
+  The same holds for a named struct WITH DROP GLUE that borrows a local
+  (#279 P1b review round 5): a test helper building
+  `MaxWorker::new(&max, gpu)` (it owns a fake compositor that implements
+  `Drop`) cannot return `max` in its tail expression while the worker
+  is still in scope (it is dropped after the tail is evaluated). Write
+  `drop(worker);` before the tail
+  (`program_output_tests_ndi_switch.rs::switch_with_the_thread_first`).
 - **A closure that returns an async method's future borrowing the
   closure's own argument is E0515** (#229 follow-up lane, caught by
   reading): `let wait = |why: PeerError| self.after_failed_fetch(.., &why);`
@@ -512,14 +595,22 @@ value.
 ## A unit test that hardcodes a PLATFORM-specific value fails on the Windows job (#189)
 The `Build (Windows)` CI job runs `cargo test --workspace` on `windows-latest`,
 so EVERY `#[test]` in `crates/` runs on BOTH Linux (the `Test` job) and Windows.
-A test that bakes in a Unix-only literal passes on Linux and FAILS on Windows —
-and the no-compile box can't see it. The one that bit #189: a `path_with_tools`
+A test that bakes in a Unix-only literal passes on Linux and FAILS on Windows.
+The one that bit #189: a `path_with_tools`
 test asserting the joined PATH string `"/opt/tools:/usr/bin:/bin"` — on Windows
 `std::env::{split_paths,join_paths}` use `;`, not `:`, so the string differs
 (`1482 passed; 1 failed` on the Windows job only). Fix: assert the INVARIANT, not
 the platform string — round-trip the result through `std::env::split_paths` and
 check `parts[0] == tools_dir`, which holds on both separators. Same rule for any
 `MAIN_SEPARATOR` / line-ending / drive-letter / temp-path assumption in a test.
+
+**A file's time or size read through `read_dir` can lag on NTFS** (#261 lane 2
+review round 3). On Windows `DirEntry::metadata` comes from the directory
+index (`FindNextFileW`), which NTFS updates lazily, e.g. for a file still open.
+Production code that decides on a file's age reads `std::fs::symlink_metadata`
+of its path (its own record, no link followed: `data_size::walk_exact`,
+`cache_sweep::list_into`), and a test that pins a time read through a listing
+holds it only `if cfg!(unix)` (`data_size_tests.rs`).
 
 **A WARP (runner) premise is proven in CI before a test rests on it** (#223 S3b:
 Microsoft's page reads as if WARP takes `D3D11_CREATE_DEVICE_VIDEO_SUPPORT`,
@@ -581,7 +672,7 @@ held back with or without the gate under test, and the test passes vacuously
 
 CI clippy runs with `-D warnings`, and `clippy::doc_lazy_continuation` (stable
 since 1.80) rejects a paragraph line that directly follows a list item without
-a blank doc line or indentation — the Tier-0 box cannot see it, so it fails
+a blank doc line or indentation, so it fails
 the Lint job (#195, three sites). After the last `- item` / `3. item`, insert a
 bare `//!` (or `///`) line before continuing prose.
 
@@ -654,7 +745,7 @@ give a test file an explicit `use` for every type it names that the parent
 only imports (`SharedFrame`, `AudioFrame`, `Arc`, …). An explicit import
 shadows a glob-imported name and never conflicts, so this is safe either way.
 
-## RED on the no-compile box for a REFACTOR (not just a wrong constant) — #203
+## RED for a REFACTOR (not just a wrong constant) — #203
 
 The "ship real logic with ONE WRONG CONSTANT" pattern extends to structural
 refactors: ship the FULL structural change in the RED commit but make ONE spot
@@ -800,9 +891,6 @@ behaviour, not a wrong spot. Keep them compiling on both sides:
 lists the diff's mutants (`file:line` + replacement) so a review can name
 the test that kills each one BEFORE CI's mutation gate runs.
 
-- The Tier-0 hook blocks it as a cargo subcommand. Because it only lists,
-  the logged `# airuleset:build-ok list-only` bypass is honest here, and
-  only here.
 - **In a worktree lane, and after merging origin/dev into it** (#221 L4b):
   the Bash guard refuses `cd <wt> && cargo mutants … > file`. Run two plain
   commands instead: `git -C <wt> diff origin/dev..HEAD --output=<scratch>/range.diff`,
@@ -812,7 +900,7 @@ the test that kills each one BEFORE CI's mutation gate runs.
   To KEEP the list (to diff it after each fix round and map only the new
   mutants), a `> file` redirect is refused too: pipe it instead,
   `cargo mutants … --list --dir <wt> | python3 -c "import sys;
-  open('<scratch>/mutants.txt','w').write(sys.stdin.read())"   # airuleset:build-ok list-only`
+  open('<scratch>/mutants.txt','w').write(sys.stdin.read())"`
   (#233 lane 1, eight review rounds: list → diff against the previous
   list, ignoring line:col → map the new descriptions).
 - **Give a review dispatch the merged base SHA, not `origin/dev`** (#136):
@@ -874,6 +962,19 @@ the test that kills each one BEFORE CI's mutation gate runs.
   (`self.finish_push("hide_title_now", result);`): no mutant, so pin its
   effect with a behaviour test (#217 addendum 2,
   `a_retried_hide_that_404s_leaves_no_stale_note_for_the_next_push`).
+  A table that holds a `Weak` hides such a missing clear: once the last
+  `Arc` drops, the stale row reads as gone anyway. The test of a release
+  that must forget its row keeps a strong ref (as a playing song's
+  reader does) and asserts the row is gone (#279 P3a review round 7,
+  `gpu_resident_tests.rs::a_song_opened_while_gpu_does_not_take_effect_lets_the_producer_go`).
+  A `mutants::skip` glue fn that also writes state moves that write
+  into a tested generic fn (`release_at_open` / `release_when_idle`
+  over the fake producer), leaving the glue only its log line.
+- **Resuming a stopped lane** (#279 P3a, 19.10.2026): its scratch dir
+  (`lane-<n>/edits/`) may hold anchor-asserted edit scripts written but
+  never applied (the stop came mid-round); read them before redoing the
+  round, and re-target their helper's worktree path (`ed.py`'s `WT`) to
+  the new worktree, since the old one is gone.
 - **A comment added INSIDE a fn body puts that whole fn in the diff's
   list** (#229 follow-up: one comment line in `pipeline_stub.rs`'s
   `run_loop_stub` listed `replace run_loop_stub with ()`). `--in-diff`
@@ -887,6 +988,13 @@ the test that kills each one BEFORE CI's mutation gate runs.
   all 18 tests because none ever held two entries. For every such choice,
   write a test whose state makes the two siblings differ (two entries
   pending), and check it against the swapped variant in the scratch model.
+- **A ring of N slots is tested with N distinct values in turn** (#279 P1a
+  review round 1, the UYVY staging ring of 3). Two pictures alternated
+  over three slots leave the slot being written holding the SAME picture
+  as the newest one, so a read of the wrong slot passes. With N values in
+  turn every other slot holds another value; the same holds for any
+  rotation or double buffer whose index logic sits outside the mutation
+  gate (`win/`).
 - **A branch whose ONLY effect is a log line survives the gate** (#224
   part 2 review round 3: `if … && !slew.owe(..) { warn!(..) }` — the
   delete-`!` mutant only moves the WARN). Give such a branch an observable
@@ -933,6 +1041,13 @@ the test that kills each one BEFORE CI's mutation gate runs.
   and survives. Subtract ONCE into a local (`let offset = …; (offset / ds,
   offset % ds)`), so the mutant also moves the quotient, which a test sees
   (#215 addendum 3, `nv12_mix.rs`).
+- The same trap inside a modular difference (#251, `compose_offset`):
+  `(a % p + p - b % p) % p` lists `a % p` → `a + p`, and the outer `% p`
+  makes it EQUIVALENT (it adds a whole p). Do not reduce a term the outer
+  `% p` reduces anyway: write `(a + p - b % p) % p` (the same value, no
+  underflow as `a + p > b % p`). The `b % p` that stays must be reduced,
+  and its `b + p` mutant then underflows on a test with `b > a`, so keep
+  one such case in the pins.
 - **Key the harness by `line:col`, not by hand-named switches (#233 lane
   2).** Write every operator of the model as a call carrying its Rust site
   (`B("142:30", "-", a, b)`, comparisons, compound assignments, `delete !` /
@@ -1063,7 +1178,7 @@ reads better too: the map keys are visible.
 `assert_eq!(take(cap).as_ptr(), p, …)` is a compile ERROR under CI's
 `clippy --all-targets -D warnings`: rustc's `dangling_pointers_from_temporaries`
 lint fires because the `Vec` temporary dies at the end of the statement while
-the pointer is compared. The no-compile box cannot see it (it is a lint of the
+the pointer is compared (a lint of the
 lib TEST target). Write `let again = take(cap); assert_eq!(again.as_ptr(), p, …)`
 — any pointer-identity assertion on a fresh value needs the value bound to a
 local for the statement's lifetime. (`sub.prev_frame.as_ref().unwrap().as_ptr()`
@@ -1154,7 +1269,7 @@ bottom of a file is preceded by `#[cfg(test)]`; inserting a NEW production
 pure module) lands the pre-existing `#[cfg(test)]` onto the NEW `mod` — gating a
 PRODUCTION module out of every non-test build — and leaves the tests module
 UNGATED (dragging `MockNdiBackend`/`#[test]` into the lib). `cargo test` passes
-(cfg(test) on) and `cargo fmt` cannot see it, so the no-compile box ships it;
+(cfg(test) on) and `cargo fmt` cannot see it;
 `cargo build` / the release Tauri compile / `clippy --workspace --all-targets`
 (lib target, cfg(test) OFF) then fail with `unresolved import`/`E0432`. Put the
 new `mod` AFTER the test module, or move the `#[cfg(test)]` explicitly back onto
@@ -1166,7 +1281,8 @@ above your `old_string` anchor before an Edit that adds a sibling `mod`.
 - Drive a handler with `crate::api::router(state, None)` + `tower::ServiceExt::oneshot`, as in `api/lyrics_tests.rs::send`, and assert the row / response afterwards.
 - A test that runs its OWN copy of the handler's UPDATE ("mirror the handler's SQL") can never fail on a change to the handler. #144 deleted two of these: `reprocess_video_ids_sets_manual_priority` and `reprocess_all_stale_only_flags_stale_rows`.
 - A test for a DELETED route stays useful as a regression guard. `router(state, None)` has no SPA fallback (that needs a `dist_dir`), so a removed path answers 404. Assert the harmful effect is absent FIRST, so the RED fails for the right reason, and the 404 last.
-- **Use the route's REAL method, read from `api/mod.rs`, never from a ticket's wording** (#225 unit 2). axum answers 405 for an unrouted method before the handler runs. The playlist update is `PUT /api/v1/playlists/{id}`; the ticket called it "the PATCH", and five tests sent PATCH. On the no-compile box they were "RED" for the wrong reason and could never pass. Two fresh-context review rounds missed it; the third found it by reading the route table. Before writing a router test, `grep` the path in `api/mod.rs`.
+- **Use the route's REAL method, read from `api/mod.rs`, never from a ticket's wording** (#225 unit 2). axum answers 405 for an unrouted method before the handler runs. The playlist update is `PUT /api/v1/playlists/{id}`; the ticket called it "the PATCH", and five tests sent PATCH. They were "RED" for the wrong reason and could never pass. Two fresh-context review rounds missed it; the third found it by reading the route table. Before writing a router test, `grep` the path in `api/mod.rs`.
+- **The test pool has ONE connection** (`db::create_memory_pool`, `max_connections(1)`; `test_state` uses it). A helper that holds it (`pool.acquire()`, an open transaction) while it, or the code it calls, runs another query on the pool waits out sqlx's 30 s acquire timeout and panics (#261 lane 2 review round 1: three import tests failed on the RED AND the GREEN tree, for the wrong reason). Change state through the real route (`PUT /api/v1/playlists/{id}` `{"is_active": …}`, `routes_import_tests.rs::set_active`), or run each query on `&pool` directly.
 
 ## A cross-crate test-only helper must be `#[doc(hidden)] pub`, NOT `#[cfg(test)]` (#203 2b)
 
@@ -1212,7 +1328,7 @@ delta is pinned exactly (`before + 1`): `mf_hw_decode.rs` `COUNTERS`.
 `clippy --all-targets -D warnings` runs `clippy::await_holding_lock` on the lib
 TEST target too: a `static SERIAL: std::sync::Mutex<()>` guard taken at the top
 of a `#[tokio::test]` and held across the handler's/worker's `.await`s is a
-compile ERROR the no-compile box cannot see (it reddened `api/mix_tests.rs`
+compile ERROR (it reddened `api/mix_tests.rs`
 and then `heavy_slot_tests.rs` + `worker_tests_idle_gate.rs` + the
 `stems/worker.rs` test module the same night). Declare the serializer as
 `static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());`
@@ -1239,7 +1355,7 @@ A feature change never touches `Cargo.lock`: features are not recorded
 there.
 
 **The `windows` crate (sp-decoder's MF bindings, 0.58) may be missing from
-the box's registry** (#223 S0): nothing on Tier-0 compiles a Windows target.
+the box's registry** (#223 S0): a Linux box never compiles a Windows target.
 Look first: `ls -d ~/.cargo/registry/src/*/windows-0.58.0` (by #223 S3b it
 was there, with `windows-core-0.58.0`; read `src/Windows/Win32/<Area>/mod.rs`
 in place, and copy a big `mod.rs` to the scratchpad before grepping it with
@@ -1252,33 +1368,9 @@ dwmediatypeindex: u32) -> windows_core::Result<IMFMediaType>`). `GUID`'s
 public `data1..data4` fields are in `windows-core-0.58.0/src/guid.rs`, from
 the same URL with `windows-core`.
 
-## Adding a NEW registry crate to the lock on the Tier-0 box (#233 lane 2)
-
-`cargo update -p <crate> --precise <v>` fails for a crate the lock does not
-hold yet ("did not match any packages"). With the members' lock versions
-current (`sync-version.sh` keeps them so now), `cargo update --workspace`
-(Tier-0-allowed, compiles nothing) adds exactly the new crate's tree and
-moves no other line — check that `git diff Cargo.lock` is additions only.
-Verify the newest version from the sparse index
-(`https://index.crates.io/<ab>/<cd>/<name>`, a neutral User-Agent) and read
-its source from the downloaded `.crate` (static.crates.io) before writing
-calls against it.
-
-## Adding a path dependency between workspace crates on the Tier-0 box (#184 G4)
-
-`Cargo.lock` is tracked but its workspace-member versions are long stale (e.g.
-`sp-decoder 0.49.0-dev.6`), and CI builds without `--locked`. So when a crate gains
-a path dep (G4: `sp-decoder` → `sp-core`), add ONE line to that crate's
-`dependencies = [...]` list in `Cargo.lock` by hand (alphabetical). Do NOT let
-`cargo tree` / `cargo metadata` resolve it: they rewrite every stale member
-version and bump unrelated deps (a ~20-line lockfile diff riding in a feature
-PR). Also check the new edge adds no cycle (`sp-core` depends only on serde /
-thiserror, so anything may depend on it).
-
 ## Scripted edits after `cargo fmt`: assert the anchor, never a silent `str.replace` (#212)
 
-On the no-compile box every change goes through editors/scripts, and `cargo fmt`
-re-wraps long lines. A later scripted `s.replace(old, new)` whose `old` is the
+`cargo fmt` re-wraps long lines. A later scripted `s.replace(old, new)` whose `old` is the
 PRE-fmt text silently does nothing — #212 shipped a test asserting the old 2×2
 standby while the rig built 2×4, caught only by a review pass (it would have
 reddened 6 CI tests). Fail loudly when an anchor is missing
@@ -1290,13 +1382,20 @@ the worktree"), and not every time (#221 L4a). Write the anchor-asserted edit
 to a script in the lane's scratchpad and run `python3 <script> <path>` as its
 own command, then fmt / commit in separate commands.
 
+**Splitting one file's changes across two commits with no `add -p`**
+(interactive staging is unavailable; #279 P0: `win/mod.rs` held both the
+probe's `mod` line and the upload counting). Copy the finished file to the
+scratchpad, write the first commit's version (the file at HEAD plus only
+that commit's anchor-asserted edits), stage and commit it, then copy the
+finished file back for the next commit. Each commit then compiles on its
+own.
+
 ## "Never blocks / never waits" tests: gates and thread names, never wall-time thresholds (#212 follow-up)
 
 The gating Coverage job runs every test under `cargo tarpaulin`'s ptrace, and
 under ptrace a thread can stall for a long time on a breakpoint. So a
 real-time grid, a "this call took < N ms" budget, or a read of a value some
-other thread is still publishing can flake there. The no-compile box never
-sees that. What held up across five review rounds:
+other thread is still publishing can flake there. What held up across five review rounds:
 
 - **Prove WHERE a call ran.** Have the mock record `thread::current().name()`
   per call (`MockNdiReceiveBackend::calls_by_thread`) and assert the helper's
@@ -1384,8 +1483,7 @@ dispatcher and no global default is set, tracing-core asks only the CALLING
 thread's default (`Dispatchers::has_just_one`, tracing-core 0.1.36
 `callsite.rs`): a parallel test that hits the same `info!` first, on a
 thread with no default, caches it as `never`, and the capturing test
-misses its own line on correct code (a flake the no-compile box cannot
-see). With a second dispatcher registered every callsite is asked of all
+misses its own line on correct code. With a second dispatcher registered every callsite is asked of all
 of them (`sometimes`), and registering a scoped default rebuilds every
 cached interest. So every capture goes through `crate::test_log::capturing`,
 which installs a global `NoSubscriber` once (`std::sync::Once`,

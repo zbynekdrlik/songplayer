@@ -22,8 +22,9 @@
 //!   peer (`peer_fetches`) that is not the one listed now, or, only while
 //!   this node's paid AI is off (it then makes no lyrics itself), a track
 //!   no peer record names (a phase-0 copy, an old attempt here).
-//! - ONE song per look: an operator's lyrics or a dub (`lyrics::kept_local`)
-//!   or a copy of another audio (`Exchange::audio_verdict`) is passed over;
+//! - ONE song per look: an operator's lyrics or a dub (`lyrics::kept_local`;
+//!   a reprocess flag only while this node's paid AI is on, #264) or a copy
+//!   of another audio (`Exchange::audio_verdict`) is passed over;
 //!   else the copy goes into every row of the video
 //!   (`lyrics::take_into_rows`: the old track is served until the
 //!   verified copy is renamed over it), and only once every row took it
@@ -38,8 +39,9 @@
 //!   followed since this process started ([`FollowStatus`]).
 //!
 //! No paid AI: the follow only fetches. The stems need no follow (they
-//! change only with `STEMS_VERSION`, which re-queues them here), the
-//! metadata is not followed (a title change renames the song's files).
+//! change only with `STEMS_VERSION`, which re-queues them here); the titles
+//! follow in their own step, with this cadence and memory
+//! (`peer::follow_title`, #269).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -97,12 +99,13 @@ pub struct Held {
     pub took: Option<(String, String)>,
 }
 
-/// A video whose lyrics a look follows: `peer`'s copy `artifact`.
+/// A video a look follows: `peer`'s copy `artifact`, and why (`W`: the
+/// lyrics' [`FollowWhy`], or #269's title `follow_title::TitleWhy`).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Candidate {
+pub struct Candidate<W = FollowWhy> {
     pub youtube_id: String,
     pub peer: String,
-    pub why: FollowWhy,
+    pub why: W,
     pub artifact: Artifact,
 }
 
@@ -156,13 +159,14 @@ pub fn candidates(
     found
 }
 
-/// `follow` in `GET /api/v1/exchange/status`, since this process started.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FollowStatus {
-    /// Songs whose lyrics followed a peer's copy.
+/// `follow` (the lyrics) and `title_follow` (#269, the titles) in `GET
+/// /api/v1/exchange/status`, since this process started.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FollowStatus<W = FollowWhy> {
+    /// Songs that followed a peer's copy.
     pub followed: u64,
     /// The last of them.
-    pub last: Option<Followed>,
+    pub last: Option<Followed<W>>,
     /// When the last look ran (RFC 3339, UTC); `None` before one.
     pub last_look: Option<String>,
     /// The songs the last look found wanting a peer's copy (one taken per
@@ -175,12 +179,25 @@ pub struct FollowStatus {
     pub last_error: Option<FollowError>,
 }
 
-/// A song whose lyrics followed a peer's copy.
+impl<W> Default for FollowStatus<W> {
+    fn default() -> Self {
+        Self {
+            followed: 0,
+            last: None,
+            last_look: None,
+            wanted: 0,
+            passed_over: 0,
+            last_error: None,
+        }
+    }
+}
+
+/// A song that followed a peer's copy.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Followed {
+pub struct Followed<W = FollowWhy> {
     pub youtube_id: String,
     pub peer: String,
-    pub why: FollowWhy,
+    pub why: W,
     /// RFC 3339, UTC.
     pub at: String,
 }
@@ -195,40 +212,51 @@ pub struct FollowError {
     pub at: String,
 }
 
-/// The follow's memory, in this process only: a restart looks at every
-/// song again.
-#[derive(Debug, Default)]
-pub struct FollowState {
+/// A follow's memory, in this process only: a restart looks at every song
+/// again. The lyrics' (`W` = [`FollowWhy`]) and #269's titles' each have
+/// their own (`Exchange::follow`, `Exchange::title_follow`).
+#[derive(Debug)]
+pub struct FollowState<W = FollowWhy> {
     /// No look before this instant (UTC ms).
-    next_look_ms: i64,
+    pub(super) next_look_ms: i64,
     /// The songs passed over for now: the copy passed over, and until when.
-    passed: HashMap<String, Passed>,
-    status: FollowStatus,
+    pub(super) passed: HashMap<String, Passed>,
+    pub(super) status: FollowStatus<W>,
+}
+
+impl<W> Default for FollowState<W> {
+    fn default() -> Self {
+        Self {
+            next_look_ms: 0,
+            passed: HashMap::new(),
+            status: FollowStatus::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Passed {
-    sha256: String,
-    until_ms: i64,
+pub(super) struct Passed {
+    pub(super) sha256: String,
+    pub(super) until_ms: i64,
 }
 
-impl FollowState {
+impl<W: Copy> FollowState<W> {
     /// A look may run at `now_ms`.
-    fn due(&self, now_ms: i64) -> bool {
+    pub(super) fn due(&self, now_ms: i64) -> bool {
         now_ms >= self.next_look_ms
     }
 
     /// No look before `after` from `now_ms`.
-    fn look_after(&mut self, now_ms: i64, after: Duration) {
+    pub(super) fn look_after(&mut self, now_ms: i64, after: Duration) {
         self.next_look_ms = now_ms.saturating_add(duration_ms(after));
     }
 
     /// A look at `now_ms` found `found` ([`candidates`]): the first song not
     /// passed over is taken now; with none the next look is [`FOLLOW_IDLE`]
     /// later. What the look found goes to the status.
-    fn pick(&mut self, found: &[Candidate], now_ms: i64) -> Option<Candidate> {
+    pub(super) fn pick(&mut self, found: &[Candidate<W>], now_ms: i64) -> Option<Candidate<W>> {
         self.passed.retain(|_, p| now_ms < p.until_ms);
-        let left: Vec<&Candidate> = found.iter().filter(|c| !self.passes_over(c)).collect();
+        let left: Vec<&Candidate<W>> = found.iter().filter(|c| !self.passes_over(c)).collect();
         self.status.last_look = Some(ms_to_rfc3339(now_ms));
         self.status.wanted = left.len();
         self.status.passed_over = found.len() - left.len();
@@ -241,7 +269,7 @@ impl FollowState {
 
     /// `c` is passed over for now: while its peer lists the same copy, for
     /// `retry` from `now_ms`.
-    fn pass(&mut self, c: &Candidate, now_ms: i64, retry: Duration) {
+    pub(super) fn pass(&mut self, c: &Candidate<W>, now_ms: i64, retry: Duration) {
         let passed = Passed {
             sha256: c.artifact.sha256.clone(),
             until_ms: now_ms.saturating_add(duration_ms(retry)),
@@ -250,14 +278,14 @@ impl FollowState {
     }
 
     /// `c` is passed over: the same copy is passed over still.
-    fn passes_over(&self, c: &Candidate) -> bool {
+    fn passes_over(&self, c: &Candidate<W>) -> bool {
         self.passed
             .get(&c.youtube_id)
             .is_some_and(|p| p.sha256 == c.artifact.sha256)
     }
 
-    /// `c`'s lyrics followed the peer's copy at `now_ms`.
-    fn followed(&mut self, c: &Candidate, now_ms: i64) {
+    /// `c` followed the peer's copy at `now_ms`.
+    pub(super) fn followed(&mut self, c: &Candidate<W>, now_ms: i64) {
         self.status.followed += 1;
         self.status.last = Some(Followed {
             youtube_id: c.youtube_id.clone(),
@@ -269,7 +297,7 @@ impl FollowState {
 
     /// `c`'s take failed at `now_ms` (`error`): asked again after
     /// [`FOLLOW_RETRY`].
-    fn failed(&mut self, c: &Candidate, now_ms: i64, error: &PeerError) {
+    pub(super) fn failed(&mut self, c: &Candidate<W>, now_ms: i64, error: &PeerError) {
         self.pass(c, now_ms, FOLLOW_RETRY);
         self.status.last_error = Some(FollowError {
             youtube_id: c.youtube_id.clone(),
@@ -296,13 +324,7 @@ pub async fn follow_next(ex: Option<&Arc<Exchange>>) -> Vec<i64> {
         return Vec::new();
     };
     let now = now_ms();
-    let due = lock(&ex.follow).due(now);
-    // While paused nothing is read: looked at again on the next tick.
-    if !due || ex.transfers_paused().await {
-        return Vec::new();
-    }
-    let Some(cfg) = asking_config(ex).await else {
-        lock(&ex.follow).look_after(now, FOLLOW_IDLE);
+    let Some(cfg) = look_config(ex, &ex.follow, now).await else {
         return Vec::new();
     };
     let held = match held_videos(&ex.pool).await {
@@ -314,12 +336,7 @@ pub async fn follow_next(ex: Option<&Arc<Exchange>>) -> Vec<i64> {
         }
     };
     let catalogs = ex.read_peers(&cfg.peers).await;
-    let reads: Vec<(&str, Option<&Catalog>)> = cfg
-        .peers
-        .iter()
-        .zip(&catalogs)
-        .map(|(peer, catalog)| (peer.name.as_str(), catalog.as_deref()))
-        .collect();
+    let reads = peer_reads(&cfg, &catalogs);
     let untracked = !ex.may_run_here(Job::Lyrics).await;
     let found = candidates(&held, &reads, untracked);
     let picked = lock(&ex.follow).pick(&found, now);
@@ -333,13 +350,48 @@ pub async fn follow_next(ex: Option<&Arc<Exchange>>) -> Vec<i64> {
     settle(ex, &c, outcome, now_ms())
 }
 
+/// A follow's first step, the lyrics' and the titles' (#269) alike: the
+/// settings a look of `state` runs with at `now`. `None` = no look now: not
+/// due yet; this node's transfers paused (nothing read, looked at again on
+/// the next tick); or it asks no peer (SNV) or its settings do not hold (the
+/// next look [`FOLLOW_IDLE`] later).
+pub(super) async fn look_config<W: Copy>(
+    ex: &Exchange,
+    state: &std::sync::Mutex<FollowState<W>>,
+    now: i64,
+) -> Option<NodeConfig> {
+    let due = lock(state).due(now);
+    if !due || ex.transfers_paused().await {
+        return None;
+    }
+    let cfg = asking_config(ex).await;
+    if cfg.is_none() {
+        lock(state).look_after(now, FOLLOW_IDLE);
+    }
+    cfg
+}
+
+/// The listed peers' catalogs as a look reads them: each peer's name with
+/// its catalog, `None` where it could not be read (`Exchange::read_peers`,
+/// in `cfg.peers` order).
+pub(super) fn peer_reads<'a>(
+    cfg: &'a NodeConfig,
+    catalogs: &'a [Option<Arc<Catalog>>],
+) -> Vec<(&'a str, Option<&'a Catalog>)> {
+    cfg.peers
+        .iter()
+        .zip(catalogs)
+        .map(|(peer, catalog)| (peer.name.as_str(), catalog.as_deref()))
+        .collect()
+}
+
 /// This node's exchange settings when it asks peers; `None` when it asks
 /// none (SNV) or they do not hold (WARNed).
 async fn asking_config(ex: &Exchange) -> Option<NodeConfig> {
     match NodeConfig::load(&ex.pool).await {
         Ok(cfg) => cfg.asking().then_some(cfg),
         Err(e) => {
-            warn!(error = %e, "exchange: the lyrics follow waits - the settings do not hold");
+            warn!(error = %e, "exchange: a follow waits - the settings do not hold");
             None
         }
     }

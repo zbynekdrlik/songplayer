@@ -136,7 +136,6 @@ async fn migration_creates_all_tables() {
         "play_history",
         "settings",
         "resolume_hosts",
-        "resolume_clip_mappings",
     ] {
         assert!(
             tables.contains(&expected.to_string()),

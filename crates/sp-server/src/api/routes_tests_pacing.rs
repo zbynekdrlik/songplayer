@@ -71,6 +71,7 @@ async fn ndi_health_endpoint_includes_pacing() {
         lock_reason: "locked".to_string(),
         transport: sp_core::playback::TransportState::Idle,
         open_failures: None,
+        gpu_decoded: false,
     });
 
     let resp = app(state)

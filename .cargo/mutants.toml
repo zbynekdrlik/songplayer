@@ -113,9 +113,9 @@ exclude_re = [
   #   shim), a #[cfg(windows)] module: dead on the Linux runner, so every
   #   mutant builds and survives. Its decisions live in the crate's pure,
   #   Linux-tested modules (adapter, picture, composition, quad, residency,
-  #   color, error, reference, readback, spout, spout_state); the module is
-  #   proven on WARP
-  #   (windows-latest) by tests/warp.rs and tests/spout.rs.
+  #   color, error, reference, readback, spout, spout_state; #279 P1a:
+  #   uyvy); the module is proven on WARP (windows-latest) by tests/warp.rs,
+  #   tests/spout.rs and tests/uyvy.rs.
   'sp-gpu/src/win/',
   # playback/asio_win.rs (+ its Windows-job tests, #233): the azo (COM) calls
   #   of the ASIO output, a #[cfg(windows)] module: dead on the Linux

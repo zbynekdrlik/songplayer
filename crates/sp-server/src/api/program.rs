@@ -55,6 +55,13 @@
 //! `program-max` thread drops both Spout senders and makes no Spout call
 //! while the quiesce holds (60 s from the last ask), and `max.state` reads
 //! `quiesced` (`202 {"state"}`).
+//!
+//! #279 P1b: both answers also carry `ndi`
+//! (`playback::ndi_feed::NdiStatus`): `program_ndi_source` as applied
+//! (`setting`), where the last boundary's NDI picture came from (`source`,
+//! `gpu` = the compositor's UYVY readback one slot late, `cpu` = the
+//! canvas), `delay_slots`, `fourcc`, the delay line's counters and the
+//! readback's p99s.
 
 use axum::Json;
 use axum::extract::{Query, State};
@@ -67,11 +74,12 @@ use sp_core::config::{PROGRAM_BLANK_ID, PROGRAM_INPUT_ID};
 
 use crate::AppState;
 use crate::playback::audio_out::OutputStatus;
+use crate::playback::ndi_feed::NdiStatus;
 use crate::playback::ndi_health_expect::program_degraded_reason;
 use crate::playback::ndi_input::{InputSettings, NdiInputStatus, load_input_settings};
 use crate::playback::program_bus::{ProgramBus, ProgramStatus};
 use crate::playback::program_item::ItemStatus;
-use crate::playback::program_max::MaxStatus;
+use crate::playback::program_max::{GpuStatus, MaxStatus};
 use crate::playback::program_switch::{
     RefusedSource, SourceError, Via, refused_sources, switch_source,
 };
@@ -115,6 +123,11 @@ pub struct ProgramResponse {
     pub input: NdiInputStatus,
     pub remote: RemoteStatus,
     pub max: MaxStatus,
+    /// #279 P1b: NDI `SP-program`'s source and its delay line.
+    pub ndi: NdiStatus,
+    /// #279 P3a: how the compositor drew the pictures (ring slots in place
+    /// vs CPU pictures) and the ring slots' failures.
+    pub gpu: GpuStatus,
     /// #221 ROZHODNUTÉ 6022247729: the playlists a cut refuses now (`null`
     /// when the playlists cannot be read).
     pub cut_refused: Option<Vec<RefusedSource>>,
@@ -183,6 +196,8 @@ impl ProgramResponse {
             input: bus.input().status(&stored.input),
             remote: bus.remote().status(&stored.remote, &bus.on_air_now()),
             max: bus.max().status(),
+            ndi: bus.max().ndi_status(),
+            gpu: bus.max().gpu_status(),
             cut_refused,
             burn_on: bus.item().burn_on(),
             burned_boundaries: bus.item().burned(),
@@ -393,6 +408,9 @@ mod tests_burn;
 #[cfg(test)]
 #[path = "program_tests_max.rs"]
 mod tests_max;
+#[cfg(test)]
+#[path = "program_tests_ndi.rs"]
+mod tests_ndi;
 #[cfg(test)]
 #[path = "program_tests_outputs.rs"]
 mod tests_outputs;

@@ -237,13 +237,9 @@ pub(crate) async fn manual_title(
 }
 
 /// Spread row `video_db_id`'s title (the correction its PATCH just wrote) to
-/// every row of its YouTube video, and rename each row's files after it in
-/// `cache_dir` (no `_gf`: a correction is no parser title). Each row's set is
-/// read right before its move, never from a snapshot (an earlier row of the
-/// loop may have moved the same files), and recorded on every row that
-/// recorded it (`SongColumns::record`). A row with no files yet (not
-/// downloaded) takes the title and records none. The caller holds
-/// `cache::SONG_FILES` from its own UPDATE to here, so a repair or a
+/// every row of its YouTube video ([`spread_title`], `'manual'`), and rename
+/// each row's files after it in `cache_dir` ([`rename_rows`]). The caller
+/// holds `cache::SONG_FILES` from its own UPDATE to here, so a repair or a
 /// re-link never interleaves. A row that no longer exists is nothing to do.
 ///
 /// Review round 1: a patched row with NO song (not downloaded yet, an
@@ -262,22 +258,69 @@ pub async fn apply_to_video(
     let Some((youtube_id, song, artist)) = row else {
         return Ok(());
     };
-    let spread = sqlx::query(
+    let spread = spread_title(pool, &youtube_id, &song, artist.as_deref(), MANUAL_SOURCE).await?;
+    rename_rows(pool, cache_dir, &youtube_id, None).await?;
+    info!(
+        video_db_id,
+        youtube_id = %youtube_id,
+        song = %song,
+        artist = ?artist,
+        rows = spread.len(),
+        "metadata: the operator's title correction applies to every row of the video"
+    );
+    Ok(())
+}
+
+/// Write one title on every row of YouTube video `youtube_id`: `song` (an
+/// empty one leaves each row its own), `artist`, `metadata_source = source`
+/// (`'manual'` for an operator's correction, #269: the peer's own label for
+/// a peer's title, so it keeps its rank here) and `gemini_failed = 0` (a
+/// spread title is no parser's). Answers the rows written, by id. The files
+/// are [`rename_rows`]'s; the caller holds `cache::SONG_FILES`.
+pub(crate) async fn spread_title(
+    pool: &SqlitePool,
+    youtube_id: &str,
+    song: &str,
+    artist: Option<&str>,
+    source: &str,
+) -> Result<Vec<i64>, sqlx::Error> {
+    let mut ids: Vec<i64> = sqlx::query_scalar(
         "UPDATE videos SET song = COALESCE(NULLIF(?, ''), song), artist = ?, \
          metadata_source = ?, gemini_failed = 0 \
-         WHERE youtube_id = ?",
+         WHERE youtube_id = ? RETURNING id",
     )
-    .bind(&song)
-    .bind(&artist)
-    .bind(MANUAL_SOURCE)
-    .bind(&youtube_id)
-    .execute(pool)
+    .bind(song)
+    .bind(artist)
+    .bind(source)
+    .bind(youtube_id)
+    .fetch_all(pool)
     .await?;
+    ids.sort_unstable();
+    Ok(ids)
+}
+
+/// Rename every row's files of YouTube video `youtube_id` in `cache_dir`
+/// after `title` (`(song, artist)`; `None` = each row's own title as it now
+/// is), no `_gf` (a named title is no parser's). Each row's set is read right
+/// before its move, never from a snapshot (an earlier row of the loop may
+/// have moved the same files), and recorded on every row that recorded it
+/// (`SongColumns::record`): where the files ARE, also after a failed move. A
+/// row with no files yet (not downloaded) is skipped. Answers whether every
+/// set is now under its new names: `false` when a move failed (a file held
+/// open on Windows) and the set stayed under the old ones. The caller holds
+/// `cache::SONG_FILES` from its read of the title to its write.
+pub(crate) async fn rename_rows(
+    pool: &SqlitePool,
+    cache_dir: &Path,
+    youtube_id: &str,
+    title: Option<(&str, &str)>,
+) -> Result<bool, sqlx::Error> {
     let ids: Vec<i64> =
         sqlx::query_scalar("SELECT id FROM videos WHERE youtube_id = ? ORDER BY id")
-            .bind(&youtube_id)
+            .bind(youtube_id)
             .fetch_all(pool)
             .await?;
+    let mut all_moved = true;
     for id in ids {
         let (file_path, audio_file_path, row_song, row_artist): RowFiles = sqlx::query_as(
             "SELECT COALESCE(file_path, ''), audio_file_path, COALESCE(song, ''), \
@@ -290,24 +333,19 @@ pub async fn apply_to_video(
         if old.is_empty() {
             continue; // not downloaded yet: no files to name
         }
-        let new = old.named(cache_dir, &row_song, &row_artist, &youtube_id, false);
-        let files = rename_song_files(&youtube_id, &old, &new).columns();
+        let (song, artist) = title.unwrap_or((row_song.as_str(), row_artist.as_str()));
+        let new = old.named(cache_dir, song, artist, youtube_id, false);
+        let files = rename_song_files(youtube_id, &old, &new);
+        all_moved &= files == new;
         files
-            .record(pool, &youtube_id, &file_path, audio_file_path.as_deref())
+            .columns()
+            .record(pool, youtube_id, &file_path, audio_file_path.as_deref())
             .await?;
     }
-    info!(
-        video_db_id,
-        youtube_id = %youtube_id,
-        song = %song,
-        artist = ?artist,
-        rows = spread.rows_affected(),
-        "metadata: the operator's title correction applies to every row of the video"
-    );
-    Ok(())
+    Ok(all_moved)
 }
 
-/// A row's recorded files and title as `apply_to_video` reads them:
+/// A row's recorded files and title as `rename_rows` reads them:
 /// `file_path`, `audio_file_path`, `song`, `artist` (`""` for a NULL text).
 type RowFiles = (String, Option<String>, String, String);
 

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use super::{
     MAX_SEND_LEAD, SEND_SPIN_MARGIN, SendClock, SendTiming, WaitStep, send_at, send_due,
-    send_wait_step,
+    send_wait_step, wait_for,
 };
 
 /// A clock that never sleeps: `now` is the test's; a wait runs `on_wait`
@@ -138,6 +138,26 @@ fn a_compose_past_the_due_instant_sends_at_once_and_is_late() {
             started: offered + 15 * MS,
         }
     );
+}
+
+/// #251: the wait the compose shares — until the instant, or at once once
+/// it passed (late); exactly at it is not late.
+#[test]
+fn a_wait_for_an_instant_is_late_only_once_it_passed() {
+    let t = Instant::now();
+    let (mut clock, list) = FakeClock::at(t + 5 * MS);
+    assert_eq!(wait_for(&mut clock, t + 12 * MS), (t + 12 * MS, false));
+    assert_eq!(
+        wait_for(&mut clock, t + 12 * MS),
+        (t + 12 * MS, false),
+        "exactly at it"
+    );
+    assert_eq!(
+        wait_for(&mut clock, t + 10 * MS),
+        (t + 12 * MS, true),
+        "passed"
+    );
+    assert_eq!(waits(&list), [t + 12 * MS, t + 12 * MS]);
 }
 
 #[test]

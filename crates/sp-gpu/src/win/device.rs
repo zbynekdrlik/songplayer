@@ -39,12 +39,15 @@ pub(super) enum DeviceUse {
     /// decoding needs; `windows-latest`'s WARP refuses these flags at
     /// `FEATURE_LEVELS` with DXGI_ERROR_UNSUPPORTED, `tests/video_device.rs`).
     VideoDecode,
+    /// #279 P0: the capability probe's two devices (`probe.rs`): BGRA like
+    /// the compositor, made per probe, so its adapter list logs at DEBUG.
+    Probe,
 }
 
 impl DeviceUse {
     fn flags(self) -> D3D11_CREATE_DEVICE_FLAG {
         match self {
-            DeviceUse::Compose => D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            DeviceUse::Compose | DeviceUse::Probe => D3D11_CREATE_DEVICE_BGRA_SUPPORT,
             DeviceUse::VideoDecode => {
                 D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT
             }
@@ -111,7 +114,8 @@ pub(super) fn create_on_picked(usage: DeviceUse) -> Result<(Device, AdapterInfo)
                 name = %info.name,
                 vram_mb,
                 software = info.is_software(),
-                "sp-gpu: DXGI adapter (video decode)"
+                usage = ?usage,
+                "sp-gpu: DXGI adapter (video decode or probe)"
             );
         }
     }

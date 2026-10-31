@@ -27,7 +27,7 @@
 use sp_core::genlock::strict_next_boundary_100ns;
 
 use super::{PacedSink, Pacer, ServiceOutcome, Standby};
-use crate::playback::frame_buf::SharedFrame;
+use crate::playback::picture::Picture;
 
 /// A standby picture by reference: the idle / pre-roll black (or a held
 /// frame), an NV12 frame of `width`×`height` (stride `stride`), submitted by
@@ -37,7 +37,7 @@ pub struct StandbyBlack<'a> {
     pub width: u32,
     pub height: u32,
     pub stride: u32,
-    pub video: &'a SharedFrame,
+    pub video: &'a Picture,
 }
 
 /// An owned standby picture (an `Arc` clone, no pixel copy): the pre-roll's
@@ -47,7 +47,7 @@ pub(super) struct FillFrame {
     width: u32,
     height: u32,
     stride: u32,
-    video: SharedFrame,
+    video: Picture,
 }
 
 impl FillFrame {

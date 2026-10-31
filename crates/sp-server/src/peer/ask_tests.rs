@@ -96,6 +96,24 @@ async fn a_peer_that_has_it_is_fetched_from() {
     );
 }
 
+/// #269 (ROZHODNUTÉ): a job run here forgets the peer records of all it
+/// makes, but the title's while this node's title is still the copy it
+/// recorded.
+#[test]
+fn a_run_here_keeps_only_the_record_of_a_title_still_the_peers() {
+    let (video, audio, title) = (
+        ArtifactKind::Video,
+        ArtifactKind::Audio,
+        ArtifactKind::Metadata,
+    );
+    assert_eq!(
+        forgotten(Job::Download.makes(), false),
+        [video, audio, title]
+    );
+    assert_eq!(forgotten(Job::Download.makes(), true), [video, audio]);
+    assert_eq!(forgotten(Job::Lyrics.makes(), true), [ArtifactKind::Lyrics]);
+}
+
 /// A job that runs here replaces what it makes: a download here writes this
 /// node's own audio, so the record that the audio came from SNV goes (a later
 /// stems ask must not read it as SNV's audio). The records of what the job

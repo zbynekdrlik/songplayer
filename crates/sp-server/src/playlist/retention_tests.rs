@@ -4,13 +4,10 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use sqlx::SqlitePool;
 
-use super::{
-    FilePlan, PassReport, RETENTION_BATCH, candidates, cutoff_ms, next_wait, pass, plan_files,
-};
+use super::{FilePlan, PassReport, RETENTION_BATCH, candidates, cutoff_ms, pass, plan_files};
 use crate::downloader::cache::{SongFiles, derived_files};
 use crate::playlist::PlaylistEntry;
 
@@ -107,12 +104,6 @@ fn on_disk(paths: &[PathBuf]) -> Vec<bool> {
 #[test]
 fn the_year_is_counted_back_from_now() {
     assert_eq!(cutoff_ms(NOW), NOW - 365 * DAY);
-}
-
-#[test]
-fn a_pass_a_day_and_an_hour_after_a_held_one() {
-    assert_eq!(next_wait(false), Duration::from_secs(86_400));
-    assert_eq!(next_wait(true), Duration::from_secs(3_600));
 }
 
 fn set_of(video: &str, audio: &str) -> SongFiles {

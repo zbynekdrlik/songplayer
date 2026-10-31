@@ -74,8 +74,8 @@ Rules for every post-deploy spec:
 - **A post-deploy check's decision logic is a pure helper with a mock-suite
   unit spec** (`e2e/cache-layout.ts` for the FLAC layout, #136;
   `av-sync-gate.ts`, `obs-scene-wait.ts`). The post-deploy spec only reads
-  the box and calls it, so the rule is tested in CI without a box. On the
-  Tier-0 box a pure helper (interfaces / type annotations only, no enums)
+  the box and calls it, so the rule is tested in CI without a box. A
+  pure helper (interfaces / type annotations only, no enums)
   also runs with plain node and no install: a scratch `check.mts` that
   imports the helper by its absolute `.ts` path and mirrors the spec's cases
   with `node:assert/strict`, run as `node --experimental-strip-types

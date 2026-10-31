@@ -294,3 +294,140 @@ test("a Resolume the guard ended reads red until it runs again", async ({ page, 
     `${RULE} Resolume (preset „snv surround 7680“) chce: Display 1 7680×1080.`,
   );
 });
+
+// #275: whether SongPlayer's clip runs in Resolume (the report's
+// `songplayer_clip`, read by SongPlayer's Resolume driver). SNV, 14.10.2026:
+// after an Arena relaunch no clip ran until the operator pressed a Stream
+// Deck scene, the wall was black for 5.5 h and the segment read "Stena: OK".
+// While a song plays on program (the mock's replay: playlist 1 on program
+// with a song) and no SongPlayer clip runs, the segment says so in amber,
+// with how long; never red, never an action (clips run only from the
+// operator's Stream Deck).
+
+const YT_MUSIC = { layer: "L# Fill", clip: "Yt music", source: "SP-program-MAX" };
+const SNV_BG = { layer: "L # BG", clip: "SNV BG", source: "NDI Source" };
+
+/** No SongPlayer clip runs, since 12 min 5 s ago (the mock stamps `now_ms`
+ * at each answer: the text holds "12 min" for 55 s). */
+function noClipFor12Min() {
+  return {
+    state: "none",
+    clips: [],
+    ndi_clips: [SNV_BG],
+    since_ms: Date.now() - (12 * 60 + 5) * 1000,
+  };
+}
+
+const WANTS = `${RULE} Resolume (preset „snv surround 7680“) chce: Display 1 7680×1080.`;
+const NONE_TIP =
+  "Na stene už 12 min nebeží žiadny Spout klip SongPlayeru (SP-program-MAX ani SP-program). " +
+  "Klipy spúšťa len operátor zo Stream Decku, SongPlayer žiadny nespúšťa. Klip so zdrojom NDI " +
+  "SongPlayer nerozozná (Resolume nepovie, aký NDI zdroj má); viditeľné NDI klipy: L # BG — SNV BG.";
+const NOTE = "Stena: nebeží Spout klip SongPlayeru (12 min)";
+
+test("a song on program with no SongPlayer clip running reads an amber note until the clip runs", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(60_000);
+  await request.post("/__mock/wall", {
+    data: { state: "ok", read: READ, songplayer_clip: noClipFor12Min() },
+  });
+  await page.goto("/");
+  const bar = page.getByTestId("health-bar");
+  const segment = page.getByTestId("health-wall");
+  await expect(bar).toHaveAttribute("data-clip", "none", { timeout: 15000 });
+  await expect(segment).toHaveText(NOTE, { timeout: 15000 });
+  await expect(segment).toHaveClass(/health-warn/);
+  await expect(segment).toHaveAttribute("data-state", "ok");
+  await expect(segment).toHaveAttribute("data-clip-missing", "true");
+  await expect(segment).toHaveAttribute("title", `${WANTS} ${NONE_TIP}`);
+
+  // The operator presses his Stream Deck scene: the wall's own words again,
+  // the running clip named in the tooltip.
+  await request.post("/__mock/wall", {
+    data: {
+      state: "ok",
+      read: READ,
+      songplayer_clip: {
+        state: "running",
+        clips: [YT_MUSIC],
+        ndi_clips: [SNV_BG],
+        since_ms: Date.now(),
+      },
+    },
+  });
+  await expect(segment).toHaveText("Stena: OK", { timeout: 15000 });
+  await expect(segment).toHaveClass(/health-ok/);
+  await expect(segment).toHaveAttribute("data-clip-missing", "false");
+  await expect(bar).toHaveAttribute("data-clip", "running");
+  await expect(segment).toHaveAttribute(
+    "title",
+    `${WANTS} Na stene beží klip SongPlayeru: L# Fill — Yt music (SP-program-MAX).`,
+  );
+});
+
+test("the note follows the program: no song on program, no note, the fact in the tooltip", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(60_000);
+  await request.post("/__mock/wall", {
+    data: { state: "ok", read: READ, songplayer_clip: noClipFor12Min() },
+  });
+  await page.goto("/");
+  const segment = page.getByTestId("health-wall");
+  await expect(segment).toHaveText(NOTE, { timeout: 15000 });
+
+  // The song leaves the program (a cut to "OBS manuál" for the sermon): the
+  // operator may show anything then.
+  await request.post("/__mock/set-playing", {
+    data: { playlist_id: 1, state: "WaitingForScene", transport: "Paused" },
+  });
+  await expect(segment).toHaveText("Stena: OK", { timeout: 10000 });
+  await expect(segment).toHaveClass(/health-ok/);
+  await expect(segment).toHaveAttribute("data-clip-missing", "false");
+  await expect(segment).toHaveAttribute("title", `${WANTS} ${NONE_TIP}`);
+
+  // Back on program: the note again.
+  await request.post("/__mock/set-playing", {
+    data: { playlist_id: 1, state: "Playing", transport: "Playing" },
+  });
+  await expect(segment).toHaveText(NOTE, { timeout: 10000 });
+  await expect(segment).toHaveAttribute("data-clip-missing", "true");
+});
+
+test("a red wall or a clip not read keeps its own words: the note never hides them", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(60_000);
+  await request.post("/__mock/wall", {
+    data: {
+      state: "display_missing",
+      problems: [DISPLAY_SIZE],
+      read: READ,
+      songplayer_clip: noClipFor12Min(),
+    },
+  });
+  await page.goto("/");
+  const bar = page.getByTestId("health-bar");
+  const segment = page.getByTestId("health-wall");
+  await expect(bar).toHaveAttribute("data-clip", "none", { timeout: 15000 });
+  await expect(segment).toHaveText(`Stena: ${DISPLAY_SIZE.short_sk}`, { timeout: 15000 });
+  await expect(segment).toHaveClass(/health-error/);
+  await expect(segment).toHaveAttribute("data-clip-missing", "false");
+  await expect(segment).toHaveAttribute(
+    "title",
+    `${WANTS} Zistené: ${DISPLAY_SIZE.text_sk}. ${NONE_TIP}`,
+  );
+
+  // Resolume not read (it does not answer): no claim, no sentence.
+  await request.post("/__mock/wall", {
+    data: { state: "ok", read: READ, songplayer_clip: { state: "unknown" } },
+  });
+  await expect(segment).toHaveText("Stena: OK", { timeout: 15000 });
+  await expect(bar).toHaveAttribute("data-clip", "unknown");
+  await expect(segment).toHaveAttribute("data-clip-missing", "false");
+  await expect(segment).toHaveAttribute("title", WANTS);
+});

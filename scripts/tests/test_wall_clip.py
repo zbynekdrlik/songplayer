@@ -5,12 +5,16 @@ here directly (numpy only, as in CI's eval env). Cases:
 
 * the reflected Gray code: a round trip, and ONE bit between neighbours
   (a blended boundary then shows exactly one grey cell);
-* the layout at 4K: cells well over 100 px, eight bands, and ANY quarter of
-  the height (SNV's wall band) holds a whole strip row;
-* the cell edges sit at the same fractions on every supported width (the
-  reader samples by fraction);
-* a frame carries its index in every band, its reference cells and its
-  digits, and two consecutive frames' strips differ in one cell only;
+* the layout at 4K: 20 px cells, nine copies per band, eight bands; ANY
+  quarter of the width (the operator's ~2x zoom shows half of it, #272 v2)
+  holds a whole copy at every offset, and ANY quarter of the height a whole
+  band (its ruler right above its strip);
+* every supported width is the 4K layout scaled (the tests read 960 and
+  1920 px frames for the 4K clip);
+* a frame carries its index in every copy of every band, each copy's
+  references, ruler and digits, and two consecutive frames' strips differ
+  in one cell of each copy only; the ruler never changes, and no strip
+  draws it (no run of 18 black cells between white ones);
 * the encode is pinned: one x264 thread, fixed GOP, bitexact, no metadata.
 """
 
@@ -40,87 +44,166 @@ def test_the_gray_code_round_trips_and_neighbours_differ_in_one_bit():
         clip.code_bits(-1)
 
 
-def test_the_4k_layout_has_big_cells_and_a_strip_in_any_quarter_band():
+def test_the_4k_layout_has_nine_copies_of_20_px_cells_in_eight_bands():
     lay = clip.layout(clip.WIDTH, clip.HEIGHT)
-    edges = lay.cell_edges
-    assert len(edges) == clip.CELLS + 1 == 21
-    widths = {b - a for a, b in zip(edges[:-1], edges[1:])}
-    assert widths == {184}, "equal cells, each well over 100 px at 3840"
-    assert edges[0] == 80 and edges[-1] == 3760, "most of the width"
-    assert len(lay.strips) == clip.BANDS == 8
-    for (y0, y1), (d0, d1) in zip(lay.strips, lay.digit_rows):
-        assert y1 - y0 >= 80
-        assert y1 <= d0 < d1, "the digits sit under the strip"
+    assert clip.CLIP_VERSION == 2
+    assert (lay.cell, clip.CELLS, clip.COPIES, clip.BANDS) == (20, 20, 9, 8)
+    assert lay.copies == tuple(120 + 400 * k for k in range(9))
+    for copy in range(clip.COPIES):
+        edges = lay.cell_edges(copy)
+        assert len(edges) == clip.CELLS + 1
+        assert {b - a for a, b in zip(edges[:-1], edges[1:])} == {20}
+    assert lay.cell_edges(0)[0] == 120 and lay.cell_edges(8)[-1] == 3720
+    assert len(lay.strips) == len(lay.rulers) == len(lay.digit_rows) == 8
+    for digits, ruler, strip in zip(lay.digit_rows, lay.rulers, lay.strips):
+        assert digits[1] < ruler[0] and ruler[1] < strip[0], "digits, ruler, strip"
+        assert ruler[1] - ruler[0] >= 20 and strip[1] - strip[0] >= 60
+        # The strip starts under its ruler within half the ruler's height,
+        # the gap the reader pairs them by (wall_locate.ruled_strips).
+        assert strip[0] - ruler[1] <= (ruler[1] - ruler[0]) // 2 + 1
+    assert lay.rulers[0] == (108, 129) and lay.strips[0] == (140, 205)
+
+
+def test_any_quarter_of_the_width_holds_a_whole_copy_at_any_offset():
+    lay = clip.layout(clip.WIDTH, clip.HEIGHT)
+    quarter = clip.WIDTH // 4
+    spare = []
+    for left in range(0, clip.WIDTH - quarter + 1):
+        right = left + quarter
+        whole = [
+            right - lay.cell_edges(k)[-1]
+            for k in range(clip.COPIES)
+            if left <= lay.cell_edges(k)[0] and lay.cell_edges(k)[-1] <= right
+        ]
+        assert whole, f"columns [{left}, {right}) hold no whole copy"
+        spare.append(max(whole))
+    assert min(spare) == 161, "8 cells to spare at the worst offset"
+    # Two copies' width minus a pixel: the worst offset of a narrower window.
+    narrow = 2 * clip.CELLS * lay.cell - 1
+    for left in range(lay.copies[0], lay.copies[-1] - narrow):
+        assert any(
+            left <= lay.cell_edges(k)[0] and lay.cell_edges(k)[-1] <= left + narrow
+            for k in range(clip.COPIES)
+        ), left
+
+
+def test_any_quarter_of_the_height_holds_a_whole_band():
+    lay = clip.layout(clip.WIDTH, clip.HEIGHT)
     quarter = clip.HEIGHT // 4
     for top in range(0, clip.HEIGHT - quarter + 1):
-        whole = [s for s in lay.strips if top <= s[0] and s[1] <= top + quarter]
-        assert whole, f"rows [{top}, {top + quarter}) hold no whole strip"
+        bottom = top + quarter
+        whole = [
+            band
+            for band in range(clip.BANDS)
+            if top <= lay.rulers[band][0] and lay.strips[band][1] <= bottom
+        ]
+        assert whole, f"rows [{top}, {bottom}) hold no whole ruler and strip"
 
 
-def test_the_cell_edges_are_the_same_fractions_on_every_supported_width():
-    fractions = clip.cell_fractions()
+def test_every_supported_width_is_the_4k_layout_scaled():
+    four_k = clip.layout(clip.WIDTH, clip.HEIGHT)
     for width in (960, 1920, 3840, 7680):
-        edges = clip.layout(width, width * 9 // 16).cell_edges
-        assert [e / width for e in edges] == pytest.approx(fractions, abs=1e-12)
+        lay = clip.layout(width, width * 9 // 16)
+        assert lay.cell * clip.CELL_DIV == width
+        assert [x / width for x in lay.copies] == pytest.approx(
+            [x / clip.WIDTH for x in four_k.copies], abs=1e-12
+        )
+    with pytest.raises(ValueError, match="no room"):
+        clip.layout(191, 108)
+    assert clip.layout(192, 108).cell == 1
 
 
-def cell_value(plane: np.ndarray, lay: clip.Layout, rows: tuple[int, int], k: int):
-    """The luma at the centre of cell ``k`` in the middle row of ``rows``."""
+def cell_value(plane: np.ndarray, lay: clip.Layout, rows, copy: int, k: int) -> int:
+    """The luma at the centre of cell ``k`` of ``copy`` in the middle row of
+    ``rows``."""
     y = (rows[0] + rows[1]) // 2
-    x = (lay.cell_edges[k] + lay.cell_edges[k + 1]) // 2
-    return int(plane[y, x])
+    edges = lay.cell_edges(copy)
+    return int(plane[y, (edges[k] + edges[k + 1]) // 2])
 
 
-def test_a_frame_carries_its_index_in_every_band():
+def test_a_frame_carries_its_index_in_every_copy_of_every_band():
     lay = clip.layout(960, 540)
     plane = clip.draw_frame(1234, 25, lay)
     assert plane.shape == (540, 960) and plane.dtype == np.uint8
     bits = clip.code_bits(1234)
-    for rows in lay.strips:
-        refs = [cell_value(plane, lay, rows, k) for k in (0, 1, 18, 19)]
-        assert refs == [clip.Y_BLACK, clip.Y_WHITE, clip.Y_WHITE, clip.Y_BLACK]
-        cells = [cell_value(plane, lay, rows, clip.REF_CELLS + k) for k in range(16)]
-        expected = [clip.Y_WHITE if b else clip.Y_BLACK for b in bits]
-        assert cells == expected
-        # Outside the strip, left and right: the background.
-        middle = (rows[0] + rows[1]) // 2
-        assert plane[middle, 0] == plane[middle, -1] == clip.Y_BACKGROUND
-    # Between two bands' rows (above the first strip): the background.
-    assert (plane[: lay.strips[0][0]] == clip.Y_BACKGROUND).all()
+    expected = [clip.Y_WHITE if b else clip.Y_BLACK for b in bits]
+    black, white = clip.Y_BLACK, clip.Y_WHITE
+    for rows, ruler in zip(lay.strips, lay.rulers):
+        for copy in range(clip.COPIES):
+            refs = [cell_value(plane, lay, rows, copy, k) for k in (0, 1, 18, 19)]
+            assert refs == [black, white, white, black]
+            cells = [cell_value(plane, lay, rows, copy, 2 + k) for k in range(16)]
+            assert cells == expected
+            marks = [cell_value(plane, lay, ruler, copy, k) for k in range(20)]
+            assert marks == [white] + [black] * 18 + [white], "the ruler"
+        # Outside the copies, left and right: the background.
+        for y in ((rows[0] + rows[1]) // 2, (ruler[0] + ruler[1]) // 2):
+            assert plane[y, lay.copies[0] - 1] == clip.Y_BACKGROUND
+            assert plane[y, lay.cell_edges(8)[-1]] == clip.Y_BACKGROUND
+    # Above the first band's digits, and between a ruler and its strip.
+    assert (plane[: lay.digit_rows[0][0]] == clip.Y_BACKGROUND).all()
+    assert (plane[lay.rulers[0][1] : lay.strips[0][0]] == clip.Y_BACKGROUND).all()
 
 
-def test_the_digits_sit_inside_the_strip_s_cells():
+def test_the_digits_sit_inside_each_copy_s_bit_cells():
     assert clip.label(37, 25) == "0037  25 FPS"
     lay = clip.layout(960, 540)
     plane = clip.draw_frame(37, 25, lay)
-    inner0 = lay.cell_edges[clip.REF_CELLS]
-    inner1 = lay.cell_edges[clip.CELLS - clip.REF_CELLS]
     for y0, y1 in lay.digit_rows:
         rows = plane[y0:y1]
-        assert (rows == clip.Y_DIGIT).any(), "the digits are drawn"
-        assert (rows[:, :inner0] == clip.Y_BACKGROUND).all()
-        assert (rows[:, inner1:] == clip.Y_BACKGROUND).all()
+        inside = np.zeros(lay.width, dtype=bool)
+        for copy in range(clip.COPIES):
+            edges = lay.cell_edges(copy)
+            inner = rows[:, edges[clip.REF_CELLS] : edges[-clip.REF_CELLS - 1]]
+            assert (inner == clip.Y_DIGIT).any(), f"copy {copy}'s digits"
+            inside[edges[clip.REF_CELLS] : edges[-clip.REF_CELLS - 1]] = True
+        assert (rows[:, ~inside] == clip.Y_BACKGROUND).all()
     mask = clip.text_mask("0037", 2)
     assert mask.shape == (clip.FONT_H * 2, (4 * clip.FONT_W + 3) * 2)
+    # The 4K clip's digits: 4 px font pixels (the label fits 16 cells).
+    big = clip.layout(clip.WIDTH, clip.HEIGHT)
+    y0, y1 = big.digit_rows[0]
+    drawn = np.flatnonzero((clip.draw_frame(37, 25, big)[y0:y1] == clip.Y_DIGIT).any(1))
+    assert drawn[-1] - drawn[0] + 1 == clip.FONT_H * 4
 
 
-def test_consecutive_frames_differ_in_one_strip_cell():
+def test_a_label_that_does_not_fit_a_copy_is_refused():
+    with pytest.raises(ValueError, match="does not fit"):
+        clip.draw_frame(37, 25, clip.layout(480, 270))
+    # One font pixel high is enough: 71 units fit 16 cells of 5 px.
+    clip.draw_frame(37, 25, clip.layout(960, 270))
+
+
+def test_consecutive_frames_differ_in_one_strip_cell_of_each_copy():
     lay = clip.layout(960, 540)
     base = clip.static_frame(lay)
     for index in (0, 1, 7, 255, 1023, 1498, 1798):
         a = clip.draw_frame(index, 30, lay, base)
         b = clip.draw_frame(index + 1, 30, lay, base)
         for y0, y1 in lay.strips:
-            columns = np.flatnonzero((a[y0:y1] != b[y0:y1]).any(axis=0))
-            assert columns.size, index
-            cells = {
-                k
-                for k in range(clip.CELLS)
-                if lay.cell_edges[k] <= columns[0] < lay.cell_edges[k + 1]
-                or lay.cell_edges[k] <= columns[-1] < lay.cell_edges[k + 1]
-            }
-            assert len(cells) == 1, (index, cells)
-            assert cells <= set(range(clip.REF_CELLS, clip.CELLS - clip.REF_CELLS))
+            columns = set(np.flatnonzero((a[y0:y1] != b[y0:y1]).any(axis=0)))
+            for copy in range(clip.COPIES):
+                edges = lay.cell_edges(copy)
+                cells = {
+                    k
+                    for k in range(clip.CELLS)
+                    if columns & set(range(edges[k], edges[k + 1]))
+                }
+                assert len(cells) == 1, (index, copy, cells)
+                assert cells <= set(range(clip.REF_CELLS, clip.CELLS - clip.REF_CELLS))
+        for y0, y1 in lay.rulers:
+            assert np.array_equal(a[y0:y1], b[y0:y1]), "the ruler never changes"
+
+
+def test_no_strip_draws_a_ruler():
+    # The reader places a copy only by a ruler: 18 dark cells between two
+    # white ones. A strip row's longest dark run between white cells is its
+    # 16 bit cells, for every 16-bit code.
+    for index in range(1 << clip.BITS):
+        cells = [0, 1] + clip.code_bits(index) + [1, 0]
+        whites = [k for k, c in enumerate(cells) if c]
+        gaps = [b - a - 1 for a, b in zip(whites[:-1], whites[1:])]
+        assert max(gaps, default=0) <= clip.BITS, index
 
 
 def test_drawing_is_deterministic():
@@ -161,14 +244,14 @@ def test_the_encode_is_pinned_and_bitexact():
 
 
 def test_names_and_counts():
-    assert clip.clip_name(25) == "wall-clip-v1-25fps-60s.mp4"
-    assert clip.clip_name(30, 2) == "wall-clip-v1-30fps-2s.mp4"
+    assert clip.clip_name(25) == "wall-clip-v2-25fps-60s.mp4"
+    assert clip.clip_name(30, 2) == "wall-clip-v2-30fps-2s.mp4"
     assert clip.frame_count(24, 60) == 1440
     assert clip.frame_count(25, 60) == 1500
     assert clip.frame_count(30, 60) == 1800
 
 
-def test_a_size_must_keep_the_cell_fractions():
+def test_a_size_must_be_whole_cells():
     assert clip.parse_size("3840x2160") == (3840, 2160)
     assert clip.parse_size("1920X1080") == (1920, 1080)
     for bad in ("1000x500", "1920x1081", "0x0"):

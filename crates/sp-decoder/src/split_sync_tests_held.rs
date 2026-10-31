@@ -51,6 +51,7 @@ impl VideoStream for Video {
             stride: 2,
             timestamp_ms: ms,
             pixel_format: PixelFormat::Nv12,
+            gpu: None,
         }))
     }
     fn width(&self) -> u32 {
@@ -379,6 +380,7 @@ impl VideoStream for MfVideo {
             stride: 2,
             timestamp_ms: ms,
             pixel_format: PixelFormat::Nv12,
+            gpu: None,
         }))
     }
     fn width(&self) -> u32 {

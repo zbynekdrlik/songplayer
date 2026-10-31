@@ -4,8 +4,8 @@
 
 use super::{
     BandKind, Biquad, CURVE_DB_MAX, CURVE_DB_MIN, DEFAULT_Q, EqBand, FX_RATE_HZ, FxError,
-    MAX_BANDS, PlaylistFx, biquad_db, coefficients, curve, curve_path, db_y, freq_x, response_db,
-    validate,
+    MAX_BANDS, PlaylistFx, biquad_db, coefficients, curve, curve_path, db_y, default_band, freq_x,
+    response_db, validate, with_kind,
 };
 
 const RATE: f64 = 48_000.0;
@@ -56,6 +56,94 @@ fn a_band_reads_from_json_with_its_defaults_and_refuses_unknown_fields() {
     let off: EqBand =
         serde_json::from_str(r#"{"kind":"peak","freq_hz":1000,"enabled":false}"#).unwrap();
     assert!(!off.enabled);
+}
+
+/// #278: every band type has its own name on the wire, read back by
+/// `from_name`, and its own Slovak label; `ALL` lists them low to high.
+#[test]
+fn every_band_type_has_its_wire_name_and_its_slovak_label() {
+    let table = [
+        (
+            BandKind::HighPass,
+            "high_pass",
+            "Orezanie basov (horná priepusť)",
+        ),
+        (BandKind::LowShelf, "low_shelf", "Basy (šelf)"),
+        (BandKind::Peak, "peak", "Pásmo (zvon)"),
+        (BandKind::HighShelf, "high_shelf", "Výšky (šelf)"),
+        (
+            BandKind::LowPass,
+            "low_pass",
+            "Orezanie výšok (dolná priepusť)",
+        ),
+    ];
+    assert_eq!(BandKind::ALL, table.map(|(kind, _, _)| kind));
+    for (kind, name, label) in table {
+        assert_eq!(kind.name(), name);
+        assert_eq!(kind.label_sk(), label);
+        assert_eq!(BandKind::from_name(name), Some(kind));
+        // The wire name is serde's own.
+        assert_eq!(serde_json::to_string(&kind).unwrap(), format!("\"{name}\""));
+    }
+    assert_eq!(BandKind::from_name("band"), None);
+    assert_eq!(BandKind::from_name(""), None);
+}
+
+/// #278 (the owner's measurement): a new band starts at its own type's
+/// frequency and Q, never 1 kHz for every type — a high-pass at 80 Hz, a
+/// low shelf at 120 Hz, a peak at 1 kHz, a high shelf at 8 kHz, a low-pass
+/// at 16 kHz; 0 dB, on, and every default passes the limits.
+#[test]
+fn a_new_band_starts_at_its_own_types_frequency_and_q() {
+    let table = [
+        (BandKind::HighPass, 80.0, DEFAULT_Q),
+        (BandKind::LowShelf, 120.0, DEFAULT_Q),
+        (BandKind::Peak, 1000.0, 1.0),
+        (BandKind::HighShelf, 8000.0, DEFAULT_Q),
+        (BandKind::LowPass, 16_000.0, DEFAULT_Q),
+    ];
+    for (kind, freq_hz, q) in table {
+        let b = default_band(kind);
+        assert_eq!(b, band(kind, freq_hz, 0.0, q), "{kind:?}");
+        assert!(b.enabled);
+        let fx = PlaylistFx {
+            gain_db: 0.0,
+            eq: vec![b],
+        };
+        assert!(validate(&fx).is_ok(), "{kind:?}");
+    }
+}
+
+/// #278: a type change takes the new type's frequency and Q, and keeps the
+/// band's gain and its on / off.
+#[test]
+fn a_type_change_takes_the_types_frequency_and_q_and_keeps_the_gain() {
+    let mut peak = band(BandKind::Peak, 2500.0, -4.5, 3.0);
+    peak.enabled = false;
+    let hp = with_kind(&peak, BandKind::HighPass);
+    assert_eq!(
+        hp,
+        EqBand {
+            kind: BandKind::HighPass,
+            freq_hz: 80.0,
+            gain_db: -4.5,
+            q: DEFAULT_Q,
+            enabled: false,
+        }
+    );
+    // And back: the shelf takes its own frequency, the gain comes along.
+    assert_eq!(
+        with_kind(&hp, BandKind::HighShelf),
+        EqBand {
+            kind: BandKind::HighShelf,
+            freq_hz: 8000.0,
+            gain_db: -4.5,
+            q: DEFAULT_Q,
+            enabled: false,
+        }
+    );
+    let on = with_kind(&band(BandKind::LowPass, 9000.0, 6.0, 2.0), BandKind::Peak);
+    assert_eq!(on, band(BandKind::Peak, 1000.0, 6.0, 1.0));
 }
 
 #[test]

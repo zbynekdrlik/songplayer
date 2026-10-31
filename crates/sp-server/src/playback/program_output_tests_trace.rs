@@ -42,7 +42,7 @@ fn pair(stamp: i64, live: bool) -> SubmitJob {
         width: 2,
         height: 2,
         stride: 2,
-        video: SharedFrame::new(vec![16; 6]),
+        video: SharedFrame::new(vec![16; 6]).into(),
         audio: vec![AudioFrame {
             data: vec![0.0; 1600 * 2],
             channels: 2,

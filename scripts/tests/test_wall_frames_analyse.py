@@ -528,3 +528,110 @@ def test_a_capture_ending_on_the_song_s_last_frame_has_no_weight_there():
     report = wa.analyse(readings, 25, frames=60, refresh_hz=60, min_boundaries=1)
     assert report["loops"] == 0 and report["weights"]["mismatches"] == 0
     assert report["verdict"] == "clean"
+
+
+def test_distinct_boundaries_count_a_re_shown_picture_once():
+    # #279's A/B counts the missing pictures as the reference minus the
+    # distinct pictures shown. A one-refresh jump back re-shows a picture:
+    # one more run, no new picture, while lost_boundaries counts the step
+    # out of it (19 -> 21) as a skip.
+    readings = pacer_readings(30, Fraction(0), 40, frames=1800)
+    readings[41] = readings[38]  # boundary 20's second refresh shows 19
+    report = wa.analyse(readings, 30)
+    assert report["jumps_back"] == 1
+    assert report["boundaries"] == 41
+    assert report["distinct_boundaries"] == 40
+    assert report["lost_boundaries"] == 1
+    # A back that re-shows two pictures, each after a newer one.
+    readings = pacer_readings(30, Fraction(0), 21, frames=1800)  # 0..20
+    readings += pacer_readings(30, Fraction(18), 2, frames=1800)  # 18, 19
+    readings += pacer_readings(30, Fraction(21), 19, frames=1800)  # 21..39
+    report = wa.analyse(readings, 30)
+    assert report["boundaries"] == 42
+    assert report["distinct_boundaries"] == 40
+
+
+def test_distinct_boundaries_take_one_picture_read_two_ways_as_one():
+    # Boundary 20 read near its next frame's weight (19.9375: within
+    # SAME_PICTURE, past half of it), then re-shown read plain (20.0), and
+    # the other way round: one picture each time.
+    plain = wa.Reading("ok", 20, None, 0, 8)
+    near = wa.Reading("ok", 19, 20, 240, 8)
+    for first, again in ((near, plain), (plain, near)):
+        readings = pacer_readings(30, Fraction(0), 40, frames=1800)
+        readings[40:42] = [first] * 2
+        readings[44] = again  # boundary 22's first refresh re-shows 20
+        report = wa.analyse(readings, 30)
+        assert report["boundaries"] == 41, first
+        assert report["distinct_boundaries"] == 40, first
+
+
+def test_distinct_boundaries_count_no_picture_a_frozen_or_dead_capture_missed():
+    # Frozen for its second half: no skip between two readings, so
+    # lost_boundaries reads 0; the distinct pictures stop at 20.
+    readings = pacer_readings(30, Fraction(0), 20, frames=1800)
+    readings += [readings[-1]] * 40
+    report = wa.analyse(readings, 30)
+    assert report["boundaries"] == report["distinct_boundaries"] == 20
+    assert report["lost_boundaries"] == 0
+    # One picture throughout (one run, no step), then nothing decoded.
+    assert wa.analyse([readings[0]] * 80, 30)["distinct_boundaries"] == 1
+    dead = wa.analyse([wa.Reading("no_strip")] * 80, 30)
+    assert dead["distinct_boundaries"] == 0
+
+
+def test_distinct_boundaries_number_pictures_on_across_loops_and_miss_a_skip():
+    # 55..59, 0..59, 0..14: the same frame in another loop is a new picture.
+    readings = pacer_readings(30, Fraction(55), 80, frames=60)
+    report = wa.analyse(readings, 30, frames=60)
+    assert report["loops"] == 2 and report["distinct_boundaries"] == 80
+    # 25 on 30: a skipped boundary loses no clip frame, but one picture.
+    readings = pacer_readings(25, Fraction(0), 30, frames=1500)
+    del readings[10:12]
+    report = wa.analyse(readings, 25)
+    assert report["lost_frames"] == 0
+    assert report["distinct_boundaries"] == 29
+
+
+def test_distinct_boundaries_group_a_re_show_by_the_run_s_first_reading():
+    # As boundaries() groups: a picture is the same only within
+    # SAME_PICTURE of the run's FIRST reading. 20.0 and 20.07 are one run;
+    # 20.14, after 21, is another picture (0.14 from 20.0), though within
+    # SAME_PICTURE of that run's last reading.
+    readings = [
+        wa.Reading("ok", 20, None, 0, 8),
+        wa.Reading("ok", 20, 21, 18, 8),
+        wa.Reading("ok", 21, None, 0, 8),
+        wa.Reading("ok", 20, 21, 36, 8),
+    ]
+    report = wa.analyse(readings, 30)
+    assert report["boundaries"] == 3
+    assert report["distinct_boundaries"] == 3
+
+
+def test_distinct_boundaries_split_one_picture_from_two_at_same_picture():
+    # The edge as the reader reads it: weight 238 is 18/256 from the plain
+    # next frame, within SAME_PICTURE (18.24/256): one picture; 237 is
+    # 19/256, past it: two.
+    for weight, distinct in ((238, 40), (237, 41)):
+        readings = pacer_readings(30, Fraction(0), 40, frames=1800)
+        readings[40:42] = [wa.Reading("ok", 19, 20, weight, 8)] * 2
+        readings[44] = wa.Reading("ok", 20, None, 0, 8)
+        report = wa.analyse(readings, 30)
+        assert report["boundaries"] == 41, weight
+        assert report["distinct_boundaries"] == distinct, weight
+
+
+def test_distinct_boundaries_count_a_loop_from_the_step_that_wraps():
+    # A capture whose first step is the wrap: its second boundary is
+    # already the next loop's (59, 0..59, 0: 62 pictures).
+    readings = pacer_readings(30, Fraction(59), 62, frames=60)
+    report = wa.analyse(readings, 30, frames=60)
+    assert report["loops"] == 2 and report["distinct_boundaries"] == 62
+    # The loop starts at the wrap's own boundary: 55..59, 0..19, a jump back
+    # to 0 (a re-show in the same loop), then 20..29.
+    readings = pacer_readings(30, Fraction(55), 25, frames=60)
+    readings += pacer_readings(30, Fraction(0), 1, frames=60)
+    readings += pacer_readings(30, Fraction(20), 10, frames=60)
+    report = wa.analyse(readings, 30, frames=60)
+    assert report["jumps_back"] == 1 and report["distinct_boundaries"] == 35

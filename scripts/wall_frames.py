@@ -1,34 +1,49 @@
-"""Read SongPlayer's wall measurement clips back from a capture (#272 lane 1).
+"""Read SongPlayer's wall measurement clips back from a capture (#272).
 
-``wall_clip.py`` draws each clip frame's index as a 16-cell Gray-code strip,
-repeated in eight bands. This reader finds every strip row in a captured
-picture, normalises its cells by the strip's own black and white reference
-cells, and decodes each picture to ``(index, next_index, weight_q8)``:
+``wall_clip.py`` draws each clip frame's index as a 16-cell Gray-code strip
+in self-contained copies side by side (v2: nine per band, each with its own
+references, under a static ruler), repeated in eight bands. Where the copies
+sit in a capture, at whatever zoom and offset the operator's mapping shows
+the clip, is ``wall_locate.locate``; each copy keeps the strips right under
+its ruler, and only those are read for it.
+
+Each picture is read through its copies' cell sums (``read_sums``): every
+strip of every copy, normalised by its own black and white reference cells,
+decodes to ``(index, next_index, weight_q8)``:
 
 - a plain frame: every cell black or white -> ``(index, None, 0)``;
 - a boundary that blends two consecutive frames (#251): exactly one cell is
   grey, the two candidate codes decode to ``i`` and ``i + 1`` -> ``(i, i + 1,
   w)`` with ``w`` the later frame's weight in Q8, the program's own unit
   (``FrameBlend``: 256 = all of the later frame);
-- anything else is named, never guessed: ``no_strip`` (no strip row found),
-  ``multi`` (two or more grey cells), ``non_adjacent`` (one grey cell whose
-  candidates are not consecutive), ``disagree`` (the bands of one picture
-  read different positions: a torn picture).
+- anything else is named, never guessed: ``no_strip`` (no copy found, or no
+  strip row where it was found), ``multi`` (two or more grey cells),
+  ``non_adjacent`` (one grey cell whose candidates are not consecutive),
+  ``disagree`` (the copies and bands of one picture read different
+  positions: a torn picture).
 
 What a run of readings means — boundaries, judder, losses, the blend
 weights, the verdict — is ``wall_analysis.analyse``.
 
 The decode is pure (numpy only) and unit-tested on frames drawn by
-``wall_clip.draw_frame``. The capture glue is tiny: a video file through
-ffmpeg (``av_sync_check``'s reader: every stored frame, with its pts;
-no ffprobe; a pts gap is a span the recording was blind, and a recording
-slower than the wall refreshes is blind everywhere), or the Windows
-desktop duplication of one output through ``dxcam`` (the box's
-``ops\\probe-venv``; ``--refresh-hz`` required): only each picture's
-sampled columns are kept, as luma, and decoded AFTER the capture; every
-poll is timed, and a poll more than half a refresh after the one before is
-a blind span (a poll on time that finds no new picture is the wall holding
-one).
+``wall_clip.draw_frame``. The capture glue is tiny. The copies are found ONCE
+per capture, on a picture whose copies read as one picture with more than
+half of them (``clip_copies``), and each picture keeps only their cell sums
+(``wall_locate.cell_sums``, 20 numbers a row per copy): a video file through
+ffmpeg (``av_sync_check``'s reader: every stored frame, with its pts; no
+ffprobe; looked at on every ``LOCATE_EVERY``-th picture until found, at most
+``LOCATE_TRIES`` times, so a clip that first shows after ~600 pictures, 10 s
+at 60 fps, is not found: trim the recording; a pts gap is a span the
+recording was blind, and a recording slower than the wall refreshes is
+blind everywhere), or the Windows desktop duplication of one output through
+``dxcam`` (the box's ``ops\\probe-venv``; ``--refresh-hz`` required): the
+copies are looked for on the whole output (or in ``--region``) and the
+capture grabs only their strip rows and columns
+(``wall_locate.capture_region``); every poll is timed, and a poll more
+than half a refresh after the one before is a blind span (a poll on time
+that finds no new picture is the wall holding one). A Spout sender
+(``--spout``, ``wall_spout``) is read the same way, from a picture that is
+off the desktop: only ``SPOUT_ROWS`` rows of the strips, polled with no sleep.
 
 Usage::
 
@@ -36,11 +51,14 @@ Usage::
                                   [--refresh-hz 60]
     python scripts/wall_frames.py --fps 25 --dxcam 1 --refresh-hz 60
                                   --seconds 20 [--region L,T,R,B]
-                                  [--x-range 0,1]
+    python scripts/wall_frames.py --fps 25 --spout "Arena - Screen 2"
+                                  --refresh-hz 60 --seconds 20
 
-The report is JSON on stdout; exit 0 = clean, 1 = defects, 3 = incomplete,
-4 = nothing decoded, 5 = the capture or its reading failed (the error on
-stderr), 2 = a usage error: a broken capture never reads as a broken wall.
+The report is JSON on stdout (``located``: the copies read, their cell and
+the region grabbed); exit 0 = clean, 1 = defects, 3 = incomplete, 4 =
+nothing decoded (also: no copy of the clip found, the reason on stderr), 5 =
+the capture or its reading failed (the error on stderr), 2 = a usage error:
+a broken capture never reads as a broken wall.
 """
 
 from __future__ import annotations
@@ -49,13 +67,16 @@ import argparse
 import bisect
 import json
 import math
+import statistics
 import subprocess
 import sys
 import tempfile
 import time
 import traceback
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 
@@ -65,94 +86,46 @@ from wall_analysis import (
     GRID_FPS,
     LEVEL_EDGE,
     MIN_BOUNDARIES,
+    POLL_TIME_ERROR,
     SAME_PICTURE,
     Reading,
     analyse,
     check_locked,
     check_present_rate,
 )
+from wall_locate import (
+    CELL_CORE,
+    CELL_SAMPLES,
+    Copy,
+    capture_region,
+    cell_sums,
+    locate,
+    strip_rows,
+)
+from wall_spout import GlSender, NewPictures
 
-FULL_SCALE = 255.0
-# A strip row: white refs - black refs > CONTRAST_MIN of the full scale, the
-# two black refs (and the two white ones) within REF_TOLERANCE of that
-# contrast of each other, every bit cell within it of [black, white].
-CONTRAST_MIN = 0.25
-REF_TOLERANCE = 0.2
-# The central part of a cell that is sampled (of its width) at CELL_SAMPLES
-# columns, and of a strip row's height.
-CELL_CORE = 0.5
-CELL_SAMPLES = 8
-MIN_STRIP_ROWS = 3
+# How long a dxcam capture looks for the copies before its timed polls (s):
+# a look at a whole 7680x1080 output takes ~0.6 s on dev1.
+LOCATE_S = 10.0
+# The rows a Spout capture reads of each strip: 24 rows poll at ~0.6 ms on SNV,
+# the whole strip's 150 at ~1.75 ms, over a tenth of a 60 Hz refresh.
+SPOUT_ROWS = 24
+# A Spout picture lands when Arena finishes it, not on a refresh: intervals of
+# 26-41 ms for 33.3 on SNV. At 0.5 and 1 ms the brackets contradict themselves
+# (2-41 boundaries a take), 2 and 3 ms read both clips clean, and at 4 ms and
+# more wall-25 leaves boundaries unresolved (30.10.2026).
+SPOUT_TIME_ERROR = 0.003
+# A recording is looked at on every LOCATE_EVERY-th picture until the copies
+# are found (a look takes 0.1-3 s), at most LOCATE_TRIES times; the pictures
+# between two looks are kept and read once the copies are found.
+LOCATE_EVERY = 15
+LOCATE_TRIES = 40
+# Copies of one capture are of one scale, within this share of a cell.
+SCALE_MATCH = 0.01
 # main()'s exit codes (2 is argparse's usage error).
 EXIT_CODES = {"clean": 0, "defects": 1, "incomplete": 3}
 EXIT_NOTHING_DECODED = 4
 EXIT_FAILED = 5
-
-
-def to_luma(image: np.ndarray) -> np.ndarray:
-    """A 2-D float luma plane on 0..255 (grey, BGR(A) or RGB(A) input)."""
-    plane = np.asarray(image)
-    if plane.ndim == 3:
-        plane = plane[:, :, 0] if plane.shape[2] == 1 else plane[:, :, :3].mean(2)
-    if plane.ndim != 2:
-        raise ValueError(f"not a picture: shape {np.asarray(image).shape}")
-    return plane.astype(np.float32)
-
-
-def cell_columns(width: int, x_range: tuple[float, float]) -> np.ndarray:
-    """The ``CELL_SAMPLES`` sampled columns of each of the strip's cells,
-    cell by cell, in a ``width`` px capture whose clip spans ``x_range``
-    (fractions of the capture width): evenly over each cell's central
-    ``CELL_CORE``."""
-    x0 = x_range[0] * width
-    span = (x_range[1] - x_range[0]) * width
-    edges = clip.cell_fractions()
-    columns = []
-    for left, right in zip(edges[:-1], edges[1:]):
-        core = span * (right - left) * CELL_CORE
-        start = x0 + span * (left + right) / 2 - core / 2
-        for i in range(CELL_SAMPLES):
-            column = math.floor(start + core * (i + 0.5) / CELL_SAMPLES)
-            if not 0 <= column < width:
-                raise ValueError("the strip's cells fall outside the capture")
-            columns.append(column)
-    return np.array(columns)
-
-
-def sample_columns(image: np.ndarray, x_range: tuple[float, float]) -> np.ndarray:
-    """The strip's sampled columns of a captured picture (all its rows)."""
-    picture = np.asarray(image)
-    return picture[:, cell_columns(picture.shape[1], x_range)]
-
-
-def cell_profile(sampled: np.ndarray) -> np.ndarray:
-    """Per picture row, the mean of each cell's sampled columns: (rows, 20)."""
-    luma = to_luma(sampled)
-    return luma.reshape(luma.shape[0], clip.CELLS, CELL_SAMPLES).mean(axis=2)
-
-
-def strip_rows(profile: np.ndarray) -> list[tuple[int, int]]:
-    """The runs of rows ``[y0, y1)`` that carry a strip."""
-    black = (profile[:, 0] + profile[:, -1]) / 2
-    white = (profile[:, 1] + profile[:, -2]) / 2
-    contrast = white - black
-    slack = REF_TOLERANCE * contrast
-    bits = profile[:, clip.REF_CELLS : -clip.REF_CELLS]
-    ok = contrast > CONTRAST_MIN * FULL_SCALE
-    ok &= np.abs(profile[:, 0] - profile[:, -1]) < slack
-    ok &= np.abs(profile[:, 1] - profile[:, -2]) < slack
-    ok &= (bits >= (black - slack)[:, None]).all(axis=1)
-    ok &= (bits <= (white + slack)[:, None]).all(axis=1)
-    runs = []
-    start = None
-    for y, good in enumerate(list(ok) + [False]):
-        if good and start is None:
-            start = y
-        elif not good and start is not None:
-            if y - start >= MIN_STRIP_ROWS:
-                runs.append((start, y))
-            start = None
-    return runs
 
 
 def strip_levels(profile: np.ndarray, rows: tuple[int, int]) -> np.ndarray:
@@ -187,45 +160,120 @@ def decode_levels(levels: np.ndarray, edge: float = LEVEL_EDGE) -> Reading:
     return Reading("ok", earlier, later, int(round(weight * 256)), 1)
 
 
-def read_columns(sampled: np.ndarray) -> Reading:
-    """Decode one picture from its sampled columns (``sample_columns``):
-    every strip row, then their consensus (the bands must read the same
-    picture, ``SAME_PICTURE``)."""
-    profile = cell_profile(sampled)
-    runs = strip_rows(profile)
-    if not runs:
+def read_sums(sums: np.ndarray, copies: list[Copy]) -> Reading:
+    """Decode one picture from its copies' cell sums (``cell_sums``): each
+    copy's strip rows that overlap the strips it was found with (another
+    slice of the output cut in beside them is never read for it), then
+    their consensus (they must read the same picture, ``SAME_PICTURE``)."""
+    if sums.shape[1:] != (len(copies), clip.CELLS):
+        raise ValueError(f"cell sums {sums.shape} are not of {len(copies)} copies")
+    readings = []
+    for k, copy in enumerate(copies):
+        profile = sums[:, k, :] / CELL_SAMPLES
+        for y0, y1 in strip_rows(profile):
+            if any(y0 < s1 and s0 < y1 for s0, s1 in copy.strips):
+                readings.append(decode_levels(strip_levels(profile, (y0, y1))))
+    if not readings:
         return Reading("no_strip")
-    readings = [decode_levels(strip_levels(profile, rows)) for rows in runs]
     good = [r for r in readings if r.ok]
     if not good:
         status = Counter(r.status for r in readings).most_common(1)[0][0]
-        return Reading(status, strips=len(runs))
+        return Reading(status, strips=len(readings))
     positions = sorted(r.position() for r in good)
     if positions[-1] - positions[0] > SAME_PICTURE:
-        return Reading("disagree", strips=len(runs))
+        return Reading("disagree", strips=len(readings))
     median = positions[(len(positions) - 1) // 2]
     chosen = next(r for r in good if r.position() == median)
-    return Reading("ok", chosen.index, chosen.next_index, chosen.weight_q8, len(runs))
+    return Reading(
+        "ok", chosen.index, chosen.next_index, chosen.weight_q8, len(readings)
+    )
 
 
-def read_frame(image: np.ndarray, x_range: tuple[float, float] = (0.0, 1.0)) -> Reading:
-    """Decode one captured picture."""
-    return read_columns(sample_columns(image, x_range))
+def read_frame(image: np.ndarray) -> Reading:
+    """Decode one captured 8-bit picture: find its copies, then read them
+    (none found: ``no_strip``)."""
+    copies = locate(image)
+    return read_sums(cell_sums(image, copies), copies)
+
+
+def same_scale(copies: list[Copy]) -> list[Copy]:
+    """The largest group of copies whose cells are within ``SCALE_MATCH`` of
+    each other (a tie: the larger cells). One mapping shows every copy at one
+    scale; a copy cut by a seam of the output reads a narrower cell, its
+    samples sit near its cells' edges, and each change of a bit reads there
+    as a blend (SNV, 58.33 px beside 60: `disagree` at every 128th frame, on
+    Spout and NDI alike)."""
+    groups = [
+        [c for c in copies if abs(c.cell / copy.cell - 1) <= SCALE_MATCH]
+        for copy in copies
+    ]
+    return max(groups, key=lambda g: (len(g), g[0].cell), default=[])
+
+
+def clip_copies(picture: np.ndarray) -> list[Copy]:
+    """The copies a capture reads every picture at: those of ``picture``
+    that read it as one picture (within ``SAME_PICTURE``) with MORE than half
+    of the copies that read it at all. A copy found where none is (an
+    overlay drawing a ruler over a strip) reads another index and is left
+    out; with no such majority (a torn picture, two copies reading two
+    pictures), none: the caller looks at another picture."""
+    good = []
+    for copy in same_scale(locate(picture)):
+        reading = read_sums(cell_sums(picture, [copy]), [copy])
+        if reading.ok:
+            good.append((copy, reading.position()))
+    if not good:
+        return []
+    middle = sorted(p for _, p in good)[(len(good) - 1) // 2]
+    kept = [c for c, p in good if abs(p - middle) <= SAME_PICTURE]
+    return kept if 2 * len(kept) > len(good) else []
+
+
+@dataclass(frozen=True)
+class Located:
+    """The copies a capture reads, and the dxcam region it grabbed."""
+
+    copies: tuple[Copy, ...]
+    region: tuple[int, int, int, int] | None
+
+    def report(self) -> dict:
+        return {
+            "copies": len(self.copies),
+            "cell_px": round(statistics.median(c.cell for c in self.copies), 2),
+            "region": list(self.region) if self.region else None,
+        }
 
 
 def read_video(
-    path: Path, width: int | None, x_range: tuple[float, float], ffmpeg: str = "ffmpeg"
-) -> tuple[list[Reading], list[float]]:
+    path: Path, width: int | None, ffmpeg: str = "ffmpeg"
+) -> tuple[list[Reading], list[float], Located | None]:
     """Every picture of a video file, read one at a time (scaled to
     ``width`` if given), and its pts (s): ``av_sync_check``'s command line
     and readers of the size and pts (the box has no ffprobe), streamed, so
-    a 4K recording is never held whole. ffmpeg is killed if the read
-    fails."""
+    a 4K recording is never held whole. The copies are looked for on every
+    ``LOCATE_EVERY``-th picture from the first, and on the last, until found
+    (``clip_copies``), at most ``LOCATE_TRIES`` times; the pictures since the
+    look before are kept and read at the copies found (``no_strip`` if none
+    were). ffmpeg is killed if the read fails."""
     src_w, src_h = av_sync_check.probe_video_size(ffmpeg, str(path))
     out_w = width or src_w
     out_h = round(src_h * out_w / src_w / 2) * 2
     size = out_w * out_h
-    readings = []
+    readings: list[Reading] = []
+    copies: list[Copy] = []
+    waiting: list[np.ndarray] = []
+    looks = 0
+
+    def look() -> None:
+        """Look for the copies on the last waiting picture, then read every
+        waiting picture at what was found."""
+        nonlocal copies, looks
+        looks += 1
+        copies = clip_copies(waiting[-1])
+        for seen in waiting:
+            readings.append(read_sums(cell_sums(seen, copies), copies))
+        waiting.clear()
+
     with tempfile.TemporaryFile() as log:
         args = av_sync_check.gray_video_args(ffmpeg, str(path), out_w, out_h)
         # The context closes ffmpeg's stdout and waits for it, also after
@@ -237,7 +285,18 @@ def read_video(
                     if len(chunk) < size:
                         break
                     picture = np.frombuffer(chunk, dtype=np.uint8)
-                    readings.append(read_frame(picture.reshape(out_h, out_w), x_range))
+                    picture = picture.reshape(out_h, out_w)
+                    if copies:
+                        readings.append(read_sums(cell_sums(picture, copies), copies))
+                        continue
+                    if looks == LOCATE_TRIES:
+                        readings.append(Reading("no_strip"))
+                        continue
+                    waiting.append(picture)
+                    if (len(readings) + len(waiting) - 1) % LOCATE_EVERY == 0:
+                        look()
+                if waiting:
+                    look()
             except BaseException:
                 proc.kill()
                 raise
@@ -249,52 +308,110 @@ def read_video(
     times = av_sync_check.showinfo_pts(err, str(path))
     if len(times) != len(readings):
         raise RuntimeError(f"read {len(readings)} pictures but {len(times)} pts")
-    return readings, times
+    return readings, times, Located(tuple(copies), None) if copies else None
+
+
+def find_clip(
+    grab: Callable[..., np.ndarray | None],
+    region: tuple[int, int, int, int] | None,
+    seconds: float,
+    clock: Callable[[], float] = time.perf_counter,
+    pause: Callable[[float], None] = time.sleep,
+    max_rows: int | None = None,
+) -> Located | None:
+    """Grab pictures (``region``, or the whole output) until one shows copies
+    that read as one picture (``clip_copies``), for at most ``seconds``:
+    the copies and the region to capture, the part of the grabbed area that
+    ``capture_region`` picks (its strip rows and columns); None if no picture
+    showed them. ``grab`` takes the region by keyword, as dxcam's does; a
+    grab that finds no new picture pauses 1 ms. ``max_rows`` as
+    ``capture_region``'s."""
+    left, top = region[:2] if region else (0, 0)
+    deadline = clock() + seconds
+    while clock() < deadline:
+        picture = grab(region=region)
+        if picture is None:
+            pause(0.001)
+            continue
+        copies = clip_copies(picture)
+        if not copies:
+            continue
+        shape = np.asarray(picture).shape
+        (x0, y0, x1, y1), inside = capture_region(copies, shape, max_rows)
+        return Located(tuple(inside), (left + x0, top + y0, left + x1, top + y1))
+    return None
 
 
 def capture_dxcam(
-    output: int,
-    region: tuple[int, int, int, int] | None,
-    seconds: float,
-    x_range: tuple[float, float],
-) -> tuple[list[float], list[np.ndarray], list[float], list[float]]:
+    output: int, region: tuple[int, int, int, int] | None, seconds: float
+) -> tuple[list[float], list[np.ndarray], list[float], list[float], Located | None]:
     """Every new picture of desktop output ``output`` for ``seconds``
     (Windows, dxcam with ``output_color="BGRA"``: no colour conversion, so
     dxcam 0.3+ never loads OpenCV; dxcam 0.0.5 imports it whatever the
-    colour): its poll's time (stamped before the grab), its strip columns
-    as luma (decoded after the capture, so the decode never delays a grab),
-    every poll's time, and when each picture's acquire was over at the
-    latest (``acquire_ended``). The frame was on screen between the stamp
-    and that end — a grab preempted before its acquire must not move the
-    picture early (review round 7). The end is stamped right after dxcam's
+    colour), after ``find_clip`` found the copies (``LOCATE_S``): its poll's
+    time (stamped before the grab), the copies' cell sums (``cell_sums``,
+    decoded after the capture, so the decode never delays a grab), every
+    poll's time, when each picture's acquire was over at the latest
+    (``acquire_ended``), and what was located (None: no copy found, nothing
+    captured). The frame was on screen between the stamp and that end — a
+    grab preempted before its acquire must not move the picture early
+    (review round 7). The end is stamped right after dxcam's
     ``AcquireNextFrame`` call when this dxcam exposes it, else after the
     whole grab. A poll that finds nothing sleeps 1 ms (Python 3.11+ on
     Windows sleeps on a high-resolution timer)."""
     import dxcam  # Windows only (the box's ops\probe-venv)
 
     camera = dxcam.create(output_idx=output, output_color="BGRA")
+    return capture_camera(camera, region, seconds)
+
+
+def capture_spout(
+    sender: str, region: tuple[int, int, int, int] | None, seconds: float
+) -> tuple[list[float], list[np.ndarray], list[float], list[float], Located | None]:
+    """``capture_dxcam``'s five results from a Spout sender (Windows)."""
+    source = GlSender(sender)
+    try:
+        return capture_camera(
+            NewPictures(source), region, seconds, max_rows=SPOUT_ROWS, idle=0.0
+        )
+    finally:
+        source.close()
+
+
+def capture_camera(
+    camera,
+    region: tuple[int, int, int, int] | None,
+    seconds: float,
+    max_rows: int | None = None,
+    idle: float = 0.001,
+) -> tuple[list[float], list[np.ndarray], list[float], list[float], Located | None]:
+    """The timed polls of ``capture_dxcam`` on anything with its ``grab``.
+    ``idle``: what a poll that finds nothing sleeps; ``max_rows`` as
+    ``capture_region``'s."""
     acquired = time_acquire(camera)
     times: list[float] = []
     pictures: list[np.ndarray] = []
     polls: list[float] = []
     acquire_ended: list[float] = []
-    columns = None
+    located = find_clip(camera.grab, region, LOCATE_S, max_rows=max_rows)
+    if located is None:
+        del camera
+        return times, pictures, polls, acquire_ended, None
+    copies = list(located.copies)
     deadline = time.perf_counter() + seconds
     while (now := time.perf_counter()) < deadline:
         polls.append(now)
         acquired[0] = None
-        picture = camera.grab(region=region)
+        picture = camera.grab(region=located.region)
         if picture is None:
-            time.sleep(0.001)
+            time.sleep(idle)
             continue
         ended = acquired[0] if acquired[0] is not None else time.perf_counter()
-        if columns is None:
-            columns = cell_columns(picture.shape[1], x_range)
         times.append(now)
         acquire_ended.append(ended)
-        pictures.append(to_luma(picture[:, columns]).astype(np.uint8))
+        pictures.append(cell_sums(picture, copies))
     del camera
-    return times, pictures, polls, acquire_ended
+    return times, pictures, polls, acquire_ended, located
 
 
 def time_acquire(camera: object) -> list[float | None]:
@@ -322,11 +439,6 @@ def time_acquire(camera: object) -> list[float | None]:
     return acquired
 
 
-def parse_pair(text: str) -> tuple[float, float]:
-    a, b = (float(v) for v in text.split(","))
-    return a, b
-
-
 def poll_blind(times: list[float], polls: list[float]) -> list[float]:
     """Each dxcam picture's blind span: the time since the poll before the
     one that got it (an empty poll proves nothing new was presented); the
@@ -341,22 +453,48 @@ def poll_blind(times: list[float], polls: list[float]) -> list[float]:
 def capture(args: argparse.Namespace) -> dict:
     """Capture or read the pictures ``args`` names, then the report."""
     late = None
+    spout = False
     if args.video is not None:
-        readings, times = read_video(args.video, args.width, args.x_range)
+        readings, times, located = read_video(args.video, args.width)
+        if located is None:
+            print(
+                f"wall_frames: no copy of the clip's strip found in {args.video} "
+                f"(looked at most {LOCATE_TRIES} times, every {LOCATE_EVERY}th "
+                "picture from the first)",
+                file=sys.stderr,
+            )
         if args.locked:
             check_locked(times, args.refresh_hz)
         blind = None  # since the picture before
         span = None  # the first picture's pts to the last one's
     else:
-        times, sampled, polls, ended = capture_dxcam(
-            args.dxcam, args.region, args.seconds, args.x_range
-        )
-        readings = [read_columns(s) for s in sampled]
+        if args.spout is not None:
+            source = f"sender {args.spout!r}"
+            times, sums, polls, ended, located = capture_spout(
+                args.spout, args.region, args.seconds
+            )
+        else:
+            source = f"output {args.dxcam}"
+            times, sums, polls, ended, located = capture_dxcam(
+                args.dxcam, args.region, args.seconds
+            )
+        if located is None:
+            print(
+                f"wall_frames: no copy of the clip's strip found on {source} "
+                f"in {LOCATE_S:g} s (region {args.region}): nothing "
+                "captured",
+                file=sys.stderr,
+            )
+            report = analyse([], args.fps, args.grid_fps, args.frames)
+            report["located"] = None
+            return report
+        readings = [read_sums(s, list(located.copies)) for s in sums]
         blind = poll_blind(times, polls)
         late = [max(0.0, e - t) for t, e in zip(times, ended)]
+        spout = args.spout is not None
         check_present_rate(times, args.refresh_hz, blind, late)
         span = (polls[0], polls[-1]) if polls else None
-    return analyse(
+    report = analyse(
         readings,
         args.fps,
         args.grid_fps,
@@ -368,7 +506,10 @@ def capture(args: argparse.Namespace) -> dict:
         min_boundaries=args.min_boundaries,
         locked=args.locked,
         late=late,
+        time_error=SPOUT_TIME_ERROR if spout else POLL_TIME_ERROR,
     )
+    report["located"] = located.report() if located else None
+    return report
 
 
 def parse_region(text: str) -> tuple[int, int, int, int]:
@@ -384,10 +525,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fps", type=int, required=True, choices=clip.FPS_SET)
     parser.add_argument("--grid-fps", type=int, default=GRID_FPS)
     parser.add_argument("--frames", type=int, help="frames in the clip")
-    parser.add_argument("--x-range", type=parse_pair, default=(0.0, 1.0))
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--video", type=Path)
     source.add_argument("--dxcam", type=int, metavar="OUTPUT")
+    source.add_argument("--spout", metavar="SENDER")
     parser.add_argument("--width", type=int, help="scale a video to this width")
     # The wall's own rate: one read from a capture is the capture's (a
     # camera's; dxcam's 1 ms polls read 58.8 Hz for 60).
@@ -400,7 +541,11 @@ def main(argv: list[str] | None = None) -> int:
         help="each video picture is one wall refresh (the wall's own signal)",
     )
     parser.add_argument("--seconds", type=float, default=20.0)
-    parser.add_argument("--region", type=parse_region, help="dxcam region L,T,R,B")
+    parser.add_argument(
+        "--region",
+        type=parse_region,
+        help="area L,T,R,B to look for the clip in (default: the whole picture)",
+    )
     parser.add_argument(
         "--min-boundaries",
         type=int,
@@ -408,7 +553,7 @@ def main(argv: list[str] | None = None) -> int:
         help="boundaries a clean capture judges for judder",
     )
     args = parser.parse_args(argv)
-    if args.locked and args.dxcam is not None:
+    if args.locked and args.video is None:
         parser.error("--locked is for a --video of the wall's own signal")
     try:
         report = capture(args)

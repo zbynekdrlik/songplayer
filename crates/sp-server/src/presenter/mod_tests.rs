@@ -1,7 +1,7 @@
 //! #222 `presenter/mod.rs`: the push decision (`payload_for`, pure) and the
 //! push itself (`maybe_push_line`) against a wiremock Presenter. Both
 //! languages always go out; a line is pushed again when only its Slovak
-//! changed.
+//! changed, and (#281) when only the song's title changed.
 //! Wired via `#[cfg(test)] #[path = "mod_tests.rs"] mod tests;`.
 
 use std::sync::Arc;
@@ -20,6 +20,14 @@ fn lines(current_en: &str, next_en: &str, current_sk: &str, next_sk: &str) -> Pr
         next_en: next_en.to_string(),
         current_sk: current_sk.to_string(),
         next_sk: next_sk.to_string(),
+    }
+}
+
+/// The dedup key of `lines` pushed with the title `song` (#281).
+fn key(lines: PresenterLines, song: &str) -> PushedLine {
+    PushedLine {
+        lines,
+        song: song.to_string(),
     }
 }
 
@@ -86,19 +94,49 @@ fn every_lyric_field_is_wrapped_for_the_stage_display() {
 #[test]
 fn a_line_already_pushed_in_both_languages_is_not_pushed_again() {
     let l = lines("Amazing grace", "How sweet", "Úžasná milosť", "Ako sladko");
-    let seen: PushedLine = l.clone();
+    let seen = key(l.clone(), "Song");
     assert_eq!(payload_for(Some(&seen), &l, "Song", ""), None);
+}
+
+/// #281: the title is part of the key. A new song whose lines are the same
+/// as the last song's (both blank: one song's outro, the next one's intro)
+/// is pushed with its own title; the same title is not.
+#[test]
+fn a_new_song_is_pushed_even_with_the_same_lines() {
+    let blank = PresenterLines::default();
+    let seen = key(blank.clone(), "Amazing Grace - Chris Tomlin");
+    let payload = payload_for(Some(&seen), &blank, "Way Maker", "Sinach").expect("a new song");
+    assert_eq!(payload.current_song, "Way Maker - Sinach");
+    assert_eq!(payload.current_text, "");
+    let seen = key(blank.clone(), "Way Maker - Sinach");
+    assert_eq!(
+        payload_for(Some(&seen), &blank, "Way Maker", "Sinach"),
+        None
+    );
+}
+
+#[test]
+fn the_title_is_the_song_and_its_artist() {
+    assert_eq!(song_title("Way Maker", "Sinach"), "Way Maker - Sinach");
+    assert_eq!(song_title("Way Maker", ""), "Way Maker");
+    assert_eq!(song_title("", ""), "");
 }
 
 #[test]
 fn a_push_is_made_when_only_the_translation_changed() {
     // The Slovak line arrived later under the same English line.
-    let seen = lines("Amazing grace", "How sweet", "", "Ako sladko");
+    let seen = key(
+        lines("Amazing grace", "How sweet", "", "Ako sladko"),
+        "Song",
+    );
     let l = lines("Amazing grace", "How sweet", "Úžasná milosť", "Ako sladko");
     let payload = payload_for(Some(&seen), &l, "Song", "").expect("the SK changed");
     assert_eq!(payload.current_translation, "Úžasná milosť");
     // And when only the English changed.
-    let seen = lines("Amazing", "How sweet", "Úžasná milosť", "Ako sladko");
+    let seen = key(
+        lines("Amazing", "How sweet", "Úžasná milosť", "Ako sladko"),
+        "Song",
+    );
     assert!(payload_for(Some(&seen), &l, "Song", "").is_some());
 }
 
@@ -141,14 +179,15 @@ async fn maybe_push_line_pushes_a_translation_that_changed_under_the_same_line()
     let push = |seen, l| maybe_push_line(Some(&client), seen, l, "Song", "Artist");
 
     // The English line first, with no translation yet.
+    let pushed = |l| Some(key(l, "Song - Artist"));
     let seen = push(None, lines("Amazing grace", "How sweet", "", ""));
-    assert_eq!(seen, Some(lines("Amazing grace", "How sweet", "", "")));
+    assert_eq!(seen, pushed(lines("Amazing grace", "How sweet", "", "")));
     let bodies = wait_for_pushes(&mock, 1).await;
     assert_eq!(bodies[0]["currentText"], "Amazing grace");
     assert_eq!(bodies[0]["currentTranslation"], "");
     // The same line again: no push, the key is kept.
     let seen = push(seen, lines("Amazing grace", "How sweet", "", ""));
-    assert_eq!(seen, Some(lines("Amazing grace", "How sweet", "", "")));
+    assert_eq!(seen, pushed(lines("Amazing grace", "How sweet", "", "")));
     // The Slovak arrives for the same English line: pushed.
     let seen = push(
         seen,
@@ -156,7 +195,7 @@ async fn maybe_push_line_pushes_a_translation_that_changed_under_the_same_line()
     );
     assert_eq!(
         seen,
-        Some(lines(
+        pushed(lines(
             "Amazing grace",
             "How sweet",
             "Úžasná milosť",
@@ -183,7 +222,7 @@ async fn maybe_push_line_pushes_a_translation_that_changed_under_the_same_line()
 
 #[tokio::test]
 async fn without_a_client_nothing_is_pushed_and_the_key_is_kept() {
-    let seen = Some(lines("a", "", "b", ""));
+    let seen = Some(key(lines("a", "", "b", ""), "Song"));
     let l = lines("c", "", "d", "");
     assert_eq!(maybe_push_line(None, seen.clone(), l, "Song", ""), seen);
 }
@@ -217,7 +256,7 @@ fn a_repeated_line_is_pushed_again_when_its_next_line_changes() {
     for (i, l) in four_repeats_then_the_next_line().iter().enumerate() {
         if let Some(p) = payload_for(seen.as_ref(), l, "What A God", "") {
             pushes.push((i + 1, p.current_text, p.next_text, p.next_translation));
-            seen = Some(l.clone());
+            seen = Some(key(l.clone(), "What A God"));
         }
     }
     let expected: Vec<(usize, String, String, String)> = vec![
@@ -253,8 +292,9 @@ async fn the_stage_display_gets_the_next_line_after_the_repeats() {
         .await;
     let client = Arc::new(PresenterClient::new(format!("{}/api/stage", mock.uri())));
 
-    // A push is a spawned task (spawn order is not arrival order), so wait
-    // for each expected push before the next line: lines 1, 4 and 5 push.
+    // A push goes out on the client's own task, the newest payload only
+    // (#281), so wait for each expected push before the next line: lines 1,
+    // 4 and 5 push.
     let mut seen = None;
     for (i, l) in four_repeats_then_the_next_line().into_iter().enumerate() {
         seen = maybe_push_line(Some(&client), seen, l, "What A God", "");
@@ -281,4 +321,61 @@ async fn the_stage_display_gets_the_next_line_after_the_repeats() {
     // Exactly three: the 2nd and 3rd repeats were never pushed.
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(received(&mock).await.len(), 3);
+}
+
+// ── #283 + #281: the stage display's line goes blank with the wall ──────────
+
+/// Where the wall is blank `sync_line` clears the stage display's lines ONCE
+/// (#283) and keeps the song's title (#281), keeps that as the pushed key,
+/// and pushes the next line again; a line goes through `maybe_push_line`.
+#[tokio::test]
+async fn sync_line_clears_the_lines_once_where_the_wall_is_blank_and_keeps_the_title() {
+    let mock = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/stage"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&mock)
+        .await;
+    let client = Arc::new(PresenterClient::new(format!("{}/api/stage", mock.uri())));
+    let sync = |seen, l| sync_line(Some(&client), seen, l, "Song", "Artist");
+
+    let pushed = |l| Some(key(l, "Song - Artist"));
+    let seen = sync(None, Some(lines("Come on", "", "No tak", "")));
+    assert_eq!(seen, pushed(lines("Come on", "", "No tak", "")));
+    wait_for_pushes(&mock, 1).await;
+    let seen = sync(seen, None);
+    let blank = pushed(PresenterLines::default());
+    assert_eq!(seen, blank, "no line with the title is the key");
+    let bodies = wait_for_pushes(&mock, 2).await;
+    assert_eq!(
+        bodies[1],
+        json!({
+            "currentText": "",
+            "nextText": "",
+            "currentSong": "Song - Artist",
+            "nextSong": "",
+            "currentTranslation": "",
+            "nextTranslation": "",
+        })
+    );
+    let seen = sync(seen, None);
+    assert_eq!(seen, blank);
+    let seen = sync(seen, Some(lines("Come on", "", "No tak", "")));
+    let bodies = wait_for_pushes(&mock, 3).await;
+    assert_eq!(bodies[2]["currentText"], "Come on", "the line again");
+    assert_eq!(seen, pushed(lines("Come on", "", "No tak", "")));
+    // Exactly three: the second blank pushed nothing (a "not yet" window
+    // that only errs in the safe direction).
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(received(&mock).await.len(), 3);
+}
+
+/// Without a client nothing is pushed and the key is kept, blank or not.
+#[test]
+fn sync_line_without_a_client_keeps_the_key() {
+    let seen = Some(key(lines("a", "", "b", ""), "Song"));
+    assert_eq!(sync_line(None, seen.clone(), None, "Song", ""), seen);
+    assert_eq!(sync_line(None, None, None, "Song", ""), None);
+    let l = lines("c", "", "d", "");
+    assert_eq!(sync_line(None, seen.clone(), Some(l), "Song", ""), seen);
 }

@@ -1,12 +1,17 @@
 //! The textures: the shared BGRA render target (3840×2160 for MAX; #239:
 //! 1920×1080 for the `SP-program` sender), a slot's two plane textures (Y as
-//! R8, UV as R8G8), and the staging copy for readback.
+//! R8, UV as R8G8), and the staging copy for readback (#279 P1a: the
+//! compositor's mapped-rows reader, `map_rows_into`, the UYVY readback's
+//! too).
 
 use std::ffi::c_void;
 
+use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use windows::Win32::Graphics::Direct3D::D3D11_SRV_DIMENSION_TEXTURE2D;
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_CPU_ACCESS_READ, D3D11_MAP_READ,
-    D3D11_MAPPED_SUBRESOURCE, D3D11_RESOURCE_MISC_SHARED, D3D11_TEXTURE2D_DESC, D3D11_USAGE,
+    D3D11_MAPPED_SUBRESOURCE, D3D11_RESOURCE_MISC_SHARED, D3D11_SHADER_RESOURCE_VIEW_DESC,
+    D3D11_SHADER_RESOURCE_VIEW_DESC_0, D3D11_TEX2D_SRV, D3D11_TEXTURE2D_DESC, D3D11_USAGE,
     D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING, ID3D11Device, ID3D11DeviceContext,
     ID3D11RenderTargetView, ID3D11ShaderResourceView, ID3D11Texture2D,
 };
@@ -18,11 +23,12 @@ use windows::Win32::Graphics::Dxgi::Common::{
 use super::failed;
 use crate::error::GpuError;
 use crate::picture::{Nv12Picture, Planes};
-use crate::readback::{mapped_len, unpad_rows};
+use crate::readback::{mapped_len, unpad_rows_into};
 use crate::residency::Resident;
 
-/// A one-mip, one-sample 2D texture's description.
-fn desc(
+/// A one-mip, one-sample 2D texture's description (#279 P0: the probe's
+/// textures too, `probe.rs`).
+pub(super) fn desc(
     width: u32,
     height: u32,
     format: DXGI_FORMAT,
@@ -48,8 +54,9 @@ fn desc(
     }
 }
 
-/// `CreateTexture2D` with no initial data.
-fn texture(
+/// `CreateTexture2D` with no initial data (#279 P1a: the UYVY pass's
+/// textures too, `uyvy.rs`).
+pub(super) fn texture(
     device: &ID3D11Device,
     desc: &D3D11_TEXTURE2D_DESC,
 ) -> Result<ID3D11Texture2D, GpuError> {
@@ -61,8 +68,47 @@ fn texture(
     })
 }
 
-/// A shader view of the whole texture.
-fn shader_view(
+/// #279 P0 / P2: the description of a shader view of ONE plane of an NV12
+/// texture as `format` (R8 = the luma, R8G8 = the interleaved chroma at
+/// half size: Microsoft's NV12 view rule): the probe's views and a ring
+/// slot's.
+pub(super) fn plane_view_desc(format: DXGI_FORMAT) -> D3D11_SHADER_RESOURCE_VIEW_DESC {
+    D3D11_SHADER_RESOURCE_VIEW_DESC {
+        Format: format,
+        ViewDimension: D3D11_SRV_DIMENSION_TEXTURE2D,
+        Anonymous: D3D11_SHADER_RESOURCE_VIEW_DESC_0 {
+            Texture2D: D3D11_TEX2D_SRV {
+                MostDetailedMip: 0,
+                MipLevels: 1,
+            },
+        },
+    }
+}
+
+/// #279 P0 / P2: a shared texture's NT handle (`CreateSharedHandle`),
+/// closed once when dropped (what was opened through it stays open). Kept
+/// as a number, so it is `Send` and `Sync`: every ring frame holds its
+/// slot's.
+pub(super) struct NtHandle(pub isize);
+
+impl NtHandle {
+    /// The handle, for a call that takes one.
+    pub fn handle(&self) -> HANDLE {
+        HANDLE(self.0 as *mut c_void)
+    }
+}
+
+impl Drop for NtHandle {
+    fn drop(&mut self) {
+        // SAFETY: the handle came from `CreateSharedHandle` and is closed
+        // once, here.
+        let _ = unsafe { CloseHandle(self.handle()) };
+    }
+}
+
+/// A shader view of the whole texture (#279 P1a: the UYVY pass reads its
+/// target through one).
+pub(super) fn shader_view(
     device: &ID3D11Device,
     texture: &ID3D11Texture2D,
 ) -> Result<ID3D11ShaderResourceView, GpuError> {
@@ -209,7 +255,8 @@ pub(super) fn staging(
 /// Copy `source` (a `width`×`height` BGRA texture on `context`'s device: the
 /// render target, or Spout's shared texture opened by a receiver) into
 /// `staging` (of the same size) and read it: `width`×`height` BGRA rows,
-/// tightly packed (the mapped rows may be padded).
+/// tightly packed (the mapped rows may be padded). The map waits for the
+/// copy.
 pub(super) fn read_back(
     context: &ID3D11DeviceContext,
     source: &ID3D11Texture2D,
@@ -217,24 +264,51 @@ pub(super) fn read_back(
     width: u32,
     height: u32,
 ) -> Result<Vec<u8>, GpuError> {
-    let row = width as usize * 4;
-    let rows = height as usize;
+    let mut packed = Vec::new();
+    unsafe { context.CopyResource(staging, source) };
+    let rows = (width as usize * 4, height as usize);
+    map_rows_into(context, staging, 0, rows, &mut packed, |hresult| {
+        GpuError::from_hresult("Map", hresult)
+    })?;
+    Ok(packed)
+}
+
+/// Map `staging` (subresource 0, a texture of 4 bytes a texel: BGRA, or the
+/// UYVY pass's RGBA) for reading with the map `flags`, put its
+/// first `row` bytes of each of its `rows` rows into `out` (cleared once
+/// the map succeeded, untouched on an error; the mapped rows may be
+/// padded), and unmap it. A failed `Map` is `map_error` of its HRESULT
+/// (the caller names it, #279 P1a: the UYVY readback's `DO_NOT_WAIT` map,
+/// `uyvy::map_failed`). More rows or a longer row than the texture has, or
+/// a mapping that does not hold the rows, is [`GpuError::NoObject`]: the
+/// unsafe slice below never reaches past the mapping, whatever the caller
+/// passes.
+pub(super) fn map_rows_into(
+    context: &ID3D11DeviceContext,
+    staging: &ID3D11Texture2D,
+    flags: u32,
+    (row, rows): (usize, usize),
+    out: &mut Vec<u8>,
+    map_error: impl FnOnce(u32) -> GpuError,
+) -> Result<(), GpuError> {
+    let mut desc = D3D11_TEXTURE2D_DESC::default();
+    unsafe { staging.GetDesc(&mut desc) };
+    let held = rows <= desc.Height as usize && row <= desc.Width as usize * 4;
     let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-    unsafe {
-        context.CopyResource(staging, source);
-        context.Map(staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
-    }
-    .map_err(|e| failed("Map", &e))?;
+    unsafe { context.Map(staging, 0, D3D11_MAP_READ, flags, Some(&mut mapped)) }
+        .map_err(|e| map_error(e.code().0 as u32))?;
     let pitch = mapped.RowPitch as usize;
     let packed = match mapped_len(pitch, row, rows) {
-        Some(len) if !mapped.pData.is_null() => {
-            // SAFETY: the mapped staging texture is `rows` rows `pitch` bytes
+        Some(len) if held && !mapped.pData.is_null() => {
+            // SAFETY: the mapped staging texture holds its `desc.Height` ≥
+            // `rows` rows of `desc.Width × 4` ≥ `row` bytes, `pitch` bytes
             // apart (`pitch` ≥ `row`, `mapped_len`), so its first `len`
-            // bytes end with the last row's pixels, inside the mapping, which
-            // stays mapped until the Unmap below.
+            // bytes end inside its last asked row, inside the mapping,
+            // which stays mapped until the Unmap below.
             let bytes =
                 unsafe { std::slice::from_raw_parts(mapped.pData.cast::<u8>().cast_const(), len) };
-            unpad_rows(bytes, pitch, row, rows)
+            out.clear();
+            unpad_rows_into(bytes, pitch, row, rows, out)
         }
         _ => None,
     };

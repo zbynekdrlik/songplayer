@@ -291,8 +291,9 @@ def test_snv_never_runs_the_pp_subset_and_pp_runs_it_with_max():
     # PP runs its own subset, MAX, the masked-settings check (release 0.72.0
     # review), the ASIO gate (#233 lane 3: DVS is installed at PP too), the
     # environment gate, the audio-fault dashboard check (#257), the LED
-    # wall report (#259: fails only when SongPlayer cannot read PP's box)
-    # and the live preview gate (#266), and never the SNV suite.
+    # wall report (#259: fails only when SongPlayer cannot read PP's box),
+    # the live preview gate (#266) and the usage log's gate (#256), and
+    # never the SNV suite.
     assert specs == [
         "**/post-deploy-pp.spec.ts",
         "**/post-deploy-max.spec.ts",
@@ -302,6 +303,7 @@ def test_snv_never_runs_the_pp_subset_and_pp_runs_it_with_max():
         "**/post-deploy-audio-faults-ui.spec.ts",
         "**/post-deploy-wall.spec.ts",
         "**/post-deploy-pp-preview.spec.ts",
+        "**/post-deploy-ui-usage.spec.ts",
     ]
 
 

@@ -468,6 +468,47 @@ mod tests {
         }
     }
 
+    /// #261 bug: a play on ANOTHER playlist (ytlive's set list plays a song
+    /// of its home playlist) is no play of the home rotation. The rotation's
+    /// join ignored the play's playlist, so such a song stayed out of its
+    /// home rotation for good: the home restart clears only its own plays.
+    /// Ten picks with the other two played at home: only the ytlive song is
+    /// left, so a pick out of all three cannot pass by luck.
+    #[tokio::test]
+    async fn a_play_on_another_playlist_keeps_the_song_in_its_home_rotation() {
+        let (pool, home, ids) = setup_with_videos(3).await;
+        let live: i64 = sqlx::query_scalar(
+            "INSERT INTO playlists (name, youtube_url, kind) VALUES ('live', '', 'custom') \
+             RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        db::models::record_play(&pool, live, ids[0]).await.unwrap();
+        assert_eq!(
+            models::get_unplayed_normalized_video_ids(&pool, home)
+                .await
+                .unwrap(),
+            ids
+        );
+        assert_eq!(
+            models::get_unplayed_video_ids(&pool, home).await.unwrap(),
+            ["yt_0", "yt_1", "yt_2"]
+        );
+        db::models::record_play(&pool, home, ids[1]).await.unwrap();
+        db::models::record_play(&pool, home, ids[2]).await.unwrap();
+        for _ in 0..10 {
+            let vid = VideoSelector::select_next(&pool, home, PlaybackMode::Continuous, None, &[])
+                .await
+                .unwrap();
+            assert_eq!(
+                vid,
+                Some(ids[0]),
+                "the song played on ytlive is unplayed here"
+            );
+        }
+    }
+
     /// The same for a custom playlist, which played nothing in Loop after a
     /// restart.
     #[tokio::test]

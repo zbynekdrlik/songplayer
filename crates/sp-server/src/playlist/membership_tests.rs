@@ -152,6 +152,36 @@ async fn an_empty_fetch_marks_nothing() {
     assert_eq!(removed_at(&pool, 1, "c").await, Some(1_000));
 }
 
+/// #261: a fetch of an inactive playlist (a manual sync) records nothing:
+/// its upsert would clear the marks the deactivation set, and a new row
+/// would escape the clock. An unknown playlist is no active one either.
+#[tokio::test]
+async fn a_fetch_of_an_inactive_playlist_records_nothing() {
+    let pool = pool().await;
+    sqlx::query("UPDATE playlists SET is_active = 0 WHERE id = 1")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let fetched = [
+        entry("a", "Song A"),
+        entry("c", "Song C"),
+        entry("d", "Song D"),
+    ];
+    for playlist in [1, 99] {
+        let report = record_fetch(&pool, playlist, &fetched, 50_000)
+            .await
+            .unwrap();
+        assert_eq!(report, SyncReport::default());
+    }
+    assert_eq!(removed_at(&pool, 1, "b").await, None, "not marked");
+    assert_eq!(removed_at(&pool, 1, "c").await, Some(1_000), "not back");
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM videos")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 4, "no new row");
+}
+
 /// The retention holds `cache::SONG_FILES` from its last read of a row to
 /// its deletion; a sync writes under the same lock, so it never brings a
 /// song back while that song's files are being deleted.

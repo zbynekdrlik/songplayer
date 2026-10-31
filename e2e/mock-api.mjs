@@ -404,14 +404,26 @@ app.patch("/api/v1/videos/:id", (req, res) => {
 // #242: a playlist's own volume + EQ. Mirrors the real handlers: GET
 // answers the row's settings + the live generation, PUT validates
 // (sp_core::audio_fx limits) and answers 204 with no body, an unknown
-// playlist is 404. `/__mock/playlist-audio` reads every PUT body sent
-// and the stored settings; `/__mock/playlist-audio-reset` clears both,
-// `/__mock/playlist-audio-set {id, fx}` seeds a row.
+// playlist is 404. `/__mock/playlist-audio` reads every PUT sent
+// (`{id, body, at, done}`: when it arrived and when it was answered, the
+// mock's ms clock), the LAST body (`last`, #278: the panel sends live) and
+// the stored settings; `/__mock/playlist-audio-reset` clears them all and
+// both delays, `/__mock/playlist-audio-set {id, fx}` seeds a row.
 const AUDIO_KINDS = ["high_pass", "low_shelf", "peak", "high_shelf", "low_pass"];
 let playlistAudio = new Map();
 let playlistAudioPuts = [];
 // How long GET …/audio waits before it answers (`/__mock/playlist-audio-delay`).
 let playlistAudioDelayMs = 0;
+// #278: how long PUT …/audio waits before it answers
+// (`/__mock/playlist-audio-put-delay {ms}`): a slow server, to prove the
+// panel never has two requests in flight.
+let playlistAudioPutDelayMs = 0;
+// #278: a status every PUT …/audio answers instead of the real one
+// (`/__mock/playlist-audio-put-status {status}`, 0 = off): a failing server.
+let playlistAudioPutStatus = 0;
+// Bumped by every reset: a delayed PUT that arrived before a reset (a test
+// that ended while its request waited) answers but stores nothing after it.
+let playlistAudioEpoch = 0;
 function playlistAudioOf(id) {
   return playlistAudio.get(id) ?? { gain_db: 0, eq: [], generation: 0 };
 }
@@ -452,9 +464,23 @@ app.get("/api/v1/playlists/:id/audio", async (req, res) => {
   }
   res.json(playlistAudioOf(id));
 });
-app.put("/api/v1/playlists/:id/audio", (req, res) => {
+app.put("/api/v1/playlists/:id/audio", async (req, res) => {
   const id = Number(req.params.id);
-  playlistAudioPuts.push({ id, body: req.body });
+  const put = { id, body: req.body, at: Date.now(), done: null };
+  playlistAudioPuts.push(put);
+  const epoch = playlistAudioEpoch;
+  if (playlistAudioPutDelayMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, playlistAudioPutDelayMs));
+  }
+  if (epoch !== playlistAudioEpoch) {
+    res.status(204).end();
+    return;
+  }
+  put.done = Date.now();
+  if (playlistAudioPutStatus > 0) {
+    res.status(playlistAudioPutStatus).type("text/plain").send("mock failure");
+    return;
+  }
   const refusal = playlistAudioRefusal(req.body);
   if (refusal) {
     res.status(400).type("text/plain").send(refusal);
@@ -476,16 +502,31 @@ app.put("/api/v1/playlists/:id/audio", (req, res) => {
   res.status(204).end();
 });
 app.get("/__mock/playlist-audio", (_req, res) => {
-  res.json({ puts: playlistAudioPuts, stored: Object.fromEntries(playlistAudio) });
+  res.json({
+    puts: playlistAudioPuts,
+    last: playlistAudioPuts.length > 0 ? playlistAudioPuts[playlistAudioPuts.length - 1].body : null,
+    stored: Object.fromEntries(playlistAudio),
+  });
 });
 app.post("/__mock/playlist-audio-reset", (_req, res) => {
   playlistAudio = new Map();
   playlistAudioPuts = [];
   playlistAudioDelayMs = 0;
+  playlistAudioPutDelayMs = 0;
+  playlistAudioPutStatus = 0;
+  playlistAudioEpoch += 1;
   res.status(204).end();
 });
 app.post("/__mock/playlist-audio-delay", (req, res) => {
   playlistAudioDelayMs = Number(req.body.ms) || 0;
+  res.status(204).end();
+});
+app.post("/__mock/playlist-audio-put-delay", (req, res) => {
+  playlistAudioPutDelayMs = Number(req.body.ms) || 0;
+  res.status(204).end();
+});
+app.post("/__mock/playlist-audio-put-status", (req, res) => {
+  playlistAudioPutStatus = Number(req.body.status) || 0;
   res.status(204).end();
 });
 app.post("/__mock/playlist-audio-set", (req, res) => {
@@ -1515,7 +1556,10 @@ app.post("/__mock/environment-reset", (_req, res) => {
 // `sp_core::wall::WallStatus`. The mock's Resolume uses its simple output,
 // so by default the bar shows no wall segment (as on a box whose Resolume
 // drives no physical display); `POST /__mock/wall {…}` sends those fields
-// over that, `POST /__mock/wall-reset` restores it.
+// over that, `POST /__mock/wall-reset` restores it. #275: the report's
+// `songplayer_clip` (whether SongPlayer's clip runs in Resolume) is
+// `unknown` by default; the GET stamps its `now_ms` with the mock's clock at
+// each answer, as the server does with its own.
 const WALL_DEFAULT = {
   checked: true,
   state: "simple_output",
@@ -1533,10 +1577,20 @@ const WALL_DEFAULT = {
   checked_at_ms: null,
   // #254: the guard that ends a crashed or hung Arena: nothing ended.
   guard: { ends: 0, last: null, phase: "idle" },
+  // #275: SongPlayer's clip in Resolume: not read.
+  songplayer_clip: {
+    state: "unknown",
+    clips: [],
+    ndi_clips: [],
+    since_ms: null,
+    now_ms: null,
+    read_error: null,
+    reader_fault: false,
+  },
 };
 let wall = { ...WALL_DEFAULT };
 app.get("/api/v1/wall", (_req, res) => {
-  res.json(wall);
+  res.json({ ...wall, songplayer_clip: { ...wall.songplayer_clip, now_ms: Date.now() } });
 });
 app.post("/__mock/wall", (req, res) => {
   wall = { ...WALL_DEFAULT, ...req.body };
@@ -1545,6 +1599,30 @@ app.post("/__mock/wall", (req, res) => {
 app.post("/__mock/wall-reset", (_req, res) => {
   wall = { ...WALL_DEFAULT };
   res.json(wall);
+});
+
+// #261: the data dir's size on `/api/v1/status` (null until the server's
+// first measure). The default: 123,4 GB, the cache 120,0 GB, measured two
+// hours before the mock started. `/__mock/data-size {…}` replaces the three
+// fields (nulls included); `/__mock/data-size-reset` restores the default.
+const GIB = 1_073_741_824;
+const DATA_SIZE_DEFAULT = {
+  data_dir_bytes: 123 * GIB + Math.floor((4 * GIB) / 10),
+  cache_bytes: 120 * GIB,
+  data_dir_measured_ms: Date.now() - 2 * 3_600_000,
+};
+let dataSize = { ...DATA_SIZE_DEFAULT };
+app.post("/__mock/data-size", (req, res) => {
+  dataSize = {
+    data_dir_bytes: req.body.data_dir_bytes ?? null,
+    cache_bytes: req.body.cache_bytes ?? null,
+    data_dir_measured_ms: req.body.data_dir_measured_ms ?? null,
+  };
+  res.json(dataSize);
+});
+app.post("/__mock/data-size-reset", (_req, res) => {
+  dataSize = { ...DATA_SIZE_DEFAULT };
+  res.json(dataSize);
 });
 
 // Status
@@ -1568,6 +1646,8 @@ app.get("/api/v1/status", (_req, res) => {
     paid_ai_held: paidAiEnabled(settings.paid_ai_enabled) ? [] : ["lyrics", "metadata"],
     // #233: the production environment, as `/api/v1/environment`.
     environment,
+    // #261: the data dir's size, at the status's top level as the server's.
+    ...dataSize,
   });
 });
 
@@ -1628,6 +1708,134 @@ app.post("/__mock/background-hold-reset", (_req, res) => {
   res.json(backgroundHold);
 });
 
+// #256: the dashboard's usage log, as the server takes it
+// (`sp_core::ui_usage`): `POST /api/v1/ui-usage` reads the body as text
+// whatever its content type (a `navigator.sendBeacon` string arrives as
+// text/plain), takes at most 200 events, page and control at most 120
+// characters, kind click|change|submit|page, no negative stamp, else a 400
+// with the fixed text and nothing kept; a kept batch is a 204, each stamp
+// capped at the clock. Each kept POST is recorded with
+// its content type for the specs (`GET /__mock/ui-usage` → `{posts:
+// [{content_type, events}]}`, cleared by `POST /__mock/ui-usage-reset`).
+// `GET /api/v1/ui-usage/summary?days=N` (1..=400, default 400) answers the
+// server's shape from what was recorded; the mock has no program source, so
+// no row counts a use on air.
+const UI_USAGE_KINDS = ["click", "change", "submit", "page"];
+const UI_USAGE_MAX_EVENTS = 200;
+const UI_USAGE_MAX_CHARS = 120;
+const UI_USAGE_DAY_MS = 86_400_000;
+const UI_USAGE_REFUSAL =
+  'a usage batch is {"events": [{"ts_ms", "page", "control", "kind"}]}: at most 200 events, ' +
+  "ts_ms not negative, page and control at most 120 characters each, kind click, change, " +
+  "submit or page";
+const UI_USAGE_DAYS_REFUSAL = "days must be a whole number from 1 to 400";
+let uiUsagePosts = [];
+
+// The batch's events as the server keeps them (each stamp capped at the
+// clock: a use cannot come after its arrival), or null when it refuses.
+function uiUsageEvents(body) {
+  let batch = body;
+  if (typeof body === "string") {
+    try {
+      batch = JSON.parse(body);
+    } catch {
+      return null;
+    }
+  }
+  if (!batch || !Array.isArray(batch.events)) return null;
+  if (batch.events.length > UI_USAGE_MAX_EVENTS) return null;
+  const events = [];
+  for (const e of batch.events) {
+    if (!e || !Number.isInteger(e.ts_ms) || e.ts_ms < 0) return null;
+    if (typeof e.page !== "string" || typeof e.control !== "string") return null;
+    if (!UI_USAGE_KINDS.includes(e.kind)) return null;
+    if ([...e.page].length > UI_USAGE_MAX_CHARS) return null;
+    if ([...e.control].length > UI_USAGE_MAX_CHARS) return null;
+    const ts_ms = Math.min(e.ts_ms, Date.now());
+    events.push({ ts_ms, page: e.page, control: e.control, kind: e.kind });
+  }
+  return events;
+}
+
+app.post("/api/v1/ui-usage", express.text({ type: () => true }), (req, res) => {
+  const events = uiUsageEvents(req.body);
+  if (events === null) {
+    res.status(400).type("text/plain").send(UI_USAGE_REFUSAL);
+    return;
+  }
+  uiUsagePosts.push({ content_type: req.get("content-type") || "", events });
+  res.status(204).end();
+});
+// A body sent as JSON that is no JSON fails in the global express.json()
+// before the route: answer it as the server does (the fixed text), never
+// express's HTML page.
+app.use("/api/v1/ui-usage", (err, _req, res, next) => {
+  if (!err) {
+    next();
+    return;
+  }
+  res.status(400).type("text/plain").send(UI_USAGE_REFUSAL);
+});
+app.get("/api/v1/ui-usage/summary", (req, res) => {
+  let days = 400;
+  if (req.query.days !== undefined) {
+    const raw = req.query.days;
+    const n = typeof raw === "string" && /^[0-9]+$/.test(raw) ? Number(raw) : 0;
+    if (n < 1 || n > 400) {
+      res.status(400).type("text/plain").send(UI_USAGE_DAYS_REFUSAL);
+      return;
+    }
+    days = n;
+  }
+  const now_ms = Date.now();
+  const from_ms = now_ms - days * UI_USAGE_DAY_MS;
+  const groups = new Map();
+  for (const post of uiUsagePosts) {
+    for (const e of post.events) {
+      if (e.ts_ms < from_ms) continue;
+      const key = JSON.stringify([e.page, e.control, e.kind]);
+      const g = groups.get(key) ?? {
+        page: e.page,
+        control: e.control,
+        kind: e.kind,
+        count: 0,
+        days: new Set(),
+        first_ms: e.ts_ms,
+        last_ms: e.ts_ms,
+      };
+      g.count += 1;
+      g.days.add(new Date(e.ts_ms).toDateString());
+      g.first_ms = Math.min(g.first_ms, e.ts_ms);
+      g.last_ms = Math.max(g.last_ms, e.ts_ms);
+      groups.set(key, g);
+    }
+  }
+  // SQLite's own text order (by code point), never the locale's.
+  const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  const order = (a, b) =>
+    b.count - a.count || cmp(a.page, b.page) || cmp(a.control, b.control) || cmp(a.kind, b.kind);
+  const rows = [...groups.values()].sort(order).map((g) => ({
+    page: g.page,
+    control: g.control,
+    kind: g.kind,
+    count: g.count,
+    days_used: g.days.size,
+    first_ms: g.first_ms,
+    last_ms: g.last_ms,
+    on_air: 0,
+  }));
+  const events = rows.reduce((sum, r) => sum + r.count, 0);
+  const first_ms = rows.length ? Math.min(...rows.map((r) => r.first_ms)) : null;
+  res.json({ now_ms, days, from_ms, events, first_ms, rows });
+});
+app.get("/__mock/ui-usage", (_req, res) => {
+  res.json({ posts: uiUsagePosts });
+});
+app.post("/__mock/ui-usage-reset", (_req, res) => {
+  uiUsagePosts = [];
+  res.json({ posts: uiUsagePosts });
+});
+
 // NDI genlock health (#150) — polled every 1 s by the dashboard's
 // GlobalLockBadge (which fills store.ndi_health for the per-card LockBadges).
 // Mirrors the real `GET /api/v1/ndi/health` array of PipelineHealthSnapshot:
@@ -1636,6 +1844,8 @@ app.post("/__mock/background-hold-reset", (_req, res) => {
 // states via `POST /__mock/ndi-health` (`POST /__mock/ndi-health-reset` puts
 // the default back). #229: every row carries `open_failures` (`null` while no
 // video failed to open since the last song started), as the server's does.
+// #279 P3a: and `gpu_decoded` (its song decodes GPU-resident: the Player
+// offers no live preview of it, `player-gpu-preview.spec.ts`).
 //
 // Default fixture exercises the three badges at once:
 //   - SP-worship   → LOCKED   (live, clock ok)
@@ -1666,6 +1876,7 @@ const NDI_HEALTH_DEFAULT = [
     },
     audio: { underruns: 0 },
     open_failures: null,
+    gpu_decoded: false,
   },
   {
     ndi_name: "SP-background",
@@ -1687,6 +1898,7 @@ const NDI_HEALTH_DEFAULT = [
     },
     audio: { underruns: 0 },
     open_failures: null,
+    gpu_decoded: false,
   },
   {
     ndi_name: "SP-live",
@@ -1708,6 +1920,7 @@ const NDI_HEALTH_DEFAULT = [
     },
     audio: { underruns: 0 },
     open_failures: null,
+    gpu_decoded: false,
   },
 ];
 
@@ -1870,6 +2083,9 @@ function programBody() {
       upload_us_p99: 0,
       draw_us_p99: 0,
       send_us_p99: 0,
+      // #279 P0: what the composes upload (MB/s, pictures/s); no GPU here.
+      upload_mb_s: 0,
+      uploads_per_s: 0,
       send_at_us_p50: 0,
       send_at_us_p99: 0,
       send_at_us_max: 0,
@@ -1880,9 +2096,14 @@ function programBody() {
       vblank_tracking: false,
       vblank_period_ns: 0,
       vblank_phase_us: mockVblankPhaseUs(),
+      // #251: where each compose starts after the vblank (the setting).
+      compose_phase_us: mockComposePhaseUs(),
       send_off_grid: 0,
       send_phase_us_p50: 0,
       send_phase_us_p99: 0,
+      compose_phase_us_p50: 0,
+      compose_phase_us_p99: 0,
+      compose_late: 0,
       slot_repicks: 0,
       device_resets: 0,
       sender_backoffs: 0,
@@ -1892,6 +2113,32 @@ function programBody() {
       list_holder: null,
       // #239: the SP-program Spout sender (1920x1080) next to MAX.
       fhd: mockFhdStatus(),
+    },
+    // #279 P1b: NDI SP-program's source (mirrors `ndi_feed::NdiStatus`).
+    // `program_ndi_source` is `gpu` only when it says so (trimmed); the mock
+    // has no GPU, like the Linux server: nothing is read back, so NDI stays
+    // on the CPU canvas.
+    ndi: {
+      setting: String(settings.program_ndi_source ?? "").trim() === "gpu" ? "gpu" : "cpu",
+      source: "cpu",
+      delay_slots: 0,
+      fourcc: "NV12",
+      repeats: 0,
+      readback_late: 0,
+      feed_coalesced: 0,
+      switches: 0,
+      readback_us_p99: 0,
+      uyvy_us_p99: 0,
+    },
+    // #279 P3a: the compositor's sides (mirrors `program_max::GpuStatus`);
+    // the mock composes nothing.
+    gpu: {
+      gpu_sides_per_s: 0,
+      cpu_sides_per_s: 0,
+      km_acquire_timeouts: 0,
+      abandoned: 0,
+      open_failures: 0,
+      gpu_opens: 0,
     },
   };
 }
@@ -1911,7 +2158,9 @@ function mockFhdStatus() {
     submitted: 0,
     failed: 0,
     sender_backoffs: 0,
-    upload_us_p99: 0,
+    spout_relists: 0,
+    // #251 step 2: no upload_us_p99 (the FHD target is drawn from MAX's
+    // upload); draw_us_p99 is its own part of the draw.
     draw_us_p99: 0,
     send_us_p99: 0,
   };
@@ -1920,9 +2169,17 @@ function mockFhdStatus() {
 // (`sp_core::config::program_max_vblank_phase_us`): ms from 0 to under
 // 1000, rounded to the µs, else 14000.
 function mockVblankPhaseUs() {
-  const raw = String(settings.program_max_vblank_phase_ms ?? "").trim();
+  return mockPhaseUs(settings.program_max_vblank_phase_ms, 14000);
+}
+// #251: `program_max_compose_phase_ms` by the same rule, else 13000
+// (`sp_core::config::program_max_compose_phase_us`).
+function mockComposePhaseUs() {
+  return mockPhaseUs(settings.program_max_compose_phase_ms, 13000);
+}
+function mockPhaseUs(stored, fallback) {
+  const raw = String(stored ?? "").trim();
   const ms = raw === "" ? NaN : Number(raw);
-  return Number.isFinite(ms) && ms >= 0 && ms < 1000 ? Math.round(ms * 1000) : 14000;
+  return Number.isFinite(ms) && ms >= 0 && ms < 1000 ? Math.round(ms * 1000) : fallback;
 }
 // #233: the outputs as `GET /api/v1/program` lists them, from the stored
 // list (an unreadable one lists nothing); an enabled VBAN entry carries its

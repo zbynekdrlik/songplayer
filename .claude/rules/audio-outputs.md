@@ -398,7 +398,7 @@ dependencies get none, like every other Rust crate the project links),
 pinned against the `Cargo.toml` version by
 `the_installer_notice_carries_the_pinned_rubatos_license` — re-copy the
 notice when the pin moves. Added to the lock with `cargo update --workspace`
-(Tier-0-allowed, compiles nothing): it adds exactly the new tree.
+(it adds exactly the new tree).
 
 ## The list (`audio_outputs`) and the network rate (`audio_network_rate`) — lane 1
 
@@ -1098,8 +1098,9 @@ before (`AudioOutputs::offer`), the host's side is the worker's.
   (`info,sp_server=debug`, or `RUST_LOG`). The host runs at
   HIGH_PRIORITY_CLASS (like SongPlayer, #203), installs the panic hook
   (`sp-audio-host-panic.log`) and logs to `sp-audio-host.log` (both in
-  `%ProgramData%\SongPlayer`, `launch::host_data_dir`; the log is started
-  afresh over 10 MiB) AND over the pipe, so a host whose pipe is down still
+  `%ProgramData%\SongPlayer`, `launch::host_data_dir`; #261: both rotate
+  to `.1` at 10 MiB, the log during a run too, `log_rotate`,
+  `cache-sweep.md`) AND over the pipe, so a host whose pipe is down still
   leaves its log.
 
 **The protocol** (`audio_host/protocol.rs`): one local named pipe per host
@@ -1186,7 +1187,7 @@ helper process would then fail to open — a main-session decision.
 **The host spawns nothing** — `audio_host/no_spawn_tests.rs` scans the
 host's code path (the bin, `mod.rs`, `host.rs`, `host_win.rs`, the protocol
 and status, `remote_clock.rs`, `mono.rs`, `log_forward.rs`, `launch.rs`,
-`panic_hook.rs`, the ASIO output and its glue, the servo, the ASRC, the
+`panic_hook.rs`, `log_rotate.rs`, the ASIO output and its glue, the servo, the ASRC, the
 queue, the clocks, `pipeline_paced.rs`, `vban_out.rs`, `vban_packet.rs`,
 `audio_out.rs`, `program_output.rs`, `mmcss.rs`, sp-asrc; comments are not
 scanned) for `Command::new`, `process::Command`, `tokio::process`,

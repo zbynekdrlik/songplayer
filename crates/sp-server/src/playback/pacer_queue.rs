@@ -42,6 +42,9 @@ pub struct PacedQueue<T> {
     /// The producer reached end-of-stream — no more frames will arrive (until a
     /// seek clears it).
     eos: bool,
+    /// #277: why the producer ended the song as a FAILURE (an early end of
+    /// the video), cleared with the end-of-stream by a seek.
+    failure: Option<String>,
 }
 
 impl<T> PacedQueue<T> {
@@ -53,6 +56,7 @@ impl<T> PacedQueue<T> {
             bound,
             epoch: 0,
             eos: false,
+            failure: None,
         }
     }
 
@@ -103,6 +107,19 @@ impl<T> PacedQueue<T> {
         self.eos = true;
     }
 
+    /// Producer (#277): the song FAILED with `reason` (an early end of the
+    /// video): end-of-stream, and the consumer reads why once the queued
+    /// frames are popped ([`failure`](Self::failure)).
+    pub fn mark_failed(&mut self, reason: String) {
+        self.failure = Some(reason);
+        self.eos = true;
+    }
+
+    /// Consumer (#277): why the producer ended the song as a failure.
+    pub fn failure(&self) -> Option<&str> {
+        self.failure.as_deref()
+    }
+
     /// Consumer: the producer finished AND every queued frame has been popped —
     /// the song is done (EOS DRAINS the queue, it never truncates it).
     pub fn is_drained(&self) -> bool {
@@ -124,6 +141,7 @@ impl<T> PacedQueue<T> {
     pub fn begin_seek(&mut self) -> u64 {
         self.buf.clear();
         self.eos = false;
+        self.failure = None;
         self.epoch += 1;
         self.epoch
     }
@@ -240,6 +258,24 @@ impl<T> SharedQueue<T> {
         if let Ok(mut st) = self.inner.lock() {
             st.queue.mark_eos();
         }
+    }
+
+    /// Producer (#277): the song FAILED with `reason` (an early end of the
+    /// video); end-of-stream with it, under one lock, so a consumer that sees
+    /// the end sees why. Poison → no-op.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn producer_failed(&self, reason: String) {
+        if let Ok(mut st) = self.inner.lock() {
+            st.queue.mark_failed(reason);
+        }
+    }
+
+    /// Consumer (#277): why the producer ended the song as a failure (see
+    /// [`PacedQueue::failure`]). Poison → `None`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn failure(&self) -> Option<String> {
+        let st = self.inner.lock().ok()?;
+        st.queue.failure().map(str::to_owned)
     }
 
     /// Producer: after EOS, BLOCK until the consumer requests a seek (scrub after

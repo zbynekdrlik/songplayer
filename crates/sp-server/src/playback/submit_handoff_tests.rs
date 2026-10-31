@@ -242,7 +242,7 @@ fn submit_job_stamp_boundary_is_the_video_tc() {
         width: 1920,
         height: 1080,
         stride: 1920,
-        video: SharedFrame::new(vec![0u8; 8]),
+        video: SharedFrame::new(vec![0u8; 8]).into(),
         audio: Vec::new(),
         video_tc_100ns: 3_333_300,
         audio_tc_100ns: 3_333_311,
@@ -265,14 +265,14 @@ fn from_paced_arc_clones_the_frame_without_copying_pixels() {
         width: 4,
         height: 2,
         stride: 4,
-        video,
+        video: video.into(),
         audio: Vec::new(),
     };
     let job = SubmitJob::from_paced(&paced, &[], 3_333_300, 3_333_311, true);
     assert!(job.live, "`live` is carried as given (#215)");
     assert!(!SubmitJob::from_paced(&paced, &[], 3_333_300, 3_333_311, false).live);
     assert_eq!(
-        job.video.as_ptr(),
+        job.video.expect_cpu().as_ptr(),
         src_ptr,
         "handoff is an Arc clone, not a pixel copy"
     );
@@ -296,7 +296,7 @@ fn only_a_live_pair_carries_the_frame_s_media_time() {
         width: 4,
         height: 2,
         stride: 4,
-        video: SharedFrame::new(vec![9u8; 12]),
+        video: SharedFrame::new(vec![9u8; 12]).into(),
         audio: Vec::new(),
     };
     let live = SubmitJob::from_paced(&paced, &[], 3_333_300, 3_333_300, true);

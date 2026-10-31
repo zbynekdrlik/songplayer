@@ -1,6 +1,6 @@
 //! Tests for the upload residency (#223 S1a).
 
-use super::{Resident, Upload, upload_for};
+use super::{Resident, Upload, swap_slots, upload_for};
 use crate::picture::Nv12Picture;
 
 fn picture(id: u64, width: u32, height: u32) -> Nv12Picture<'static> {
@@ -64,4 +64,48 @@ fn a_slot_holds_what_was_uploaded_into_it() {
             height: 720
         }
     );
+}
+
+/// #251: picture ids (`Some`) in slots `[Outgoing, Incoming]`.
+const A: Option<u64> = Some(1);
+const B: Option<u64> = Some(2);
+const C: Option<u64> = Some(3);
+const D: Option<u64> = Some(4);
+
+#[test]
+fn the_next_fade_of_a_blended_song_takes_its_outgoing_picture_from_the_other_slot() {
+    // Fade(A -> B) left A outgoing and B incoming; Fade(B -> C) wants B
+    // outgoing: trading the slots leaves only C to upload (one, not two).
+    assert!(swap_slots([A, B], [B, C]));
+}
+
+#[test]
+fn the_picture_a_fade_ended_on_is_taken_from_the_incoming_slot() {
+    // Fade(A -> B) then B alone (outgoing slot, incoming not drawn).
+    assert!(swap_slots([A, B], [B, None]));
+    // The picture drawn alone sits in the incoming slot.
+    assert!(swap_slots([B, A], [A, None]));
+    assert!(swap_slots([None, A], [A, None]));
+}
+
+#[test]
+fn no_trade_when_it_saves_no_upload() {
+    assert!(!swap_slots([A, B], [A, B]), "both resident where drawn");
+    assert!(!swap_slots([A, B], [A, C]), "the outgoing one is in place");
+    assert!(!swap_slots([A, B], [C, D]), "two new pictures either way");
+    assert!(
+        !swap_slots([A, B], [None, B]),
+        "the incoming one is in place"
+    );
+    assert!(!swap_slots([None, None], [A, B]), "nothing resident");
+    assert!(
+        !swap_slots([A, None], [A, B]),
+        "a fade out of the picture shown"
+    );
+    assert!(!swap_slots([A, B], [None, None]), "nothing drawn (black)");
+}
+
+#[test]
+fn both_pictures_in_the_wrong_slots_trade_places() {
+    assert!(swap_slots([B, A], [A, B]));
 }

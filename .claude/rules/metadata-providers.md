@@ -78,6 +78,16 @@ answered correctly), and nothing ever ran the real providers.
   redacted with every key, so the live g35t probe answers it as is. A
   recorded / probed provider error is cut to 300 chars
   (`health::bounded_error`): a Claude error carries the proxy's whole reply.
+- **The model** (`gemini_model`, default `DEFAULT_GEMINI_MODEL`) is
+  `gemini-3.8-flash` since 15.10.2026. That day `gemini-3.1-pro-preview`
+  took 59 s grounded and over 120 s even for "reply OK", past the
+  provider's 90 s request bound, and the live gate failed twice. 3.8 Flash
+  answered the gate's video correctly in 5.2 s (3.7 / 3.5 Flash in
+  5–7 s). It was the newest Gemini in `GET /v1beta/models` for the box's
+  key; no Pro newer than 3.1 is listed. The box's stored `gemini_model`
+  setting wins over the default: change it on each box too (metadata
+  reads it at startup). Re-check the list before any change: newest model
+  only.
 - Request tools: `"tools": [{"google_search": {}}]` is still the grounding
   tool for `generateContent` on Gemini 3 Pro (ai.google.dev, checked
   29.9.2026). The answer text is every non-thought part joined.
@@ -132,6 +142,11 @@ answered correctly), and nothing ever ran the real providers.
     router: two rows sharing files, a row not downloaded, another video
     untouched, the stem following the audio) and
     `an_artist_only_correction_of_a_row_with_no_song_keeps_the_songs`.
+    `apply_to_video` is two steps, `spread_title` (the UPDATE, taking the
+    `metadata_source` it writes) and `rename_rows` (each row's files): #269's
+    title follow (`peer::follow_title`) writes a peer's title through the
+    same two, with the peer's label (a peer's operator title stays
+    `'manual'` here), renaming first and writing only once every set moved.
   - **An artist ALONE for a video with no song is refused** (review round
     2): a download keeps a correction only with its song (below), so an
     artist-only PATCH of a video no row of which has a song yet (none

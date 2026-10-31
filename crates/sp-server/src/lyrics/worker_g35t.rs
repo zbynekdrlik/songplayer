@@ -47,9 +47,10 @@ pub(crate) enum G35tOutcome {
     /// Transient failure (no vocals / no keys / g35t transport error) — the
     /// selector backs the row off and retries later.
     Deferred(&'static str),
-    /// No usable transcript (already written here, by
-    /// `quarantine_empty_transcript`): quarantined as `asr_gap`, or for a song
-    /// the wall serves only the attempt recorded, its lyrics kept (#144).
+    /// No usable transcript — empty, or too sparse to be lyrics (#283) —
+    /// already written here, by `quarantine_no_lyrics`: quarantined as
+    /// `asr_gap`, or for a song the wall serves only the attempt recorded,
+    /// its lyrics kept (#144) unless they are themselves too sparse.
     Quarantined,
 }
 
@@ -58,7 +59,8 @@ impl LyricsWorker {
     /// did not ship. `clean_vocal` is the already-isolated vocal stem from
     /// `process_song`; `transcript` is its one g35t transcript when it was
     /// taken (#144 — then nothing is transcribed again); `gemini_keys` is the
-    /// parsed `gemini_api_key` CSV.
+    /// parsed `gemini_api_key` CSV; `song_ms` is the row's length, which a
+    /// track must fill with at least `MIN_WORDS_PER_MINUTE` words (#283).
     ///
     /// Does NOT translate/persist or call `clear_processing` — the caller does
     /// that (Track → shared tail; Deferred/Quarantined → early return).
@@ -77,7 +79,9 @@ impl LyricsWorker {
         song: &str,
         artist: &str,
         started_at_unix_ms: i64,
+        song_ms: Option<i64>,
     ) -> Result<G35tOutcome> {
+        use crate::lyrics::g35t_transcript::{build_track, is_sparse, track_words};
         let (words, is_fullmix) = match transcript {
             Some(words) => (words, false),
             None => match self
@@ -98,18 +102,40 @@ impl LyricsWorker {
             },
         };
 
+        // #283: a transcript too sparse to be lyrics (242's eight shouts over
+        // 4¼ minutes) is a failed transcription, never a track.
+        let track = build_track(&words, LYRICS_PIPELINE_VERSION);
+        let track_n = track.as_ref().map_or(0, track_words);
+        let sparse = track.is_some() && is_sparse(track_n, song_ms);
+
         // Audit sidecar: dump the word count so operators can inspect coverage
         // without parsing tracing logs (mirrors the old asr_path audit).
         let audit_path = self.cache_dir.join(format!("{youtube_id}_g35t_audit.json"));
         let audit = serde_json::json!({
-            "outcome": if words.is_empty() { "quarantine" } else { "lines" },
+            "outcome": match (&track, sparse) {
+                (None, _) => "quarantine",
+                (Some(_), true) => "sparse",
+                (Some(_), false) => "lines",
+            },
             "g35t_word_count": words.len(),
+            "track_words": track_n,
+            "song_ms": song_ms,
         });
         if let Ok(bytes) = serde_json::to_vec_pretty(&audit) {
             let _ = tokio::fs::write(&audit_path, &bytes).await;
         }
 
-        match crate::lyrics::g35t_transcript::build_track(&words, LYRICS_PIPELINE_VERSION) {
+        match track {
+            Some(_) if sparse => {
+                let reason = format!(
+                    "sparse_transcript: {} words in {} s",
+                    track_n,
+                    song_ms.unwrap_or(0) / 1000
+                );
+                self.quarantine_no_lyrics(video_id, youtube_id, &reason, song_ms)
+                    .await;
+                Ok(G35tOutcome::Quarantined)
+            }
             Some(mut track) => {
                 // #171: mark a full-mix transcript with its own source so the
                 // dashboard shows the lower-quality base variant and a later run
@@ -126,7 +152,8 @@ impl LyricsWorker {
                 Ok(G35tOutcome::Track(track))
             }
             None => {
-                self.quarantine_empty_transcript(video_id, youtube_id).await;
+                self.quarantine_no_lyrics(video_id, youtube_id, "empty_transcript", song_ms)
+                    .await;
                 Ok(G35tOutcome::Quarantined)
             }
         }

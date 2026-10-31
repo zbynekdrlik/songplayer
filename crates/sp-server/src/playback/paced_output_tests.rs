@@ -18,9 +18,11 @@ use crate::playback::frame_buf::SharedFrame;
 use crate::playback::pacer::{
     FrameBlend, PacedFrame, PacedSink, Pacer, ServiceOutcome, Standby, StandbyBlack,
 };
+use crate::playback::picture::Picture;
 use crate::playback::submit_handoff::{SUBMIT_HANDOFF_BOUND, SubmitCounters, SubmitJob};
 use crate::playback::wallclock::{SettableClock, WallClock};
 use sp_core::genlock::floor_boundary_100ns;
+use sp_gpu::FakeRing;
 use sp_ndi::AudioFrame;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -46,7 +48,7 @@ fn frame(w: u32, pts_ns: i64) -> PacedFrame {
         width: w,
         height: 2,
         stride: w,
-        video: SharedFrame::new(vec![0u8; (w * 2 * 3 / 2) as usize]),
+        video: SharedFrame::new(vec![0u8; (w * 2 * 3 / 2) as usize]).into(),
         audio: vec![AudioFrame {
             data: vec![0.25; 1600 * 2],
             channels: 2,
@@ -70,7 +72,7 @@ fn job(stamp: i64, w: u32, channels: Option<u32>) -> SubmitJob {
         width: w,
         height: 2,
         stride: w,
-        video: SharedFrame::new(vec![0u8; (w * 2 * 3 / 2) as usize]),
+        video: SharedFrame::new(vec![0u8; (w * 2 * 3 / 2) as usize]).into(),
         audio: channels
             .map(|ch| AudioFrame {
                 data: vec![0.5; 1600 * ch as usize],
@@ -130,7 +132,7 @@ impl Recorder {
     fn last_picture(&self) -> Option<(usize, usize)> {
         self.jobs()
             .last()
-            .map(|(_, j)| (j.video.as_ptr() as usize, j.video.len()))
+            .map(|(_, j)| (j.video.expect_cpu().as_ptr() as usize, j.video.len()))
     }
 
     /// The last delivered pair's first audio block (empty with none).
@@ -162,15 +164,15 @@ struct Rig {
     consumer: PacedConsumer<Recorder>,
     pacer: Pacer,
     clk: SettableClock,
-    black: SharedFrame,
+    black: Picture,
 }
 
 impl Rig {
     fn new() -> Self {
         let (pacer_wall, clk) = WallClock::settable(0);
         let consumer_wall = WallClock::new(Box::new(clk.clone()));
-        let black = SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]);
-        let picture = Picture {
+        let black = Picture::Cpu(SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]));
+        let picture = FillPicture {
             width: 4,
             height: 2,
             stride: 4,
@@ -409,7 +411,7 @@ fn idle_to_play_across_a_slow_open_holds_the_idle_black_and_stays_contiguous() {
     rig.between_scopes(4, 6);
     assert_eq!(
         rig.out.last_picture().map(|(ptr, _)| ptr),
-        Some(rig.black.as_ptr() as usize),
+        Some(rig.black.expect_cpu().as_ptr() as usize),
         "the fills hold the idle black itself (a refcount bump)"
     );
     rig.clk.set(b(6) + GRACE + 1_000);
@@ -606,6 +608,38 @@ fn a_fill_follows_the_last_audio_layout_and_ignores_an_empty_one() {
         rig.out.video_timecodes(),
         (1..=6).map(b).collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn a_fill_holds_the_last_ring_frame_by_arc() {
+    // #279 P2: a ring frame (P3a's hardware decode) is held by the
+    // consumer's fill like a CPU picture: the SAME frame on every filled
+    // boundary (an `Arc` bump, its slot still in use), never the standby
+    // black; the slot is free once the consumer and its output let go.
+    let ring = FakeRing::new(2);
+    let gpu = ring.frame(8, 2, Duration::ZERO).expect("a free slot");
+    let mut rig = Rig::new();
+    let h = rig.handoff.clone();
+    h.offer(SubmitJob {
+        video: gpu.clone().into(),
+        ..job(b(1), 8, Some(2))
+    });
+    rig.between_scopes(1, 3); // the job, then fills of b(2), b(3)
+    assert_eq!(
+        rig.out.video_timecodes(),
+        (1..=3).map(b).collect::<Vec<_>>()
+    );
+    assert_eq!(rig.sends(), pairs(SONG_A, 3), "never the 4x2 black");
+    assert!(
+        rig.out
+            .jobs()
+            .iter()
+            .all(|(_, j)| j.video.gpu().is_some_and(|f| f.ptr_eq(&gpu))),
+        "every boundary shows the ring frame itself"
+    );
+    assert_eq!(ring.stats().in_use, 1, "one frame, one slot");
+    drop((rig, h, gpu));
+    assert_eq!(ring.stats().in_use, 0, "the consumer let it go");
 }
 
 #[test]

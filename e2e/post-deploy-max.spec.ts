@@ -14,9 +14,13 @@
  * #223 follow-up: every boundary between the reads goes on the display
  * output's refresh grid at the phase setting, and its slot is picked anew
  * at most once (the drift between the display's clock and SongPlayer's).
+ * #251: while the grid ticks, the boundaries are also composed at the
+ * compose phase setting (median), never at the drifting offer.
  *
  * #239: the same thread sends the FHD program as the Spout sender
- * `SP-program` (1920×1080) right after each MAX boundary. The same two
+ * `SP-program` (1920×1080) right after each MAX boundary (#251 step 2: a
+ * second target of MAX's compositor, drawn by the same compose from the
+ * same upload, so `max.fhd` has no upload figure of its own). The same two
  * reads gate `max.fhd` (`fhdGateFailures`): its setting on, `running`,
  * Spout's registry listing `SP-program` at 1920×1080, at least one grid
  * second of its boundaries out, none failed and no sender refused.
@@ -107,10 +111,13 @@ test.describe("SP-program-MAX (#223 S2)", () => {
         `(${second.vblank_period_ns} ns): start after the vblank p50/p99 = ` +
         `${second.send_phase_us_p50}/${second.send_phase_us_p99} us ` +
         `(phase ${second.vblank_phase_us}), slot re-picks ` +
-        `+${second.slot_repicks - first.slot_repicks}; SP-program (1920x1080) ` +
+        `+${second.slot_repicks - first.slot_repicks}; compose start after the ` +
+        `vblank p50/p99 = ${second.compose_phase_us_p50}/${second.compose_phase_us_p99} us ` +
+        `(compose phase ${second.compose_phase_us}), composed late ` +
+        `+${second.compose_late - first.compose_late}; SP-program (1920x1080) ` +
         `listed ${second.fhd.listed_width}x${second.fhd.listed_height}, ` +
-        `p99 upload+draw+send = ` +
-        `${second.fhd.upload_us_p99 + second.fhd.draw_us_p99 + second.fhd.send_us_p99} us`,
+        `p99 own draw ${second.fhd.draw_us_p99} us + send ${second.fhd.send_us_p99} us ` +
+        `(#251 step 2: drawn from MAX's upload, in MAX's compose)`,
     );
     expect(maxGateFailures(first, second), "the SP-program-MAX gate").toEqual([]);
     expect(

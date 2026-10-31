@@ -301,7 +301,9 @@ fn run_loop_windows(
                         }
                         DecodeResult::Error(msg) => {
                             // #229: the failed open's answer to its Play (one
-                            // per Play, in order: the engine's `PlayAnswers`).
+                            // per Play, in order: the engine's `PlayAnswers`);
+                            // #277: or an early end, marked as no answer when
+                            // it came after `Started` (`early_end.rs`).
                             paused = false;
                             error!(playlist_id, %msg, "decode error");
                             let _ = event_tx.send((playlist_id, PipelineEvent::Error(msg)));

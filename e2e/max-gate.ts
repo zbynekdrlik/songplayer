@@ -6,7 +6,10 @@
  * (`fhdGateFailures`).
  */
 
-/** #239: `GET /api/v1/program` → `max.fhd` (sp-server `FhdStatus`). */
+/** #239: `GET /api/v1/program` → `max.fhd` (sp-server `FhdStatus`). #251
+ *  step 2: the FHD target is drawn by MAX's compose from MAX's upload, so it
+ *  has no `upload_us_p99` of its own; `draw_us_p99` is its own part of the
+ *  draw. */
 export interface FhdStatus {
   enabled: boolean;
   state: string;
@@ -17,7 +20,6 @@ export interface FhdStatus {
   submitted: number;
   failed: number;
   sender_backoffs: number;
-  upload_us_p99: number;
   draw_us_p99: number;
   send_us_p99: number;
 }
@@ -34,6 +36,10 @@ export interface MaxStatus {
   upload_us_p99: number;
   draw_us_p99: number;
   send_us_p99: number;
+  /** #279 P0: plane bytes uploaded, MB/s, and pictures uploaded per second
+   *  (logged, not gated). */
+  upload_mb_s?: number;
+  uploads_per_s?: number;
   send_at_us_p50: number;
   send_at_us_p99: number;
   send_at_us_max: number;
@@ -44,9 +50,16 @@ export interface MaxStatus {
   vblank_state: string | null;
   vblank_period_ns: number;
   vblank_phase_us: number;
+  /** #251: the setting `program_max_compose_phase_ms`, µs. */
+  compose_phase_us: number;
   send_off_grid: number;
   send_phase_us_p50: number;
   send_phase_us_p99: number;
+  /** #251: where after the vblank the composes started, µs. */
+  compose_phase_us_p50: number;
+  compose_phase_us_p99: number;
+  /** #251: jobs taken after their compose instant (composed at once). */
+  compose_late: number;
   slot_repicks: number;
   device_resets: number;
   sender_backoffs: number;
@@ -66,6 +79,21 @@ export const MIN_BOUNDARIES = 30;
  *  the sends are not paced on Arena's rhythm and the wall stutters. */
 export const SEND_PHASE_SLACK_US = 1_500;
 
+/** #251: each MAX compose (the 4K uploads and the blend draw) starts at its
+ *  own phase of the same grid, `compose_phase_us` after the vblank, so its
+ *  GPU work keeps clear of the instants Arena renders and reads Spout in
+ *  (SNV's wall jumped back one picture while it drifted through them). The
+ *  median start lies in [phase, phase + `COMPOSE_PHASE_SLACK_US`] while the
+ *  grid ticks. */
+export const COMPOSE_PHASE_SLACK_US = 1_500;
+
+/** A phase setting as a median start reads it: a setting of a refresh or
+ *  more lands that far into a later refresh (#243), so it is read modulo
+ *  the refresh. */
+function phaseInRefresh(settingUs: number, periodUs: number): number {
+  return periodUs > 0 ? Math.floor(settingUs % periodUs) : settingUs;
+}
+
 /** A slot is picked anew only when the drift between the display's clock and
  *  SongPlayer's carries the lead out of its window (hours apart): more than
  *  one between two reads seconds apart means the pick flaps. */
@@ -80,7 +108,8 @@ export const MAX_SLOT_REPICKS = 1;
  * boundaries a second: a 2-deep queue drops the oldest only when it falls
  * behind), none failed and no device lost; and every boundary in between
  * sent on the display's refresh grid, the median at the phase setting,
- * the slot picked anew at most `MAX_SLOT_REPICKS` times.
+ * the slot picked anew at most `MAX_SLOT_REPICKS` times; and (#251) while
+ * the grid ticks, the median compose start at the compose phase setting.
  */
 export function maxGateFailures(first: MaxStatus, second: MaxStatus): string[] {
   const failures: string[] = [];
@@ -127,12 +156,23 @@ export function maxGateFailures(first: MaxStatus, second: MaxStatus): string[] {
   // refresh (the pacer's slot is vblank + phase), so the median start is the
   // setting modulo the refresh: SNV's 19 ms = 2333 us at 16 666.7 us.
   const periodUs = second.vblank_period_ns / 1_000;
-  const want = periodUs > 0 ? Math.floor(setting % periodUs) : setting;
+  const want = phaseInRefresh(setting, periodUs);
   if (phase < want || phase > want + SEND_PHASE_SLACK_US) {
     const into = want === setting ? "" : ` (${want} us into the refresh)`;
     failures.push(
       `the Spout sends start ${phase} us after the vblank (median), not at the ${setting} us phase${into}`,
     );
+  }
+  if (second.vblank_state === "ticking") {
+    const composed = second.compose_phase_us_p50;
+    const composeSetting = second.compose_phase_us;
+    const composeWant = phaseInRefresh(composeSetting, periodUs);
+    if (composed < composeWant || composed > composeWant + COMPOSE_PHASE_SLACK_US) {
+      const into = composeWant === composeSetting ? "" : ` (${composeWant} us into the refresh)`;
+      failures.push(
+        `the MAX composes start ${composed} us after the vblank (median), not at the ${composeSetting} us compose phase${into}`,
+      );
+    }
   }
   const repicks = second.slot_repicks - first.slot_repicks;
   if (repicks > MAX_SLOT_REPICKS) {

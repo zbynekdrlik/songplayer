@@ -255,8 +255,9 @@ pub fn window_label(hours: u32) -> String {
     }
 }
 
-/// `n` with its Slovak noun: 1 `one`, 2–4 `few`, else `many`.
-fn counted(n: i64, one: &str, few: &str, many: &str) -> String {
+/// `n` with its Slovak noun: 1 `one`, 2–4 `few`, else `many` (#256's
+/// Nastavenia line uses it too).
+pub(crate) fn counted(n: i64, one: &str, few: &str, many: &str) -> String {
     let word = match n {
         1 => one,
         2..=4 => few,

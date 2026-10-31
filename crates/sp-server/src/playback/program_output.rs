@@ -80,6 +80,11 @@
 //! 911014 burn-id QR (`program_burn.rs`): painted into a copy of its canvas
 //! picture just before the NDI submit — never into the picture
 //! `SP-program-MAX` and the Spout FHD sender got.
+//!
+//! #279 P1b: while `program_ndi_source` = `gpu` and the `program-max`
+//! thread's UYVY readback is fresh, the video side sends the boundary
+//! BEFORE with its readback instead of a canvas picture: one slot late,
+//! picture and audio together (`program_output_ndi.rs`, `ndi_feed.rs`).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -90,7 +95,7 @@ use sp_core::genlock::{
     strict_next_boundary_100ns,
 };
 use sp_decoder::PeakLimiter;
-use sp_ndi::{AudioFrame, NdiBackend, NdiSender};
+use sp_ndi::{AudioFrame, NdiBackend, NdiSender, PixelFormat};
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
@@ -98,13 +103,15 @@ use crate::playback::audio_out::AudioOutputs;
 use crate::playback::audio_out_block::{ProgramBlock, is_program_block};
 use crate::playback::band_pool::BandPool;
 use crate::playback::frame_buf::SharedFrame;
+use crate::playback::picture::{CpuMisses, CpuUse};
 use crate::playback::program_bus::{
     PROGRAM_NDI_NAME, ProgramBus, ProgramJob, Take, install, restore_selected_source,
 };
 use crate::playback::program_canvas::{Canvas, FadeSide};
 use crate::playback::program_item::{ItemFrame, ItemTrack, ProgramItem};
 use crate::playback::program_max::{MaxJob, MaxOut, MaxPicture};
-use crate::playback::program_output_timing::{BoundaryMarks, LateBoundary, utc_label};
+use crate::playback::program_max_send::{NoWait, SendClock};
+use crate::playback::program_output_timing::{BoundaryMarks, warn_late_boundary};
 use crate::playback::program_trace::{JobShape, ProgramTrace, TraceWriter};
 use crate::playback::program_transition::{
     AudioFormat, Layout, MIX_THREAD_NAME, MixJob, mix_audio_block, mix_bands,
@@ -112,6 +119,8 @@ use crate::playback::program_transition::{
 use crate::playback::submit_handoff::SubmitJob;
 use crate::playback::submitter::FrameSubmitter;
 use crate::playback::wallclock::WallClock;
+#[path = "program_output_ndi.rs"]
+mod ndi;
 
 /// The program's picture size, 1080p (the paced idle size): #223, every
 /// picture `SP-program` sends is this canvas, its standby black included
@@ -167,12 +176,18 @@ pub struct ProgramOutput<B: NdiBackend> {
     /// #223 S2: the `SP-program-MAX` hand-off each boundary is offered to,
     /// after VBAN's block and before the video side.
     max: Option<Arc<MaxOut>>,
+    /// #251 step 4: the clock the video side waits out the quiet window on.
+    video_clock: Box<dyn SendClock + Send>,
     /// #147: the program trace's writer: one record per served boundary.
     trace: Option<TraceWriter>,
     /// #228: the item record (marks in, the item on air out) and the burn
     /// switch, and this sender's own view of the item on air.
     item: Option<Arc<ProgramItem>>,
     track: ItemTrack,
+    /// #279 P1b: NDI's delay line (`program_output_ndi.rs`).
+    ndi: ndi::NdiLine,
+    /// #279 P2: GPU pictures the canvas could not fit (shown black).
+    canvas_misses: CpuMisses,
 }
 
 /// #215: one run of mixed boundaries as the `SP-program` sender saw it: how
@@ -214,9 +229,12 @@ fn has_picture(mix: &MixJob) -> bool {
 }
 
 /// #223 follow-up: a window boundary's side as `Canvas::fade` reads it: its
-/// picture's layout and bytes, or `None` when the side is missing.
-fn fade_side(job: &Option<SubmitJob>) -> FadeSide<'_> {
-    job.as_ref().map(|job| (Layout::of(job), &job.video[..]))
+/// picture's layout and bytes, or `None` when the side is missing (#279 P2:
+/// or a GPU picture, counted in `misses`: the black).
+fn fade_side<'a>(job: &'a Option<SubmitJob>, misses: &mut CpuMisses) -> FadeSide<'a> {
+    let job = job.as_ref()?;
+    let video = job.video.cpu_for(CpuUse::Canvas, misses)?;
+    Some((Layout::of(job), &video[..]))
 }
 
 /// #210: one program boundary split at the VBAN hand-off
@@ -250,6 +268,7 @@ fn send<B: NdiBackend>(
         audio,
         stamp_100ns,
         audio_tc_100ns,
+        PixelFormat::Nv12,
     );
 }
 
@@ -345,9 +364,12 @@ impl<B: NdiBackend> ProgramOutput<B> {
             limiter: PeakLimiter::new(PROGRAM_AUDIO_RATE_HZ),
             limited_through: None,
             max: None,
+            video_clock: Box::new(NoWait),
             trace: None,
             item: None,
             track: ItemTrack::default(),
+            ndi: ndi::NdiLine::default(),
+            canvas_misses: CpuMisses::default(),
         }
     }
 
@@ -372,6 +394,13 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// #223 S2: also offer every boundary to `SP-program-MAX`.
     pub fn with_max(mut self, max: Arc<MaxOut>) -> Self {
         self.max = Some(max);
+        self
+    }
+
+    /// #251 step 4: wait out the video side's quiet window on `clock`
+    /// (production: `SpinClock`; the default `NoWait` never waits).
+    pub fn with_video_clock(mut self, clock: Box<dyn SendClock + Send>) -> Self {
+        self.video_clock = clock;
         self
     }
 
@@ -411,31 +440,6 @@ impl<B: NdiBackend> ProgramOutput<B> {
         shown
     }
 
-    /// #228: the canvas picture `video` with the 911014 burn of the item
-    /// frame it shows, painted into a copy, while the switch is on; else
-    /// `video` itself. Counts every boundary that went out burned.
-    fn burn(&self, video: SharedFrame, shown: Option<ItemFrame>) -> SharedFrame {
-        let Some(item) = self.item.as_ref().filter(|item| item.burn_on()) else {
-            return video;
-        };
-        let Some(shown) = shown else {
-            return video;
-        };
-        let gen_ts_ns = shown.wire_100ns * 100;
-        match crate::playback::program_burn::burned(
-            &video,
-            self.canvas.layout(),
-            shown.frame,
-            gen_ts_ns,
-        ) {
-            Some(burned) => {
-                item.count_burned();
-                burned
-            }
-            None => video,
-        }
-    }
-
     /// #223 S2: offer the boundary to `SP-program-MAX` (never waits for the
     /// `program-max` thread; nothing is built while MAX takes nothing).
     fn offer_max(&self, pair: &Pair, stamp_100ns: i64) {
@@ -456,7 +460,8 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// Serve one program boundary: its audio side ([`split`](Self::split),
     /// no video work) goes to the audio outputs (VBAN, #233) FIRST, then the
     /// boundary is offered to
-    /// `SP-program-MAX` (#223 S2, [`offer_max`](Self::offer_max)), then the
+    /// `SP-program-MAX` (#223 S2, [`offer_max`](Self::offer_max)), then (#251
+    /// step 4) it waits out the quiet window after the vblank, then the
     /// video side and the NDI pair ([`submit_video`](Self::submit_video)) —
     /// #210: FOH audio never waits for the video side of its own boundary
     /// (the NDI submit, a mixed picture). A forwarded source job keeps its
@@ -469,7 +474,8 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// served at, read off `now` (the sender's wall: the stamps' timeline),
     /// for `health.timing` (`program_output_timing.rs`). #147: once the NDI
     /// submit returned, the boundary is written into the trace with
-    /// `source`, the source the bus queued it with.
+    /// `source`, the source the bus queued it with. #279 P1b: the video side
+    /// is `submit_ndi` (from the GPU: the boundary before goes out).
     pub fn serve(
         &mut self,
         job: ProgramJob,
@@ -485,7 +491,8 @@ impl<B: NdiBackend> ProgramOutput<B> {
         self.offer_max(&pair, stamp_100ns);
         let ends_run = !matches!(pair, Pair::Mix { .. });
         let shown = self.observe_item(&pair, source, stamp_100ns); // #228
-        let submit_start_100ns = self.submit_video(pair, stamp_100ns, shown, &now);
+        self.wait_video_quiet(); // #251 step 4: never in Arena's read window
+        let (submit_start_100ns, sent_100ns) = self.submit_ndi(pair, stamp_100ns, shown, &now);
         let submitted_100ns = now();
         if ends_run {
             self.end_mix_run();
@@ -499,9 +506,20 @@ impl<B: NdiBackend> ProgramOutput<B> {
         };
         if let Some(trace) = &mut self.trace {
             let k = crate::playback::fleet_shift::global().slots();
-            trace.record(&marks, source, shape, k);
+            trace.record_sent(&marks, source, shape, k, sent_100ns);
         }
         marks
+    }
+
+    /// #251 step 4: before the video side, wait while the boundary lies in
+    /// the quiet window after the primary's vblank (`program_video_quiet.rs`).
+    fn wait_video_quiet(&mut self) {
+        // #279 P1b: with MAX off nothing goes out over Spout for Arena.
+        if let Some(max) = &self.max
+            && max.enabled()
+        {
+            super::program_video_quiet::wait_out(&max.video, &mut *self.video_clock);
+        }
     }
 
     /// The tests' shorthand: [`serve`](Self::serve) with no clock; the stamp.
@@ -594,7 +612,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
         match pair {
             Pair::Source(job) => {
                 let video = self.source_picture(&job);
-                let video = self.burn(video, shown);
+                let video = self.burn(video, shown, PixelFormat::Nv12);
                 let audio_tc = job.audio_tc_100ns;
                 send(
                     &mut self.submitter,
@@ -622,7 +640,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
                 let picture_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
                 self.mix_run.boundaries += 1;
                 self.mix_run.max_picture_us = self.mix_run.max_picture_us.max(picture_us);
-                let video = self.burn(video, shown);
+                let video = self.burn(video, shown, PixelFormat::Nv12);
                 send(
                     &mut self.submitter,
                     canvas,
@@ -639,17 +657,29 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// #223 + #251: a forwarded pair's canvas picture: fitted (or passed
     /// through), or — blended by the pacer toward the next frame — both
     /// frames in ONE pass (`Canvas::fade`, the next one at its weight).
+    /// #279 P2: a GPU picture is a counted miss: the canvas black (a GPU
+    /// blend partner: that side black).
     fn source_picture(&mut self, job: &SubmitJob) -> SharedFrame {
         let layout = Layout::of(job);
+        let Some(video) = job.video.cpu_for(CpuUse::Canvas, &mut self.canvas_misses) else {
+            return self.canvas_black();
+        };
         match &job.blend {
-            Some(blend) => self.canvas.fade(
-                Some((layout, &job.video[..])),
-                Some((layout, &blend.video[..])),
-                blend.weight_q8,
-                &self.bands,
-            ),
-            None => self.canvas.fit(layout, &job.video, &self.bands),
+            Some(blend) => {
+                let next = blend.video.cpu_for(CpuUse::Canvas, &mut self.canvas_misses);
+                let next = next.map(|next| (layout, &next[..]));
+                let shown = Some((layout, &video[..]));
+                self.canvas.fade(shown, next, blend.weight_q8, &self.bands)
+            }
+            None => self.canvas.fit(layout, video, &self.bands),
         }
+    }
+
+    /// #279 P2: how many GPU pictures the canvas could not fit (the tests'
+    /// view).
+    #[cfg(test)]
+    pub(crate) fn canvas_misses(&self) -> u64 {
+        self.canvas_misses.count()
     }
 
     /// #223: the canvas's studio black — the standby picture
@@ -686,7 +716,8 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// canvas picture (no fitted scratch, no second pass), a missing side the
     /// canvas's studio black, in the sender's row bands into a pooled buffer.
     fn paint_mix(&mut self, mix: &MixJob) -> SharedFrame {
-        let (from, to) = (fade_side(&mix.from), fade_side(&mix.to));
+        let misses = &mut self.canvas_misses;
+        let (from, to) = (fade_side(&mix.from, misses), fade_side(&mix.to, misses));
         let fitted = [from, to]
             .into_iter()
             .flatten()
@@ -710,26 +741,6 @@ impl<B: NdiBackend> ProgramOutput<B> {
     pub fn flush(&mut self) {
         self.submitter.flush();
     }
-}
-
-/// #210: the WARN of a boundary whose VBAN hand-off came after its block's
-/// first packet was due (over VBAN's send latency L, part 2): its three
-/// figures, the boundary as its wire stamp and in UTC (to line up with a
-/// dev1 capture), and how many such boundaries the rate limit skipped since
-/// the WARN before it. The decision is `BoundaryTiming::observe`'s (tested);
-/// logging only.
-#[cfg_attr(test, mutants::skip)]
-fn warn_late_boundary(late: &LateBoundary) {
-    let wire = crate::playback::fleet_shift::wire_100ns(late.stamp_100ns);
-    warn!(
-        boundary_100ns = wire,
-        boundary_utc = %utc_label(wire),
-        ready_late_us = late.sample.ready_late_us,
-        vban_feed_late_us = late.sample.vban_feed_late_us,
-        submit_us = late.sample.submit_us,
-        suppressed = late.suppressed,
-        "program output: a boundary's VBAN audio was handed over after its first packet was due (over VBAN's send latency) — its packets go out late, back to back"
-    );
 }
 
 /// Most wall ticks one wake may owe: the pacer's own catch-up bound, beyond
@@ -928,6 +939,7 @@ fn spawn_program_thread(backend: Option<super::SharedNdiBackend>, bus: Arc<Progr
             let mut out = ProgramOutput::fhd(sender)
                 .with_outputs(bus.outputs().clone())
                 .with_max(bus.max().clone())
+                .with_video_clock(Box::new(super::program_max_send::SpinClock))
                 .with_item(bus.item().clone())
                 .with_trace(bus.trace());
             // #215 addendum 3 + #223 follow-up: how many threads paint a mixed
@@ -964,6 +976,12 @@ mod tests_limit;
 #[cfg(test)]
 #[path = "program_output_tests_max.rs"]
 mod tests_max;
+#[cfg(test)]
+#[path = "program_output_tests_ndi.rs"]
+mod tests_ndi;
+#[cfg(test)]
+#[path = "program_output_tests_ndi_switch.rs"]
+mod tests_ndi_switch;
 #[cfg(test)]
 #[path = "program_output_tests_order.rs"]
 mod tests_order;

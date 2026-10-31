@@ -15,25 +15,27 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_RASTERIZER_DESC, D3D11_RENDER_TARGET_BLEND_DESC, D3D11_SAMPLER_DESC,
     D3D11_TEXTURE_ADDRESS_CLAMP, D3D11_USAGE_DEFAULT, D3D11_VIEWPORT, ID3D11BlendState,
     ID3D11Buffer, ID3D11Device, ID3D11DeviceContext, ID3D11PixelShader, ID3D11Query,
-    ID3D11RasterizerState, ID3D11SamplerState, ID3D11VertexShader,
+    ID3D11RasterizerState, ID3D11SamplerState, ID3D11ShaderResourceView, ID3D11VertexShader,
 };
 use windows::core::{PCSTR, s};
 
 use super::failed;
-use super::textures::{PlaneTextures, RenderTarget};
+use super::textures::RenderTarget;
 use crate::error::GpuError;
 use crate::quad::{QUAD_CONSTANTS_BYTES, QuadConstants};
 
 /// The compositor's HLSL: one quad per picture (`compose.hlsl`).
 const SHADER: &str = include_str!("../compose.hlsl");
 
-/// How long [`Pipeline::wait_until_done`] waits for the GPU before it reports
+/// How long [`wait_until_each_done`] waits for the GPU before it reports
 /// [`GpuError::Timeout`]. A frame takes milliseconds; a hung GPU is reset by
 /// Windows after 2 s (TDR) and then reports the device removed, so this only
 /// bounds a driver that never answers.
-const FRAME_WAIT_LIMIT: Duration = Duration::from_secs(10);
+pub(super) const FRAME_WAIT_LIMIT: Duration = Duration::from_secs(10);
 
-/// What the compositor draws with: created once per device.
+/// What the compositor draws with: created once per device, shared by
+/// every target (#251 step 2: a target only brings its render target and
+/// its event query).
 pub(super) struct Pipeline {
     vertex: ID3D11VertexShader,
     pixel: ID3D11PixelShader,
@@ -41,13 +43,14 @@ pub(super) struct Pipeline {
     blend: ID3D11BlendState,
     raster: ID3D11RasterizerState,
     constants: ID3D11Buffer,
-    done: ID3D11Query,
 }
 
-/// One quad to draw: its constants and the plane textures it samples.
+/// One quad to draw: its constants and the plane views it samples (an
+/// uploaded slot's textures, or #279 P2 an opened ring slot's NV12 planes).
 pub(super) struct Quad<'t> {
     pub constants: QuadConstants,
-    pub textures: &'t PlaneTextures,
+    pub luma: &'t ID3D11ShaderResourceView,
+    pub chroma: &'t ID3D11ShaderResourceView,
 }
 
 /// The bytes of a compiled shader.
@@ -62,17 +65,23 @@ fn blob_bytes(blob: &ID3DBlob) -> &[u8] {
     }
 }
 
-/// Compile one entry point of [`SHADER`] with `D3DCompile`
-/// (d3dcompiler_47.dll, part of Windows): at runtime, once per device, so the
-/// build needs no shader toolchain and WARP and the GPU run the same source.
-fn compile(entry: PCSTR, target: PCSTR, stage: &'static str) -> Result<Vec<u8>, GpuError> {
+/// Compile one entry point of the HLSL `source` (reported as `name`:
+/// [`SHADER`], #279 P1a `uyvy.hlsl`) with `D3DCompile` (d3dcompiler_47.dll,
+/// part of Windows): at runtime, once per device, so the build needs no
+/// shader toolchain and WARP and the GPU run the same source.
+pub(super) fn compile(
+    (source, name): (&str, PCSTR),
+    entry: PCSTR,
+    target: PCSTR,
+    stage: &'static str,
+) -> Result<Vec<u8>, GpuError> {
     let mut code: Option<ID3DBlob> = None;
     let mut errors: Option<ID3DBlob> = None;
     let result = unsafe {
         D3DCompile(
-            SHADER.as_ptr().cast::<c_void>(),
-            SHADER.len(),
-            s!("compose.hlsl"),
+            source.as_ptr().cast::<c_void>(),
+            source.len(),
+            name,
             None,
             None,
             entry,
@@ -105,14 +114,15 @@ fn compile(entry: PCSTR, target: PCSTR, stage: &'static str) -> Result<Vec<u8>, 
 }
 
 /// Unwrap an out-parameter a successful create call must have set.
-fn created<T>(value: Option<T>, call: &'static str) -> Result<T, GpuError> {
+pub(super) fn created<T>(value: Option<T>, call: &'static str) -> Result<T, GpuError> {
     value.ok_or(GpuError::NoObject { call })
 }
 
 impl Pipeline {
     pub fn new(device: &ID3D11Device) -> Result<Self, GpuError> {
-        let vertex_code = compile(s!("vs_main"), s!("vs_5_0"), "vertex")?;
-        let pixel_code = compile(s!("ps_main"), s!("ps_5_0"), "pixel")?;
+        let source = (SHADER, s!("compose.hlsl"));
+        let vertex_code = compile(source, s!("vs_main"), s!("vs_5_0"), "vertex")?;
+        let pixel_code = compile(source, s!("ps_main"), s!("ps_5_0"), "pixel")?;
         let mut vertex: Option<ID3D11VertexShader> = None;
         unsafe { device.CreateVertexShader(&vertex_code, None, Some(&mut vertex)) }
             .map_err(|e| failed("CreateVertexShader", &e))?;
@@ -126,7 +136,6 @@ impl Pipeline {
             blend: blend(device)?,
             raster: raster(device)?,
             constants: constants(device)?,
-            done: query(device)?,
         })
     }
 
@@ -169,10 +178,7 @@ impl Pipeline {
                 );
                 context.PSSetShaderResources(
                     0,
-                    Some(&[
-                        Some(quad.textures.luma_view.clone()),
-                        Some(quad.textures.chroma_view.clone()),
-                    ]),
+                    Some(&[Some(quad.luma.clone()), Some(quad.chroma.clone())]),
                 );
                 context.Draw(4, 0);
             }
@@ -181,48 +187,47 @@ impl Pipeline {
             context.PSSetShaderResources(0, Some(&[None, None]));
         }
     }
-
-    /// Flush the queued work and wait until the GPU has finished it (an
-    /// event query), yielding the thread between polls.
-    pub fn wait_until_done(&self, context: &ID3D11DeviceContext) -> Result<(), GpuError> {
-        wait_until_done_on(context, &self.done)
-    }
 }
 
-/// Flush the work queued on `context` and wait until the GPU has finished
-/// it, through the event query `done`, yielding the thread between polls:
-/// the compositor's frame wait, and the Spout sender's wait for its copy
-/// into Spout's shared texture (#223 follow-up).
-pub(super) fn wait_until_done_on(
+/// #251 step 2: flush the work queued on `context` ONCE and wait until the
+/// GPU has finished each of `done` (event queries the caller ended in draw
+/// order: the compositor's one per target), yielding the thread between
+/// polls; the instant each was seen finished. The whole wait is bounded by
+/// [`FRAME_WAIT_LIMIT`].
+pub(super) fn wait_until_each_done(
     context: &ID3D11DeviceContext,
-    done: &ID3D11Query,
-) -> Result<(), GpuError> {
+    done: &[&ID3D11Query],
+) -> Result<Vec<Instant>, GpuError> {
     let start = Instant::now();
+    unsafe { context.Flush() };
+    let mut seen = Vec::with_capacity(done.len());
+    for query in done {
+        while !finished(context, query)? {
+            if start.elapsed() > FRAME_WAIT_LIMIT {
+                return Err(GpuError::Timeout(FRAME_WAIT_LIMIT.as_millis() as u64));
+            }
+            std::thread::yield_now();
+        }
+        seen.push(Instant::now());
+    }
+    Ok(seen)
+}
+
+/// Whether the GPU has passed the event query `done`.
+fn finished(context: &ID3D11DeviceContext, done: &ID3D11Query) -> Result<bool, GpuError> {
+    let mut finished = FALSE;
+    // SAFETY: an event query's data is one BOOL, written into `finished`
+    // (S_FALSE leaves it FALSE: not done yet).
     unsafe {
-        context.End(done);
-        context.Flush();
+        context.GetData(
+            done,
+            Some((&mut finished as *mut BOOL).cast::<c_void>()),
+            std::mem::size_of::<BOOL>() as u32,
+            0,
+        )
     }
-    loop {
-        let mut finished = FALSE;
-        // SAFETY: an event query's data is one BOOL, written into
-        // `finished` (S_FALSE leaves it FALSE: not done yet).
-        unsafe {
-            context.GetData(
-                done,
-                Some((&mut finished as *mut BOOL).cast::<c_void>()),
-                std::mem::size_of::<BOOL>() as u32,
-                0,
-            )
-        }
-        .map_err(|e| failed("GetData", &e))?;
-        if finished.as_bool() {
-            return Ok(());
-        }
-        if start.elapsed() > FRAME_WAIT_LIMIT {
-            return Err(GpuError::Timeout(FRAME_WAIT_LIMIT.as_millis() as u64));
-        }
-        std::thread::yield_now();
-    }
+    .map_err(|e| failed("GetData", &e))?;
+    Ok(finished.as_bool())
 }
 
 /// Bilinear, clamped at the edges (the reference's `taps`), no mips.
@@ -271,8 +276,9 @@ fn blend(device: &ID3D11Device) -> Result<ID3D11BlendState, GpuError> {
     created(blend, "CreateBlendState")
 }
 
-/// Solid, no culling (the strip's winding does not matter), no scissor.
-fn raster(device: &ID3D11Device) -> Result<ID3D11RasterizerState, GpuError> {
+/// Solid, no culling (the strip's winding does not matter), no scissor
+/// (#279 P1a: the UYVY pass's triangle too, `uyvy.rs`).
+pub(super) fn raster(device: &ID3D11Device) -> Result<ID3D11RasterizerState, GpuError> {
     let desc = D3D11_RASTERIZER_DESC {
         FillMode: D3D11_FILL_SOLID,
         CullMode: D3D11_CULL_NONE,
@@ -307,7 +313,8 @@ fn constants(device: &ID3D11Device) -> Result<ID3D11Buffer, GpuError> {
     created(buffer, "CreateBuffer")
 }
 
-/// The event query that tells when the GPU has finished a frame.
+/// The event query that tells when the GPU has finished a target's draw,
+/// or a Spout copy.
 pub(super) fn query(device: &ID3D11Device) -> Result<ID3D11Query, GpuError> {
     let desc = D3D11_QUERY_DESC {
         Query: D3D11_QUERY_EVENT,

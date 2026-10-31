@@ -393,8 +393,9 @@ drops. The wall step runs before the pause/hold:
 - The stage display (#221 review round 3): with another playlist on
   program, the OFF ends with `resync_presenter(owner)` — the wall owner's
   line at its last position, or a cleared display. It repeats the owner's
-  line, or clears the display while the owner is in a blank stretch
-  (review round 4: blank like the wall until the owner's next line). (The
+  line, or clears the display's lines while the owner is in a blank stretch
+  (review round 4: blank like the wall until the owner's next line; #281:
+  the owner's song title stays there, `lyrics-display.md`). (The
   round-3 case, an owner change by an OFF alone — a cut to "OBS manuál"
   while cg OBS still showed another playlist — needed the deleted union of
   `legacy_cg.shown`.)
@@ -617,8 +618,12 @@ stale `program_follow_obs` row in a box's settings table is never read.
   `api/program_tests.rs`, and the mock E2Es `program-control.spec.ts` +
   `settings-program-transition.spec.ts`.
 - Pins were derived with scratch Python models of `ProgramCore` and the
-  weight / blend math (rust-workspace.md, no-compile box). Re-derive them with
+  weight / blend math (rust-workspace.md). Re-derive them with
   your own model when the Rust changes.
+- A blend pin at weight 128 cannot tell the sides apart (`f·128 + t·128` is
+  symmetric): a call site that swapped `from` / `to` passes it. Pin at an
+  uneven weight and note the swapped value (#279 P2:
+  `program_output_tests_max.rs`, weight 64 → 72 / 100, swapped 35 / 119).
 - The settings task's effect is proven by the spec it puts on the bus
   (`spec_becomes`, bounded at 20 s), never by a sleep; its start is proven
   with a poll that never comes round again (`NO_POLL`), so only the

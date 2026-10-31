@@ -6,6 +6,7 @@ paths:
   - "crates/sp-server/src/lyrics/worker_translation.rs"
   - "crates/sp-server/src/db/models_register*.rs"
   - "crates/sp-core/src/lyrics.rs"
+  - "crates/sp-server/src/lyrics/haleluja*.rs"
 ---
 
 # The register check: worship songs, checked once per track (#250)
@@ -100,3 +101,22 @@ on 11 tracks there were no refusals, at 3–10 s per track.
   reading; a ★ line is only flagged.
 - The details are on #250.
 
+## Every Slovak line says "haleluja" (#284)
+
+The owner, 18.10.2026: "namiesto aleluja pouzivat haleluja v prekladoch".
+`lyrics::haleluja::haleluja` is the one rule (a word starting `aleluj` /
+`alleluj` at a word boundary, any case, becomes `haleluj…` in its case;
+`haleluja` and a word that only contains the letters stay). Both writers of
+an SK line call it: `apply_translations` (every translation pass) and the
+register check's fix. A NEW writer of `LyricsLine::sk` calls it too. The
+translator's prompt does NOT name the word: it stays the bare neutral task
+(#145 refusals), the post-pass guarantees the form.
+
+`haleluja::rewrite_stored` runs once per start in the lyrics worker's
+`run`, before its loop (every lyrics writer runs in that worker's tick, so
+it never races one): every video with `has_lyrics = 1` and no dub row
+(`dub_requested`, or a `gemini-live-translate` track on any row) has its
+`{yt}_lyrics.json` parsed as a `LyricsTrack` (a lossless round trip) and
+written back only when a line's `sk` changed; one INFO per pass with the
+counts. The rewritten files are hashed again, so PP's lyrics follow (#264,
+`changed`) takes them. No `LYRICS_PIPELINE_VERSION` bump, no paid call.

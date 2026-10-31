@@ -176,32 +176,58 @@ impl LyricsWorker {
         }
     }
 
-    /// The g35t base tier's empty-transcript exit. A row the wall serves keeps
-    /// its lyrics and records the attempt ([`Self::keep_served_lyrics`]); any
-    /// other row is quarantined as `asr_gap` (`quarantine_video_lyrics`, which
-    /// also removes its `<yt>_lyrics.json`).
-    pub(crate) async fn quarantine_empty_transcript(&self, video_id: i64, youtube_id: &str) {
-        if self
-            .keep_served_lyrics(video_id, youtube_id, "empty_transcript")
-            .await
+    /// The g35t base tier's no-lyrics exit: an empty transcript, or one too
+    /// sparse to be lyrics (#283, `g35t_transcript::is_sparse`); `reason`
+    /// names which. A row the wall serves keeps its lyrics and records the
+    /// attempt ([`Self::keep_served_lyrics`]), unless what it serves is
+    /// itself too sparse to be lyrics ([`Self::serves_only_shouts`]); that
+    /// row, like any other, is quarantined as `asr_gap`
+    /// (`quarantine_video_lyrics`, which also removes its `<yt>_lyrics.json`).
+    pub(crate) async fn quarantine_no_lyrics(
+        &self,
+        video_id: i64,
+        youtube_id: &str,
+        reason: &str,
+        song_ms: Option<i64>,
+    ) {
+        if !self.serves_only_shouts(youtube_id, song_ms).await
+            && self.keep_served_lyrics(video_id, youtube_id, reason).await
         {
             return;
         }
         warn!(
             youtube_id = %youtube_id,
-            "g35t base tier: empty transcript — quarantining as asr_gap"
+            reason,
+            "g35t base tier: no lyrics in the transcript — quarantining as asr_gap"
         );
         if let Err(e) = crate::db::models::quarantine_video_lyrics(
             &self.pool,
             video_id,
             &self.cache_dir,
-            "empty_transcript",
+            reason,
             crate::lyrics::LYRICS_PIPELINE_VERSION,
         )
         .await
         {
             warn!(youtube_id = %youtube_id, %e, "g35t base tier: quarantine failed");
         }
+    }
+
+    /// #283: whether the `<yt>_lyrics.json` the video has is a transcript's
+    /// own track (the g35t base tier's sources) that is itself too sparse to
+    /// be lyrics (242 served five shouts, `Yeah. / Come on.`, for a sung
+    /// song). Such a track is never kept over a failed transcript. A track of
+    /// a text (★, the operator's override) is lyrics however short; a missing
+    /// or unreadable file, or a song of unknown length, is not judged.
+    async fn serves_only_shouts(&self, youtube_id: &str, song_ms: Option<i64>) -> bool {
+        use crate::lyrics::g35t_transcript::{SOURCE_G35T, is_sparse, track_words};
+        let file = self.cache_dir.join(format!("{youtube_id}_lyrics.json"));
+        let Ok(text) = tokio::fs::read_to_string(&file).await else {
+            return false;
+        };
+        serde_json::from_str::<sp_core::lyrics::LyricsTrack>(&text).is_ok_and(|track| {
+            track.source.starts_with(SOURCE_G35T) && is_sparse(track_words(&track), song_ms)
+        })
     }
 
     /// Stamp an over-cap row (#144) `unsupported_source`, log it, clear the

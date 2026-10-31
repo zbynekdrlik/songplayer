@@ -1,7 +1,12 @@
 import { test, expect } from "@playwright/test";
 import {
+  CLIP_WAIT_MS,
   FIRST_CHECK_WAIT_MS,
   NO_SEGMENT_STATES,
+  clipFailures,
+  clipSettled,
+  clipSummary,
+  pollClip,
   POLL_INTERVAL_MS,
   pollWall,
   wallChecked,
@@ -252,6 +257,85 @@ test("the summary line tells what Resolume wants and what the box shows", () => 
   );
 });
 
+// #275: SongPlayer's clip in Resolume is logged, never a failure; only a
+// server that does not carry the fact fails.
+test("the clip's state never fails the gate: only its absence or a reader fault does", () => {
+  for (const state of ["running", "none", "unknown"]) {
+    expect(clipFailures(snv({ songplayer_clip: { state } })), state).toEqual([]);
+  }
+  expect(clipFailures(snv())).toEqual([
+    "the wall report carries no songplayer_clip (a server without #275?)",
+  ]);
+  // Nothing to judge before a check ran (wallFailures says why).
+  expect(clipFailures(snv({ checked: false }))).toEqual([]);
+  expect(clipFailures(null)).toEqual([]);
+  // SongPlayer's own reader cannot read Arena's answer: that fails, with why.
+  const fault = {
+    state: "unknown",
+    reader_fault: true,
+    read_error: "param 1681395963139: error decoding response body",
+  };
+  expect(clipFailures(snv({ songplayer_clip: fault }))).toEqual([
+    "SongPlayer cannot read Resolume's clip params: param 1681395963139: error decoding response body",
+  ]);
+  // Arena not answering is no reader fault.
+  const noAnswer = {
+    state: "unknown",
+    reader_fault: false,
+    read_error: "Arena does not answer (the circuit breaker is open)",
+  };
+  expect(clipFailures(snv({ songplayer_clip: noAnswer }))).toEqual([]);
+});
+
+test("the clip is polled until it reads or its reader fails", async () => {
+  expect(CLIP_WAIT_MS).toBeGreaterThanOrEqual(60_000);
+  expect(clipSettled(null)).toBe(false);
+  expect(clipSettled(snv())).toBe(false);
+  expect(clipSettled(snv({ songplayer_clip: { state: "unknown" } }))).toBe(false);
+  expect(clipSettled(snv({ songplayer_clip: { state: "none" } }))).toBe(true);
+  expect(clipSettled(snv({ songplayer_clip: { state: "running" } }))).toBe(true);
+  expect(clipSettled(snv({ songplayer_clip: { state: "unknown", reader_fault: true } }))).toBe(
+    true,
+  );
+  // Unknown (the composition loading), then it reads: the read is judged.
+  const loading = snv({ songplayer_clip: { state: "unknown" } });
+  const reads = scripted([loading, loading, snv({ songplayer_clip: { state: "none" } })]);
+  const read = await pollClip(reads.read, 90_000, reads.wait, reads.now);
+  expect(read?.songplayer_clip?.state).toBe("none");
+  expect(reads.asked()).toBe(3);
+  // Unknown for the whole window: the last read is judged (and passes).
+  const always = scripted([loading]);
+  const last = await pollClip(always.read, 10_000, always.wait, always.now, 2_000);
+  expect(always.asked()).toBe(6);
+  expect(clipFailures(last)).toEqual([]);
+});
+
+test("the summary line logs SongPlayer's clip: its state, how long, the clips", () => {
+  const yt = { layer: "L# Fill", clip: "Yt music", source: "SP-program-MAX" };
+  const bg = { layer: "L # BG", clip: "SNV BG", source: "NDI Source" };
+  const running = {
+    state: "running",
+    clips: [yt],
+    ndi_clips: [bg],
+    since_ms: 1_000_000,
+    now_ms: 1_754_400,
+  };
+  expect(clipSummary(running)).toBe(
+    "clip=running for 754 s [L# Fill / Yt music] ndi=[L # BG / SNV BG]",
+  );
+  expect(clipSummary({ state: "none", clips: [], ndi_clips: [], since_ms: null, now_ms: 5 })).toBe(
+    "clip=none",
+  );
+  expect(clipSummary({ state: "unknown" })).toBe("clip=unknown");
+  expect(
+    clipSummary({ state: "unknown", reader_fault: true, read_error: "param 7: no value" }),
+  ).toBe('clip=unknown reader_fault error="param 7: no value"');
+  expect(clipSummary(undefined)).toBe("");
+  expect(wallSummary(snv({ songplayer_clip: running }))).toBe(
+    `${wallSummary(snv())} clip=running for 754 s [L# Fill / Yt music] ndi=[L # BG / SNV BG]`,
+  );
+});
+
 test("the mock serves a report the gate passes", async ({ request }) => {
   await request.post("/__mock/wall-reset");
   const resp = await request.get("/api/v1/wall");
@@ -261,6 +345,10 @@ test("the mock serves a report the gate passes", async ({ request }) => {
   expect(status.state).toBe("simple_output");
   expect(status.guard).toEqual({ ends: 0, last: null, phase: "idle" });
   expect(wallFailures(status)).toEqual([]);
+  // #275: the mock's clip is not read, stamped with the mock's clock.
+  expect(status.songplayer_clip?.state).toBe("unknown");
+  expect(typeof status.songplayer_clip?.now_ms).toBe("number");
+  expect(clipFailures(status)).toEqual([]);
   await request.post("/__mock/wall", { data: { state: "unknown" } });
   const unknown = (await (await request.get("/api/v1/wall")).json()) as WallStatus;
   expect(wallFailures(unknown)).toEqual(["the wall report could not read the box (state unknown)"]);

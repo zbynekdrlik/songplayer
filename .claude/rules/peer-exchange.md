@@ -104,7 +104,8 @@ wait for a peer that has the song", below).
   listed, the queued job entries listed), `null` when the rows cannot be
   read (WARNed); `jobs` = the board's running jobs; `follow` = the
   lyrics this node followed from its peers (#264, "The lyrics follow
-  the peer's copy" below).
+  the peer's copy" below); `title_follow` = the titles, the same shape
+  (#269, "The titles follow the peer's" below).
 - A config that does not hold reads as the exchange OFF (no node, not
   serving, no peer) plus `config_error` = the reason.
 - `POST /api/v1/exchange/probe` (LAN, no key) reads every peer's catalog
@@ -148,8 +149,9 @@ wait for a peer that has the song", below).
 ## Wiring
 
 - `peer::Exchange { pool, cache_dir, board, client, transfer_probe,
-  follow }` (`client`, `transfer_probe` and `follow`, the lyrics
-  follow's memory, are `pub(crate)`; `cache_dir` holds the `{yt}_lyrics.json` the catalog names
+  follow, title_follow }` (`client`, `transfer_probe`, `follow` and
+  `title_follow`, the lyrics' and the titles' follow memory, are
+  `pub(crate)`; `cache_dir` holds the `{yt}_lyrics.json` the catalog names
   and the fetch parts dir `<cache>/peer/`; `board` = the jobs announced as
   running, below), built once by `lib.rs` right after `AppState`:
   `Exchange::new(pool, cache_dir) -> Arc<Exchange>` (it builds the board and
@@ -663,8 +665,19 @@ wait for a peer that has the song", below).
   rare (the lyrics one owner-gated); carrying a version on `CatalogJob`
   is a follow-up candidate.
 - A wait whose row was dropped meanwhile (a song removed from a playlist)
-  stays in `peer_waits`; a much later ask of the same video inherits its
-  spent bound and runs the job here at once. Rare; nothing expires it.
+  stays in `peer_waits` until the daily `peer::leftovers` pass (#261, the
+  shared daily timer, `Job::PeerLeftovers`): it drops the `peer_waits` /
+  `peer_fetches` / `peer_standins` of a video NO row has (any playlist),
+  and every `peer_hashes` entry whose path names no row's YouTube id (a
+  coincidental match only keeps an entry; an empty id never counts). Until
+  then a later ask of the same video inherits its spent bound and runs the
+  job here at once. A record whose video still has a row is never touched.
+  No statement scans a table per row of another (review round 1 measured
+  10 s of a held write lock at 4 000 rows / 20 000 hashes, past the 5 s
+  busy timeout): the records' `NOT EXISTS` uses V43's
+  `idx_videos_youtube`; the hashes are decided in Rust
+  (`leftovers::names_a_video`, the ids and the paths read once) and each
+  orphan deleted by its own `remove_hash`.
 - `Exchange::fetched` ends the wait and records each artifact's origin in
   `peer_fetches` (node, version, sha256; `source = peer:<node>` in the INFO
   `exchange: done with a peer's copy`). The row's `metadata_source` /
@@ -716,7 +729,8 @@ wait for a peer that has the song", below).
   video that was there stays.
 - `Exchange::run_here` drops the parts of the job's needed kinds
   (`drop_job_parts`): a job that runs here (2 h bound, a fetch that kept
-  failing) leaves no orphaned part in `<cache>/peer/`.
+  failing) leaves no orphaned part in `<cache>/peer/`. #261: any part 7 days
+  unchanged goes with the daily cache sweep (`cache-sweep.md`).
 - The LOCAL download's "video rename failed" branch
   (`downloader/mod.rs::place_video`, the #229 follow-up lane) deletes the
   normalized audio only when no row records it (`cache::recorded_by_a_row`,
@@ -805,9 +819,13 @@ wait for a peer that has the song", below).
     (`Exchange::forget_origins`, `models_peer::forget_fetches`) on EVERY
     Local it answers, the no-peers and bad-settings paths included (they
     never go through `run_here`): a download here writes this node's own
-    audio under the names a fetched pair had. On SNV (no peers) that is
-    three no-op DELETEs per download (video, audio, metadata);
-  - `run_here` forgets the records of what its job makes, for any job;
+    audio under the names a fetched pair had. The title's record stays
+    while this node's title is still that copy (#269, "The titles follow
+    the peer's" below). On SNV (no peers) that is one read of the title's
+    record (none there) and three no-op DELETEs per download (video,
+    audio, metadata);
+  - `run_here` forgets the records of what its job makes, for any job (the
+    title's kept as above);
   - `peer::download::adopt` records the pair's origin BEFORE
     `record_download` makes the row playable (a stems or lyrics ask in
     between would otherwise find no record); `fetched` records the same
@@ -820,8 +838,9 @@ wait for a peer that has the song", below).
   audio as fetched from SNV (`TestNode::audio_from`), the state a real PP
   has after its download; the guard's own tests change PP's bytes so that
   one branch alone decides (the record, a stored hash, a hash taken now).
-- Lyrics: never for an operator's ask here (`lyrics_manual_priority`, a
-  non-blank `lyrics_override_text`) on ANY row of the video (its rows serve
+- Lyrics: never for an operator's ask here (`lyrics_manual_priority`,
+  only while this node's paid AI is on, #264; a non-blank
+  `lyrics_override_text`) on ANY row of the video (its rows serve
   one `{yt}_lyrics.json`; review round 5: the asked row only before), never
   for a video whose `{yt}_lyrics.json` here is a dub's subtitles (any row
   of it here dub-requested or `gemini-live-translate`), a failed read →
@@ -836,6 +855,29 @@ wait for a peer that has the song", below).
   queue never takes another, so its flag is never cleared;
   `reprocess-all-stale` / `reprocess-catalog-with-new-gate` set it with no
   playlist filter, and the Reprocess route leaves `asr_gap` in place). The
+  reprocess flag counts only while this node's paid AI is on (#264,
+  ROZHODNUTÉ 6185176417: `kept_local` reads `paid_ai::enabled` once per
+  call and binds it, 0/1, a bare `?` between the Live-Translate source and
+  the version): with paid AI off the flag asks for a run this node cannot
+  make (held every 30 min for good: PP rows 166, 225, 11 and 39 after an
+  ops Reprocess), so the hook, the follow and the stand-in's look take the
+  listed peer's copy under the same audio rule, and the take
+  (`adopt_lyrics` → `mark_video_lyrics_complete`) clears the flag on every
+  row. An operator's text, a dub and Live-Translate keep the lyrics local
+  either way; SNV (paid AI on, no peer) is unchanged. A flagged row whose
+  track here already carries the peer's source at its version
+  (`NothingNewer`: source and version only, never the bytes) has nothing
+  newer to fetch (#264 ROZHODNUTÉ, option a, finding 6188753933): with
+  paid AI off `lyrics::nothing_newer` clears the flag on every row of the
+  video (`answer_reprocess`, one UPDATE; a row affected = a flag was set),
+  ends the wait and answers Done (INFO `exchange: an operator's reprocess
+  is answered by the peer's copy served here`), recording no origin: the
+  row leaves bucket 1, and another copy of the same source at the peer is
+  the follow's (`changed` / `untracked`, which a recorded sha would hide).
+  Without a flag, or with paid AI on, it runs
+  here as before (`Exchange::local`: held while off). Re-fetching the same
+  copy (option b) was rejected: it moves the same bytes and changes
+  nothing. The
   peer's `/videos` row must match its catalog (pipeline version) and must
   not be `gemini-live-translate`; the same source at the same version as
   the row already serves = nothing newer → runs here (the daily full-mix
@@ -966,9 +1008,10 @@ Three rules:
       reads a row that records an audio (rows share it), else the lowest
       (review round 1: a lowest row with none kept the stand-in waiting
       forever);
-    - an operator's text or ask, a dub or a Live-Translate row on the video
-      (`lyrics::kept_local`, the hook's own query) → dropped, no peer asked
-      (a dropped stand-in also ends a spent wait its hand-off kept);
+    - an operator's text or ask (an ask only while paid AI is on, #264),
+      a dub or a Live-Translate row on the video (`lyrics::kept_local`, the
+      hook's own query) → dropped, no peer asked (a dropped stand-in also
+      ends a spent wait its hand-off kept);
     - the listed peers' catalogs (cached 60 s): the first holding the
       lyrics at this node's version (`holds`) → the audio guard's verdict
       (`Exchange::audio_verdict`, the half of `unless_peers_audio` that
@@ -1032,11 +1075,20 @@ Three rules:
   a_stand_ins_spent_bound_survives_a_pick_with_the_peer_unreachable,
   a_reprocess_left_on_an_inactive_playlists_row_does_not_keep_the_lyrics_here,
   an_operators_ask_on_another_row_of_the_video_keeps_the_lyrics_here,
-  an_operators_mark_the_queue_never_acts_on_does_not_keep_the_lyrics_here}`,
+  an_operators_mark_the_queue_never_acts_on_does_not_keep_the_lyrics_here,
+  the_kept_local_sql_binds_four_bare_parameters_in_text_order}`,
+  `held_tests.rs::{a_reprocess_flag_keeps_the_lyrics_here_only_while_paid_ai_is_on,
+  an_operators_text_or_a_dub_keeps_the_lyrics_here_while_paid_ai_is_off,
+  an_operators_reprocess_takes_the_peers_copy_while_paid_ai_is_off,
+  a_reprocess_of_the_peers_copy_served_here_is_answered_while_paid_ai_is_off,
+  with_paid_ai_on_the_peers_copy_served_here_runs_here_and_keeps_a_flag,
+  a_reprocess_flag_with_an_operators_text_or_a_dub_is_left_alone_while_paid_ai_is_off}`
+  (#264),
   `standin_tests.rs` (the supersede over two real nodes: every row, a
   parked track, the check row with an audio, the recheck, another audio,
   an operator or a dub, no row, the order, the recheck curve, every row or
-  none over, an inactive playlist's reprocess flag no owner; the stand-in
+  none over, an inactive playlist's reprocess flag no owner, nor a
+  reprocess flag while paid AI is off (#264); the stand-in
   recorded after the bound — its source read or
   unreachable — and after a failing fetch from that source only, kept as
   it was when the run is put back (no new wait on the song or on an
@@ -1089,7 +1141,8 @@ record: #264 comment 6146849106.
     node's own (an operator's reprocess result, bucket 4's ★ retry) and is
     never undone by a peer's copy.
 - **The take** (`follow::follow`): `lyrics::kept_local` (an operator's text
-  or ask the queue acts on, a dub, Live-Translate) → passed over
+  or ask the queue acts on — an ask only while paid AI is on, #264 —, a
+  dub, Live-Translate) → passed over
   `FOLLOW_KEPT` (6 h); the audio guard (`Exchange::audio_verdict`, the row
   `lyrics::audio_row` picks) → another audio passed over `FOLLOW_KEPT`, "not
   now" `FOLLOW_RETRY` (30 min); then `lyrics::take_into_rows` (shared with
@@ -1118,11 +1171,10 @@ record: #264 comment 6146849106.
   {youtube_id, peer, why, at}, last_look, wanted, passed_over, last_error:
   {youtube_id, peer, error, at}}` since this process started.
 - **Not followed:** the stems (they change only with `STEMS_VERSION`,
-  which re-queues them here and the hook takes the peer's); the metadata
-  (an operator's title at SNV would rename PP's file set, `apply_title`
-  outside the repair queue: a follow-up candidate); a ★ toggled at SNV
-  without a new track (the admin toggle; „Nesedí" queues a reprocess, whose
-  new track is followed): it reaches PP with the next track.
+  which re-queues them here and the hook takes the peer's); a ★ toggled at
+  SNV without a new track (the admin toggle; „Nesedí" queues a reprocess,
+  whose new track is followed): it reaches PP with the next track. The
+  titles follow in their own step (#269, next section).
 - Known limit (the hooks' and the stand-in's too): an operator's Reprocess
   clicked at this node during a take is cleared by the adoption
   (`mark_video_lyrics_complete` sets the manual flag to 0); the window is
@@ -1139,10 +1191,130 @@ record: #264 comment 6146849106.
   refused leaves no record, a record that failed is not fetched every
   tick, one song per look and the idle wait, untracked
   only with paid AI off, a node with no peer, the queue and a stand-in left
-  alone, an operator's lyrics or a dub kept; the pure `wants`,
+  alone, an operator's lyrics or a dub kept, a reprocess flag kept only
+  while paid AI is on (#264); the pure `wants`,
   `candidates`, `FollowState`), `lyrics/worker_tests_peer.rs::
   {the_worker_follows_the_peers_newer_lyrics,
   the_worker_fills_a_parked_row_from_the_peer}`.
+
+## The titles follow the peer's (`peer::follow_title`, #269)
+
+The same owner's rule, for titles: an operator's correction at SNV
+(`PATCH /api/v1/videos/{id}`, `'manual'`, every row, files renamed) never
+reached a song PP already held, because PP asks a peer for a title only at
+its download and in its metadata repair (rows of `REPAIR_QUEUE_WHERE`).
+Design record: #269 comment 6190388058.
+
+- **Where and how often:** `follow_title::follow_next`, in the lyrics
+  worker's tick right after the lyrics follow, so it inherits
+  `lyrics_worker_enabled` and the #230 hold (checked before it): switching
+  the lyrics worker off at PP stops the title follow too. The lyrics
+  follow's own machinery (`follow::FollowState<TitleWhy>`, its own copy
+  `Exchange::title_follow`, generic over the "why"; the shared first step
+  `follow::look_config` and `follow::peer_reads`): ONE video per look, the
+  next tick while a look finds one, else `FOLLOW_IDLE` (15 min);
+  `transfers_paused` (the operator's pause, #230's hold) reads nothing; a
+  node that asks no peer (SNV) reads nothing. No paid AI: it only reads the
+  peer's catalog and its `/videos` row.
+- **Candidates** (`follow_title::held_titles` + the pure `candidates` /
+  `wants`): every video this node holds downloaded (a row with
+  `normalized = 1` that `queue_row!()` takes) with NO row in the metadata
+  repair queue (those are the repair's, which takes a peer's title first),
+  its title as this node's own catalog lists it (`catalog::metadata_for`:
+  the version and the sha256 of `PeerMetadata::to_bytes`) and its
+  `peer_fetches` metadata record; per video the first listed peer whose
+  catalog lists its title at a version this node takes (≥ 1, a parser's
+  never). `wants`, in order:
+  - `same` (ROZHODNUTÉ on #269, the last comment there): this node's title
+    is byte for byte the one the peer lists (the same sha256, so the same
+    rank) and is not yet recorded as that peer's copy (no record, another
+    peer's, a record of an older title): the look records the origin
+    (`peer_fetches` kind `metadata`, that peer, that sha) and takes nothing
+    — no `/videos` read, no rename, no row written. A phase-0 copy of
+    SNV's operator title then follows SNV's later corrections. Trade-off,
+    accepted: an identical correction made independently here follows SNV
+    from then on (PP takes its titles and lyrics from SNV only, and an
+    identical title is no loss);
+  - never over a correction made here: a `'manual'` title that is not the
+    copy recorded from that peer (no record, another peer's, or a record
+    whose sha256 is not this node's title's own: an operator here corrected
+    it after a take) stays;
+  - `higher`: the peer's rank is above this node's (`metadata_version`:
+    operator 2, provider 1, parser 0);
+  - `changed`: this node's title IS the copy recorded from that peer (the
+    record names it and its sha256 is this node's own title's) and the peer
+    lists another sha256 (corrected or improved there, a revert included).
+
+  An equal rank that is not the peer's recorded copy stays (a provider
+  title made here).
+- **The take:** the peer's `/videos` row (`PeerTitle::of`, its sha256
+  against the catalog entry; a mismatch is a failed take, asked again
+  `FOLLOW_RETRY` later or at once when a fresh catalog lists another
+  title); then under `cache::SONG_FILES` the look's answer is checked
+  again (`held_titles` of the one video + `wants`: a correction made here
+  meanwhile, or a row now in the repair queue → nothing touched, passed
+  over `FOLLOW_RETRY`); every row's files are renamed FIRST
+  (`metadata::manual::rename_rows`, named after the peer's title), and
+  only when every set moved is the title written on every row
+  (`metadata::manual::spread_title` with the peer's label: a peer's
+  operator title stays `'manual'` here and keeps its rank; `gemini_failed
+  = 0`) and the origin recorded (`download::record_title`, its one INFO
+  `exchange: a peer's title was taken`). A file that cannot move (the
+  player holds it on Windows) leaves every title as it was, the files
+  recorded where they are: the next look after `FOLLOW_RETRY` tries again.
+  Written the other way round, the next look would read the title as the
+  copy already taken (or, for a `'manual'` title with no record, as this
+  node's own correction) and never rename the files again. A `same` is
+  only recorded (`record_same`), also under the lock after the same
+  re-check (a title changed here meanwhile → nothing recorded, passed
+  over `FOLLOW_RETRY`).
+- **A download run here keeps the title's record** (ROZHODNUTÉ on #269):
+  `Exchange::forget_origins` drops the records of everything the job
+  makes (`ask::forgotten`), but the metadata one while this node's title
+  is still the recorded copy (`follow_title::title_is_recorded_copy`: the
+  record's sha256 = this node's own title's; a failed read WARNs and
+  drops it, as before). A local re-download (the 48 kHz reset, a fetch
+  given up) keeps a `'manual'` title (`download_title`), so the peer's
+  later corrections still follow; a title already changed here loses it.
+  The download then writes its own title: one that changes it leaves a
+  record whose sha256 no longer matches, which `is_copy_of` reads as no
+  copy (inert) until the title is the peer's bytes again.
+- **`apply_to_video` is the same two steps** (`spread_title` with
+  `'manual'`, then `rename_rows` after each row's own title): one rename
+  and record path for an operator's correction and a peer's title.
+- **Visible:** the DEBUG `exchange: followed the peer's title` (`why`,
+  `rows`); a `same` logs one INFO `exchange: this node's title is the
+  peer's - its origin recorded`; a failed take WARNs (`exchange: a peer's
+  newer title was not taken - asking again later`); `GET
+  /api/v1/exchange/status` → `title_follow`, the shape of `follow` with
+  `why` `higher` | `changed` | `same` (a `same` counts in `followed`). PP's
+  phase-0 titles that equal SNV's are recorded one per lyrics tick after
+  the release (`why: same`).
+- **Known limits:** a peer's `'manual'` row with `gemini_failed = 1` (none
+  is written since #136's PATCH) is taken with `gemini_failed = 0`, so this
+  node's own bytes differ from the peer's and the title then reads as a
+  correction made here: not followed again. A failed `record_title`
+  (WARNed) leaves the title with no record; the next look then finds it
+  byte for byte the peer's and records it (`same`).
+- OPEN for phase 2 (SNV listing PP): which node's titles may replace which
+  is the phase-2 tie-break ("Kinds, versions, jobs").
+- Tests: `peer/follow_title_tests.rs` (two real nodes: an operator's
+  correction at SNV into every row with the files, the record and the
+  status through the router; the next correction and a revert follow; a
+  correction made here stays, also over an older record; an equal rank
+  stays, a higher one is taken with the peer's label; a busy file retried;
+  the pause and the hold; a node with no peer; one video per look and the
+  idle wait; the repair queue left to the repair; a correction made during
+  the take; the take waiting for the song-files lock; a row that no longer
+  matches the catalog; `held_titles`' rows; a byte-identical title recorded
+  then followed, not recorded when changed meanwhile; a download run here
+  keeping the record of the title it keeps, forgetting it for a changed
+  title; the pure `wants` (an operator's title here stays even under a rank
+  above 2; `same` for every unrecorded identical title above a parser's),
+  `candidates` and `FollowState<TitleWhy>`),
+  `ask_tests.rs::a_run_here_keeps_only_the_record_of_a_title_still_the_peers`
+  (`forgotten`), `wire_tests.rs::a_titles_sha256_is_the_one_of_its_bytes`,
+  `lyrics/worker_tests_peer.rs::the_worker_follows_the_peers_corrected_title`.
 
 ## PP's workers on (MAIN SESSION OPS, after the release with lanes 7–9 reaches PP)
 
@@ -1183,6 +1355,24 @@ record: #264 comment 6146849106.
    paid AI is off), `follow.last_error` null or naming a song; PP's log
    `exchange: followed the peer's lyrics` per song. Then a song SNV
    re-runs reaches PP within ~15 min of SNV's hash pass.
+7. An operator's Reprocess at PP (#264, after the release that carries
+   the paid-AI rule of `kept_local` reaches PP): rows 166, 225, 11 and 39
+   read `has_lyrics = 1` with SNV's source at v22 and
+   `lyrics_manual_priority = 0`; PP's log shows `exchange: done with a
+   peer's copy` (`job=lyrics`) or `exchange: followed the peer's lyrics`
+   once per video, and no more `paid AI is off - still held` for them.
+   A Reprocess at PP of a song that already serves SNV's copy logs
+   `exchange: an operator's reprocess is answered by the peer's copy
+   served here` once and its rows read `lyrics_manual_priority = 0`.
+8. The title follow (#269, after the release that carries it reaches
+   PP): correct a test title at SNV (an operator PATCH of a song no event
+   uses); within one look (≤ 15 min) PP's rows read it with
+   `metadata_source = 'manual'`, PP's log shows `exchange: a peer's title
+   was taken` for it, `title_follow.last` names it (`why: higher`). Revert
+   it at SNV: PP follows back (`why: changed`). Before that, right after
+   the release, PP's titles equal to SNV's are recorded one per lyrics
+   tick (`why: same`, INFO `exchange: this node's title is the peer's - its
+   origin recorded`), `title_follow.wanted` falling to 0.
 
 ## Tests
 
@@ -1206,6 +1396,14 @@ record: #264 comment 6146849106.
   `TestNode::audio_from(yt, peer)` records
   this node's audio as fetched from `peer` at the sha every node's
   `give_song` audio has (`rig::song_audio_sha`).
+- To bring an operator's mark to the follow (`follow::follow`'s
+  `kept_local`), put it on a second row that is outside the lyrics queue
+  NOW but that the queue WILL take: one not downloaded yet
+  (`normalized = 0`). A row in the queue never reaches the follow (it is
+  the hook's), and a `removed_at` / test-item row is one the queue never
+  takes: `kept_local`'s operator clauses do not apply `queue_row!()`, so
+  such a fixture pins that gap instead of a real ask (#264 review round
+  1). `TestNode::manual_flags(yt)` reads every row's reprocess flag.
 - wiremock stands in for Cloudflare Access and a peer (`client_tests.rs`,
   `fetch_tests.rs`); the routes go through the real `peer::router`
   (`api_tests.rs`, `lan_tests.rs`). A real-time rate test asserts a LOWER

@@ -224,7 +224,7 @@ impl ToolsManager {
             let mut archive = zip::ZipArchive::new(file)?;
             for i in 0..archive.len() {
                 let mut entry = archive.by_index(i)?;
-                let name = entry.name().to_string();
+                let name = entry.name()?.to_string();
                 if name.ends_with("/deno.exe") || name == "deno.exe" {
                     let mut out = std::fs::File::create(&dest)?;
                     std::io::copy(&mut entry, &mut out)?;
@@ -333,7 +333,7 @@ impl ToolsManager {
             let mut archive = zip::ZipArchive::new(file)?;
             for i in 0..archive.len() {
                 let mut entry = archive.by_index(i)?;
-                let name = entry.name().to_string();
+                let name = entry.name()?.to_string();
                 if name.ends_with("/ffmpeg.exe") || name == "ffmpeg.exe" {
                     let mut out = std::fs::File::create(&dest)?;
                     std::io::copy(&mut entry, &mut out)?;

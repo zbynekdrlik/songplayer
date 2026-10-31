@@ -28,6 +28,9 @@ pub enum FourCCVideoType {
     BGRA = 0x4152_4742,
     /// NV12 planar luma + interleaved chroma (semi-planar). `'N','V','1','2'`.
     NV12 = 0x3231_564E,
+    /// #279 P1b: UYVY packed 4:2:2, `U Y0 V Y1` per pixel pair. `'U','Y','V','Y'`
+    /// (the receive side's `receive::FOURCC_UYVY`).
+    UYVY = 0x5956_5955,
 }
 
 /// Audio FourCC format identifiers.
@@ -54,6 +57,21 @@ pub enum PixelFormat {
     /// Data layout: Y plane of `height` rows, then UV plane of `height/2` rows.
     /// Total bytes: `width * height * 3 / 2`.
     Nv12,
+    /// #279 P1b: UYVY packed 4:2:2, `stride = width * 2`, `height` rows of
+    /// `U Y0 V Y1` per pixel pair: what `SP-program` sends from the GPU's
+    /// readback (NDI takes it with no conversion of its own).
+    Uyvy,
+}
+
+impl PixelFormat {
+    /// The FourCC NDI is told for this format.
+    pub fn four_cc(self) -> FourCCVideoType {
+        match self {
+            PixelFormat::Bgra => FourCCVideoType::BGRA,
+            PixelFormat::Nv12 => FourCCVideoType::NV12,
+            PixelFormat::Uyvy => FourCCVideoType::UYVY,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

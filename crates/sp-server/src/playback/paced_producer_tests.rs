@@ -5,12 +5,16 @@
 //! the seek's origin and epoch; the picture a seek past the last frame holds;
 //! the preview taps fed through the tail.
 
+use std::time::Duration;
+
 use sp_decoder::{
     AudioStream, DecodedAudioFrame, DecodedVideoFrame, DecoderError, MediaStream, PixelFormat,
     SplitSyncedDecoder, VideoStream,
 };
+use sp_gpu::FakeRing;
 
-use super::{DecodeProducer, QueuedFrame, to_paced_frame};
+use super::{DecodeProducer, Held, QueuedFrame, to_paced_frame};
+use crate::playback::picture::Picture;
 use crate::playback::preview::PreviewTap;
 use crate::playback::preview::preview_stream::{DecodeTaps, StreamTap, ViewerGuard};
 
@@ -68,6 +72,7 @@ impl VideoStream for Video {
             stride: 4,
             timestamp_ms: ms,
             pixel_format: PixelFormat::Nv12,
+            gpu: None,
         }))
     }
     fn width(&self) -> u32 {
@@ -189,7 +194,13 @@ fn shape(item: &QueuedFrame) -> Shape {
         .iter()
         .map(|a| a.timecode_100ns.expect("timed") / 10_000)
         .collect();
-    (frame.pts_ns / 1_000_000, *ms, audio, *ended, frame.video[0])
+    (
+        frame.pts_ns / 1_000_000,
+        *ms,
+        audio,
+        *ended,
+        frame.video.expect_cpu()[0],
+    )
 }
 
 #[test]
@@ -204,11 +215,12 @@ fn a_frame_and_its_audio_go_out_on_the_songs_origin() {
         stride: 4,
         timestamp_ms: 1_400,
         pixel_format: PixelFormat::Nv12,
+        gpu: None,
     };
     let frame = to_paced_frame(video, vec![chunk(1_350), chunk(900)], 1_000);
     assert_eq!(frame.pts_ns, 400_000_000);
     assert_eq!((frame.width, frame.height, frame.stride), (4, 2, 4));
-    assert_eq!(&frame.video[..], &picture(7)[..]);
+    assert_eq!(&frame.video.expect_cpu()[..], &picture(7)[..]);
     let audio: Vec<ChunkShape> = frame
         .audio
         .iter()
@@ -236,6 +248,7 @@ fn a_frame_and_its_audio_go_out_on_the_songs_origin() {
         stride: 4,
         timestamp_ms: 900,
         pixel_format: PixelFormat::Nv12,
+        gpu: None,
     };
     assert_eq!(to_paced_frame(early, Vec::new(), 1_000).pts_ns, 0);
 }
@@ -421,3 +434,54 @@ fn the_preview_gets_the_held_picture_and_its_audio_through_the_tail() {
     let block = audio.try_recv().expect("its chunk was offered");
     assert_eq!(block.samples, vec![200.0f32; 4]);
 }
+
+#[test]
+fn a_held_ring_frame_gives_the_preview_its_audio_only_and_is_counted() {
+    // #279 P2: past the video's end the held picture is a ring frame (P3a's
+    // hardware decode). The preview taps cannot read it yet (P3b): each
+    // held step offers its chunk alone and counts the miss, never a panic;
+    // the queue item carries the ring frame itself (an `Arc` bump).
+    let mut dec = decoder(&[0, 100], &every(0, 300, 100), false);
+    let mut p = DecodeProducer::new(0);
+    let stream = StreamTap::new("t".into(), 0);
+    let taps = DecodeTaps {
+        preview: PreviewTap::new(Default::default(), "t".into()),
+        stream: stream.clone(),
+    };
+    let (_viewer, _relay) = ViewerGuard::subscribe(&stream);
+    let video = stream.shared().video_receiver();
+    let audio = stream.shared().audio_receiver();
+    for _ in 0..2 {
+        p.next_item(&mut dec, &taps).unwrap().expect("a frame");
+    }
+    let ring = FakeRing::new(1);
+    let frame = ring.frame(4, 2, Duration::ZERO).expect("a free slot");
+    p.held = Some(Held {
+        width: 4,
+        height: 2,
+        stride: 4,
+        video: Picture::Gpu(frame.clone()),
+    });
+    while video.try_recv().is_ok() {}
+    while audio.try_recv().is_ok() {}
+    for (step, ms) in [(1, 200), (2, 300)] {
+        let (item, at, _) = p.next_item(&mut dec, &taps).unwrap().expect("a held step");
+        assert_eq!(at, ms);
+        assert!(video.try_recv().is_err(), "no picture offered at {ms}");
+        let block = audio.try_recv().expect("its chunk was offered");
+        assert_eq!(block.samples, vec![ms as f32; 4]);
+        assert_eq!(p.preview_misses(), step, "one miss per held step");
+        assert!(
+            item.video.gpu().is_some_and(|g| g.ptr_eq(&frame)),
+            "the ring frame itself"
+        );
+    }
+}
+
+/// #277: an early end of the video (a child module over these mocks).
+#[path = "paced_producer_tests_early.rs"]
+mod early;
+
+/// #279 P3a: GPU-resident frames (a child module over these mocks).
+#[path = "paced_producer_tests_gpu.rs"]
+mod gpu;

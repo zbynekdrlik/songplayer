@@ -8,12 +8,16 @@
 //! The timing half: an NDI send that advances a settable wall by a fixed
 //! cost shows as `submit_us`, never in the VBAN hand-off, on `serve`'s
 //! marks and on the bus's `health.timing` through the sender thread.
+//! #279 P1b: from the GPU readback NDI sends the boundary before, and VBAN
+//! still has every block before any NDI call. The rig's `at`, `samples`,
+//! `pair` and `interleaved` serve `program_output_tests_ndi.rs` too.
 //! Wired via `#[cfg(test)] #[path = "program_output_tests_order.rs"] mod tests_order;`.
 
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+use sp_core::config::NdiSource;
 use sp_core::genlock::{GENLOCK_GRID_FPS, floor_boundary_100ns, strict_next_boundary_100ns};
 use sp_ndi::test_util::MockNdiBackend;
 use sp_ndi::{AudioFrame, FourCCVideoType, NdiBackend, NdiError, NdiSender};
@@ -22,6 +26,7 @@ use super::{ProgramOutput, run_program_loop};
 use crate::playback::audio_out_block::ProgramBlock;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_bus::{PROGRAM_NDI_NAME, ProgramBus, ProgramJob};
+use crate::playback::program_max::MaxOut;
 use crate::playback::program_output_timing::{BoundaryMarks, BoundarySample, BoundaryTimingStatus};
 use crate::playback::program_transition::{MixJob, crossfade_gains};
 use crate::playback::submit_handoff::SubmitJob;
@@ -32,10 +37,11 @@ const T0: i64 = 17_900_000_000_000_000;
 
 /// An NDI backend that records like [`MockNdiBackend`] and runs `on_audio`
 /// inside every `send_audio` — the first call of a pair's NDI submit —
-/// before it records the send.
-struct HookedNdi {
-    inner: MockNdiBackend,
-    on_audio: Box<dyn Fn() + Send + Sync>,
+/// before it records the send. The hook sees the mock as it is then (#279
+/// P1b: the picture the pair before put on the wire).
+pub(super) struct HookedNdi {
+    pub(super) inner: MockNdiBackend,
+    pub(super) on_audio: Box<dyn Fn(&MockNdiBackend) + Send + Sync>,
 }
 
 impl NdiBackend for HookedNdi {
@@ -120,7 +126,7 @@ impl NdiBackend for HookedNdi {
         interleaved: &[f32],
         timecode_100ns: Option<i64>,
     ) {
-        (self.on_audio)();
+        (self.on_audio)(&self.inner);
         self.inner.send_audio(
             handle,
             sample_rate,
@@ -198,7 +204,7 @@ fn submit_with_ndi_held(job: ProgramJob) -> Seen {
     let held = gate.clone();
     let backend = Arc::new(HookedNdi {
         inner: MockNdiBackend::new(),
-        on_audio: Box::new(move || {
+        on_audio: Box::new(move |_: &MockNdiBackend| {
             let _ = entered_tx.send(());
             held.wait();
         }),
@@ -234,13 +240,13 @@ fn submit_with_ndi_held(job: ProgramJob) -> Seen {
 }
 
 /// NDI's planar block back in VBAN's interleaved order (L, R, L, R, …).
-fn interleaved(planar: &[f32]) -> Vec<f32> {
+pub(super) fn interleaved(planar: &[f32]) -> Vec<f32> {
     let (left, right) = planar.split_at(planar.len() / 2);
     left.iter().zip(right).flat_map(|(&l, &r)| [l, r]).collect()
 }
 
 /// The k-th grid boundary after `floor(T0)`.
-fn at(k: usize) -> i64 {
+pub(super) fn at(k: usize) -> i64 {
     let mut x = floor_boundary_100ns(T0, GENLOCK_GRID_FPS);
     for _ in 0..k {
         x = strict_next_boundary_100ns(x, GENLOCK_GRID_FPS);
@@ -250,18 +256,18 @@ fn at(k: usize) -> i64 {
 
 /// One stereo 1600-frame block: `level` + `step` per interleaved sample, so
 /// with a step the left and right samples differ.
-fn samples(level: f32, step: f32) -> Vec<f32> {
+pub(super) fn samples(level: f32, step: f32) -> Vec<f32> {
     (0..3200).map(|i| level + i as f32 * step).collect()
 }
 
 /// A source's boundary pair: a `width`×2 NV12 picture and one stereo
 /// 1600-frame block, its audio stamped `audio_tc`.
-fn pair(width: u32, stamp: i64, audio_tc: i64, data: Vec<f32>) -> SubmitJob {
+pub(super) fn pair(width: u32, stamp: i64, audio_tc: i64, data: Vec<f32>) -> SubmitJob {
     SubmitJob {
         width,
         height: 2,
         stride: width,
-        video: SharedFrame::new(vec![90u8; width as usize * 3]),
+        video: SharedFrame::new(vec![90u8; width as usize * 3]).into(),
         audio: vec![AudioFrame {
             data,
             channels: 2,
@@ -369,6 +375,68 @@ fn a_mixed_boundarys_block_reaches_vban_while_its_ndi_submit_is_held() {
     );
 }
 
+/// #279 P1b: from the GPU readback NDI sends each boundary one boundary
+/// late, and VBAN still has every block before any NDI call: b0's serve
+/// sends nothing (the switch holds it), and when b0's pair goes out, inside
+/// b1's serve, VBAN already has both blocks.
+#[test]
+fn from_the_gpu_vban_has_each_block_before_any_ndi_call() {
+    let gate = Arc::new(Gate::default());
+    let _opener = Opener(gate.clone());
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let held = gate.clone();
+    let backend = Arc::new(HookedNdi {
+        inner: MockNdiBackend::new(),
+        on_audio: Box::new(move |_: &MockNdiBackend| {
+            let _ = entered_tx.send(());
+            held.wait();
+        }),
+    });
+    let sender = NdiSender::new_with_clocking(backend.clone(), PROGRAM_NDI_NAME, false, false)
+        .expect("mock sender");
+    let vban = Arc::new(VbanOut::new());
+    let max = Arc::new(MaxOut::new());
+    max.set_ndi_source(NdiSource::Gpu);
+    max.ndi.push(at(0), SharedFrame::new(vec![7; 2 * 2 * 2]));
+    let out = ProgramOutput::new(sender, 2, 2)
+        .with_vban(vban.clone())
+        .with_max(max);
+    let (first, second) = (samples(0.25, 1e-4), samples(0.5, 1e-4));
+    let submit = std::thread::spawn(move || {
+        let mut out = out;
+        out.submit(ProgramJob::Source(pair(2, at(0), at(0), first)));
+        out.submit(ProgramJob::Source(pair(2, at(1), at(1), second)));
+        // Hand the output back so its sender outlives the reads below.
+        out
+    });
+    entered_rx
+        .recv_timeout(Duration::from_secs(20))
+        .expect("b0's NDI submit started, in b1's serve");
+    assert_eq!(
+        vban.queued(),
+        2,
+        "VBAN has b0's and b1's blocks before b0's NDI submit returns"
+    );
+    gate.open();
+    let _out = submit.join().expect("the submit thread");
+    assert_eq!(
+        (
+            backend.inner.video_timecodes(),
+            backend.inner.audio_timecodes()
+        ),
+        (vec![at(0)], vec![at(0)]),
+        "b0's pair, one boundary late"
+    );
+    assert_eq!(
+        interleaved(&backend.inner.last_audio_planar()),
+        samples(0.25, 1e-4)
+    );
+    assert_eq!(
+        backend.inner.last_async_video_fourcc(),
+        Some(FourCCVideoType::UYVY)
+    );
+}
+
 /// #233: with two outputs, BOTH hold the boundary's block before its NDI
 /// submit returns — the fan-out sits where #210's VBAN hand-off sat.
 #[test]
@@ -379,7 +447,7 @@ fn every_output_has_the_block_before_the_ndi_submit() {
     let held = gate.clone();
     let backend = Arc::new(HookedNdi {
         inner: MockNdiBackend::new(),
-        on_audio: Box::new(move || {
+        on_audio: Box::new(move |_: &MockNdiBackend| {
             let _ = entered_tx.send(());
             held.wait();
         }),
@@ -423,7 +491,7 @@ fn slow_output(clock: &SettableClock, cost_100ns: i64) -> ProgramOutput<HookedNd
     let slow = clock.clone();
     let backend = Arc::new(HookedNdi {
         inner: MockNdiBackend::new(),
-        on_audio: Box::new(move || slow.advance(cost_100ns)),
+        on_audio: Box::new(move |_: &MockNdiBackend| slow.advance(cost_100ns)),
     });
     let sender =
         NdiSender::new_with_clocking(backend, PROGRAM_NDI_NAME, false, false).expect("mock sender");

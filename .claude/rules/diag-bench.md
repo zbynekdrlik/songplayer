@@ -6,7 +6,7 @@ paths:
   - "crates/sp-decoder/src/subtype.rs"
 ---
 
-# Diagnostic benches: `/api/v1/diag/*` (#223 S0, S3b)
+# Diagnostic benches: `/api/v1/diag/*` (#223 S0, S3b; #279 P0, P3a)
 
 These are measurement routes. The main session runs them on the box to decide
 a design gate. Playback never calls them, and the dashboard has no button for
@@ -45,7 +45,9 @@ try {
 } catch { $_.ErrorDetails.Message }
 ```
 
-The body has two required fields and one optional:
+A decode run's body has two required fields and one optional (#279: the
+handler, not axum, requires `file` and `seconds` unless `"probe": true`,
+below):
 
 - `file`: a bare file name. No `/`, `\` or `:`, no `..`, no control
   characters, at most 255 bytes. No trailing `.` or space (Windows strips
@@ -61,17 +63,28 @@ The body has two required fields and one optional:
     -H 'content-type: application/json' \
     -d '{"file":"av1_2160p.mp4","seconds":15,"hw":true}'
   ```
+- `resident` (#279 P3a, optional, default `false`, never with `hw`): `true`
+  makes a producer device of the run's own on the production adapter
+  (`sp_gpu::ProducerGpu::new`, like a pipeline's) and opens the reader
+  GPU-resident on it (`video-decode.md` "GPU-resident decode"): every
+  GPU-decoded picture is copied into the producer's ring and never read
+  back, so the timings are what a GPU-resident song pays (the decode and
+  the ring copy). The box gate "decode bench gpu_resident": each 4K
+  sample (AV1, VP9) within D2.
 
 Answers:
 
 - **200:** the report.
 - **500:** the report of a run the decoder ended, at open or mid-run. It
   carries `error` and the pictures decoded so far.
-- **400:** a bad name, or `seconds` out of range.
+- **400:** a bad name, `seconds` out of range, (#279) a missing `file`
+  / `seconds`, or (#279 P3a) `hw` and `resident` both.
 - From axum, before the handler runs (NOT logged): **400** for a body that is
-  not JSON, **422** for one that is not the two fields (one missing, a
-  negative or a fractional `seconds`) or whose `hw` is not a bool, **415**
-  without `Content-Type: application/json`.
+  not JSON, **422** for a field of the wrong type (a negative or a
+  fractional `seconds`, a `hw`, `resident` or `probe` that is not a
+  bool), **415**
+  without `Content-Type: application/json`. A missing `file` or `seconds`
+  is the handler's 400 (#279).
 - **404:** no such sample. The body names the path it looked at.
 - **409:** a run is in progress. One run at a time per process. A 409 that
   never clears means the decoder hangs inside `open` or `next_frame`: the
@@ -89,6 +102,22 @@ failed`).
   open, configure and NV12 path as the paced producer, in the request's
   mode (`hw`). The paced producer's mode is the setting `video_hw_decode`,
   so a bench with `hw` set to that setting measures what playback runs.
+- #282: it opens under the decode cap in force (`max_resolution`, the
+  start line's `max_height`), as the producer does: a sample larger than
+  the cap's 16:9 box is decoded scaled, and `width` / `height` report the
+  scaled size. The cap is computed with the SETTING's `video_hw_decode`
+  (#279 P3a: or `video_decode` = gpu in effect), not the request's `hw`
+  (on a box with both off, automatic is 1440 even for a `"hw": true` or
+  `"resident": true` run). Set `max_resolution` back to
+  automatic to measure a 4K sample at 4K (`video-decode.md` "The decode
+  cap"). The report carries `max_height` (the cap the run opened under)
+  and `scaled_from` (`[w, h]`, the stream's own size, when the run decoded
+  it scaled; `null` otherwise); a scaled run's end line adds
+  ` scaled_from=WxH max_height=N`. A scaled run's `decode_path` reads
+  `"hardware"` for any DXGI surface (the video processor's texture tells
+  nothing of the decoder): judge NVDEC by the timings, and compare
+  `frames` / `source_fps` with an uncapped run of the same file (a
+  difference = the processor converted the rate).
 - It runs on its own thread, `decode-bench`. That thread is started by
   `playback::decode_thread::spawn_decode_thread`, exactly like the producer's
   `paced-decode-<playlist id>`, so both get `THREAD_PRIORITY_NORMAL` inside
@@ -144,6 +173,19 @@ failed`).
   - `adapter`: the GPU's name, only when `decode_path` is `"hardware"`
     (the box: `NVIDIA GeForce RTX 3070 Ti`).
   - `hw_fallback`: `open: <why>` / `mid-stream: <why>`, else `null`.
+- #279 P3a, a `resident` run (`hw_requested` is true for it too):
+  - `gpu_resident`: `true`; its `decode_path` `"hardware"` = the pictures
+    were copied into the ring (a `"software"` run fell back, as for `hw`);
+  - `ring` (`null` for any other run): the producer's ring after the run,
+    `{slots, in_use, waits, full, dead, copy_us_p99, vram_mb}`. Every
+    picture goes back at once, so `in_use` reads 0; `waits` > 0 = the
+    copy found every slot in use;
+  - a producer device that cannot be made (no production adapter, as on
+    `windows-latest`) is a 500 with the report, `error` `producer device:
+    <why>`, no ring;
+  - the end line adds ` gpu_resident ring_slots=… ring_waits=… ring_full=…
+    ring_dead=… copy_us_p99=… vram_mb=…` (` gpu_resident ring=-` with no
+    producer).
 
 **The gate is revision 2's D2.**
 
@@ -176,8 +218,8 @@ failed`).
 **Logs:**
 
 - one INFO `decode-bench: start` (file, bytes, `max_wall_s`, priority,
-  `hw`), logged BEFORE the open, so a run that wedges inside it still names
-  its file;
+  `mode` = `software` / `hardware` / `gpu_resident`, `max_height`), logged
+  BEFORE the open, so a run that wedges inside it still names its file;
 - at the end, one INFO `decode-bench: done: <summary>` (size, codec, fps,
   `open_ms`, the stats, the gate; a `hw` run adds `hw=requested
   decode_path=… adapter=… hw_fallback=…`, a software run's line is S0's),
@@ -186,6 +228,33 @@ failed`).
 - one INFO `decode-bench: no report` for every 400 / 404 / 409 / 501
   refusal, and one WARN `decode-bench: the run failed` for a 500 without a
   report.
+
+### `{"probe": true}`: the GPU capability probe (#279 P0)
+
+- The same route, with `{"probe": true}` and NO other field
+  (`diag/gpu_probe.rs::ask`: a probe with `file`, `seconds`, `hw` or
+  `resident` is a 400; a request that is no probe and lacks `file` or `seconds` is a 400
+  too: both are optional in the body since #279, so no longer axum's 422;
+  a `probe` that is not a bool is axum's 422).
+- It runs `sp_gpu::probe_gpu()` (`gpu-max.md` "The capability probe") on a
+  blocking thread holding the bench's slot (409 while any bench runs): two
+  devices on the compositor's adapter (A with the video API like the decode
+  device, B BGRA like the compositor), five steps, the keyed-mutex step
+  reading A's bytes back on B; read-only, nothing of the program path
+  touched.
+- 200 `{verdict {kind: gpu_resident_ok | needs_fallback, step, error},
+  probe {<step>: {ok, error?}}, adapter, adapters [{name, vendor_id,
+  device_id, vram_mb, software}], vram {budget_mb, used_mb} | null,
+  vram_error}`; an error is `{call, hresult: "0x…", detail}`. 500 when no
+  adapter or device could be had (the text names it); 501 off Windows.
+  INFO `decode-bench: GPU probe start` / `done: <verdict, adapter, steps>`,
+  INFO `decode-bench: no probe` for a 409 / 501, WARN `the GPU probe failed`.
+- Record the SNV and PP answers on #279 (P0's gate).
+
+```bash
+curl -s -X POST http://10.77.9.201:8920/api/v1/diag/decode-bench \
+  -H 'content-type: application/json' -d '{"probe":true}'
+```
 
 ## `POST /api/v1/diag/fit-bench`: what the program canvas fit costs (#223 S10a)
 
@@ -225,7 +294,12 @@ curl -s -X POST http://10.77.9.201:8920/api/v1/diag/fit-bench \
   - Linux tests drive it with a scripted stream and a scripted clock, with no
     wall-time thresholds.
 - `diag/decode_bench_mf.rs`: the `cfg(windows)` thread body (open in the
-  mode, facts, the reader's `DecodeFacts` after the run, log).
+  mode, facts, the reader's `DecodeFacts` after the run, log; #279 P3a: a
+  resident run's producer made first through `decode_bench::decode_mode`,
+  Linux-tested with `make` a parameter, and its ring read after the
+  reader is dropped). The request's mode is `decode_bench::BenchMode`
+  (`Software` / `Hardware` / `Resident`); tests of a resident run:
+  `decode_bench_tests_resident.rs`.
   - The Windows job's router test covers it on the decoder crate's
     `tests/fixtures/black_3s.mp4`. It expects `codec` H264, `ended`
     `end_of_stream` and `thread_priority` 0; a software run reads
@@ -236,6 +310,11 @@ curl -s -X POST http://10.77.9.201:8920/api/v1/diag/fit-bench \
     the adapter rule (named only on a hardware path) lives there.
 - `diag/fit_bench.rs`: the fit bench (`check`, `synthetic`, `report` tested;
   `run` the timed loops); route tests `api/diag_tests_fit.rs`.
+- `diag/gpu_probe.rs` (#279 P0): `ask` (the request's two shapes),
+  `ProbeAnswer` (+ its log `summary`) and `run` (the probe a parameter, the
+  slot dropped before the answer, a panic a 500), Linux-tested in
+  `gpu_probe_tests.rs`; route tests `api/diag_tests_probe.rs` (501 off
+  Windows; on the Windows job the real probe answers or names why not).
 - `api/diag.rs`: the handlers.
   - `AppState.decode_bench` holds the dir and the gate.
   - Every test state builds its own, so the 409 test cannot race another

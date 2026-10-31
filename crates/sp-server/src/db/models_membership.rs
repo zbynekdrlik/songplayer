@@ -7,10 +7,14 @@
 //! (`crate::db::queue_row!`); its files, stems, lyrics and dub stay, so a
 //! song put back plays again at once. A year after its mark the retention
 //! deletes it with its own data and files (`playlist::retention`).
+//!
+//! #261: a playlist's deactivation marks its rows the same way
+//! ([`deactivate`]) and its reactivation clears exactly those marks
+//! ([`reactivate`]), so an inactive playlist's songs go a year later too.
 
 use std::path::{Path, PathBuf};
 
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, SqliteConnection, SqlitePool};
 
 /// A row of a playlist as the sync compares it with the fetched list.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,6 +62,88 @@ pub async fn mark_removed(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+/// Whether `playlist_id` is active; `false` for no such playlist (#261: an
+/// inactive playlist's sync records nothing, `playlist::membership`).
+pub async fn playlist_active(pool: &SqlitePool, playlist_id: i64) -> Result<bool, sqlx::Error> {
+    let active: Option<i64> = sqlx::query_scalar("SELECT is_active FROM playlists WHERE id = ?")
+        .bind(playlist_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(active == Some(1))
+}
+
+/// #261: a playlist's deactivation starts #260's clock on its rows. The
+/// playlist keeps its FIRST `deactivated_at` (V43; `now_ms` unless it is
+/// inactive already), and every row not marked yet gets exactly that value
+/// as its `removed_at`; a row the sync marked keeps its mark. Never the
+/// test item's playlist (its pinned clips are no songs to delete). On
+/// `conn`, the caller's transaction with the `is_active` write. The rows
+/// it marked.
+pub async fn deactivate(
+    conn: &mut SqliteConnection,
+    playlist_id: i64,
+    now_ms: i64,
+) -> Result<u64, sqlx::Error> {
+    sqlx::query(
+        "UPDATE playlists SET deactivated_at = COALESCE(deactivated_at, ?) \
+         WHERE id = ? AND kind != 'test'",
+    )
+    .bind(now_ms)
+    .bind(playlist_id)
+    .execute(&mut *conn)
+    .await?;
+    let marked = sqlx::query(
+        "UPDATE videos SET removed_at = (SELECT deactivated_at FROM playlists WHERE id = ?1) \
+         WHERE playlist_id = ?1 AND removed_at IS NULL \
+           AND (SELECT deactivated_at FROM playlists WHERE id = ?1) IS NOT NULL",
+    )
+    .bind(playlist_id)
+    .execute(&mut *conn)
+    .await?
+    .rows_affected();
+    Ok(marked)
+}
+
+/// #261: a reactivation clears exactly the marks its deactivation set
+/// (`removed_at` = the playlist's `deactivated_at`: [`deactivate`] gives
+/// every mark that very value, so a sync's mark never equals it, even
+/// after a clock step), then the column: a song the sync marked before it
+/// stays marked, so it is never picked again before the next sync, and its
+/// year keeps counting. On `conn`, the caller's transaction. The rows it
+/// cleared.
+pub async fn reactivate(conn: &mut SqliteConnection, playlist_id: i64) -> Result<u64, sqlx::Error> {
+    let cleared = sqlx::query(
+        "UPDATE videos SET removed_at = NULL WHERE playlist_id = ?1 \
+         AND removed_at = (SELECT deactivated_at FROM playlists WHERE id = ?1)",
+    )
+    .bind(playlist_id)
+    .execute(&mut *conn)
+    .await?
+    .rows_affected();
+    sqlx::query("UPDATE playlists SET deactivated_at = NULL WHERE id = ?")
+        .bind(playlist_id)
+        .execute(&mut *conn)
+        .await?;
+    Ok(cleared)
+}
+
+/// #261: what an `is_active` write does to the playlist's rows, on `conn`
+/// (the PUT's transaction, `routes::update_playlist`): a deactivation marks
+/// them at `now_ms` ([`deactivate`]), a reactivation clears those marks
+/// ([`reactivate`]). The rows it marked or cleared.
+pub async fn follow_activation(
+    conn: &mut SqliteConnection,
+    playlist_id: i64,
+    active: bool,
+    now_ms: i64,
+) -> Result<u64, sqlx::Error> {
+    if active {
+        reactivate(conn, playlist_id).await
+    } else {
+        deactivate(conn, playlist_id, now_ms).await
+    }
 }
 
 /// Membership + readiness check for the `videos.playlist_id` model used by
@@ -159,8 +245,8 @@ pub async fn recorded_elsewhere(
 }
 
 /// The peer exchange's records of a video (`youtube_id` keyed) that go with
-/// its last row.
-const PEER_TABLES: [&str; 3] = ["peer_waits", "peer_fetches", "peer_standins"];
+/// its last row (and #261's daily `peer::leftovers` pass).
+pub(crate) const PEER_TABLES: [&str; 3] = ["peer_waits", "peer_fetches", "peer_standins"];
 
 /// Delete `row` while it is still due at `cutoff_ms`, in one transaction
 /// with its own data: its play history (the foreign key's

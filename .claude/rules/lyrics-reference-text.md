@@ -3,6 +3,7 @@ paths:
   - "crates/sp-server/src/lyrics/reference_gate*.rs"
   - "crates/sp-server/src/lyrics/sung_coverage*.rs"
   - "crates/sp-server/src/lyrics/title_search*.rs"
+  - "crates/sp-server/src/lyrics/full_artist*.rs"
   - "crates/sp-server/src/lyrics/lrclib_search*.rs"
   - "crates/sp-server/src/lyrics/text_candidate*.rs"
   - "crates/sp-server/src/lyrics/transcript_cache*.rs"
@@ -41,7 +42,7 @@ paths:
 - The thresholds are MEASURED (#144 comment 5899043518):
   - complete texts: 0.64–0.977 coverage (0.64–0.97 against g35t transcripts), runs ≤ 20.6 s;
   - ★ rows whose wall held one line over other singing: runs ≥ 34.9 s.
-- To re-measure, use the gate's own transcripts: `{yt}_g35t_words.json` (kept) and `{yt}_g35t_words_used.json` (retired) in the box cache. The v20 WhisperX `{yt}_whisperx_track.json` files are a fallback. `eval/lyrics/reports/2026-09-12-raw/` has real g35t transcripts plus the eval gold texts.
+- To re-measure, use the gate's own transcripts: `{yt}_g35t_words.json` (kept) and `{yt}_g35t_words_used.json` (retired) in the box cache. The v20 WhisperX `{yt}_whisperx_track.json` files are deleted by #261's cache sweep (`cache-sweep.md`, a retired output, 7 days after its last write). `eval/lyrics/reports/2026-09-12-raw/` has real g35t transcripts plus the eval gold texts.
 - On the box, run a read-only Python script: write it to `%TEMP%` with the win-resolume MCP `FileWrite`, open the DB `file:...songplayer.db?mode=ro`, print only a compact table, then delete the script and its `__pycache__`.
 
 ## One transcript per song, one pass
@@ -104,8 +105,9 @@ Before it, no post-deploy check sent a Gemini 3.5 Transcribe request: a dead or 
 
 ## Texts
 
+- **The lookups ask for the artist IN FULL (#283).** The metadata prompt shortens a person's first names to initials for the wall's title (`metadata/gemini.rs`, "P. Wickham"; the parser too), and LRCLIB / lyrics.ovh / Genius asked for that missed the song (112 SNV rows, 19.10.2026). `process_song` calls `full_artist::expand_lookup_artist` right after the duration cap: each `X. (Y. )Surname` the video's own title spells out (`\bX…\.?\s+Surname\b`, any case) replaces it on the WORKER'S row only, so the Spotify resolver, gather's three lookups, the title search and the cleanups get "Phil Wickham"; the dashboard's stage broadcasts keep the display artist (cloned before), and the database's artist is never written. A name the title does not spell (`@JohnWilds`) stays.
 - `parse_json3` gives ONE line per sung caption line. Each line keeps its event's own span, never divided by hand. No production code reads `CandidateText::line_timings`: mtl re-times the text.
-- The scraped-lyrics Claude cleanup (`CleanupMode::ScrapedLyrics`) KEEPS every repeat, because mtl times exactly the lines it is given. When its prompt semantics change, bump the cleanup cache names (`_cleaned_v3.json` today), or the reprocess reuses stale decisions.
+- The scraped-lyrics Claude cleanup (`CleanupMode::ScrapedLyrics`) KEEPS every repeat, because mtl times exactly the lines it is given. When its prompt semantics change, bump the cleanup cache names (`_cleaned_v3.json` today), or the reprocess reuses stale decisions; bump `cache_sweep_plan::CLEANED_VERSION` with them (a test reads both writers), so the daily cache sweep deletes the older caches and keeps the new ones.
 - Turn a fetched timed track or a scraped plain lyric into a candidate only through `text_candidate::{timed_candidate, cleaned_text_candidate}`. `gather.rs` and the title search share them, and `gather_uses_lyrics_ovh_primary_with_genius_fallback` reads both files. The override, description, lyrics.ovh and Spotify candidates are built directly.
 
 ## Reprocess: ONE per-song path, and no route blanks what the wall serves
@@ -133,12 +135,13 @@ Before it, no post-deploy check sent a Gemini 3.5 Transcribe request: a dead or 
 - A row **serves lyrics** when `has_lyrics = 1` AND its `<yt>_lyrics.json` exists (`worker_outcome.rs::serves_lyrics`, what `playback/lyrics_loader.rs` loads).
 - The worker's two failure exits ask it first (`keep_served_lyrics`):
   - **an error** — `fail_song`, the `Err` arm of `process_next` (e.g. a failed Claude cleanup in `gather.rs`);
-  - **an empty transcript** — `quarantine_empty_transcript`, the g35t base tier.
+  - **an empty or too sparse transcript** — `quarantine_no_lyrics`, the g35t base tier (#283, below).
 - A served row records ONLY the attempt (`db::models::record_served_lyrics_failure`):
   - `lyrics_attempts` + the `lyrics_next_attempt_at` backoff, through the existing `record_lyrics_deferral` and `downloader::retry_backoff` (shared with `defer_song` via `next_backoff`). The manual bucket honours that backoff, so a queued song does not loop;
   - **its `lyrics_manual_priority` stays** (ROZHODNUTÉ 5908227646, lane A): a transient Claude / Gemini error must not drop the song out of the manual rollout. Only the `SERVED_RERUN_MAX_ATTEMPTS`th (3rd) failed attempt since the song was queued clears it (`CASE WHEN lyrics_attempts >= 3`; queueing resets `lyrics_attempts` to 0, and a deferral counts as an attempt too).
 - It keeps `has_lyrics`, `lyrics_source` and the file until a successful run replaces them. `record_served_lyrics_failure` returns a `ServedFailure {attempts, was_manual, left_manual_queue}` and the WARN keys on it (`worker_outcome.rs::log_served_failure`, review round 1): `re-run failed on its last allowed attempt — … the song leaves the manual queue` exactly once, on the clear, with the video id, the YouTube id and the reason; `… the song stays queued for its next attempt after the backoff` before it; `… only the attempt is recorded` for a row that was not in the manual queue (the stale and full-mix buckets).
-- An unserved row: an error is a DEFERRAL since #263, never a terminal state (next section); an empty transcript is still quarantined as `asr_gap` with the file removed.
+- An unserved row: an error is a DEFERRAL since #263, never a terminal state (next section); an empty or too sparse transcript is still quarantined as `asr_gap` with the file removed.
+- **#283: a served track of only shouts is not kept.** A transcript under `g35t_transcript::MIN_WORDS_PER_MINUTE` (5) words per minute of the song (`is_sparse(track_words(..), row.duration_ms)`) is a failed transcription: the base tier never ships it, and `quarantine_no_lyrics` keeps a served `<yt>_lyrics.json` over it (or over an empty one) only when that track is not itself a base-tier (`gemini-3-5-transcribe*`) track that sparse (`serves_only_shouts`; a text's track, ★ or the operator's override, is lyrics however short, review round 1). Song 242 ("Homesick For Heaven", live) served `Yeah. / Come on. ×3 / Yeah.` (8 words, 1.9 wpm); its vocal, its stem and its full mix all transcribe to 8–10 shouts, so the model, not the separation, loses the singing (#283 comment 6279719441). The threshold sits in SNV's measured gap (four transcripts at 0–2.6 wpm, every other ≥ 7.4); a song with no `duration_ms` is not judged. The audit's `outcome` reads `sparse`. Pinned by `worker_outcome_tests.rs` (`a_sparse_*`, `an_empty_rerun_quarantines_a_served_track_of_only_shouts`) and `g35t_transcript_tests.rs`.
 - The operator's `POST /api/v1/lyrics/quarantine` is unchanged: it parks a song on purpose.
 - The failed pass of a served row ends like every other: `lyrics_processed_at = now` (review round 1; an unserved row's deferral, #263, leaves it as it was, like every `defer_song`). The #171 full-mix upgrade bucket re-attempts a row at most once a day by it, and a served full-mix row whose upgrade failed keeps that gate (`a_failed_upgrade_of_a_served_full_mix_row_waits_a_day`).
 - What a served row whose re-run failed does next (the ROZHODNUTÉ's trade-off — it shows only in the DB and the WARN, never as a dark wall):

@@ -40,6 +40,15 @@
 //!    instrumental break (a gap over [`LONG_GAP_MS`]) and after the last line,
 //!    it leaves [`HOLD_TAIL_MS`] after its sung end instead.
 //!
+//! #280: every source line is first read without its parenthesised asides
+//! (`display_plan_asides.rs`), then, in sung lyrics (a dub line keeps its
+//! words), without its bare interjections
+//! (`display_plan_interjections.rs`): a line that is only `Oh.` / `Yeah.`
+//! leaves the plan, the previous line holds through its time and takes its
+//! sentence end. So the grouping, the char limit and the shown text all see
+//! the shorter lines.
+//! A display line's `src_range` still counts in the track's own lines.
+//!
 //! The dashboard karaoke view (`LyricsState::update`) keeps the raw track and
 //! its word timing. Only the wall and the Presenter read this plan. The
 //! constants are documented in `.claude/rules/lyrics-display.md`.
@@ -49,6 +58,12 @@ use std::ops::Range;
 use sp_core::lyrics::LyricsLine;
 
 use crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE;
+
+#[path = "display_plan_asides.rs"]
+mod asides;
+
+#[path = "display_plan_interjections.rs"]
+mod interjections;
 
 /// The most a `Song` line appears on the wall before it is sung, so the room
 /// can pre-read it. Only into a pause of [`SUSTAIN_MARGIN_MS`] after the
@@ -158,7 +173,9 @@ pub struct DisplayLine {
     /// after the last line.
     pub hide_ms: u64,
     /// The indices of the source lines (in `LyricsTrack::lines`) this line
-    /// shows.
+    /// shows, from its first shown line to its last. A line left out (#280,
+    /// only interjections) between them is in the range; one between two
+    /// display lines is in none.
     pub src_range: Range<usize>,
 }
 
@@ -200,9 +217,14 @@ impl DisplayPlan {
     }
 }
 
-/// Turn a track's sung lines into its display lines under `profile`: group
-/// them into sentences, then schedule (see the module docs).
+/// Turn a track's sung lines into its display lines under `profile`: take
+/// the lines the wall shows ([`shown_lines`]), group them into sentences,
+/// then schedule (see the module docs).
 pub fn build_plan(lines: &[LyricsLine], profile: DisplayProfile) -> Vec<DisplayLine> {
+    // The index in the track of each shown line, and the line as shown.
+    let (kept, shown): (Vec<usize>, Vec<LyricsLine>) =
+        shown_lines(lines, profile).into_iter().unzip();
+    let lines = &shown[..];
     let groups = group_lines(lines);
     let spans = schedule(lines, &groups, profile);
     groups
@@ -219,10 +241,54 @@ pub fn build_plan(lines: &[LyricsLine], profile: DisplayProfile) -> Vec<DisplayL
                     .fold(None, |sk, line| join_sk(sk, line.sk.clone())),
                 show_ms,
                 hide_ms,
-                src_range: group,
+                src_range: kept[group.start]..kept[group.end - 1] + 1,
             }
         })
         .collect()
+}
+
+/// The source lines the wall shows, each with its index in the track (#280):
+/// read without the parenthesised asides, then, for sung lyrics, without the
+/// bare interjections. A line that is only interjections is left out and
+/// hands its sentence end back to the line before it; one whose words
+/// outside its asides are only interjections is read with only its brackets
+/// gone. A left-out line that began a sentence (the line before it ends
+/// one, or it is the first) hands its capital to the next line kept, unless
+/// it ends its sentence itself. A dub line (`Speech`) keeps its words: its
+/// English is the whole sentences matched to it by time (#184 H5), not its
+/// translation, so it cannot judge the Slovak (review round 2).
+fn shown_lines(lines: &[LyricsLine], profile: DisplayProfile) -> Vec<(usize, LyricsLine)> {
+    let mut kept: Vec<(usize, LyricsLine)> = Vec::with_capacity(lines.len());
+    // Whether the next line begins a sentence, and the (EN, SK) capitals a
+    // left-out line that began one hands to the next line kept.
+    let (mut begins, mut capitals) = (true, (false, false));
+    for (i, line) in lines.iter().enumerate() {
+        let read = asides::without_asides(line);
+        if profile == DisplayProfile::Speech {
+            kept.push((i, read));
+            continue;
+        }
+        match interjections::shown(&read)
+            .or_else(|| interjections::shown(&asides::unbracketed(line)))
+        {
+            Some(shown) => {
+                let shown = interjections::with_capitals(shown, std::mem::take(&mut capitals));
+                begins = ends_sentence(&shown);
+                kept.push((i, shown));
+            }
+            None => {
+                if begins {
+                    capitals = interjections::capitals(&read);
+                }
+                interjections::hand_back(&read, kept.last_mut().map(|(_, before)| before));
+                begins = ends_sentence(&read);
+                if begins {
+                    capitals = (false, false);
+                }
+            }
+        }
+    }
+    kept
 }
 
 /// The source lines of each display line, in order (step 1 of the module
@@ -310,7 +376,14 @@ fn text(line: &LyricsLine) -> &str {
 
 /// The last char of `text` that is not a closing quote or bracket.
 fn final_mark(text: &str) -> Option<char> {
-    text.chars().rev().find(|c| !CLOSERS.contains(c))
+    final_mark_at(text).map(|(_, c)| c)
+}
+
+/// [`final_mark`] with its byte index in `text`.
+fn final_mark_at(text: &str) -> Option<(usize, char)> {
+    text.char_indices()
+        .rev()
+        .find(|(_, c)| !CLOSERS.contains(c))
 }
 
 /// Whether the line ends a sentence (`. ! ? …`).

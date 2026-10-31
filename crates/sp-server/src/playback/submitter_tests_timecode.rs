@@ -123,7 +123,7 @@ fn holdover_keeps_the_submitted_frame_alive_across_the_async_call() {
     let mut sub = FrameSubmitter::new(sender, 30, 1);
 
     let data = SharedFrame::new(vec![3u8; 4 * 2 * 3 / 2]);
-    sub.submit_frame_at_boundary_owned(4, 2, 4, data, &[], 333_333, 333_333);
+    sub.submit_frame_at_boundary_owned(4, 2, 4, data, &[], 333_333, 333_333, PixelFormat::Nv12);
 
     let (recv_ptr, recv_len) = backend
         .last_async_video_slice()
@@ -141,7 +141,7 @@ fn holdover_keeps_the_submitted_frame_alive_across_the_async_call() {
 
     // A second submit releases the first allocation and holds the second.
     let data2 = SharedFrame::new(vec![9u8; 4 * 2 * 3 / 2]);
-    sub.submit_frame_at_boundary_owned(4, 2, 4, data2, &[], 666_666, 666_666);
+    sub.submit_frame_at_boundary_owned(4, 2, 4, data2, &[], 666_666, 666_666, PixelFormat::Nv12);
     let (recv_ptr2, _) = backend.last_async_video_slice().unwrap();
     let held2 = sub.prev_frame.as_ref().unwrap();
     assert_eq!(
@@ -162,7 +162,15 @@ fn frame_submitter_submit_shared_is_zero_copy_via_the_owned_path() {
 
     let frame = SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]);
     let src_ptr = frame.as_ptr() as usize;
-    sub.submit_shared(4, 2, 4, frame, &[], 333_333, 333_333);
+    sub.submit_shared(
+        4,
+        2,
+        4,
+        crate::playback::picture::Picture::Cpu(frame),
+        &[],
+        333_333,
+        333_333,
+    );
 
     let calls = backend.calls();
     assert!(
@@ -198,10 +206,10 @@ fn paced_sink_emit_submits_the_pacer_frame_without_a_pixel_copy() {
         width: 4,
         height: 2,
         stride: 4,
-        video: SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]),
+        video: SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]).into(),
         audio: Vec::new(),
     };
-    let src_ptr = frame.video.as_ptr() as usize;
+    let src_ptr = frame.video.expect_cpu().as_ptr() as usize;
 
     PacedSink::emit(&mut sub, &frame, &[], 333_333, 333_333);
 
@@ -211,10 +219,17 @@ fn paced_sink_emit_submits_the_pacer_frame_without_a_pixel_copy() {
         "the SDK receives the pacer's own allocation — no copy"
     );
     assert!(
-        sub.prev_frame.as_ref().unwrap().ptr_eq(&frame.video),
+        sub.prev_frame
+            .as_ref()
+            .unwrap()
+            .ptr_eq(frame.video.expect_cpu()),
         "the holdover shares the pacer's allocation (an Arc bump)"
     );
-    assert_eq!(&frame.video[..], &[16u8; 12][..], "pacer pixels untouched");
+    assert_eq!(
+        &frame.video.expect_cpu()[..],
+        &[16u8; 12][..],
+        "pacer pixels untouched"
+    );
 }
 
 #[test]

@@ -264,6 +264,13 @@ impl SplitSyncedDecoder {
         self.duration_ms
     }
 
+    /// The VIDEO reader's own duration (ms), as its container says (#277):
+    /// what an early end of the picture is measured against.
+    /// [`duration_ms`](Self::duration_ms) is the audio's, the master clock.
+    pub fn video_duration_ms(&self) -> u64 {
+        self.video.duration_ms()
+    }
+
     /// Video width in pixels.
     pub fn width(&self) -> u32 {
         self.video.width()

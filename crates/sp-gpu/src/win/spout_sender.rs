@@ -1,6 +1,7 @@
 //! The Spout sender of `SP-program-MAX` (#223 S1b), and of the FHD program
-//! `SP-program` (#239): the compositor's render target, shared with Resolume
-//! Arena through the vendored Spout2 SDK
+//! `SP-program` (#239): one of the compositor's render targets (#251 step 2:
+//! the primary, or the FHD target added to the same compositor), shared
+//! with Resolume Arena through the vendored Spout2 SDK
 //! (SpoutDX `SendTexture`, via `spout_shim.cpp`). Every decision (the name
 //! check, refusing a taken name, confirming or refusing the first send) is
 //! `crate::spout` / `crate::spout_state`'s, tested on Linux; this file only
@@ -13,17 +14,15 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use tracing::{info, warn};
-use windows::Win32::Graphics::Direct3D11::{
-    ID3D11Device, ID3D11DeviceContext, ID3D11Query, ID3D11Texture2D,
-};
+use windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11Query, ID3D11Texture2D};
 use windows::core::Interface;
 
 use super::spout_lock::{give_back, give_back_maps, held_elsewhere, listed_senders};
-use super::{Compositor, micros_since};
+use super::{Compositor, NO_TARGET, micros_since};
 use crate::error::GpuError;
 use crate::spout::{
-    SENDER_NAMES_MAP, SPOUT_FHD_SENDER_NAME, SPOUT_SENDER_NAME, check_sender_name, map_mutex_name,
-    status_result,
+    SENDER_NAMES_MAP, SPOUT_FHD_SENDER_NAME, SPOUT_SENDER_NAME, check_sender_name, lost_send_error,
+    map_mutex_name, shim_send_mode, status_result,
 };
 use crate::spout_lock::access_mutex_name;
 use crate::spout_state::{
@@ -31,6 +30,8 @@ use crate::spout_state::{
     access_held, after_send, before_send, claim, list_check,
 };
 use crate::stats::SpoutSendStats;
+use crate::targets::TargetId;
+use sp_core::config::SpoutSend;
 
 // `spout_shim.cpp`, built with the vendored SDK by build.rs.
 unsafe extern "C" {
@@ -41,7 +42,13 @@ unsafe extern "C" {
     ) -> *mut c_void;
     fn spout_sender_listed(sender: *mut c_void) -> c_int;
     fn spout_sender_claim_name(sender: *mut c_void) -> c_int;
-    fn spout_sender_send(sender: *mut c_void, texture: *mut c_void) -> c_int;
+    fn spout_sender_send_synced(
+        sender: *mut c_void,
+        texture: *mut c_void,
+        done: *mut c_void,
+        bound_ms: u64,
+        mode: c_int,
+    ) -> c_int;
     fn spout_sender_relist(sender: *mut c_void) -> c_int;
     fn spout_sender_state(sender: *mut c_void, initialized: *mut c_int, name_matches: *mut c_int);
     fn spout_sender_refuse(sender: *mut c_void) -> c_int;
@@ -57,7 +64,10 @@ static SDK: Mutex<()> = Mutex::new(());
 
 /// Run one shim call of the sender `sender` under [`SDK`], then give back
 /// any Spout lock the call left this thread holding (#243: Spout keeps a
-/// lock it was handed abandoned, `crate::spout_lock`).
+/// lock it was handed abandoned, `crate::spout_lock`). #251: a send holds
+/// [`SDK`] through its wait for the GPU's copy (well under a millisecond,
+/// bounded by `pipeline::FRAME_WAIT_LIMIT`); only the `program-max` thread
+/// sends, so no other sender waits behind it.
 fn sdk<T>(sender: &str, call: impl FnOnce() -> T) -> T {
     let _one = SDK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let out = call();
@@ -126,11 +136,12 @@ fn first_send_facts(shim: &Shim) -> FirstSendFacts {
     }
 }
 
-/// A Spout sender of the compositor's render target. It holds its own
-/// references to the compositor's device and render target (Spout does not
-/// AddRef the device), so it may outlive the `Compositor` value; S2 drops it
-/// with the compositor when the device is lost. Registered at its first
-/// [`send`](SpoutSender::send), unregistered when dropped.
+/// A Spout sender of one of the compositor's render targets. It holds its
+/// own references to the compositor's device and that render target (Spout
+/// does not AddRef the device), so it may outlive the `Compositor` value
+/// (and its target's removal); S2 drops it with the compositor when the
+/// device is lost. Registered at its first [`send`](SpoutSender::send),
+/// unregistered when dropped.
 ///
 /// Neither it nor the `Compositor` is `Send`: both drive the device's one
 /// immediate context, which is not thread-safe, so both live on the thread
@@ -148,36 +159,53 @@ pub struct SpoutSender {
     confirmed_sends: u64,
     device: ID3D11Device,
     texture: ID3D11Texture2D,
-    /// The compositor's immediate context and an event query: each send
-    /// waits until the GPU has done its copy into Spout's shared texture.
-    context: ID3D11DeviceContext,
+    /// An event query on the compositor's device: each send waits until the
+    /// GPU has done its copy into Spout's shared texture BEFORE Spout
+    /// announces the frame (#251, the shim's `SendSynced`).
     copied: ID3D11Query,
+    /// #251 (19.10.2026): how each frame is handed to Spout around its
+    /// texture mutex (`program_max_spout_send`, set before every send).
+    mode: SpoutSend,
 }
 
 impl SpoutSender {
-    /// The sender `SP-program-MAX` ([`SPOUT_SENDER_NAME`]) on `compositor`'s
-    /// device. [`GpuError::SpoutNameTaken`] when a live sender holds the
-    /// name (Spout would have renamed this one).
+    /// The sender `SP-program-MAX` ([`SPOUT_SENDER_NAME`]) of `compositor`'s
+    /// primary target. [`GpuError::SpoutNameTaken`] when a live sender holds
+    /// the name (Spout would have renamed this one).
     pub fn new(compositor: &Compositor) -> Result<Self, GpuError> {
-        Self::with_name(compositor, SPOUT_SENDER_NAME)
+        Self::for_target(compositor, TargetId::PRIMARY, SPOUT_SENDER_NAME)
     }
 
-    /// #239: the sender `SP-program` ([`SPOUT_FHD_SENDER_NAME`]), on the
-    /// FHD program's 1920×1080 compositor (`Compositor::with_size`): it
-    /// shares whatever `compositor` draws, so pair it with that one.
+    /// #239: the sender `SP-program` ([`SPOUT_FHD_SENDER_NAME`]) of the FHD
+    /// program's 1920×1080 target `target` (#251 step 2: added to MAX's
+    /// compositor, `Compositor::add_target` with `FHD_TARGET`).
     /// [`GpuError::SpoutNameTaken`] when a live sender holds the name.
-    pub fn new_fhd(compositor: &Compositor) -> Result<Self, GpuError> {
-        Self::with_name(compositor, SPOUT_FHD_SENDER_NAME)
+    pub fn new_fhd(compositor: &Compositor, target: TargetId) -> Result<Self, GpuError> {
+        Self::for_target(compositor, target, SPOUT_FHD_SENDER_NAME)
     }
 
-    /// The sender under another name: tests run several at once, and the
-    /// production name is one per machine. Not for production.
+    /// The sender of the primary target under another name: tests run
+    /// several at once, and the production name is one per machine. Not for
+    /// production.
     #[doc(hidden)]
     pub fn with_name(compositor: &Compositor, name: &str) -> Result<Self, GpuError> {
+        Self::for_target(compositor, TargetId::PRIMARY, name)
+    }
+
+    /// #251 step 2: the sender `name` of `compositor`'s render target
+    /// `target`: it shares what each compose draws there. It holds its own
+    /// reference to that texture (a removed target goes on existing until
+    /// the sender is dropped). [`GpuError::NoObject`] for a target the
+    /// compositor does not hold; [`GpuError::SpoutNameTaken`] when a live
+    /// sender holds the name.
+    pub fn for_target(
+        compositor: &Compositor,
+        target: TargetId,
+        name: &str,
+    ) -> Result<Self, GpuError> {
         let c_name = check_sender_name(name)?;
+        let texture = compositor.target_texture(target).ok_or(NO_TARGET)?.clone();
         let device = compositor.device().clone();
-        let texture = compositor.render_target().clone();
-        let context = compositor.context().clone();
         let copied = super::pipeline::query(&device)?;
         // Not OK until the shim says so.
         let mut code: c_int = -1;
@@ -216,9 +244,14 @@ impl SpoutSender {
             confirmed_sends: 0,
             device,
             texture,
-            context,
             copied,
+            mode: SpoutSend::default(),
         })
+    }
+
+    /// #251: how the next sends hand their frame to Spout.
+    pub fn set_send_mode(&mut self, mode: SpoutSend) {
+        self.mode = mode;
     }
 
     /// The name the sender registers.
@@ -233,8 +266,10 @@ impl SpoutSender {
 
     /// Share the render target as it is now: call it after
     /// `Compositor::compose`, on the same thread. Spout copies it into its
-    /// own shared texture on the GPU (`SendTexture`); the first call
-    /// registers the sender. [`GpuError::DeviceLost`] means the device must
+    /// own shared texture on the GPU and announces the frame only once the
+    /// GPU has done the copy (#251: the shim's `SendSynced`, never spoutDX's
+    /// `SendTexture`, which announced a frame still being written); the
+    /// first call registers the sender. [`GpuError::DeviceLost`] means the device must
     /// be rebuilt (and the sender with it). [`GpuError::SpoutNotRegistered`]
     /// means this sender is done (`crate::spout_state`: another sender took
     /// the name, Spout did not list it or could not register it, or its list
@@ -257,11 +292,15 @@ impl SpoutSender {
         // SAFETY: the shim sender is live until Drop; the texture is the
         // compositor's render target, on the device the sender opened on.
         let texture = self.texture.as_raw();
-        let code = sdk(&self.name, || unsafe { spout_sender_send(raw, texture) });
-        // #223 follow-up: return once the GPU has done the copy, so the
-        // caller's timing is when Spout's shared texture really holds the
-        // frame (Arena reads it on its own clock), not when it was queued.
-        super::pipeline::wait_until_done_on(&self.context, &self.copied)?;
+        let done = self.copied.as_raw();
+        let bound_ms = super::pipeline::FRAME_WAIT_LIMIT.as_millis() as u64;
+        let mode = shim_send_mode(self.mode);
+        // #223 follow-up + #251: the shim returns once the GPU has done the
+        // copy (and only then announced it), so `send_us` is when Spout's
+        // shared texture really holds the frame.
+        let code = sdk(&self.name, || unsafe {
+            spout_sender_send_synced(raw, texture, done, bound_ms, mode)
+        });
         let send_us = micros_since(start);
         unsafe { self.device.GetDeviceRemovedReason() }
             .map_err(|e| GpuError::removed(e.code().0 as u32))?;
@@ -279,10 +318,7 @@ impl SpoutSender {
             AfterSend::Lost { code, next } => {
                 self.check_texture_lock(send_us)?;
                 self.registration = next;
-                Err(GpuError::Spout {
-                    call: "spout_sender_send",
-                    code: code as u32,
-                })
+                Err(lost_send_error(code, bound_ms))
             }
             AfterSend::Refuse(why) => {
                 let holder = self.list_holder(why);

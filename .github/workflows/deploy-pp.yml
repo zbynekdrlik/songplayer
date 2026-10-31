@@ -172,6 +172,13 @@ jobs:
         shell: powershell
         timeout-minutes: 2
         run: |
+          # An older build dispatched on purpose (a rollback, #251) checks out
+          # a tree from before this script: the auto-start stays as the last
+          # deploy delivered it, and the rollback goes on.
+          if (-not (Test-Path (Join-Path $env:GITHUB_WORKSPACE 'scripts/runner-autostart.ps1'))) {
+            Write-Host "::warning::this build predates scripts/runner-autostart.ps1 - the runner's auto-start is left as the last deploy delivered it"
+            exit 0
+          }
           powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE\scripts\runner-autostart.ps1"
           $code = $LASTEXITCODE
           if ($code -ne 0) {
@@ -371,7 +378,9 @@ jobs:
       # post-deploy-max.spec.ts + post-deploy-audio-asio.spec.ts (#233: DVS
       # registered, the ASIO outputs SP_ASIO_OUTPUTS_EXPECTED names run) +
       # post-deploy-pp-preview.spec.ts (#266: the on-program card's live
-      # preview decodes video and audio, in Edge).
+      # preview decodes video and audio, in Edge) +
+      # post-deploy-ui-usage.spec.ts (#256: PP's own usage log answers its
+      # summary, and the gate's automated session adds nothing to it).
       - name: Post-deploy Playwright (PP subset)
         shell: powershell
         env:

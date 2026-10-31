@@ -79,6 +79,22 @@ mod tests {
         assert_eq!(&bytes, b"NV12");
     }
 
+    /// #279 P1b: the send side's UYVY is the FourCC the receive side reads.
+    #[test]
+    fn fourcc_video_uyvy_value_and_bytes() {
+        assert_eq!(FourCCVideoType::UYVY as u32, 0x5956_5955);
+        let bytes = (FourCCVideoType::UYVY as u32).to_le_bytes();
+        assert_eq!(&bytes, b"UYVY");
+        assert_eq!(FourCCVideoType::UYVY as u32, receive::FOURCC_UYVY);
+    }
+
+    #[test]
+    fn each_pixel_format_names_its_fourcc() {
+        assert_eq!(PixelFormat::Bgra.four_cc(), FourCCVideoType::BGRA);
+        assert_eq!(PixelFormat::Nv12.four_cc(), FourCCVideoType::NV12);
+        assert_eq!(PixelFormat::Uyvy.four_cc(), FourCCVideoType::UYVY);
+    }
+
     #[test]
     fn fourcc_audio_fltp_value_and_bytes() {
         assert_eq!(FourCCAudioType::FLTP as u32, 0x7054_4C46);

@@ -77,7 +77,7 @@ async fn states_once_quiesced(state: &crate::AppState) -> (serde_json::Value, se
     last
 }
 
-/// Both senders went out once; the quiesce drops both (each before its
+/// Both senders went out (MAX twice, SP-program once); the quiesce drops both (each before its
 /// compositor), `max.state` and `max.fhd.state` read `quiesced`, and while
 /// it holds (a minute) the thread lives on with nothing offered, built or
 /// sent.
@@ -92,9 +92,15 @@ async fn a_quiesce_drops_both_spout_senders_and_ends_every_spout_call() {
     wait_until("the loop takes jobs", || max.accepting());
     let a = picture(4, 2);
     max.offer_with(|| plain(1, &a));
+    // MAX goes first, whole: the SP-program output is built after MAX's
+    // send and goes out from the next boundary.
+    wait_until("MAX went out, SP-program built", || {
+        max.status().submitted == 1 && gpu.log().fhd_senders_built == 1
+    });
+    max.offer_with(|| plain(2, &a));
     wait_until("MAX and SP-program went out", || {
         let status = max.status();
-        status.submitted == 1 && status.fhd.submitted == 1
+        status.submitted == 2 && status.fhd.submitted == 1
     });
 
     let (status, json) = call(state.clone(), "POST", "/api/v1/program/spout/quiesce", None).await;
@@ -104,12 +110,12 @@ async fn a_quiesce_drops_both_spout_senders_and_ends_every_spout_call() {
     assert_eq!(fhd_state, "quiesced", "the SP-program sender too");
     assert_eq!(
         gpu.log().drops,
-        ["sender", "compositor", "fhd sender", "fhd compositor"],
-        "both Spout senders dropped, each before its compositor"
+        ["sender", "fhd sender", "compositor"],
+        "both Spout senders dropped, then their one compositor (#251 step 2)"
     );
     assert!(!running.finished(), "the thread lives on, quiesced");
     assert!(
-        !max.offer_with(|| plain(2, &a)),
+        !max.offer_with(|| plain(3, &a)),
         "a quiesced MAX takes no job"
     );
     {
@@ -118,15 +124,11 @@ async fn a_quiesce_drops_both_spout_senders_and_ends_every_spout_call() {
         let log = gpu.log();
         assert_eq!(
             (log.compositors_built, log.senders_built, log.sent),
-            (1, 1, 1),
+            (1, 1, 2),
             "MAX: nothing built or sent after the quiesce"
         );
         assert_eq!(
-            (
-                log.fhd_compositors_built,
-                log.fhd_senders_built,
-                log.fhd_sent
-            ),
+            (log.targets_added.len(), log.fhd_senders_built, log.fhd_sent),
             (1, 1, 1),
             "SP-program: nothing built or sent after the quiesce"
         );

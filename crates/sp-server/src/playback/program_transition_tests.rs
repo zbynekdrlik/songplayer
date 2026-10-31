@@ -488,7 +488,7 @@ fn a_layout_is_read_from_the_sources_job() {
         width: 8,
         height: 6,
         stride: 10,
-        video: SharedFrame::new(vec![0u8; 90]),
+        video: SharedFrame::new(vec![0u8; 90]).into(),
         audio: Vec::new(),
         video_tc_100ns: T0,
         audio_tc_100ns: T0,

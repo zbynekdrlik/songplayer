@@ -7,8 +7,10 @@ pub mod models_peer; // #229 the node exchange's tables (own module, models.rs i
 pub mod models_playlist_fx; // #242 a playlist's own volume + EQ (V33 columns)
 pub mod models_playlists; // #225 every playlist id, for the WS on-connect replay (own module, 1000-line cap)
 pub mod models_register; // #250 a lyrics track's register check (V36 columns)
+pub mod models_set_list; // #261 a set list stays numbered 0..N-1 (removal, a playlist's DELETE)
 pub mod models_stems; // #14 karaoke stem-separation queries (own module, 1000-line cap)
 pub mod models_stems_priority; // #195 tiered in-use-first stems selector (own module, 1000-line cap)
+pub mod models_ui_usage; // #256 the dashboard's usage log (V42)
 pub mod startup_open; // #229 the startup open waits out a briefly locked database
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
@@ -31,6 +33,18 @@ macro_rules! queue_row {
     };
 }
 pub(crate) use queue_row;
+
+/// #261: a row of an ACTIVE playlist (an unqualified fragment like
+/// [`queue_row!`]). The stems queue (pick, tiers, position, count) and the
+/// video upgrade's counts splice it, as the download and lyrics queues
+/// already ask `p.is_active = 1`: a deactivated playlist's songs are not
+/// processed while they wait for #260's retention.
+macro_rules! active_playlist {
+    () => {
+        "playlist_id IN (SELECT id FROM playlists WHERE is_active = 1)"
+    };
+}
+pub(crate) use active_playlist;
 
 /// All migrations as (version, SQL) tuples.
 /// Each SQL string may contain multiple statements separated by semicolons.
@@ -76,6 +90,8 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (39, MIGRATION_V39),
     (40, MIGRATION_V40),
     (41, MIGRATION_V41),
+    (42, MIGRATION_V42),
+    (43, MIGRATION_V43),
 ];
 
 const MIGRATION_V1: &str = "
@@ -652,6 +668,54 @@ UPDATE videos SET lyrics_source = NULL, lyrics_attempts = 0, lyrics_next_attempt
 WHERE lyrics_source = 'no_source' AND COALESCE(has_lyrics, 0) = 0
 ";
 
+/// #256: the dashboard's usage log (`db::models_ui_usage`): one row per
+/// recorded use — `ts_ms` by the browser's clock, the dashboard `page`, the
+/// `control` (its `data-testid`, else `<tag>`; empty for a page view), the
+/// `kind` (`click` / `change` / `submit` / `page`) and `on_air_source`, the
+/// program's source when the batch arrived (a playlist id, -1 the NDI input,
+/// -2 Blank, NULL before the first selection). Kept 400 days, read and
+/// pruned by time.
+const MIGRATION_V42: &str = "
+CREATE TABLE IF NOT EXISTS ui_usage (
+    ts_ms INTEGER NOT NULL,
+    page TEXT NOT NULL,
+    control TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    on_air_source INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_ui_usage_ts ON ui_usage (ts_ms);
+";
+
+/// #261 (no infinite archive):
+///
+/// - `resolume_clip_mappings` goes: no code ever wrote it (V1's).
+/// - `play_history` gets an index by video, then playlist: the foreign
+///   key's cascade and the video upgrade's retention look a video up, the
+///   rotation counts a playlist's own plays of it, and the daily bound
+///   (`playlist::history_bound`) keeps the latest row per playlist and video.
+/// - `videos` gets an index by YouTube id: the daily `peer::leftovers` pass
+///   looks every exchange record's video up by it (without it, a scan of
+///   `videos` per record held the write lock for seconds), as do the
+///   exchange's per-video reads.
+/// - `playlists.deactivated_at` (UTC ms; NULL = active): a deactivation
+///   marks the playlist's rows `removed_at` with this value (a row already
+///   marked keeps its mark), so #260's retention deletes them a year later;
+///   a reactivation clears exactly those marks (`removed_at =` it), never
+///   the sync's earlier ones (`db::models_membership::deactivate` /
+///   `reactivate`). Back-filled once for every playlist inactive now, never
+///   the test item's.
+const MIGRATION_V43: &str = "
+DROP TABLE IF EXISTS resolume_clip_mappings;
+CREATE INDEX IF NOT EXISTS idx_play_history_video ON play_history (video_id, playlist_id);
+CREATE INDEX IF NOT EXISTS idx_videos_youtube ON videos (youtube_id);
+ALTER TABLE playlists ADD COLUMN deactivated_at INTEGER;
+UPDATE playlists SET deactivated_at = CAST(strftime('%s', 'now') AS INTEGER) * 1000
+WHERE is_active = 0 AND kind != 'test';
+UPDATE videos SET removed_at = (SELECT p.deactivated_at FROM playlists p WHERE p.id = videos.playlist_id)
+WHERE removed_at IS NULL
+  AND playlist_id IN (SELECT id FROM playlists WHERE deactivated_at IS NOT NULL)
+";
+
 /// Connection-pool tuning for the FILE-backed pool (#184 round A).
 ///
 /// WAL + NORMAL synchronous remove reader/writer blocking for this
@@ -848,6 +912,12 @@ mod tests_v40;
 #[path = "mod_tests_v41.rs"]
 #[cfg(test)]
 mod tests_v41;
+#[path = "mod_tests_v42.rs"]
+#[cfg(test)]
+mod tests_v42;
+#[path = "mod_tests_v43.rs"]
+#[cfg(test)]
+mod tests_v43;
 
 #[path = "mod_tests_pool.rs"]
 #[cfg(test)]

@@ -25,6 +25,7 @@
 
 use super::*;
 use crate::playback::frame_buf::SharedFrame;
+use crate::playback::picture::Picture;
 use crate::playback::wallclock::{SettableClock, WallClock};
 use sp_ndi::AudioFrame;
 
@@ -42,7 +43,7 @@ fn mk_frame(pts_ns: i64) -> PacedFrame {
         width: 4,
         height: 2,
         stride: 4,
-        video: SharedFrame::new(vec![0u8; 12]),
+        video: SharedFrame::new(vec![0u8; 12]).into(),
         audio: vec![],
     }
 }
@@ -306,7 +307,7 @@ fn service_buffered_frame_catches_up_never_resyncs() {
 fn service_standby_on_grid_step_is_not_a_relatch() {
     let (mut pacer, clk) = anchored_pacer();
     let mut sink = RecordingSink::default();
-    let black = SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]);
+    let black = Picture::Cpu(SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]));
     clk.set(b(1)); // sched_now == next_boundary == latched boundary (boundary == nb)
     let out = pacer.service_standby(
         Standby::Black {
@@ -334,7 +335,7 @@ fn service_standby_backward_step_relatches_once() {
     clk.set(b(100));
     pacer.anchor(); // next_boundary = strict_next(b(100))
     let mut sink = RecordingSink::default();
-    let black = SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]);
+    let black = Picture::Cpu(SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]));
     // Backward step far below the latched standby boundary.
     clk.set(b(50));
     let out = pacer.service_standby(
@@ -366,7 +367,7 @@ fn service_standby_backward_step_relatches_once() {
 fn service_standby_services_a_late_boundary_by_emitting() {
     let (mut pacer, clk) = anchored_pacer();
     let mut sink = RecordingSink::default();
-    let black = SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]);
+    let black = Picture::Cpu(SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]));
     // First on-grid standby advances next_boundary to b(2).
     clk.set(b(1));
     assert_eq!(

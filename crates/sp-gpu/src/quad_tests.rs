@@ -3,7 +3,7 @@
 
 use sp_core::fit::{Fill, Placement, fill_width};
 
-use super::{QUAD_CONSTANTS_BYTES, QuadConstants, ndc_rect, uv_rect};
+use super::{QUAD_CONSTANTS_BYTES, QuadConstants, ndc_rect, uv_in_texture, uv_rect};
 use crate::color::matrix_f32;
 
 fn place(w: u32, h: u32, off_x: u32, off_y: u32) -> Placement {
@@ -134,6 +134,42 @@ fn the_constant_buffer_is_six_registers_in_the_hlsl_order() {
     let mut want: Vec<f32> = (1..=21).map(|v| v as f32).collect();
     want.extend([0.0, 0.0, 0.0]);
     assert_eq!(floats, want);
+}
+
+/// #279 P2: an uploaded picture's texture is its own size: the texture
+/// coordinates stay exactly what `uv_rect` gave (bit for bit, so every pin
+/// of the CPU reference holds).
+#[test]
+fn a_texture_of_the_picture_s_size_keeps_the_texture_coordinates() {
+    let crop = [0.0, 0.125, 1.0, 0.875];
+    assert_eq!(uv_in_texture(crop, (1920, 1080), (1920, 1080)), crop);
+    assert_eq!(uv_in_texture(WHOLE, (1440, 1080), (1440, 1080)), WHOLE);
+}
+
+/// #279 P2: an odd picture in a ring slot's even texture spans its own
+/// columns and rows: u scales by 1919/1920, v by 1079/1080.
+#[test]
+fn an_odd_picture_in_an_even_slot_spans_its_own_texels() {
+    let (su, sv) = (1919.0_f32 / 1920.0, 1079.0_f32 / 1080.0);
+    assert_eq!(
+        uv_in_texture(WHOLE, (1919, 1079), (1920, 1080)),
+        [0.0, 0.0, su, sv]
+    );
+    let inner = [0.25, 0.5, 0.75, 1.0];
+    assert_eq!(
+        uv_in_texture(inner, (1919, 1079), (1920, 1080)),
+        [0.25 * su, 0.5 * sv, 0.75 * su, sv]
+    );
+    assert_eq!(
+        uv_in_texture(inner, (1920, 1079), (1920, 1080)),
+        [0.25, 0.5 * sv, 0.75, sv],
+        "each axis by its own sides"
+    );
+    assert_eq!(
+        uv_in_texture(WHOLE, (0, 0), (0, 0)),
+        [0.0; 4],
+        "an empty texture reads no NaN"
+    );
 }
 
 /// The shader is compiled only on Windows (`D3DCompile`, at runtime), so

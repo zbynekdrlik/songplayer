@@ -1,6 +1,7 @@
 //! Playlist sync — fetch video IDs from YouTube via yt-dlp and upsert to DB;
 //! a song that left the YouTube playlist is marked (#260, `membership`).
 
+pub mod history_bound; // #261: one play per song, 30 days outside a rotation
 pub mod loop_memory; // #229 follow-up: Loop's song across a restart
 pub mod membership; // #260: a fetch marks the songs that left the playlist
 pub mod retention; // #260: a year later the marked row goes, with its files

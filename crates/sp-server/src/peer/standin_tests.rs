@@ -296,6 +296,31 @@ async fn an_operators_mark_the_queue_never_acts_on_does_not_keep_the_stand_in() 
     }
 }
 
+/// #264 (ROZHODNUTÉ 6185176417): with paid AI off an operator's reprocess
+/// flag asks for a run this node cannot make, so it keeps nothing local:
+/// the peer's copy replaces the stand-in in every row, and the take clears
+/// the flag. (With paid AI on it keeps the track for good, above; an
+/// operator's text or a dub keep it either way: `held_tests.rs`.)
+#[tokio::test]
+async fn with_paid_ai_off_a_reprocess_flag_does_not_keep_the_stand_in() {
+    let (snv, pp, rows, _) = snv_and_pp_standin().await;
+    let snv_json = snv_lyrics(&snv).await;
+    set(pp.pool(), "paid_ai_enabled", "false").await;
+    sqlx::query("UPDATE videos SET lyrics_manual_priority = 1 WHERE id = ?")
+        .bind(rows[1])
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(supersede_next(Some(&pp.ex)).await, rows.to_vec());
+    assert_eq!(json_at(&pp), Some(snv_json));
+    assert!(standins(&pp).await.is_empty());
+    assert_eq!(
+        pp.manual_flags(YT).await,
+        vec![0, 0],
+        "the take clears the flag"
+    );
+}
+
 /// No row of the video is left here (removed from its playlists): nothing
 /// to replace, the stand-in is dropped.
 #[tokio::test]

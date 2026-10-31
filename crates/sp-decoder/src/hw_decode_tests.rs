@@ -4,7 +4,8 @@
 use super::{
     D3D11_BIND_DECODER, DXGI_FORMAT_NV12, DecodeMode, DecodePath, FallbackGate, FallbackStage,
     HwCounters, HwDecodeStats, HwFallback, OnDecodeError, PathNote, PathTracker, Resume,
-    SurfaceError, SurfaceLayout, hw_counters, mapped_from_scanline0, on_decode_error, visible_size,
+    SurfaceError, SurfaceLayout, SurfaceUse, hw_counters, mapped_from_scanline0, on_decode_error,
+    visible_size,
 };
 use crate::error::DecoderError;
 
@@ -12,11 +13,59 @@ use crate::error::DecoderError;
 // Mode and path
 // ---------------------------------------------------------------------------
 
+/// #279 P3a review round 1: GPU-resident modes compare by their producer
+/// (on Windows, where one can be made: WARP producers).
+#[cfg(windows)]
+#[test]
+fn gpu_resident_modes_compare_by_their_producer() {
+    use std::sync::Arc;
+    let a = Arc::new(sp_gpu::ProducerGpu::new_warp().expect("a WARP producer"));
+    let b = Arc::new(sp_gpu::ProducerGpu::new_warp().expect("another"));
+    let on_a = DecodeMode::GpuResident(Arc::clone(&a));
+    assert_eq!(
+        on_a,
+        DecodeMode::GpuResident(Arc::clone(&a)),
+        "the same producer"
+    );
+    assert_ne!(on_a, DecodeMode::GpuResident(b), "another producer");
+    assert_ne!(on_a, DecodeMode::Hardware);
+    assert!(on_a.on_gpu());
+    assert_eq!(on_a.as_str(), "gpu_resident");
+}
+
+/// #279 P3a review round 3: a surface goes into the ring only for a
+/// GPU-resident reader whose producer is not retired; anything else is
+/// read back (a retired producer's songs: never a reopen in software).
+#[test]
+fn a_surface_goes_into_the_ring_only_for_a_live_producer() {
+    assert_eq!(SurfaceUse::of(true, false), SurfaceUse::Ring);
+    assert_eq!(SurfaceUse::of(true, true), SurfaceUse::ReadBack, "retired");
+    assert_eq!(
+        SurfaceUse::of(false, false),
+        SurfaceUse::ReadBack,
+        "Hardware"
+    );
+    assert_eq!(SurfaceUse::of(false, true), SurfaceUse::ReadBack);
+}
+
 #[test]
 fn the_mode_is_software_unless_hardware_is_asked_for() {
     assert_eq!(DecodeMode::default(), DecodeMode::Software);
     assert_eq!(DecodeMode::from_hw_flag(false), DecodeMode::Software);
     assert_eq!(DecodeMode::from_hw_flag(true), DecodeMode::Hardware);
+}
+
+/// #279 P3a: the D3D path is asked for in `Hardware` (and `GpuResident`,
+/// whose producer exists only on Windows) mode; the modes' words; a kind
+/// equals only itself.
+#[test]
+fn the_modes_say_their_path_and_compare_by_kind() {
+    assert!(!DecodeMode::Software.on_gpu());
+    assert!(DecodeMode::Hardware.on_gpu());
+    assert_eq!(DecodeMode::Software.as_str(), "software");
+    assert_eq!(DecodeMode::Hardware.as_str(), "hardware");
+    assert_ne!(DecodeMode::Software, DecodeMode::Hardware);
+    assert_eq!(DecodeMode::Hardware.clone(), DecodeMode::Hardware);
 }
 
 #[test]
@@ -562,6 +611,16 @@ fn the_counters_count_each_outcome_on_its_own() {
     counters.path_changed();
     counters.path_changed();
     counters.path_changed();
+    // #282: a counter each, never the other's.
+    for _ in 0..5 {
+        counters.scaled_open();
+    }
+    counters.scale_refused();
+    counters.scale_refused();
+    // #279 P3a: GPU-resident opens, their own counter.
+    for _ in 0..6 {
+        counters.resident_open();
+    }
     assert_eq!(
         counters.snapshot(),
         HwDecodeStats {
@@ -572,6 +631,9 @@ fn the_counters_count_each_outcome_on_its_own() {
             mid_stream_fallbacks: 2,
             path_changes: 3,
             last_fallback: Some("mid-stream: device hung".into()),
+            scaled_opens: 5,
+            scale_refusals: 2,
+            resident_opens: 6,
         }
     );
 }

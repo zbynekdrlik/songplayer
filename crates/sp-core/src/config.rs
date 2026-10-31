@@ -125,6 +125,90 @@ pub fn program_spout_fhd_to_send(loaded: Option<&str>, checked: bool) -> Option<
     (program_spout_fhd_enabled(loaded) != checked).then(|| checked.to_string())
 }
 
+/// #279 P1b: where NDI `SP-program`'s picture is made ([`program_ndi_source`]):
+/// `gpu` = the `program-max` compositor's UYVY readback of its FHD target,
+/// sent one boundary late with that boundary's audio; `cpu` = the CPU canvas
+/// (`program_canvas.rs`). Temporary, for P1b's wall A/B (deleted in P5);
+/// read with MAX's settings every 5 s, no restart.
+pub const SETTING_PROGRAM_NDI_SOURCE: &str = "program_ndi_source";
+
+/// #279 P1b: the two sources of NDI `SP-program`'s picture (the default:
+/// the CPU canvas).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NdiSource {
+    /// The CPU canvas: the fit / the fade on the band pool, NV12.
+    #[default]
+    Cpu,
+    /// The GPU readback of the compositor's FHD target, UYVY.
+    Gpu,
+}
+
+impl NdiSource {
+    /// The setting's and the telemetry's word: `cpu` or `gpu`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            NdiSource::Cpu => "cpu",
+            NdiSource::Gpu => "gpu",
+        }
+    }
+}
+
+/// #279 P1b: a stored `program_ndi_source`: exactly `gpu` (trimmed) is the
+/// GPU readback; anything else, absent included, is the CPU canvas — the
+/// default, so a deploy changes nothing on air.
+pub fn program_ndi_source(raw: Option<&str>) -> NdiSource {
+    if raw.is_some_and(|v| v.trim() == "gpu") {
+        NdiSource::Gpu
+    } else {
+        NdiSource::Cpu
+    }
+}
+
+/// #251 (19.10.2026): how `SP-program-MAX` and `SP-program` hand each frame
+/// to Spout ([`program_max_spout_send`]). Measured on SNV: while Arena
+/// receives `SP-program-MAX`, its own 30 fps clip lost 38–58 % of its frames
+/// on the wall; with no layer receiving it, none. Read with MAX's settings
+/// every 5 s, no restart; for the wall's A/B.
+pub const SETTING_PROGRAM_MAX_SPOUT_SEND: &str = "program_max_spout_send";
+
+/// #251: the hand-off of a frame to Spout's shared texture, around Spout's
+/// texture-access mutex (the one every receiver takes to read it).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SpoutSend {
+    /// Copy, flush, wait for the GPU to finish the copy, announce, then
+    /// release the mutex (#251 step 3: the receiver waits through the GPU).
+    #[default]
+    Synced,
+    /// Copy, flush, announce, release; no wait (spoutDX's `SendTexture`,
+    /// release 0.82.0).
+    Plain,
+    /// Copy, flush, release the mutex, then wait for the copy and announce
+    /// only once it is done (no receiver waits on SongPlayer's GPU).
+    ReleaseThenWait,
+}
+
+impl SpoutSend {
+    /// The setting's and the log's word.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SpoutSend::Synced => "synced",
+            SpoutSend::Plain => "plain",
+            SpoutSend::ReleaseThenWait => "release_then_wait",
+        }
+    }
+}
+
+/// #251: a stored `program_max_spout_send`: `plain` or `release_then_wait`
+/// (trimmed); anything else, absent included, is `synced`, today's hand-off,
+/// so a deploy changes nothing on the wall.
+pub fn program_max_spout_send(raw: Option<&str>) -> SpoutSend {
+    match raw.map(str::trim) {
+        Some("plain") => SpoutSend::Plain,
+        Some("release_then_wait") => SpoutSend::ReleaseThenWait,
+        _ => SpoutSend::Synced,
+    }
+}
+
 /// #223 follow-up: where after each vblank of the wall's display a
 /// `SP-program-MAX` send starts, in ms (decimals allowed): Resolume Arena
 /// takes the Spout texture at its own instant in each refresh, so a send
@@ -141,11 +225,64 @@ pub const DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US: u64 = 14_000;
 /// (missing, not a number, negative, too large) is
 /// [`DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US`].
 pub fn program_max_vblank_phase_us(raw: Option<&str>) -> u64 {
+    phase_ms_as_us(raw, DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US)
+}
+
+/// #251: where after each vblank of the primary display a `SP-program-MAX`
+/// boundary is COMPOSED, in ms (decimals allowed): the GPU work (the 4K
+/// uploads, the blend draw) must keep clear of the instants Arena renders
+/// and reads Spout in ([`program_max_compose_phase_us`]).
+pub const SETTING_PROGRAM_MAX_COMPOSE_PHASE_MS: &str = "program_max_compose_phase_ms";
+/// #251: the default compose phase, µs: 13 ms after the vblank, inside the
+/// band measured clean on SNV's wall (compose start +10.4 … +15.2 ms:
+/// 0–2 jumps back a minute, against 7–30 at +4.4 … +9 ms; 15.10.2026).
+pub const DEFAULT_PROGRAM_MAX_COMPOSE_PHASE_US: u64 = 13_000;
+
+/// #251: a stored `program_max_compose_phase_ms` in µs, by the rule of
+/// [`program_max_vblank_phase_us`]; else
+/// [`DEFAULT_PROGRAM_MAX_COMPOSE_PHASE_US`].
+pub fn program_max_compose_phase_us(raw: Option<&str>) -> u64 {
+    phase_ms_as_us(raw, DEFAULT_PROGRAM_MAX_COMPOSE_PHASE_US)
+}
+
+/// #251 step 4: the quiet window of the `SP-program` video side, in ms after
+/// each vblank of the primary display (decimals allowed): a boundary whose
+/// video side (the canvas fit, the NDI submit) would start inside
+/// [`program_video_quiet_from_us`, `program_video_quiet_to_us`) waits until
+/// its end, so it never loads the memory bus while Arena reads Spout. A
+/// window whose start is not before its end, or that ends past one refresh
+/// of the display (16.7 ms at 60 Hz), is off.
+pub const SETTING_PROGRAM_VIDEO_QUIET_FROM_MS: &str = "program_video_quiet_from_ms";
+/// #251 step 4: the quiet window's end, ms after the vblank.
+pub const SETTING_PROGRAM_VIDEO_QUIET_TO_MS: &str = "program_video_quiet_to_ms";
+/// #251 step 4: the default window, µs: 3–10.5 ms after the vblank. SNV
+/// 16.10.2026: a memory burst at +6 ms made Arena show the older picture
+/// 15–50× more often, and the video sides starting at +4…+10 ms were the
+/// bad bands; at most 7.5 ms of delay keeps camera-box's arrival-latched
+/// FIFO in its budget (cross-session answer, #251 comment 6206228023).
+pub const DEFAULT_PROGRAM_VIDEO_QUIET_FROM_US: u64 = 3_000;
+pub const DEFAULT_PROGRAM_VIDEO_QUIET_TO_US: u64 = 10_500;
+
+/// #251 step 4: a stored `program_video_quiet_from_ms` in µs, by the rule of
+/// [`program_max_vblank_phase_us`]; else
+/// [`DEFAULT_PROGRAM_VIDEO_QUIET_FROM_US`].
+pub fn program_video_quiet_from_us(raw: Option<&str>) -> u64 {
+    phase_ms_as_us(raw, DEFAULT_PROGRAM_VIDEO_QUIET_FROM_US)
+}
+
+/// #251 step 4: a stored `program_video_quiet_to_ms` in µs, by the rule of
+/// [`program_max_vblank_phase_us`]; else
+/// [`DEFAULT_PROGRAM_VIDEO_QUIET_TO_US`].
+pub fn program_video_quiet_to_us(raw: Option<&str>) -> u64 {
+    phase_ms_as_us(raw, DEFAULT_PROGRAM_VIDEO_QUIET_TO_US)
+}
+
+/// A stored phase in ms as µs: from 0 up to (not including) 1000 ms,
+/// rounded to the µs; anything else is `default`.
+fn phase_ms_as_us(raw: Option<&str>, default: u64) -> u64 {
     raw.and_then(|v| v.trim().parse::<f64>().ok())
         .filter(|ms| (0.0..1000.0).contains(ms))
-        .map_or(DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US, |ms| {
-            (ms * 1000.0).round() as u64
-        })
+        .map_or(default, |ms| (ms * 1000.0).round() as u64)
 }
 
 /// #223 S3b: hardware video decode for playback — Media Foundation's decoder
@@ -166,6 +303,12 @@ pub fn video_hw_decode(raw: Option<&str>) -> bool {
     raw.map_or(DEFAULT_VIDEO_HW_DECODE, |v| v.trim() == "true")
 }
 
+// #279 P3a: the setting `video_decode` (where the GPU's pictures stay), in
+// its own file for the 1000-line cap.
+#[path = "config_video_decode.rs"]
+mod video_decode_setting;
+pub use video_decode_setting::{SETTING_VIDEO_DECODE, VideoDecode, video_decode};
+
 /// #223 S12: the automatic in-place video upgrade (`video_upgrade::worker`).
 /// OFF until its safety net is on the box; read at every tick.
 pub const SETTING_VIDEO_UPGRADE_ENABLED: &str = "video_upgrade_enabled";
@@ -176,7 +319,8 @@ pub fn video_upgrade_enabled(raw: Option<&str>) -> bool {
     raw.is_some_and(|v| v.trim() == "true")
 }
 
-/// #223 S13: what Nastavenia's "Najvyššie rozlíšenie sťahovania" offers;
+/// #223 S13: what Nastavenia's "Najvyššie rozlíšenie (sťahovanie aj
+/// prehrávanie)" offers (#282: the cap scales playback too);
 /// `""` = automatic (2160 with GPU decoding, else 1440).
 pub const MAX_RESOLUTION_CHOICES: [&str; 5] = ["", "2160", "1440", "1080", "720"];
 
@@ -322,7 +466,7 @@ pub fn is_blank_scene(scene: &str) -> bool {
 
 // Default values for settings that have sensible defaults.
 pub const DEFAULT_OBS_WEBSOCKET_URL: &str = "ws://127.0.0.1:4455";
-pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3.1-pro-preview";
+pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3.8-flash";
 pub const DEFAULT_CACHE_DIR: &str = "cache";
 /// #223 S10b: a download's height cap when `max_resolution` is unset and
 /// hardware video decode is on (G3, comment 6102650616).
@@ -512,6 +656,59 @@ mod tests {
         assert!(!program_spout_fhd_enabled(Some("\tfalse ")), "trimmed");
     }
 
+    /// #279 P1b: NDI `SP-program` comes from the GPU readback only for an
+    /// explicit `gpu`; the default (and anything else) is the CPU canvas.
+    #[test]
+    fn the_ndi_source_is_the_cpu_canvas_unless_the_setting_says_gpu() {
+        assert_eq!(SETTING_PROGRAM_NDI_SOURCE, "program_ndi_source");
+        assert_eq!(program_ndi_source(None), NdiSource::Cpu, "no setting");
+        assert_eq!(program_ndi_source(Some("gpu")), NdiSource::Gpu);
+        assert_eq!(
+            program_ndi_source(Some(" gpu\n")),
+            NdiSource::Gpu,
+            "trimmed"
+        );
+        for other in ["cpu", "", "GPU", "gpu2", "true"] {
+            assert_eq!(program_ndi_source(Some(other)), NdiSource::Cpu, "{other:?}");
+        }
+        assert_eq!(NdiSource::Cpu.as_str(), "cpu");
+        assert_eq!(NdiSource::Gpu.as_str(), "gpu");
+        assert_eq!(NdiSource::default(), NdiSource::Cpu, "nothing applied yet");
+    }
+
+    /// #251: the Spout hand-off is today's `synced` unless the setting names
+    /// one of the other two exactly (trimmed).
+    #[test]
+    fn the_spout_hand_off_is_synced_unless_the_setting_names_another() {
+        assert_eq!(SETTING_PROGRAM_MAX_SPOUT_SEND, "program_max_spout_send");
+        assert_eq!(
+            program_max_spout_send(None),
+            SpoutSend::Synced,
+            "no setting"
+        );
+        assert_eq!(program_max_spout_send(Some("plain")), SpoutSend::Plain);
+        assert_eq!(
+            program_max_spout_send(Some(" release_then_wait\n")),
+            SpoutSend::ReleaseThenWait,
+            "trimmed"
+        );
+        for other in ["synced", "", "PLAIN", "release", "true"] {
+            assert_eq!(
+                program_max_spout_send(Some(other)),
+                SpoutSend::Synced,
+                "{other:?}"
+            );
+        }
+        assert_eq!(SpoutSend::Synced.as_str(), "synced");
+        assert_eq!(SpoutSend::Plain.as_str(), "plain");
+        assert_eq!(SpoutSend::ReleaseThenWait.as_str(), "release_then_wait");
+        assert_eq!(
+            SpoutSend::default(),
+            SpoutSend::Synced,
+            "nothing applied yet"
+        );
+    }
+
     /// #239: a save sends each Spout switch only when the checkbox changed
     /// it from what the page loaded (read by the switch's own rule).
     #[test]
@@ -549,6 +746,46 @@ mod tests {
         assert_eq!(program_max_vblank_phase_us(Some("NaN")), 14_000);
         assert_eq!(program_max_vblank_phase_us(Some("8ms")), 14_000);
         assert_eq!(program_max_vblank_phase_us(Some("")), 14_000);
+    }
+
+    /// #251: the compose phase takes the same rule, its own 13 ms default
+    /// (inside the band measured clean on SNV's wall, 15.10.2026).
+    #[test]
+    fn the_max_compose_phase_is_ms_from_zero_to_under_a_second() {
+        assert_eq!(
+            SETTING_PROGRAM_MAX_COMPOSE_PHASE_MS,
+            "program_max_compose_phase_ms"
+        );
+        assert_eq!(DEFAULT_PROGRAM_MAX_COMPOSE_PHASE_US, 13_000);
+        assert_eq!(program_max_compose_phase_us(None), 13_000);
+        assert_eq!(program_max_compose_phase_us(Some("11")), 11_000);
+        assert_eq!(program_max_compose_phase_us(Some(" 12.25\n")), 12_250);
+        assert_eq!(program_max_compose_phase_us(Some("0")), 0, "0 is a phase");
+        assert_eq!(program_max_compose_phase_us(Some("999.9")), 999_900);
+        assert_eq!(program_max_compose_phase_us(Some("1000")), 13_000);
+        assert_eq!(program_max_compose_phase_us(Some("-1")), 13_000);
+        assert_eq!(program_max_compose_phase_us(Some("13ms")), 13_000);
+    }
+
+    /// #251 step 4: the video side's quiet window is two phases by the same
+    /// rule, 3–10.5 ms by default.
+    #[test]
+    fn the_video_quiet_window_is_two_phases_three_to_ten_and_a_half_ms() {
+        assert_eq!(
+            SETTING_PROGRAM_VIDEO_QUIET_FROM_MS,
+            "program_video_quiet_from_ms"
+        );
+        assert_eq!(
+            SETTING_PROGRAM_VIDEO_QUIET_TO_MS,
+            "program_video_quiet_to_ms"
+        );
+        assert_eq!(program_video_quiet_from_us(None), 3_000);
+        assert_eq!(program_video_quiet_to_us(None), 10_500);
+        assert_eq!(program_video_quiet_from_us(Some(" 4.25\n")), 4_250);
+        assert_eq!(program_video_quiet_to_us(Some("0")), 0, "0 is a phase");
+        assert_eq!(program_video_quiet_from_us(Some("1000")), 3_000);
+        assert_eq!(program_video_quiet_to_us(Some("-2")), 10_500);
+        assert_eq!(program_video_quiet_to_us(Some("12")), 12_000);
     }
 
     /// #223 S3b: hardware decode is OFF unless the setting says exactly

@@ -37,6 +37,13 @@
 //! first song's answer can come after the second Play went out; it records
 //! nothing, resets nothing and counts no failure (`answers_last_play`,
 //! `failure_backoff::PlayAnswers`).
+//!
+//! #277: a video that ends long before its own duration fails too
+//! (`playback::early_end`). Before its first picture its `Error` is the
+//! Play's answer, as a failed open's; after its song's `Started` it answers
+//! no Play and acts only while no newer Play is under way (`takes_error`).
+//! Either way the engine asks the video-upgrade worker to repair the file
+//! (`video_upgrade::repair`).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -46,6 +53,7 @@ use tokio::time::Instant;
 use tracing::{debug, info, warn};
 
 use super::PlaybackEngine;
+use super::early_end;
 use super::failure_backoff::{FailureRun, RetryView, utc_ms_after};
 use super::pipeline::PipelineEvent;
 use super::state::{PlayAction, PlayEvent, PlayState};
@@ -132,6 +140,11 @@ impl PlaybackEngine {
                 let now = crate::peer::wire::now_ms();
                 crate::video_upgrade::rollback::after_failed_open(&pool, video_id, now).await
             });
+            // #277: a video that ends early is repaired (once per video and
+            // process, by the video-upgrade worker).
+            if early_end::is_early_end(error) {
+                crate::video_upgrade::repair::ask(video_id);
+            }
         }
         let backoff = {
             let Some(pp) = self.pipelines.get_mut(&playlist_id) else {
@@ -273,6 +286,20 @@ impl PlaybackEngine {
         self.pipelines
             .get_mut(&playlist_id)
             .is_none_or(|pp| pp.pending_plays.answered())
+    }
+
+    /// An `Error` of `playlist_id` with `error` came: whether its arm acts.
+    /// A failed open, and an early end before the first picture (#277), is
+    /// the answer to its Play ([`Self::answers_last_play`]). An early end
+    /// after its song's `Started` answers no Play (`Started` did): it acts
+    /// only while no newer Play is under way, and leaves the count alone.
+    pub(super) fn takes_error(&mut self, playlist_id: i64, error: &str) -> bool {
+        if !early_end::is_after_start(error) {
+            return self.answers_last_play(playlist_id);
+        }
+        self.pipelines
+            .get(&playlist_id)
+            .is_none_or(|pp| pp.pending_plays.pending() == 0)
     }
 
     /// `PipelineEvent::Started` of `playlist_id`: a song opened, so the run of

@@ -7,6 +7,7 @@
 
 use super::*;
 use crate::playback::frame_buf::SharedFrame;
+use crate::playback::picture::Picture;
 use crate::playback::submitter::FrameSubmitter;
 use crate::playback::wallclock::{SettableClock, WallClock};
 use sp_ndi::test_util::MockNdiBackend;
@@ -32,11 +33,11 @@ fn anchored_pacer() -> (Pacer, SettableClock) {
     (pacer, clk)
 }
 
-fn black() -> SharedFrame {
-    SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2])
+fn black() -> Picture {
+    Picture::Cpu(SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]))
 }
 
-fn idle(video: &SharedFrame) -> Standby<'_> {
+fn idle(video: &Picture) -> Standby<'_> {
     Standby::Black {
         width: 4,
         height: 2,
@@ -59,7 +60,7 @@ fn frame_with_samples(pts_ns: i64, channels: u32, per_channel: usize) -> PacedFr
         width: 4,
         height: 2,
         stride: 4,
-        video: SharedFrame::new(vec![0u8; 12]),
+        video: SharedFrame::new(vec![0u8; 12]).into(),
         audio: vec![AudioFrame {
             data: vec![0.25; per_channel * channels as usize],
             channels,
