@@ -96,7 +96,7 @@ impl DanteParams {
         let state = state.to_string_lossy().replace('\\', "\\\\");
         format!(
             "name = \"{}\"\nmanufacturer = \"New Level\"\nmodel = \"SongPlayer\"\n\
-             rx = []\ntx = [\"01\", \"02\"]\ntiming = \"normal\"\nsample_rate = {}\nencoding = 24\n\
+             rx = []\ntx = [\"01\", \"02\"]\nsample_rate = {}\nencoding = 24\n\
              latency_ns = {DANTE_LATENCY_NS}\nblock = {DANTE_BLOCK}\n\
              work_margin = {DANTE_WORK_MARGIN}\nstate_file = \"{state}\"\n",
             self.device, self.rate
