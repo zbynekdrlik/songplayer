@@ -55,24 +55,31 @@ const MIN_JUDGED = 300;
 /** The slips a take may hold (the owner, #272, 31.10.2026). */
 const MAX_SLIPS = 3;
 
-/** Whether the uneven boundaries pair up into neighbours, one pair a slip. */
-function pairedAsSlips(at: number[]): boolean {
-  return at.every((n, i) => i % 2 === 0 || n === at[i - 1] + 1);
+/** The slips the uneven boundaries make: two neighbours are one, one picture
+ *  long and the next short; a lone boundary is one too, so a run counts one
+ *  per two boundaries, rounded up. */
+function slipCount(at: number[]): number {
+  let slips = 0;
+  let run = 0;
+  at.forEach((n, i) => {
+    run = i > 0 && n === at[i - 1] + 1 ? run + 1 : 1;
+    if (run % 2 === 1) {
+      slips += 1;
+    }
+  });
+  return slips;
 }
 
-/** Whether the take's only defect is slips: at most `MAX_SLIPS` pairs of
- *  neighbouring uneven boundaries, and everything a clean verdict needs
- *  besides. */
+/** Whether the take's only defect is at most `MAX_SLIPS` slips, with
+ *  everything a clean verdict needs besides. */
 function slipsOnly(report: WallFramesReport): boolean {
   const r = report.refreshes;
   const at = r?.uneven_samples ?? [];
   return (
     r !== null &&
     r.uneven > 0 &&
-    r.uneven % 2 === 0 &&
-    r.uneven <= 2 * MAX_SLIPS &&
     at.length === r.uneven &&
-    pairedAsSlips(at) &&
+    slipCount(at) <= MAX_SLIPS &&
     r.unresolved === 0 &&
     (r.inconsistent ?? 0) === 0 &&
     r.judged >= MIN_JUDGED &&

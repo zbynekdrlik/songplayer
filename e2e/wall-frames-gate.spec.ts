@@ -63,12 +63,11 @@ test("one slip per take passes (owner, #272, 30.10.2026)", () => {
   expect(wallFramesFailures("wall-30", EXIT_DEFECTS, oneSlip())).toEqual([]);
 });
 
-test("two uneven boundaries that are not neighbours fail", () => {
+test("a lone uneven boundary is one slip and passes (#272, CI 41189187432)", () => {
   const report = oneSlip();
-  report.refreshes!.uneven_samples = [708, 710];
-  expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toEqual([
-    "wall-30: JUDDER: 2 of 1166 judged boundaries were held the wrong number of refreshes",
-  ]);
+  report.refreshes!.uneven = 3;
+  report.refreshes!.uneven_samples = [8, 708, 709];
+  expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toEqual([]);
 });
 
 test("three slips per take pass (owner, #272, 31.10.2026)", () => {
@@ -87,18 +86,25 @@ test("four slips fail", () => {
   ]);
 });
 
-test("an odd count of uneven boundaries fails", () => {
+test("four lone uneven boundaries are four slips and fail", () => {
   const report = oneSlip();
-  report.refreshes!.uneven = 3;
-  report.refreshes!.uneven_samples = [708, 709, 710];
+  report.refreshes!.uneven = 4;
+  report.refreshes!.uneven_samples = [8, 208, 708, 900];
   expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toHaveLength(1);
 });
 
-test("slips whose later pair is not neighbours fail", () => {
+test("a run of seven neighbours is four slips and fails", () => {
   const report = oneSlip();
-  report.refreshes!.uneven = 4;
-  report.refreshes!.uneven_samples = [708, 709, 900, 902];
+  report.refreshes!.uneven = 7;
+  report.refreshes!.uneven_samples = [700, 701, 702, 703, 704, 705, 706];
   expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toHaveLength(1);
+});
+
+test("a run of six neighbours is three slips and passes", () => {
+  const report = oneSlip();
+  report.refreshes!.uneven = 6;
+  report.refreshes!.uneven_samples = [700, 701, 702, 703, 704, 705];
+  expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toEqual([]);
 });
 
 test("fewer listed boundaries than uneven ones fail", () => {
