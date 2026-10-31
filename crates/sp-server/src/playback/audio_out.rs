@@ -27,6 +27,7 @@ use crate::playback::asio_out::{AsioOut, AsioStatus};
 use crate::playback::asio_state::{Reason, buffer_note, rate_note};
 use crate::playback::audio_out_block::ProgramBlock;
 use crate::playback::audio_out_queue::lock;
+use crate::playback::dante_device::DanteParams;
 use crate::playback::vban_out::{VbanOut, VbanStatus};
 use crate::playback::vban_packet::VBAN_SEND_LATENCY_100NS;
 use crate::playback::vban_rate::fft_delay_frames;
@@ -41,6 +42,8 @@ pub const STATE_DISABLED: &str = "disabled";
 pub enum OutputSink {
     Vban(Arc<VbanOut>),
     Asio(Arc<AsioOut>),
+    /// #285: the ASIO worker over the native Dante device, in this process.
+    Dante(Arc<AsioOut>, DanteParams),
 }
 
 impl OutputSink {
@@ -48,7 +51,7 @@ impl OutputSink {
     pub fn push(&self, block: ProgramBlock) {
         match self {
             Self::Vban(out) => out.push(block),
-            Self::Asio(out) => out.push(block),
+            Self::Asio(out) | Self::Dante(out, _) => out.push(block),
         }
     }
 
@@ -56,7 +59,7 @@ impl OutputSink {
     pub fn stop(&self) {
         match self {
             Self::Vban(out) => out.stop(),
-            Self::Asio(out) => out.stop(),
+            Self::Asio(out) | Self::Dante(out, _) => out.stop(),
         }
     }
 
@@ -65,7 +68,7 @@ impl OutputSink {
     pub fn discard(&self) {
         match self {
             Self::Vban(out) => out.discard(),
-            Self::Asio(out) => out.discard(),
+            Self::Asio(out) | Self::Dante(out, _) => out.discard(),
         }
     }
 
@@ -73,7 +76,7 @@ impl OutputSink {
     fn start_error(&self) -> Option<String> {
         match self {
             Self::Vban(out) => out.start_error(),
-            Self::Asio(out) => out.start_error(),
+            Self::Asio(out) | Self::Dante(out, _) => out.start_error(),
         }
     }
 }
@@ -185,9 +188,11 @@ impl RunningOutput {
     /// This output's line of `outputs[]` on a network at `network_rate`.
     pub fn status(&self, network_rate: u32) -> OutputStatus {
         match (&self.sink, self.entry.kind) {
-            (Some(OutputSink::Asio(out)), _) => self.asio_status(Some(out), network_rate),
+            (Some(OutputSink::Asio(out) | OutputSink::Dante(out, _)), _) => {
+                self.asio_status(Some(out), network_rate)
+            }
             (Some(OutputSink::Vban(out)), _) => self.vban_status(Some(out)),
-            (None, OutputType::Asio) => self.asio_status(None, network_rate),
+            (None, OutputType::Asio | OutputType::Dante) => self.asio_status(None, network_rate),
             (None, OutputType::Vban) => self.vban_status(None),
         }
     }

@@ -148,7 +148,9 @@ fn no_thread(_: &OutputSink, _: &str) {}
 fn vban(o: &RunningOutput) -> Arc<VbanOut> {
     match &o.sink {
         Some(OutputSink::Vban(out)) => out.clone(),
-        Some(OutputSink::Asio(_)) => panic!("{} is an ASIO output", o.entry.id),
+        Some(OutputSink::Asio(_) | OutputSink::Dante(..)) => {
+            panic!("{} is an ASIO or Dante output", o.entry.id)
+        }
         None => panic!("{} has no output", o.entry.id),
     }
 }
@@ -585,6 +587,7 @@ async fn an_asio_entry_is_built_and_its_worker_started_through_the_starter() {
         let kind = match sink {
             OutputSink::Vban(_) => "vban",
             OutputSink::Asio(_) => "asio",
+            OutputSink::Dante(..) => "dante",
         };
         seen.lock().unwrap().push((id.to_string(), kind));
     };
@@ -626,4 +629,68 @@ async fn an_asio_entry_is_built_and_its_worker_started_through_the_starter() {
     asio.push(ProgramBlock::silence(1));
     apply(&outputs, settings(vec![], 48_000), &mut resolved, &start).await;
     assert_eq!(asio.queued(), 0);
+}
+
+fn dante_output(id: &str) -> OutputEntry {
+    OutputEntry::dante(
+        id,
+        "Dante",
+        sp_core::audio_outputs::DanteDest {
+            device: "SongPlayer".into(),
+            ip: "10.0.0.1".into(),
+        },
+    )
+}
+
+#[tokio::test]
+async fn a_dante_entry_is_built_at_the_network_rate_through_the_starter() {
+    let started = Arc::new(std::sync::Mutex::new(Vec::<u32>::new()));
+    let seen = started.clone();
+    let start = move |sink: &OutputSink, _: &str| {
+        if let OutputSink::Dante(_, params) = sink {
+            seen.lock().unwrap().push(params.rate);
+        }
+    };
+    let outputs = AudioOutputs::new();
+    let mut resolved = HashMap::new();
+    apply(
+        &outputs,
+        settings(vec![dante_output("out-1")], 96_000),
+        &mut resolved,
+        &start,
+    )
+    .await;
+    assert_eq!(*started.lock().unwrap(), [96_000]);
+    assert_eq!(outputs.running()[0].built_rate, 96_000);
+    apply(
+        &outputs,
+        settings(vec![dante_output("out-1")], 48_000),
+        &mut resolved,
+        &start,
+    )
+    .await;
+    assert_eq!(
+        *started.lock().unwrap(),
+        [96_000, 48_000],
+        "a new rate rebuilds it"
+    );
+}
+
+#[tokio::test]
+async fn a_switched_off_dante_entry_starts_nothing() {
+    let started = Arc::new(std::sync::Mutex::new(0));
+    let seen = started.clone();
+    let start = move |_: &OutputSink, _: &str| *seen.lock().unwrap() += 1;
+    let mut entry = dante_output("out-1");
+    entry.enabled = false;
+    let outputs = AudioOutputs::new();
+    apply(
+        &outputs,
+        settings(vec![entry], 96_000),
+        &mut HashMap::new(),
+        &start,
+    )
+    .await;
+    assert_eq!(*started.lock().unwrap(), 0);
+    assert!(outputs.running()[0].sink.is_none());
 }

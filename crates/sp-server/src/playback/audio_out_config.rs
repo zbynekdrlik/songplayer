@@ -13,9 +13,9 @@ use std::collections::BTreeMap;
 use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
 use sp_core::audio_outputs::{
-    AsioDest, EntryError, MAX_ASIO_OUTPUTS, MAX_OUTPUTS, MAX_VBAN_OUTPUTS, OutputEntry, OutputType,
-    Problem, RateChoice, SUPPORTED_RATES, VbanDest, VbanSampleFormat, driver_taken, max_of_type,
-    shown_id, validate_entry, validate_list,
+    AsioDest, DanteDest, EntryError, MAX_ASIO_OUTPUTS, MAX_OUTPUTS, MAX_VBAN_OUTPUTS, OutputEntry,
+    OutputType, Problem, RateChoice, SUPPORTED_RATES, VbanDest, VbanSampleFormat, driver_taken,
+    max_of_type, shown_id, validate_entry, validate_list,
 };
 use sp_core::config::{
     DEFAULT_VBAN_STREAM_NAME, SETTING_AUDIO_NETWORK_RATE, SETTING_AUDIO_OUTPUTS, audio_network_rate,
@@ -108,6 +108,15 @@ fn asio_dest(raw: &RawValue, at: &str) -> Result<AsioDest, String> {
     })
 }
 
+/// A Dante entry's `dante` block.
+fn dante_dest(raw: &RawValue, at: &str) -> Result<DanteDest, String> {
+    let r = Reader::of(raw, at, "dante.", &format!("{at}: dante"))?;
+    Ok(DanteDest {
+        device: r.req("device")?,
+        ip: r.req("ip")?,
+    })
+}
+
 /// Entry `index` read field by field (no validation of values yet). Each
 /// type reads only its own block.
 fn entry(index: usize, raw: &RawValue) -> Result<OutputEntry, String> {
@@ -125,9 +134,10 @@ fn entry(index: usize, raw: &RawValue) -> Result<OutputEntry, String> {
     let kind_text: String = r.req("type")?;
     let kind = OutputType::parse(&kind_text)
         .ok_or_else(|| format!("{at}: type must be {}", OutputType::NAMES))?;
-    let (vban, asio) = match kind {
-        OutputType::Vban => (Some(vban_dest(r.raw("vban")?, &at)?), None),
-        OutputType::Asio => (None, Some(asio_dest(r.raw("asio")?, &at)?)),
+    let (vban, asio, dante) = match kind {
+        OutputType::Vban => (Some(vban_dest(r.raw("vban")?, &at)?), None, None),
+        OutputType::Asio => (None, Some(asio_dest(r.raw("asio")?, &at)?), None),
+        OutputType::Dante => (None, None, Some(dante_dest(r.raw("dante")?, &at)?)),
     };
     Ok(OutputEntry {
         id,
@@ -138,6 +148,7 @@ fn entry(index: usize, raw: &RawValue) -> Result<OutputEntry, String> {
         delay_ms: r.opt("delay_ms")?.unwrap_or(0),
         vban,
         asio,
+        dante,
     })
 }
 
