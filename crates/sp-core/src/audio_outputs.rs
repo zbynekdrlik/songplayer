@@ -891,3 +891,7 @@ pub fn wire_stream_name(name: &str) -> String {
 #[cfg(test)]
 #[path = "audio_outputs_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "audio_outputs_tests_dante.rs"]
+mod tests_dante;

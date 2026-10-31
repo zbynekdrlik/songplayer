@@ -92,7 +92,10 @@ pub async fn delete(path: &str) -> Result<(), String> {
 /// Used for playback control endpoints (`/api/v1/playback/{id}/{action}`)
 /// that reply with `204 No Content`.
 pub async fn post_empty(path: &str) -> Result<(), String> {
-    let resp = Request::post(path).send().await.map_err(|e| e.to_string())?;
+    let resp = Request::post(path)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
     if !resp.ok() {
         return Err(format!("POST {} → {}", path, resp.status()));
     }
@@ -363,7 +366,10 @@ pub async fn patch_mix(body: serde_json::Value) -> Result<(), String> {
 /// `{status, queue_position}`; we only need success/failure here.
 pub async fn post_enqueue_stems(video_id: i64) -> Result<(), String> {
     let path = format!("/api/v1/stems/{video_id}/enqueue");
-    let resp = Request::post(&path).send().await.map_err(|e| e.to_string())?;
+    let resp = Request::post(&path)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
     if !resp.ok() {
         return Err(format!("POST {} → {}", path, resp.status()));
     }
@@ -435,11 +441,7 @@ pub async fn post_live_play_video(
 /// tap-a-line UI.
 pub async fn seek_playlist(playlist_id: i64, position_ms: u64) -> Result<(), String> {
     let body = serde_json::json!({ "position_ms": position_ms });
-    post_json_empty(
-        &format!("/api/v1/playback/{playlist_id}/seek"),
-        &body,
-    )
-    .await
+    post_json_empty(&format!("/api/v1/playback/{playlist_id}/seek"), &body).await
 }
 
 /// GET the lyrics track for a video. Used by the shared LyricsView (scroll
@@ -455,7 +457,10 @@ pub async fn get_video_lyrics(
     video_id: i64,
 ) -> Result<Option<sp_core::lyrics::LyricsTrack>, String> {
     let path = format!("/api/v1/videos/{video_id}/lyrics");
-    let resp = Request::get(&path).send().await.map_err(|e| e.to_string())?;
+    let resp = Request::get(&path)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
     if resp.status() == 204 {
         return Ok(None);
     }
@@ -479,10 +484,7 @@ pub struct ImportedVideo {
 
 /// POST a bare YouTube URL to the import endpoint. Returns 201 + the new
 /// video_id on success. yt-dlp does the metadata fetch server-side.
-pub async fn import_video(
-    youtube_url: String,
-    playlist_id: i64,
-) -> Result<ImportedVideo, String> {
+pub async fn import_video(youtube_url: String, playlist_id: i64) -> Result<ImportedVideo, String> {
     let body = serde_json::json!({
         "youtube_url": youtube_url,
         "playlist_id": playlist_id,

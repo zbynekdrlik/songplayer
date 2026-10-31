@@ -185,7 +185,7 @@ async fn get_program_names_a_stored_entry_it_could_not_read() {
     assert_eq!(json["outputs"][0]["id"], "out-1");
     assert_eq!(
         json["outputs_problems"],
-        serde_json::json!(["entry 2 (id out-2): type must be vban or asio"])
+        serde_json::json!(["entry 2 (id out-2): type must be vban, asio or dante"])
     );
 }
 

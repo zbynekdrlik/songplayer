@@ -91,7 +91,8 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     // closure that read `has_content()` (the mixer slot) re-created its child
     // twice a second — resetting a mid-drag fader. A `Memo` only propagates when
     // the boolean actually flips, so a position tick no longer touches the slot.
-    let has_content = Memo::new(move |_| np().map(|i| i.has_now_playing_content()).unwrap_or(false));
+    let has_content =
+        Memo::new(move |_| np().map(|i| i.has_now_playing_content()).unwrap_or(false));
     // #225: the server told this playlist's state since the page loaded (its
     // on-connect replay tells every playlist's). Until then the Player claims
     // nothing — no "Nič nehrá", no "Nehrá", no program badge.

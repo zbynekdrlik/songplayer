@@ -22,28 +22,40 @@ pub struct PresetSpec {
 #[component]
 pub fn Mixer(
     /// Widget heading.
-    #[prop(into)] title: Signal<String>,
+    #[prop(into)]
+    title: Signal<String>,
     /// The binding / now-playing state line (e.g. "Stemy — …").
-    #[prop(into)] state_line: Signal<String>,
+    #[prop(into)]
+    state_line: Signal<String>,
     /// Stable test id for the state line.
-    #[prop(optional)] state_testid: &'static str,
+    #[prop(optional)]
+    state_testid: &'static str,
     /// Reason the controls are locked; `None`/empty = not locked.
-    #[prop(into)] disabled_reason: Signal<Option<String>>,
+    #[prop(into)]
+    disabled_reason: Signal<Option<String>>,
     /// The fader channels, in order.
     channels: Vec<ChannelSpec>,
     /// The preset buttons.
     presets: Vec<PresetSpec>,
     /// Which preset id is active (highlighted with the accent).
-    #[prop(into)] active_preset: Signal<Option<String>>,
+    #[prop(into)]
+    active_preset: Signal<Option<String>>,
     /// Stable test id for the presets group.
-    #[prop(optional)] presets_testid: &'static str,
+    #[prop(optional)]
+    presets_testid: &'static str,
     /// Extra class on the root (e.g. "mixer-karaoke" / "mixer-dub").
-    #[prop(optional)] extra_class: &'static str,
+    #[prop(optional)]
+    extra_class: &'static str,
     /// Adapter-specific footer content (e.g. the enqueue button + save status).
-    #[prop(optional)] children: Option<Children>,
+    #[prop(optional)]
+    children: Option<Children>,
 ) -> impl IntoView {
-    let reason_hidden =
-        move || disabled_reason.get().map(|r| r.trim().is_empty()).unwrap_or(true);
+    let reason_hidden = move || {
+        disabled_reason
+            .get()
+            .map(|r| r.trim().is_empty())
+            .unwrap_or(true)
+    };
     // One reactive class string (base + variant + locked) — avoids mixing a
     // dynamic `class=` with `class:` toggles.
     let root_class = move || {
