@@ -10,6 +10,9 @@ paths:
   - "crates/sp-server/src/playback/vban_packet_tests_legacy.rs"
   - "crates/sp-server/src/playback/asrc*.rs"
   - "crates/sp-asrc/**"
+  - "crates/sp-core/src/dante_status*.rs"
+  - "crates/sp-server/src/playback/dante_device*.rs"
+  - "sp-ui/src/components/audio_outputs_dante.rs"
   - "crates/sp-server/src/playback/asio_*.rs"
   - "crates/sp-server/src/api/audio*.rs"
   - "crates/sp-server/src/api/program_tests_outputs.rs"
@@ -1374,3 +1377,36 @@ difference with its UTC time.
   job). Pins from a scratch Python model of the analyzer and the search.
 - **Follow-up (owner, once measured):** PP's ASIO gate fails on any loop
   event during its minute.
+
+## The native Dante output (#285)
+
+- **Not in production.** dstack's problem A (a Windows TX stall, and a media
+  wait that spins about a core per thread) is open, so no Dante output is
+  enabled on SNV or PP before dstack sends its tag. A new entry starts off.
+  `dante-stack` is GPL-3.0-or-later and SongPlayer MIT: the dependency does
+  not reach `main` before the owner's answer on #285.
+- `type: dante` in `audio_outputs`, at most one, `DanteDest {device, ip}`: the
+  device name by Dante's own rule, the `ip` one IPv4 of this PC (a second
+  address beside DVS, `Place::Ip`).
+- `DanteDevice` (`dante_device.rs`) implements the `AsioDevice` seam **in this
+  process**, on every platform, with no `sp-dante-host` (the owner's ruling):
+  `asio_out`'s worker, ring, `asrc_servo` and status serve it, so a second servo
+  never appears. dstack by git tag, no Dante protocol code here. `RingProcess`
+  is the stack's callback: like a buffer switch it allocates, locks and logs
+  nothing. Two TX channels at the network rate, 24-bit, block 128, 10 ms.
+- `outputs[i]` = the ASIO worker's line under `asio` plus `dante`
+  (`sp_core::dante_status::DanteFigures`) while a device runs: read through
+  `DanteLink`, which the worker sets at the start and clears at the close, from
+  `ctl::answer("status", ..)`. Nothing on the audio path takes its lock. **The
+  stack's status flags are 0 / 1, not booleans**: a typed `bool` fails the
+  whole line (only the test on the real stack caught it).
+- The dashboard's texts: `dante_status.rs` rewrites the ASIO chips by whole
+  phrases (`karta` is feminine, `zariadenie` neuter: a word swap broke the
+  grammar), and a test keeps `karta` / `ovládač` / `ASIO` out. A
+  changed ASIO tooltip can need a new phrase there. Chip keys stay `asio-*`.
+- Tests run the real stack on `ClockSource::System` (a test receiver over UDP,
+  `ONE_DEVICE`: each binds the Dante ports). Not proven yet: Windows media
+  threads at load, real PTP, a real receiver, Dante Controller.
+- `cargo fmt --all` does not reach `sp-ui`, and `cargo fmt` inside it
+  reformats unrelated files: run `rustfmt --edition 2024 <file>` on the ones
+  you touched.

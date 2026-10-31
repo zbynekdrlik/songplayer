@@ -167,3 +167,9 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+SongPlayer.exe contains dstack 0.3.3 (its crates dante-stack and
+dante-audio-io), https://github.com/zbynekdrlik/dstack. dante-stack is licensed
+under the GNU General Public License, version 3 or later (GPL-3.0-or-later),
+and adapts parts of teodly/inferno, taken under the same license.
+dante-audio-io is licensed under MIT OR Apache-2.0.
