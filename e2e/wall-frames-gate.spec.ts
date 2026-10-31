@@ -50,12 +50,17 @@ test("judder fails and names the uneven boundaries", () => {
   ]);
 });
 
+/** Uneven boundaries held as a slip: long, then short, in turn. */
+function held(...at: number[]) {
+  return at.map((boundary, i) => ({ boundary, refreshes: i % 2 === 0 ? 3 : 1 }));
+}
+
 /** A take whose only defect is one slip at boundaries 708 and 709. */
 function oneSlip(): WallFramesReport {
   return {
     ...clean(),
     verdict: "defects",
-    refreshes: { judged: 1166, uneven: 2, unresolved: 0, uneven_samples: [708, 709] },
+    refreshes: { judged: 1166, uneven: 2, unresolved: 0, uneven_boundaries: held(708, 709) },
   };
 }
 
@@ -66,21 +71,28 @@ test("one slip per take passes (owner, #272, 30.10.2026)", () => {
 test("a lone uneven boundary is one slip and passes (#272, CI 41189187432)", () => {
   const report = oneSlip();
   report.refreshes!.uneven = 3;
-  report.refreshes!.uneven_samples = [8, 708, 709];
+  report.refreshes!.uneven_boundaries = held(8, 708, 709);
   expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toEqual([]);
+});
+
+test("a freeze is no slip, however few boundaries it touches (#272)", () => {
+  const report = oneSlip();
+  report.refreshes!.uneven = 1;
+  report.refreshes!.uneven_boundaries = [{ boundary: 708, refreshes: 4 }];
+  expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toHaveLength(1);
 });
 
 test("three slips per take pass (owner, #272, 31.10.2026)", () => {
   const report = oneSlip();
   report.refreshes!.uneven = 6;
-  report.refreshes!.uneven_samples = [8, 9, 708, 709, 900, 901];
+  report.refreshes!.uneven_boundaries = held(8, 9, 708, 709, 900, 901);
   expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toEqual([]);
 });
 
 test("four slips fail", () => {
   const report = oneSlip();
   report.refreshes!.uneven = 8;
-  report.refreshes!.uneven_samples = [8, 9, 708, 709, 900, 901, 1000, 1001];
+  report.refreshes!.uneven_boundaries = held(8, 9, 708, 709, 900, 901, 1000, 1001);
   expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toEqual([
     "wall-30: JUDDER: 8 of 1166 judged boundaries were held the wrong number of refreshes",
   ]);
@@ -89,21 +101,21 @@ test("four slips fail", () => {
 test("four lone uneven boundaries are four slips and fail", () => {
   const report = oneSlip();
   report.refreshes!.uneven = 4;
-  report.refreshes!.uneven_samples = [8, 208, 708, 900];
+  report.refreshes!.uneven_boundaries = held(8, 208, 708, 900);
   expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toHaveLength(1);
 });
 
 test("a run of seven neighbours is four slips and fails", () => {
   const report = oneSlip();
   report.refreshes!.uneven = 7;
-  report.refreshes!.uneven_samples = [700, 701, 702, 703, 704, 705, 706];
+  report.refreshes!.uneven_boundaries = held(700, 701, 702, 703, 704, 705, 706);
   expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toHaveLength(1);
 });
 
 test("a run of six neighbours is three slips and passes", () => {
   const report = oneSlip();
   report.refreshes!.uneven = 6;
-  report.refreshes!.uneven_samples = [700, 701, 702, 703, 704, 705];
+  report.refreshes!.uneven_boundaries = held(700, 701, 702, 703, 704, 705);
   expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toEqual([]);
 });
 
@@ -115,7 +127,7 @@ test("fewer listed boundaries than uneven ones fail", () => {
 
 test("a slip with no listed boundaries fails", () => {
   const report = oneSlip();
-  delete report.refreshes!.uneven_samples;
+  delete report.refreshes!.uneven_boundaries;
   expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toHaveLength(1);
 });
 
@@ -136,11 +148,11 @@ test("a slip beside any other defect fails, and the slip is named", () => {
 
 test("a slip in a take a clean verdict could not hold fails", () => {
   for (const weak of [
-    { refreshes: { judged: 1166, uneven: 2, unresolved: 0, inconsistent: 1, uneven_samples: [8, 9] } },
+    { refreshes: { judged: 1166, uneven: 2, unresolved: 0, inconsistent: 1, uneven_boundaries: held(8, 9) } },
     { unverified: { steps: 1 } },
     { decoded: 2000 },
-    { refreshes: { judged: 299, uneven: 2, unresolved: 0, uneven_samples: [8, 9] } },
-    { refreshes: { judged: 1166, uneven: 2, unresolved: 1, uneven_samples: [8, 9] } },
+    { refreshes: { judged: 299, uneven: 2, unresolved: 0, uneven_boundaries: held(8, 9) } },
+    { refreshes: { judged: 1166, uneven: 2, unresolved: 1, uneven_boundaries: held(8, 9) } },
   ]) {
     expect(wallFramesFailures("wall-30", EXIT_DEFECTS, { ...oneSlip(), ...weak })).not.toEqual([]);
   }

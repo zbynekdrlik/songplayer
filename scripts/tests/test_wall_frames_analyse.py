@@ -185,6 +185,7 @@ def test_a_repeated_boundary_is_judder_at_a_known_refresh_rate():
         "judged": 8,
         "uneven": 1,
         "uneven_samples": [4],
+        "uneven_boundaries": [{"boundary": 2, "refreshes": 4}],
         "unresolved": 0,
         "inconsistent": 0,
     }

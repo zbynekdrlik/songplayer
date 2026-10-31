@@ -98,6 +98,15 @@ def test_a_slip_still_reads_as_judder_at_the_spout_time_error():
     a, b = report["refreshes"]["uneven_samples"]
     assert b == a + 1
     assert report["verdict"] == "defects"
+    long, short = report["refreshes"]["uneven_boundaries"]
+    assert short["boundary"] == long["boundary"] + 1
+    assert (long["refreshes"], short["refreshes"]) == (3, 1)
+
+
+def test_a_freeze_reports_its_length():
+    report = spout_take(jitter(200) + [5000.0] + jitter(200))
+    held = report["refreshes"]["uneven_boundaries"]
+    assert [b["refreshes"] >= 290 for b in held] == [True]
 
 
 def plain(*levels: int) -> list[np.ndarray]:
