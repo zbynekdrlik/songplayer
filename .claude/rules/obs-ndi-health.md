@@ -1008,3 +1008,11 @@ the output every consumer takes, through cg OBS's own probe scene (below).
   green.
 - **Do not "fix" a red gate** by raising 40 ms, lowering 0.9/0.95, or skipping
   on exit 2. Find what moved the audio or the picture.
+
+## The A/V gate's playlist (#285, 1.11.2026)
+
+The gate compares the program with the song's original sidecars, so it plays a
+scene whose playlist has no gain or enabled EQ band (`pickFlatAudioScene`,
+`e2e/obs-baseline-scene.ts`: `sp-slow`, `sp-worship`, `sp-presence`, then any
+other flat one). The operator's ytslow at -21 dB + high-pass read as
+`audio_corr` 0.669, `glitches` 396 of 400. The gate never changes his settings.

@@ -96,7 +96,7 @@ import { spawn, spawnSync, type ChildProcess } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { ObsDriver } from "./obs-driver";
-import { pickBaselineScene } from "./obs-baseline-scene";
+import { PlaylistAudio, pickFlatAudioScene, playlistAudioIsFlat } from "./obs-baseline-scene";
 import {
   AV_PROBE_INPUT,
   AV_PROBE_SCENE,
@@ -630,11 +630,22 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
     ).toBe(false);
 
     // 1. Put the baseline sp-* output on program.
-    const baseline = pickBaselineScene(await driver.listScenes());
-    expect(
-      baseline.startsWith("sp-"),
-      `baseline scene must be an sp-* output, got "${baseline}"`,
-    ).toBe(true);
+    const playlists = await getJson<Array<{ id: number; ndi_output_name: string }>>(
+      request,
+      "/api/v1/playlists",
+    );
+    const flatScenes: string[] = [];
+    for (const playlist of playlists) {
+      const audio = await getJson<PlaylistAudio>(request, `/api/v1/playlists/${playlist.id}/audio`);
+      if (playlistAudioIsFlat(audio)) {
+        flatScenes.push(playlist.ndi_output_name.toLowerCase());
+      }
+    }
+    const baseline = pickFlatAudioScene(await driver.listScenes(), flatScenes);
+    if (baseline === null) {
+      throw new Error(`no sp-* scene has a playlist with flat audio (flat: ${flatScenes.join(", ")})`);
+    }
+    console.log(`A/V gate: baseline ${baseline}, flat scenes ${flatScenes.join(", ")}`);
     await driver.switchScene(baseline);
     // #221 L4b: the playback authority puts the baseline's playlist on air
     // a moment after the facade's switch; wait until it alone is on air.

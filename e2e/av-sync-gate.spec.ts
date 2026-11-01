@@ -226,6 +226,11 @@ test.describe("the A/V gate measures a playlist with no audio settings of its ow
     expect(pickFlatAudioScene(["sp-slow", "sp-worship"], ["sp-worship"])).toBe("sp-worship");
   });
 
+  test("a playlist that holds songs goes before one that may not", () => {
+    expect(pickFlatAudioScene(["sp-live", "sp-presence"], ["sp-live", "sp-presence"])).toBe("sp-presence");
+    expect(pickFlatAudioScene(["sp-live", "sp-alex"], ["sp-live", "sp-alex"])).toBe("sp-live");
+  });
+
   test("never a disallowed scene, and null when no scene is left", () => {
     expect(pickFlatAudioScene(["sp-fast", "sp-warmup", "sp-90s"], ["sp-fast", "sp-warmup", "sp-90s"])).toBeNull();
     expect(pickFlatAudioScene(["sp-slow"], [])).toBeNull();
