@@ -79,8 +79,8 @@ rubato = "=5.0.1"
 rtrb = "=0.4.0"
 # #285: the native Dante output. dstack by tag, no Dante code in this repo.
 # GPL-3.0-or-later: the owner's licence ruling is open on #285.
-dante-stack = { git = "https://github.com/zbynekdrlik/dstack", tag = "v0.4.16" }
-dante-audio-io = { git = "https://github.com/zbynekdrlik/dstack", tag = "v0.4.16" }
+dante-stack = { git = "https://github.com/zbynekdrlik/dstack", tag = "v0.4.28" }
+dante-audio-io = { git = "https://github.com/zbynekdrlik/dstack", tag = "v0.4.28" }
 # #228: the SP-program burn-id QR (911014, #151's payload). Pure-Rust
 # encoder; `default-features = false` drops the optional image / svg / pic
 # renderers (the module matrix needs none). MIT OR Apache-2.0 (its MIT notice

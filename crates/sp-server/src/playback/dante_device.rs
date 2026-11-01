@@ -311,11 +311,7 @@ impl AsioDevice for DanteDevice {
             .ok_or_else(|| Reason::Failed("the Dante device is not open".into()))?;
         let media = prepared.media();
         let cfg = prepared.config();
-        let timing = Timing {
-            block: u64::from(DANTE_BLOCK),
-            playout: self.params.latency_frames(),
-            margin: cfg.work_margin,
-        };
+        let timing = Timing::of(cfg);
         let bits = cfg.encoding;
         for ch in 0..DANTE_CHANNELS {
             if !media.tx.set_source(ch, Source::Engine) {
@@ -342,8 +338,7 @@ impl AsioDevice for DanteDevice {
         let stop = Arc::new(AtomicBool::new(false));
         let thread = stream::spawn(Arc::clone(&media.clock), pump, Arc::clone(&stop))
             .map_err(|e| Reason::Failed(format!("the Dante pump: {e}")))?;
-        let signals = Signals::Report(Arc::new(AtomicBool::new(false)));
-        let host = match prepared.start(signals) {
+        let host = match prepared.start(Signals::Host) {
             Ok(host) => host,
             Err(e) => {
                 stop.store(true, Ordering::Release);
