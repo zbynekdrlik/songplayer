@@ -14,7 +14,7 @@ import {
   recordingFiles,
   resolveSidecars,
 } from "./av-sync-gate";
-import { pickBaselineScene } from "./obs-baseline-scene";
+import { pickBaselineScene, pickFlatAudioScene, playlistAudioIsFlat } from "./obs-baseline-scene";
 
 test.describe("A/V sync gate helpers (#147)", () => {
   test("isPlayingWithFrames needs Playing AND frames in the last 5 s", () => {
@@ -207,5 +207,27 @@ test.describe("baseline scene picker (CLAUDE.md OBS discipline)", () => {
 
   test("falls back to a non-sp scene only when no other sp-* exists", () => {
     expect(pickBaselineScene(["sp-fast", "sp-warmup", "QR test"])).toBe("QR test");
+  });
+});
+
+test.describe("the A/V gate measures a playlist with no audio settings of its own", () => {
+  test("a playlist with a gain or an enabled EQ band is not flat", () => {
+    expect(playlistAudioIsFlat({ gain_db: 0, eq: [] })).toBe(true);
+    expect(playlistAudioIsFlat({ gain_db: 0, eq: [{ enabled: false }] })).toBe(true);
+    expect(playlistAudioIsFlat({ gain_db: -21, eq: [] })).toBe(false);
+    expect(playlistAudioIsFlat({ gain_db: 0, eq: [{ enabled: true }] })).toBe(false);
+  });
+
+  test("sp-slow stays the first choice while it is flat", () => {
+    expect(pickFlatAudioScene(["sp-worship", "sp-slow"], ["sp-worship", "sp-slow"])).toBe("sp-slow");
+  });
+
+  test("an operator's gain on sp-slow moves the gate to another flat scene", () => {
+    expect(pickFlatAudioScene(["sp-slow", "sp-worship"], ["sp-worship"])).toBe("sp-worship");
+  });
+
+  test("never a disallowed scene, and null when no scene is left", () => {
+    expect(pickFlatAudioScene(["sp-fast", "sp-warmup", "sp-90s"], ["sp-fast", "sp-warmup", "sp-90s"])).toBeNull();
+    expect(pickFlatAudioScene(["sp-slow"], [])).toBeNull();
   });
 });
