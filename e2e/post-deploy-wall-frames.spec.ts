@@ -208,6 +208,8 @@ test.describe("the LED wall shows every frame, in order, on its cadence (#272)",
         `wall frames ${clip.name}: exit ${result.code}, verdict ${r?.verdict ?? "-"}, ` +
           `boundaries ${r?.boundaries ?? "-"}, judged ${r?.refreshes?.judged ?? "-"}, ` +
           `uneven ${r?.refreshes?.uneven ?? "-"} ${JSON.stringify(r?.refreshes?.uneven_boundaries ?? [])}, ` +
+          `unresolved ${r?.refreshes?.unresolved ?? "-"}, inconsistent ${r?.refreshes?.inconsistent ?? "-"}, ` +
+          `unverified steps ${r?.unverified?.steps ?? "-"}, ` +
           `jumps back ${r?.jumps_back ?? "-"}, ` +
           `lost ${r?.lost_frames ?? "-"}, decoded ${r?.decoded ?? "-"}/${r?.samples ?? "-"}, ` +
           `located ${JSON.stringify(r?.located ?? null)}`,
