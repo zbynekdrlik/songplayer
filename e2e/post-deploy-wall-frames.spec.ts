@@ -22,17 +22,20 @@
  *
  * It needs Arena's wall clip on SongPlayer's program (`SP-program-MAX`, or
  * NDI `SP-program`): a wall showing another source reads nothing and fails
- * by name. It restores the program source it found, then leaves camera-box's
+ * by name. Each take also reads `SP-program-MAX`, the sender Arena takes, at
+ * the same time: the sender keeps the strict gate, Arena's output has the
+ * budget of closed software (the owner, #285, 1.11.2026). It restores the program source it found, then leaves camera-box's
  * clip as the test item's remembered clip (`/start` + `/stop`, no body).
  */
 
 import { test, expect, APIRequestContext } from "@playwright/test";
-import { spawnSync } from "child_process";
+import { spawn } from "child_process";
 import * as path from "path";
 import {
   ArenaLayer,
   EXIT_NOTHING_DECODED,
   WallFramesReport,
+  arenaOutputFailures,
   coveringLayers,
   wallFramesFailures,
 } from "./wall-frames-gate";
@@ -46,6 +49,8 @@ const PYTHON =
 const READER = path.resolve(__dirname, "..", "scripts", "wall_frames.py");
 /** Arena's Spout sender of the wall screen (`snv surround 7680`'s Screen 2). */
 const SPOUT_SENDER = process.env.SP_WALL_SPOUT_SENDER || "Arena - Screen 2";
+/** SongPlayer's own sender, the picture Arena reads. */
+const INPUT_SENDER = "SP-program-MAX";
 /** An optional region `L,T,R,B` of the sender's picture, a manual override.
  *  #272 v2: with none, the reader finds the clip's copies on the whole
  *  picture and reads only their strip rows and columns, so a change of
@@ -104,36 +109,67 @@ async function waitOnAir(request: APIRequestContext, row: string, ms: number): P
   throw new Error(`the clip ${row} did not play on program within 25 s (on air: ${last})`);
 }
 
-/** One Spout take of `fps`'s clip: the reader's exit code and report. */
-function take(fps: number): { code: number | null; report: WallFramesReport | null; stderr: string } {
+interface Take {
+  code: number | null;
+  report: WallFramesReport | null;
+  stderr: string;
+}
+
+/** One Spout take of `sender` on `fps`'s clip, so two can read the same span. */
+function take(sender: string, fps: number): Promise<Take> {
   const args = [
     READER,
     "--fps",
     String(fps),
     "--spout",
-    SPOUT_SENDER,
+    sender,
     "--refresh-hz",
     REFRESH_HZ,
     "--seconds",
     String(TAKE_S),
   ];
-  if (REGION) {
+  if (REGION && sender === SPOUT_SENDER) {
     args.push("--region", REGION);
   }
-  const run = spawnSync(PYTHON, args, {
-    cwd: path.dirname(READER),
-    encoding: "utf8",
-    timeout: (TAKE_S + 90) * 1000,
-    windowsHide: true,
-    maxBuffer: 64 * 1024 * 1024,
+  return new Promise((resolve) => {
+    const child = spawn(PYTHON, args, {
+      cwd: path.dirname(READER),
+      timeout: (TAKE_S + 90) * 1000,
+      windowsHide: true,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d) => (stdout += d));
+    child.stderr.on("data", (d) => (stderr += d));
+    child.on("error", (err) => (stderr += `${err}`));
+    child.on("close", (code) => {
+      let report: WallFramesReport | null = null;
+      try {
+        report = JSON.parse(stdout) as WallFramesReport;
+      } catch {
+        report = null;
+      }
+      resolve({ code, report, stderr });
+    });
   });
-  let report: WallFramesReport | null = null;
-  try {
-    report = JSON.parse(run.stdout) as WallFramesReport;
-  } catch {
-    report = null;
+}
+
+/** The one log line of a take. */
+function logTake(label: string, result: Take): void {
+  const r = result.report;
+  console.log(
+    `wall frames ${label}: exit ${result.code}, verdict ${r?.verdict ?? "-"}, ` +
+      `boundaries ${r?.boundaries ?? "-"}, judged ${r?.refreshes?.judged ?? "-"}, ` +
+      `uneven ${r?.refreshes?.uneven ?? "-"} ${JSON.stringify(r?.refreshes?.uneven_boundaries ?? [])}, ` +
+      `unresolved ${r?.refreshes?.unresolved ?? "-"}, inconsistent ${r?.refreshes?.inconsistent ?? "-"}, ` +
+      `unverified steps ${r?.unverified?.steps ?? "-"}, ` +
+      `jumps back ${r?.jumps_back ?? "-"}, ` +
+      `lost ${r?.lost_frames ?? "-"}, decoded ${r?.decoded ?? "-"}/${r?.samples ?? "-"}, ` +
+      `located ${JSON.stringify(r?.located ?? null)}`,
+  );
+  if (result.stderr.trim()) {
+    console.log(`wall frames ${label} stderr: ${result.stderr.trim().slice(0, 2000)}`);
   }
-  return { code: run.status, report, stderr: `${run.error ?? ""}${run.stderr ?? ""}` };
 }
 
 /** Arena's REST (read only), the URL `post-deploy.spec.ts` reads. */
@@ -202,22 +238,14 @@ test.describe("the LED wall shows every frame, in order, on its cadence (#272)",
         await cut(request, testPlaylist);
       }
       await waitOnAir(request, clip.row, 3_000);
-      const result = take(clip.fps);
-      const r = result.report;
-      console.log(
-        `wall frames ${clip.name}: exit ${result.code}, verdict ${r?.verdict ?? "-"}, ` +
-          `boundaries ${r?.boundaries ?? "-"}, judged ${r?.refreshes?.judged ?? "-"}, ` +
-          `uneven ${r?.refreshes?.uneven ?? "-"} ${JSON.stringify(r?.refreshes?.uneven_boundaries ?? [])}, ` +
-          `unresolved ${r?.refreshes?.unresolved ?? "-"}, inconsistent ${r?.refreshes?.inconsistent ?? "-"}, ` +
-          `unverified steps ${r?.unverified?.steps ?? "-"}, ` +
-          `jumps back ${r?.jumps_back ?? "-"}, ` +
-          `lost ${r?.lost_frames ?? "-"}, decoded ${r?.decoded ?? "-"}/${r?.samples ?? "-"}, ` +
-          `located ${JSON.stringify(r?.located ?? null)}`,
-      );
-      if (result.stderr.trim()) {
-        console.log(`wall frames ${clip.name} stderr: ${result.stderr.trim().slice(0, 2000)}`);
-      }
-      failures.push(...wallFramesFailures(clip.name, result.code, result.report));
+      const [result, input] = await Promise.all([
+        take(SPOUT_SENDER, clip.fps),
+        take(INPUT_SENDER, clip.fps),
+      ]);
+      logTake(clip.name, result);
+      logTake(`${clip.name} sender`, input);
+      failures.push(...arenaOutputFailures(clip.name, result.code, result.report));
+      failures.push(...wallFramesFailures(`${clip.name} sender`, input.code, input.report));
       if (result.code === EXIT_NOTHING_DECODED) {
         failures.push(`${clip.name}: Arena layers above SongPlayer's clip: ${await whatCovers()}`);
       }

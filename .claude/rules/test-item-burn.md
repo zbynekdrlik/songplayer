@@ -528,7 +528,12 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
     (`diag\wall-bridge\strip_probe.ps1`), and run `wall_locate.locate`
     on it (the copies found, their cell).
   - Only exit 0 with verdict `clean` passes, or a take whose ONE defect is
-    slips (owner, #272, 31.10.2026: at most 3 per 40 s take, `MAX_SLIPS`):
+    slips (owner, #285, 1.11.2026: Arena is closed software, so each take also
+    reads `SP-program-MAX` at the same time; that sender keeps `MAX_SLIPS`, and
+    Arena's output has `ARENA_MAX_SLIPS` = 8, a contradictory boundary counted
+    as a slip, `arenaOutputFailures`; a lost frame, jump back or stall fails on
+    either. Measured sender even, output 7-9 uneven) (owner, #272, 31.10.2026:
+    at most 3 per 40 s take, `MAX_SLIPS`):
     one picture a refresh long and the next a refresh short, everything a
     clean verdict needs besides (`slipsOnly`). A run of neighbouring uneven
     boundaries counts one slip per two, rounded up, so a lone one is a slip

@@ -12,6 +12,11 @@
  * 31.10.2026: at most `MAX_SLIPS` per 40 s take; a slip is one picture held a
  * refresh long, the next a refresh short). An incomplete or failed capture
  * fails too, named as what it is, never as judder.
+ *
+ * Arena is closed software (the owner, #285, 1.11.2026): what it adds cannot be
+ * fixed here, so its output has a budget of its own and SongPlayer's sender,
+ * read in the same take, keeps `MAX_SLIPS` (`arenaOutputFailures`). A lost
+ * frame, a jump back or a stall fails on either.
  */
 
 /** The reader's report fields the gate reads (`wall_analysis.analyse`). */
@@ -57,9 +62,20 @@ const MIN_COVERAGE = 0.95;
 const MIN_JUDGED = 300;
 /** The slips a take may hold (the owner, #272, 31.10.2026). */
 const MAX_SLIPS = 3;
+/** The slips Arena's own output may hold per 40 s take while the sender is
+ *  even. Measured 1.11.2026 in takes with an even sender: 7 to 9 uneven
+ *  boundaries + 2 to 3 inconsistent ones, 6 to 7 by this count. */
+export const ARENA_MAX_SLIPS = 8;
 /** A slip holds a picture one refresh long on a 60 Hz wall: 3. More is a
  *  stall, which never passes as a slip. */
 const MAX_SLIP_REFRESHES = 3;
+
+/** How many slips a take may hold, and whether a boundary whose timing
+ *  contradicts itself counts as one (Arena's output) or fails the take. */
+interface SlipBudget {
+  maxSlips: number;
+  inconsistentIsSlip: boolean;
+}
 
 /** The slips the uneven boundaries make: two neighbours are one, one picture
  *  long and the next short; a lone boundary is one too, so a run counts one
@@ -79,16 +95,18 @@ function slipCount(at: number[]): number {
 /** Whether the take's only defect is at most `MAX_SLIPS` slips, with
  *  everything a clean verdict needs besides. A boundary the capture left
  *  unresolved may be a slip, so it counts as one. */
-function slipsOnly(report: WallFramesReport): boolean {
+function slipsOnly(report: WallFramesReport, budget: SlipBudget): boolean {
   const r = report.refreshes;
   const uneven = r?.uneven_boundaries ?? [];
+  const inconsistent = r?.inconsistent ?? 0;
+  const counted = budget.inconsistentIsSlip ? inconsistent : 0;
   return (
     r !== null &&
-    r.uneven + r.unresolved > 0 &&
+    r.uneven + r.unresolved + counted > 0 &&
     uneven.length === r.uneven &&
     uneven.every((b) => b.refreshes <= MAX_SLIP_REFRESHES) &&
-    slipCount(uneven.map((b) => b.boundary)) + r.unresolved <= MAX_SLIPS &&
-    (r.inconsistent ?? 0) === 0 &&
+    slipCount(uneven.map((b) => b.boundary)) + r.unresolved + counted <= budget.maxSlips &&
+    inconsistent === counted &&
     r.judged >= MIN_JUDGED &&
     report.unverified.steps === 0 &&
     report.decoded >= MIN_COVERAGE * report.samples &&
@@ -104,6 +122,7 @@ export function wallFramesFailures(
   clip: string,
   exitCode: number | null,
   report: WallFramesReport | null,
+  budget: SlipBudget = { maxSlips: MAX_SLIPS, inconsistentIsSlip: false },
 ): string[] {
   const where = `${clip}:`;
   if (exitCode === EXIT_NOTHING_DECODED) {
@@ -124,7 +143,7 @@ export function wallFramesFailures(
   }
   const judged = exitCode === EXIT_DEFECTS && report.verdict === "defects";
   const unresolved = exitCode === EXIT_INCOMPLETE && report.verdict === "incomplete";
-  if ((judged || unresolved) && slipsOnly(report)) {
+  if ((judged || unresolved) && slipsOnly(report, budget)) {
     return [];
   }
   const failures = defects(where, report);
@@ -141,6 +160,19 @@ export function wallFramesFailures(
     return [`${where} the reader exited ${exitCode} with the verdict ${report.verdict}`];
   }
   return [];
+}
+
+/** The gate's failures for Arena's output, the take beside an even sender:
+ *  `ARENA_MAX_SLIPS`, a contradictory boundary counted as a slip. */
+export function arenaOutputFailures(
+  clip: string,
+  exitCode: number | null,
+  report: WallFramesReport | null,
+): string[] {
+  return wallFramesFailures(clip, exitCode, report, {
+    maxSlips: ARENA_MAX_SLIPS,
+    inconsistentIsSlip: true,
+  });
 }
 
 /** One line per defect counter that is not zero. */

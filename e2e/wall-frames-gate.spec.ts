@@ -15,6 +15,7 @@ import {
   EXIT_USAGE,
   ArenaLayer,
   WallFramesReport,
+  arenaOutputFailures,
   coveringLayers,
   wallFramesFailures,
 } from "./wall-frames-gate";
@@ -332,4 +333,52 @@ test("Arena's Blank generator draws nothing, so a Blank clip above the MAX clip 
     layer([["SNV BG", true, "NDI Source"]]),
   ];
   expect(coveringLayers(layers)).toEqual(["L4 'SNV BG'"]);
+});
+
+/** A take of Arena's output: `slips` slips + `inconsistent` contradictory boundaries. */
+function arenaTake(slips: number, inconsistent: number): WallFramesReport {
+  const report = oneSlip();
+  const uneven = unevenSlips(slips);
+  report.refreshes = { ...report.refreshes!, uneven: uneven.length, uneven_boundaries: uneven, inconsistent };
+  return report;
+}
+
+function unevenSlips(slips: number): { boundary: number; refreshes: number }[] {
+  return Array.from({ length: slips }, (_, i) => [
+    { boundary: 100 * (i + 1), refreshes: 3 },
+    { boundary: 100 * (i + 1) + 1, refreshes: 1 },
+  ]).flat();
+}
+
+test("Arena's output passes its measured take: 4 slips, 3 contradictory boundaries (#285)", () => {
+  expect(arenaOutputFailures("wall-25", EXIT_DEFECTS, arenaTake(4, 3))).toEqual([]);
+});
+
+test("the sender does not get Arena's budget (#285)", () => {
+  expect(wallFramesFailures("wall-25", EXIT_DEFECTS, arenaTake(4, 0))).not.toEqual([]);
+  expect(wallFramesFailures("wall-25", EXIT_DEFECTS, arenaTake(1, 1))).not.toEqual([]);
+});
+
+test("Arena's output fails over 8 slips, contradictory boundaries counted (#285)", () => {
+  expect(arenaOutputFailures("wall-25", EXIT_DEFECTS, arenaTake(8, 0))).toEqual([]);
+  expect(arenaOutputFailures("wall-25", EXIT_DEFECTS, arenaTake(6, 3))).not.toEqual([]);
+  expect(arenaOutputFailures("wall-25", EXIT_DEFECTS, arenaTake(9, 0))).not.toEqual([]);
+});
+
+test("Arena's budget never covers a lost frame, a jump back or a stall (#285)", () => {
+  const stall = arenaTake(1, 0);
+  stall.refreshes!.uneven_boundaries![0].refreshes = 4;
+  for (const report of [
+    { ...arenaTake(1, 0), lost_frames: 1 },
+    { ...arenaTake(1, 0), jumps_back: 1 },
+    stall,
+  ]) {
+    expect(arenaOutputFailures("wall-25", EXIT_DEFECTS, report)).not.toEqual([]);
+  }
+});
+
+test("Arena's output with only contradictory boundaries, verdict incomplete, passes (#285)", () => {
+  const report = arenaTake(0, 2);
+  report.verdict = "incomplete";
+  expect(arenaOutputFailures("wall-25", EXIT_INCOMPLETE, report)).toEqual([]);
 });
