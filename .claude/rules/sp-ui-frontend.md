@@ -264,7 +264,7 @@ mixer was "hrozne škaredý"; he wants ONE modern mixer everywhere).
   is OUTSIDE the workspace; `test-wasm` is only `cargo check -p sp-core`). So the
   mappings (`song_gains_for_preset`/`song_preset_for_gains`, dub
   `ratio_to_faders`/`faders_to_ratio`/`dub_ratio_for_preset`/`dub_preset_for_ratio`,
-  the unified `gains_for_preset`/`preset_for_gains`, `channel_labels`, `presets`)
+  `presets`)
   live in `crates/sp-core/src/mixer_model.rs` (WASM-safe, covered by the workspace
   Test job + the diff-scoped mutation gate) and sp-ui imports them. Preset matching
   quantises to integer permille so it tolerates the UI's integer-percent fader

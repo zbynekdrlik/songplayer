@@ -153,7 +153,7 @@ exclude_re = [
   'sp-server/src/lyrics/mtl_aligner',
   # orchestrator.rs asr_transcribe (line-agnostic — the line shifted 495->499 and
   #   the old pin missed on run 34784800346 shard 3/8): the RealReferenceStageBackend
-  #   ASR call hits the live AssemblyAI HTTP API; network-bound, no local unit
+  #   ASR call hits the live Gemini API (g35t_client); network-bound, no local unit
   #   test (same class as g35t_client's #[mutants::skip] HTTP helpers).
   'orchestrator\.rs:[0-9]+:[0-9]+: replace <impl ReferenceStageBackend for RealReferenceStageBackend>::asr_transcribe',
 

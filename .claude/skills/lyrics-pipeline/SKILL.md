@@ -292,7 +292,7 @@ owner's call on #144, asked separately.
     (`acquire_slot`) means at most ONE heavy child (isolation / mtl / separation)
     runs process-wide — the lyrics and stem workers can never OOM the box
     together (they did, 07:40 → SongPlayer abort 0xc0000409 + OBS died).
-  - Before each heavy step a `GlobalMemoryStatusEx` check (`heavy_step_memory_ok`)
+  - Before each heavy step a `GlobalMemoryStatusEx` check (`memory_ok_for`)
     requires ≥ 4 GiB free physical AND commit, else it defers with no backoff
     (`WaitingForMemory` / stem row stays pending); each child also runs in a
     Windows Job Object capped at 6 GiB so an OOM kills the child, not the host.

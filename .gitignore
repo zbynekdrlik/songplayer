@@ -21,3 +21,4 @@ e2e/test-results/
 
 # Lyrics eval local cache (vocal stems, downloaded audio)
 eval/lyrics/.eval-cache/
+e2e/post-deploy-report/

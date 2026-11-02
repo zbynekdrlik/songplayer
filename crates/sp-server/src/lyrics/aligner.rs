@@ -101,8 +101,6 @@ fn preprocess_vocals_args(
 /// skip Demucs entirely and return the existing path. Demucs on a 10-min
 /// song can take 5–10 min on CPU; re-running it unnecessarily on every
 /// worker pick-up was timing out at 600 s and blocking the entire pipeline.
-/// The Python prototype's `scripts/experiments/gemini_lyrics.py` also
-/// relied on caller-side caching of the vocals WAV.
 #[cfg_attr(test, mutants::skip)]
 #[allow(clippy::too_many_arguments)]
 pub async fn preprocess_vocals(

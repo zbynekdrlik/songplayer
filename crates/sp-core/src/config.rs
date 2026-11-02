@@ -13,7 +13,6 @@ pub const SETTING_GEMINI_API_KEY: &str = "gemini_api_key";
 pub const SETTING_GEMINI_MODEL: &str = "gemini_model";
 pub const SETTING_CACHE_DIR: &str = "cache_dir";
 pub const SETTING_MAX_RESOLUTION: &str = "max_resolution";
-pub const SETTING_API_PORT: &str = "api_port";
 /// #184 round H step 2: the dub output voice. `speaker` (the default,
 /// [`DUB_VOICE_SPEAKER`]) = the model speaks in the speaker's OWN voice (no
 /// `speech_config`, owner decision #184 5797691198); any other value pins that
