@@ -41,6 +41,7 @@
 use std::collections::BTreeSet;
 
 use sp_core::config::PROGRAM_INPUT_ID;
+use sp_core::dante_status::DanteFigures;
 
 use super::model::{Counter, Event, Meter, Probe, Severity, StateFlag, kinds};
 use crate::playback::asio_loop::{LoopEventKind, LoopState, LoopStatus};
@@ -141,6 +142,15 @@ fn asio_into(probe: &mut Probe, asio: &AsioStatus) {
     });
 }
 
+/// A Dante output's own faults, beside the ones its seam reports as ASIO.
+fn dante_into(probe: &mut Probe, dante: &DanteFigures) {
+    probe.counters.extend([
+        Counter::loss(kinds::PUMP_MISSED, dante.pump_missed),
+        Counter::risk(kinds::PUMP_LATE, dante.pump_late),
+        Counter::risk(kinds::PUMP_OVERRUN, dante.pump_overruns),
+    ]);
+}
+
 /// Whether an output's loop check ran (it checks now, or it has time).
 pub fn loop_ran(status: &LoopStatus) -> bool {
     status.state != LoopState::Off || status.checked_s + status.blind_s > 0.0
@@ -217,6 +227,9 @@ pub fn output_probes(outputs: &[OutputStatus]) -> Vec<Probe> {
         }
         if let Some(asio) = &output.asio {
             asio_into(&mut probe, asio);
+        }
+        if let Some(dante) = &output.dante {
+            dante_into(&mut probe, dante);
         }
         probes.push(probe);
         if let Some(asio) = &output.asio

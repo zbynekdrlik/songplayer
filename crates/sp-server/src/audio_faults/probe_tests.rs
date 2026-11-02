@@ -7,6 +7,8 @@ use std::sync::Arc;
 use sp_core::config::{PROGRAM_BLANK_ID, PROGRAM_INPUT_ID, PROGRAM_INPUT_LABEL};
 
 use super::*;
+use sp_core::dante_status::DanteFigures;
+
 use crate::audio_faults::model::{Counter, Event, Meter, Probe, Severity, StateFlag, kinds};
 use crate::playback::asio_loop::{LoopEvent, LoopEventKind, LoopState, LoopStatus};
 use crate::playback::asio_out::AsioStatus;
@@ -242,6 +244,34 @@ fn asio_output(asio: AsioStatus) -> OutputStatus {
         asio: Some(asio),
         ..output("out-2", true, 1_800, 3)
     }
+}
+
+/// #285: the date step cost `pump_missed` +1200 on dstack ≤ 0.4.15 and the
+/// ledger read clean, since only `GET /api/v1/program` carried the number.
+#[test]
+fn a_dante_output_loses_its_missed_blocks_and_risks_its_late_ones() {
+    let dante = DanteFigures {
+        pump_missed: 21,
+        pump_late: 22,
+        pump_overruns: 23,
+        ..DanteFigures::default()
+    };
+    let out = OutputStatus {
+        kind: "dante",
+        dante: Some(dante),
+        ..output("out-4", true, 1_800, 3)
+    };
+    let probes = output_probes(&[out]);
+    assert_eq!(probes.len(), 1);
+    assert_eq!(
+        probes[0].counters,
+        vec![
+            Counter::loss(kinds::BLOCKS_DROPPED, 3),
+            Counter::loss(kinds::PUMP_MISSED, 21),
+            Counter::risk(kinds::PUMP_LATE, 22),
+            Counter::risk(kinds::PUMP_OVERRUN, 23),
+        ]
+    );
 }
 
 #[test]

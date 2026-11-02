@@ -399,6 +399,9 @@ fn every_kind_reads_in_slovak_an_unknown_one_as_sent() {
         ("limited", "limiter"),
         ("ndi_late", "NDI neskoro"),
         ("unserviced", "neobslúžený slot"),
+        ("pump_missed", "vynechaný blok Dante"),
+        ("pump_late", "oneskorený blok Dante"),
+        ("pump_overrun", "prekročený blok Dante"),
         ("start", "spustenie"),
         ("brand_new_kind", "brand_new_kind"),
     ];
