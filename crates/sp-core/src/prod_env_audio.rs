@@ -324,8 +324,8 @@ pub struct AudioProfile {
 
 /// The report-only facts that are not the production ones, in Slovak: the
 /// Dante adapter's driver model (its effect is still being measured), the
-/// active power scheme and core parking (the setup script applies it; it
-/// stays report-only here). None of them is a problem. The Windows Update
+/// active power scheme and core parking (the setup script applies core
+/// parking; both stay report-only here). None of them is a problem. The Windows Update
 /// driver exclusion was one until #255 lane 2 made it a gate.
 pub fn notes(p: &AudioProfile) -> Vec<String> {
     let mut notes = Vec::new();
@@ -355,8 +355,13 @@ pub fn notes(p: &AudioProfile) -> Vec<String> {
             )),
         },
     }
-    if p.power.scheme_guid.is_none() {
-        notes.push("aktívny plán napájania sa nepodarilo zistiť".to_string());
+    match p.power.scheme_guid.as_deref() {
+        None => notes.push("aktívny plán napájania sa nepodarilo zistiť".to_string()),
+        Some(guid) if ECONOMY_SCHEMES.contains(&guid.to_ascii_lowercase().as_str()) => {
+            let name = p.power.scheme_name.as_deref().unwrap_or(guid);
+            notes.push(format!("aktívny plán napájania je úsporný: {name}"));
+        }
+        Some(_) => {}
     }
     match p.power.core_parking_min_cores_pct {
         Some(pct) if pct < FULL_CORES_PCT => notes.push(format!(
@@ -367,6 +372,15 @@ pub fn notes(p: &AudioProfile) -> Vec<String> {
     }
     notes
 }
+
+/// Windows' Balanced and Power saver schemes. PP ran the event of 14.10 on
+/// Balanced with core parking still at 100 %, and that read showed nothing
+/// (#255). Any other scheme is the operator's own (High performance, Ultimate,
+/// Bitsum).
+pub const ECONOMY_SCHEMES: [&str; 2] = [
+    "381b4222-f694-41f0-9685-ff5bb260df2e",
+    "a1841308-3541-4fab-bc81-f71556f20b4a",
+];
 
 /// Core parking is off when its minimum keeps every core (100 %).
 pub const FULL_CORES_PCT: u32 = 100;
