@@ -3,11 +3,11 @@
 
 use std::net::{SocketAddr, SocketAddrV4, UdpSocket};
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use dante_stack::flows::client::Client;
-use dante_stack::flows::control::{FlowRequest, PORT};
-use dante_stack::media::packet;
+use dstack::flows::client::Client;
+use dstack::flows::control::{FlowRequest, PORT};
+use dstack::media::packet;
 use sp_core::audio_outputs::RateChoice;
 
 use super::*;
@@ -74,30 +74,34 @@ fn a_short_ring_is_silence_and_an_underrun_only_once_primed() {
     assert_eq!(counts.consumed.load(Ordering::Relaxed), 4);
 }
 
+/// dstack's numbers for program audio (2.11.2026): 10 ms, block 32, a margin
+/// of half the latency, the `normal` profile.
 #[test]
-fn a_config_the_stack_takes_two_tx_no_rx_at_the_network_rate() {
-    let dir = tempfile::tempdir().unwrap();
-    let cfg = dante_stack::device::DeviceConfig::from_toml(
-        &params(dir.path(), Ipv4Addr::LOCALHOST).config_text(),
-    )
-    .unwrap();
+fn the_device_is_two_tx_no_rx_on_dlinks_defaults_at_the_network_rate() {
+    let cfg = params(Path::new("x"), Ipv4Addr::LOCALHOST)
+        .config()
+        .device()
+        .unwrap();
     assert_eq!(cfg.name, "SongPlayer-test");
     assert!(cfg.rx.is_empty());
     assert_eq!(cfg.tx.len(), 2);
     assert_eq!(cfg.sample_rate, 96_000);
     assert_eq!(cfg.encoding, 24);
-    assert_eq!(cfg.block, u64::from(DANTE_BLOCK));
-    assert_eq!(cfg.latency_ns, DANTE_LATENCY_NS);
+    assert_eq!(cfg.block, 32);
+    assert_eq!(cfg.latency_ns, 10_000_000);
+    assert_eq!(cfg.work_margin, 480);
+    assert_eq!(
+        (cfg.manufacturer.as_str(), cfg.model.as_str()),
+        ("New Level", "SongPlayer")
+    );
 }
 
+/// What Dante Controller set survives: the state file stays where it was.
 #[test]
-fn a_windows_state_path_stays_one_toml_string() {
-    let mut p = params(Path::new("x"), Ipv4Addr::LOCALHOST);
-    p.dir = PathBuf::from(r"C:\ProgramData\SongPlayer\dante");
-    assert!(
-        p.config_text()
-            .contains(r#"C:\\ProgramData\\SongPlayer\\dante"#)
-    );
+fn the_state_file_stays_in_the_devices_directory() {
+    let dir = PathBuf::from("C:/ProgramData/SongPlayer/dante");
+    let cfg = params(&dir, Ipv4Addr::LOCALHOST).config().device().unwrap();
+    assert_eq!(cfg.state_file, dir.join("state.toml"));
 }
 
 #[test]
@@ -200,13 +204,24 @@ fn an_output_with_no_device_running_shows_no_dante_figures() {
 }
 
 #[test]
-fn a_taken_address_fails_the_open_and_names_no_panic() {
+fn an_address_no_adapter_holds_fails_the_start_and_names_no_panic() {
     let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
     // No such address on this machine.
     let mut device = DanteDevice::new(params(dir.path(), Ipv4Addr::new(192, 0, 2, 77)));
-    assert!(device.open("", [0, 1]).is_err());
+    device.open("", [0, 1]).unwrap();
+    let (_tx, rx) = rtrb::RingBuffer::new(1024);
+    assert!(device.start(rx).is_err());
     device.close();
+}
+
+#[test]
+fn a_name_the_stack_refuses_fails_the_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut p = params(dir.path(), Ipv4Addr::LOCALHOST);
+    p.device = "-bad".into();
+    let refused = DanteDevice::new(p).open("", [0, 1]).err();
+    assert!(matches!(refused, Some(Reason::Refused(_))), "{refused:?}");
 }
 
 /// A receiver of ours asks for the flow and reads the program's samples.
@@ -218,7 +233,7 @@ fn the_device_serves_a_receiver_the_rings_audio() {
     let mut device = DanteDevice::new(params(dir.path(), ip));
     let opened = device.open("", [0, 1]).expect("the device set up");
     assert_eq!(opened.rate, 96_000.0);
-    assert_eq!(opened.buffer_frames, DANTE_BLOCK);
+    assert_eq!(opened.buffer_frames, 32);
     let (mut tx, rx) = rtrb::RingBuffer::new(1 << 16);
     assert_eq!(
         device
@@ -267,7 +282,7 @@ fn the_device_serves_a_receiver_the_rings_audio() {
         .expect("two 24-bit slots");
     }
     assert!(left && right, "both channels on the wire");
-    assert!(device.consumed_frames() >= u64::from(DANTE_BLOCK));
+    assert!(device.consumed_frames() >= 32);
     assert!(device.poll().callbacks > 0);
     assert!(!device.poll().reset);
     device.close();
@@ -374,7 +389,9 @@ fn a_program_block_reaches_the_wire_through_the_asio_worker() {
 /// channel names, so DVS is replaced with no change on any receiver.
 #[test]
 fn the_channels_carry_dvs_s_names() {
-    let dir = tempfile::tempdir().unwrap();
-    let text = params(dir.path(), Ipv4Addr::LOCALHOST).config_text();
-    assert!(text.contains("tx = [\"01\", \"02\"]"), "{text}");
+    let cfg = params(Path::new("x"), Ipv4Addr::LOCALHOST)
+        .config()
+        .device()
+        .unwrap();
+    assert_eq!(cfg.tx, ["01", "02"]);
 }

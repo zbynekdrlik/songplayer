@@ -1380,11 +1380,9 @@ difference with its UTC time.
 
 ## The native Dante output (#285)
 
-- **Not in production.** dstack's problem A (a Windows TX stall, and a media
-  wait that spins about a core per thread) is open, so no Dante output is
-  enabled on SNV or PP before dstack sends its tag. A new entry starts off.
-  `dante-stack` is GPL-3.0-or-later and SongPlayer MIT: the dependency does
-  not reach `main` before the owner's answer on #285.
+- **Live on resolume-snv since 1.11.2026, never on PP** (the owner's hold). dstack
+  is GPL-3.0-or-later and SongPlayer MIT: no `main` before the owner's answer on
+  #285.
 - `type: dante` in `audio_outputs`, at most one, `DanteDest {device, ip}`: the
   device name by Dante's own rule, the `ip` one IPv4 of this PC (a second
   address beside DVS, `Place::Ip`).
@@ -1393,7 +1391,13 @@ difference with its UTC time.
   `asio_out`'s worker, ring, `asrc_servo` and status serve it, so a second servo
   never appears. dstack by git tag, no Dante protocol code here. `RingProcess`
   is the stack's callback: like a buffer switch it allocates, locks and logs
-  nothing. Two TX channels at the network rate, 24-bit, block 128, 10 ms.
+  nothing. Two TX channels at the network rate on `dlink`'s defaults (24-bit,
+  block 32, 10 ms, a margin of half the latency, the `normal` profile). `Link`
+  sets up and starts in one call, so a refused address fails the seam's `start`;
+  only a refused config fails `open`. `Link` hides `PumpStats`, so a panicked
+  callback no longer reads `faulted`: the worker's 2 s stall watch ends that run.
+  The rule against `timing = "normal"` (the 31.10 peaks) holds until the FOH
+  console, read by dstack, has judged a dlink build.
 - `outputs[i]` = the ASIO worker's line under `asio` plus `dante`
   (`sp_core::dante_status::DanteFigures`) while a device runs: read through
   `DanteLink`, which the worker sets at the start and clears at the close, from

@@ -402,33 +402,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dante-audio-io"
-version = "0.4.28"
-source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.4.28#0742997f7d9a45f610426c975e08fa2db8d04be7"
-
-[[package]]
-name = "dante-stack"
-version = "0.4.28"
-source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.4.28#0742997f7d9a45f610426c975e08fa2db8d04be7"
-dependencies = [
- "dante-audio-io",
- "if-addrs",
- "libc",
- "mdns-sd",
- "mio",
- "serde",
- "serde_json",
- "simple-dns",
- "socket2",
- "thiserror",
- "tokio",
- "toml",
- "tracing",
- "tracing-subscriber",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "data-encoding"
 version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -487,10 +460,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "dlink"
+version = "0.5.1"
+source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.5.1#70b930dac904345ad03ccecfa5809de1a36571d8"
+dependencies = [
+ "dstack",
+ "dstack-audio-io",
+ "toml",
+]
+
+[[package]]
 name = "dotenvy"
 version = "0.15.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
+
+[[package]]
+name = "dstack"
+version = "0.5.1"
+source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.5.1#70b930dac904345ad03ccecfa5809de1a36571d8"
+dependencies = [
+ "dstack-audio-io",
+ "if-addrs",
+ "libc",
+ "mdns-sd",
+ "mio",
+ "serde",
+ "serde_json",
+ "simple-dns",
+ "socket2",
+ "thiserror",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "dstack-audio-io"
+version = "0.5.1"
+source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.5.1#70b930dac904345ad03ccecfa5809de1a36571d8"
 
 [[package]]
 name = "either"
@@ -2339,8 +2349,8 @@ dependencies = [
  "base64",
  "chrono",
  "crossbeam-channel",
- "dante-audio-io",
- "dante-stack",
+ "dlink",
+ "dstack",
  "futures",
  "if-addrs",
  "jpeg-encoder",

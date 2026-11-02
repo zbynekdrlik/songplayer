@@ -1,32 +1,27 @@
 //! #285: the native Dante output. SongPlayer's own TX-only Dante device
-//! (dstack's `dante-stack`, threads in this process, no driver and no DVS)
-//! behind the [`AsioDevice`] seam, so `asio_out`'s worker, its ring, its
-//! drift servo and its status serve it unchanged: the stack's `dante-engine`
-//! thread calls [`RingProcess`] once per block as a driver's buffer switch
-//! would, on the Dante media clock.
+//! (dstack's `dlink`, threads in this process, no driver and no DVS) behind
+//! the [`AsioDevice`] seam, so `asio_out`'s worker, its ring, its drift servo
+//! and its status serve it unchanged: the stack's `dstack-engine` thread calls
+//! [`RingProcess`] once per block as a driver's buffer switch would, on the
+//! Dante media clock.
 //!
-//! Two TX channels at the network rate, 24-bit, block 128, latency 10 ms.
+//! Two TX channels at the network rate on dlink's defaults: 24-bit, block 32,
+//! latency 10 ms, a pump margin of half the latency, no real-time setup.
 //! The stack pulls and never stretches time; the servo keeps the ring's fill.
 //! Without PTP the pump paces itself and drops its outputs, and the device
 //! keeps announcing: the stack starts sending once the clock is ready.
 //!
-//! The production gate (#285): dstack's problem A is open, so no Dante output
-//! is enabled on SNV or PP before its tag.
+//! `Link::start` sets up and starts in one call, so a device the stack refuses
+//! (a name, an address no adapter holds) fails the seam's `start`, not `open`.
 
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::thread::JoinHandle;
-use std::time::Duration;
 
-use dante_audio_io::{Block, Process};
-use dante_stack::ctl;
-use dante_stack::daemon::media::Media;
-use dante_stack::daemon::{Options, Place};
-use dante_stack::host::{self, ClockSource, Host, HostError, Prepared, Signals};
-use dante_stack::media::source::Source;
-use dante_stack::stream::{self, Map, Pump, PumpStats, Timing};
+use dlink::Clock as ClockSource;
+use dlink::{Block, Config, HostError, Link, Map, Media, Place, Process};
+use dstack::ctl;
 use serde::Deserialize;
 use sp_core::audio_outputs::{DanteDest, OutputEntry, effective_rate};
 use sp_core::dante_status::DanteFigures;
@@ -36,15 +31,9 @@ use crate::playback::asio_format::AsioSample;
 use crate::playback::asio_out::{AsioDevice, Opened, Started};
 use crate::playback::asio_state::{DeviceEvents, Reason};
 
-/// Frames per block of the stack's pump.
-pub const DANTE_BLOCK: u32 = 128;
-/// The latency the device advertises: program audio does not chase the
-/// lowest (ruling on #285), and a late TX thread stayed clean at 10 ms.
-pub const DANTE_LATENCY_NS: u64 = 10_000_000;
-/// The pump's work margin, samples: two blocks (the stack asks at least one).
-pub const DANTE_WORK_MARGIN: u32 = 2 * DANTE_BLOCK;
+/// The largest block the stack's pump runs (its `block` setting).
+const MAX_BLOCK: usize = 256;
 const DANTE_CHANNELS: usize = 2;
-const STOP_WAIT: Duration = Duration::from_secs(5);
 
 static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 
@@ -82,25 +71,17 @@ impl DanteParams {
     }
 
     fn latency_frames(&self) -> u64 {
-        u64::from(self.rate) * DANTE_LATENCY_NS / 1_000_000_000
+        u64::from(self.rate) * dlink::LATENCY_NS / 1_000_000_000
     }
 
-    fn config_path(&self) -> PathBuf {
-        self.dir.join("device.toml")
-    }
-
-    /// The device's config for the stack. The name is validated, the state
-    /// file's path is written as a TOML string.
-    pub fn config_text(&self) -> String {
-        let state = self.dir.join("state.toml");
-        let state = state.to_string_lossy().replace('\\', "\\\\");
-        format!(
-            "name = \"{}\"\nmanufacturer = \"New Level\"\nmodel = \"SongPlayer\"\n\
-             rx = []\ntx = [\"01\", \"02\"]\nsample_rate = {}\nencoding = 24\n\
-             latency_ns = {DANTE_LATENCY_NS}\nblock = {DANTE_BLOCK}\n\
-             work_margin = {DANTE_WORK_MARGIN}\nstate_file = \"{state}\"\n",
-            self.device, self.rate
-        )
+    /// The device for the stack. Dante Controller's changes live in the
+    /// state file, and the channels carry DVS's names: a receiver subscribed
+    /// to `01@resolume-snv` needs no change.
+    pub fn config(&self) -> Config {
+        Config::new(self.device.clone(), self.dir.join("state.toml"))
+            .tx(["01", "02"])
+            .sample_rate(self.rate)
+            .product("New Level", "SongPlayer")
     }
 }
 
@@ -202,7 +183,7 @@ impl RingProcess {
     pub fn new(ring: rtrb::Consumer<f32>, counts: Arc<Counts>) -> Self {
         Self {
             ring,
-            scratch: vec![0.0; DANTE_BLOCK as usize * DANTE_CHANNELS],
+            scratch: vec![0.0; MAX_BLOCK * DANTE_CHANNELS],
             counts,
         }
     }
@@ -246,19 +227,11 @@ fn reason(e: HostError) -> Reason {
     }
 }
 
-/// A running device.
-struct Running {
-    host: Host,
-    pump: JoinHandle<()>,
-    stop: Arc<AtomicBool>,
-    stats: Arc<PumpStats>,
-}
-
 /// The output's device on its worker thread.
 pub struct DanteDevice {
     params: DanteParams,
-    prepared: Option<Prepared>,
-    running: Option<Running>,
+    config: Option<Config>,
+    running: Option<Link>,
     counts: Arc<Counts>,
     link: DanteLink,
 }
@@ -272,88 +245,48 @@ impl DanteDevice {
     pub fn linked(params: DanteParams, link: DanteLink) -> Self {
         Self {
             params,
-            prepared: None,
+            config: None,
             running: None,
             counts: Arc::default(),
             link,
         }
     }
-
-    fn prepare(&self) -> Result<Prepared, Reason> {
-        let p = &self.params;
-        std::fs::create_dir_all(&p.dir)
-            .and_then(|()| std::fs::write(p.config_path(), p.config_text()))
-            .map_err(|e| Reason::Failed(format!("the Dante device's config: {e}")))?;
-        let opts = Options {
-            config: p.config_path(),
-            place: Place::Ip(p.ip),
-            control: p.dir.join("control.sock"),
-        };
-        host::prepare_with(&opts, &[0, 1], p.clock).map_err(reason)
-    }
 }
 
 impl AsioDevice for DanteDevice {
     fn open(&mut self, _driver: &str, _channels: [u32; 2]) -> Result<Opened, Reason> {
-        self.prepared = Some(self.prepare()?);
+        std::fs::create_dir_all(&self.params.dir)
+            .map_err(|e| Reason::Failed(format!("the Dante device's directory: {e}")))?;
+        let config = self.params.config();
+        let device = config
+            .device()
+            .map_err(|problems| Reason::Refused(problems.join("; ")))?;
+        self.config = Some(config);
         Ok(Opened {
             rate: f64::from(self.params.rate),
-            buffer_frames: DANTE_BLOCK,
+            buffer_frames: u32::try_from(device.block).unwrap_or(u32::MAX),
             out_channels: DANTE_CHANNELS as u32,
             sample: AsioSample::Float32,
         })
     }
 
     fn start(&mut self, ring: rtrb::Consumer<f32>) -> Result<Started, Reason> {
-        let prepared = self
-            .prepared
+        let config = self
+            .config
             .take()
             .ok_or_else(|| Reason::Failed("the Dante device is not open".into()))?;
-        let media = prepared.media();
-        let cfg = prepared.config();
-        let timing = Timing::of(cfg);
-        let bits = cfg.encoding;
-        for ch in 0..DANTE_CHANNELS {
-            if !media.tx.set_source(ch, Source::Engine) {
-                return Err(Reason::Failed("the Dante device has no engine ring".into()));
-            }
-        }
         self.counts = Arc::default();
-        let stats = Arc::new(PumpStats::new(timing, self.params.rate));
-        media.attach_engine(Arc::clone(&stats));
+        let process = RingProcess::new(ring, Arc::clone(&self.counts));
         let map = Map {
             rx: Vec::new(),
             tx: vec![0, 1],
         };
-        let process = RingProcess::new(ring, Arc::clone(&self.counts));
-        let pump = Pump::new(
-            process,
-            map,
-            timing,
-            bits,
-            Arc::clone(&media.rx),
-            Arc::clone(&media.tx),
-            Arc::clone(&stats),
-        );
-        let stop = Arc::new(AtomicBool::new(false));
-        let thread = stream::spawn(Arc::clone(&media.clock), pump, Arc::clone(&stop))
-            .map_err(|e| Reason::Failed(format!("the Dante pump: {e}")))?;
-        let host = match prepared.start(Signals::Host) {
-            Ok(host) => host,
-            Err(e) => {
-                stop.store(true, Ordering::Release);
-                let _ = thread.join();
-                return Err(reason(e));
-            }
-        };
+        let place = Place::Ip(self.params.ip);
+        let running =
+            Link::start_on(&config, &place, map, process, self.params.clock).map_err(reason)?;
         info!(rate = self.params.rate, "dante output: device announced");
-        self.link.set(Some(media));
-        self.running = Some(Running {
-            host,
-            pump: thread,
-            stop,
-            stats,
-        });
+        self.link.set(Some(Arc::clone(running.media())));
+        self.running = Some(running);
         Ok(Started {
             output_latency_frames: self.output_latency_frames(),
             loop_inputs: 0,
@@ -366,15 +299,11 @@ impl AsioDevice for DanteDevice {
             ..DeviceEvents::default()
         };
         if let Some(run) = &self.running {
-            let stream = run.stats.stream_stats();
-            events.overloads = stream.overruns;
-            events.late_callbacks = stream.late;
-            if let Some(why) = run.host.ended() {
+            let view = run.media().engine().unwrap_or_default();
+            events.overloads = view.overruns;
+            events.late_callbacks = view.late;
+            if let Some(why) = run.ended() {
                 warn!(%why, "dante output: the device ended");
-                events.reset = true;
-            }
-            if stream.faulted {
-                warn!("dante output: the callback panicked");
                 events.reset = true;
             }
         }
@@ -399,13 +328,9 @@ impl AsioDevice for DanteDevice {
 
     fn close(&mut self) {
         self.link.set(None);
-        self.prepared = None;
+        self.config = None;
         if let Some(run) = self.running.take() {
-            run.stop.store(true, Ordering::Release);
-            if run.pump.join().is_err() {
-                warn!("dante output: the pump thread panicked");
-            }
-            let stopped = run.host.stop(STOP_WAIT);
+            let stopped = run.stop();
             info!(?stopped, "dante output: device stopped");
         }
     }
