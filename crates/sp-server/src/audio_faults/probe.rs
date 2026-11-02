@@ -146,7 +146,6 @@ fn asio_into(probe: &mut Probe, asio: &AsioStatus) {
 fn dante_into(probe: &mut Probe, dante: &DanteFigures) {
     probe.counters.extend([
         Counter::loss(kinds::PUMP_MISSED, dante.pump_missed),
-        Counter::risk(kinds::PUMP_LATE, dante.pump_late),
         Counter::risk(kinds::PUMP_OVERRUN, dante.pump_overruns),
     ]);
 }

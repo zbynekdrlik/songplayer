@@ -85,8 +85,6 @@ pub mod kinds {
     pub const OVERLOAD: &str = "overload";
     /// Dante output: blocks the device's pump never ran (#285).
     pub const PUMP_MISSED: &str = "pump_missed";
-    /// Dante output: blocks the pump ran late.
-    pub const PUMP_LATE: &str = "pump_late";
     /// Dante output: blocks that took the pump longer than a block.
     pub const PUMP_OVERRUN: &str = "pump_overrun";
     /// ASIO output: its host process went down (a state).

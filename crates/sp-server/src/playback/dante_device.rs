@@ -301,7 +301,6 @@ impl AsioDevice for DanteDevice {
         if let Some(run) = &self.running {
             let view = run.media().engine().unwrap_or_default();
             events.overloads = view.overruns;
-            events.late_callbacks = view.late;
             if let Some(why) = run.ended() {
                 warn!(%why, "dante output: the device ended");
                 events.reset = true;
