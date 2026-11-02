@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SongPlayer návrh v1</title>
+<style>
+:root{--bg:#f4f5f7;--panel:#fff;--line:#dfe2e8;--fg:#181b22;--muted:#626b7a;--blue:#2f5fd0;--red:#d0213f;--amber:#a86200;--green:#14804a;--soft:#eef1f6}
+@media (prefers-color-scheme:dark){:root{--bg:#12141a;--panel:#1b1e26;--line:#2d323d;--fg:#eceef2;--muted:#9aa3b2;--blue:#7ea2f5;--red:#f0506b;--amber:#eeab4a;--green:#4cc38a;--soft:#252934;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,"Segoe UI",Roboto,sans-serif}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+header{display:flex;align-items:center;gap:16px;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+header b{font-size:16px}
+.state{display:flex;align-items:center;gap:8px;margin-left:auto;min-width:0;font-size:14px;color:var(--muted)}
+.dot{flex:none;width:9px;height:9px;border-radius:50%;background:var(--green)}
+.more{padding:6px 10px;border-radius:8px;color:var(--muted);white-space:nowrap}
+.more:hover{background:var(--soft)}
+.app{display:grid;grid-template-columns:270px minmax(0,1fr);gap:16px;max-width:1280px;margin:0 auto;padding:16px}
+.src{display:flex;flex-direction:column;gap:1px;align-self:start}
+.src h2,.songs h2{margin:0 0 6px;font-size:13px;font-weight:600;color:var(--muted)}
+.row{display:flex;align-items:center;gap:8px;border-radius:8px;padding:2px 2px 2px 10px}
+.row.sel{background:var(--soft)}
+.row .name{flex:1;min-width:0;text-align:left;padding:3px 0}
+.row .name small{display:block;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.go{flex:none;padding:4px 10px;border-radius:7px;font-size:13px;color:var(--blue);border:1px solid var(--line);background:var(--panel)}
+.go:hover{border-color:var(--blue)}
+.air{flex:none;padding:4px 10px;border-radius:7px;font-size:13px;font-weight:600;color:#fff;background:var(--red)}
+.sep{height:1px;background:var(--line);margin:8px 0}
+main{min-width:0;display:flex;flex-direction:column;gap:12px}
+.now{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.top{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+.top h1{margin:0;font-size:20px}
+.top span{color:var(--muted)}
+.bar{height:6px;border-radius:3px;background:var(--soft);margin:12px 0 4px;overflow:hidden}
+.bar i{display:block;width:66%;height:100%;background:var(--blue)}
+.time{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.ctl{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px}
+.ctl button{padding:8px 12px;border-radius:8px;background:var(--soft)}
+.ctl .main{background:var(--blue);color:#fff;font-weight:600}
+@media (prefers-color-scheme:dark){.ctl .main{color:#12141a}}
+.vol{display:flex;align-items:center;gap:8px;margin-left:auto;font-size:14px;color:var(--muted)}
+.vol input{width:130px}
+.vol button{padding:6px 9px;font-size:13px}
+.prev{display:none;aspect-ratio:16/9;max-height:300px;width:100%;margin-top:12px;border-radius:8px;background:#000;color:#999;place-items:center}
+.prev.open{display:grid}
+.songs{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
+.song{display:flex;align-items:center;gap:10px;width:100%;padding:8px 6px;border-top:1px solid var(--line);text-align:left}
+.song:hover{background:var(--soft)}
+.song span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.song small{color:var(--muted);font-variant-numeric:tabular-nums}
+.song.cur{font-weight:600}
+.why{max-width:1280px;margin:8px auto 32px;padding:0 16px;color:var(--muted);font-size:14px}
+.why h2{font-size:15px;color:var(--fg);margin:16px 0 6px}
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:540px}
+td,th{text-align:left;padding:6px 10px 6px 0;border-bottom:1px solid var(--line);vertical-align:top}
+@media (max-width:760px){
+ .app{grid-template-columns:minmax(0,1fr)}
+ .src{order:2}
+ main{order:1}
+ .vol{margin-left:0;width:100%}
+ .vol input{flex:1;width:auto}
+ .state span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+}
+</style>
+</head>
+<body>
+<header>
+  <b>SongPlayer</b>
+  <div class="state"><i class="dot" id="dot"></i><span id="st">Všetko v poriadku</span></div>
+  <button class="more" onclick="alert0()">Viac ▾</button>
+  <button class="more">Nastavenia</button>
+</header>
+<div class="app">
+  <nav class="src" id="src">
+    <h2>Zdroje</h2>
+  </nav>
+  <main>
+    <section class="now">
+      <div class="top"><h1 id="t">Count On You</h1><span>P. Barrett · <span id="pl">ytfast</span></span></div>
+      <div class="bar"><i></i></div>
+      <div class="time"><span>6:54</span><span>10:15</span></div>
+      <div class="ctl">
+        <button>⏮</button><button class="main">Pauza</button><button>Ďalšia</button>
+        <button onclick="document.getElementById('p').classList.toggle('open')">Náhľad</button>
+        <div class="vol"><button>Zvuk</button></div>
+      </div>
+      <div class="prev" id="p">náhľad programu</div>
+    </section>
+    <section class="songs">
+      <h2>Skladby</h2>
+      <button class="song cur"><span>Count On You — P. Barrett</span><small>10:15</small></button>
+      <button class="song"><span>Speak To Mountains — Planetshakers</span><small>5:42</small></button>
+      <button class="song"><span>We Raise — Bethel Music</span><small>6:08</small></button>
+      <button class="song"><span>Not Guilty — Elevation</span><small>4:51</small></button>
+      <button class="song"><span>Praise — Elevation Worship</span><small>5:17</small></button>
+    </section>
+  </main>
+</div>
+<section class="why">
+  <h2>Prečo to vyzerá takto: merané 20.10.–2.11.2026, 116 úkonov</h2>
+  <div class="tw"><table>
+    <tr><th>Úkon</th><th>Počet</th><th>Dní</th><th>Trieda</th><th>V návrhu</th></tr>
+    <tr><td>Strih na program</td><td>13</td><td>6</td><td>Pri službe</td><td>V zozname zdrojov, dnes je to druhý zoznam tých istých mien</td></tr>
+    <tr><td>Vybrať playlist</td><td>20</td><td>3</td><td>Pri službe</td><td>Jeden zoznam vľavo</td></tr>
+    <tr><td>Spustiť skladbu zo zoznamu</td><td>29</td><td>1</td><td>Asi pri službe</td><td>Hneď na prvej obrazovke, dnes je pod náhľadom</td></tr>
+    <tr><td>Pauza, Ďalšia</td><td>2</td><td>2</td><td>Kritické</td><td>Ostávajú, inak ich niet ako zastaviť z webu</td></tr>
+    <tr><td>Hlasitosť a EQ playlistu</td><td>15</td><td>1</td><td>Zriedka</td><td>Až po kliku na Zvuk</td></tr>
+    <tr><td>Náhľad videa</td><td>bez dát</td><td>?</td><td>Odhad</td><td>Až po kliku</td></tr>
+    <tr><td>Nastavenia</td><td>1</td><td>1</td><td>Zriedka</td><td>Vpravo hore</td></tr>
+    <tr><td>Stránky Naživo, Texty, Dabing</td><td>0</td><td>0</td><td>Bez použitia</td><td>Pod „Viac“, zrušiť ich rozhodneš ty</td></tr>
+    <tr><td>Stavový pás (13 údajov)</td><td>nemerané</td><td>?</td><td>Len pri probléme</td><td>Jedna veta hore, detail po kliku</td></tr>
+  </table></div>
+  <p>Dáta sú z 13 dní. Stream Deck a Companion sa do nich nepočítajú, preto ide o používanie webu, nie celej réžie. Skladby a stav sú ukážkové, stránka nič neovláda.</p>
+</section>
+<script>
+const L=[["ytfast",1],["ytslow"],["ytworship"],["ytwarmup"],["ytpresence"],["yt90s"],["ytalex"],["ytlive"],["ytyouth"],["Dabing"]];
+const X=["OBS manuál","Blank"];
+const s=document.getElementById("src");
+let sel="ytfast",air="ytfast";
+function draw(){
+  s.querySelectorAll(".row,.sep").forEach(e=>e.remove());
+  const add=(n,sub)=>{
+    const r=document.createElement("div");r.className="row"+(n===sel?" sel":"");
+    const b=document.createElement("button");b.className="name";b.textContent=n;
+    const m=document.createElement("small");m.textContent=sub;b.append(m);
+    b.onclick=()=>{sel=n;document.getElementById("pl").textContent=n;draw()};
+    const g=document.createElement("button");
+    if(n===air){g.className="air";g.textContent="Na programe"}else{g.className="go";g.textContent="Strih";g.onclick=()=>{air=n;draw()}}
+    r.append(b,g);s.append(r)};
+  L.forEach(([n])=>add(n,n===air?"hrá":"pozastavené"));
+  const d=document.createElement("div");d.className="sep";s.append(d);
+  X.forEach(n=>add(n,""));
+}
+draw();
+function alert0(){const o=document.getElementById("st");o.textContent="Naživo · Texty · Dabing · Spracovanie"}
+</script>
+</body>
+</html>
