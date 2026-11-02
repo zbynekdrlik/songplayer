@@ -249,7 +249,7 @@ fn asio_output(asio: AsioStatus) -> OutputStatus {
 /// #285: the date step cost `pump_missed` +1200 on dstack ≤ 0.4.15 and the
 /// ledger read clean, since only `GET /api/v1/program` carried the number.
 #[test]
-fn a_dante_output_loses_its_missed_blocks_and_risks_its_late_ones() {
+fn a_dante_output_loses_its_missed_blocks_and_a_pump_within_its_margin_is_no_risk() {
     let dante = DanteFigures {
         pump_missed: 21,
         pump_late: 22,
@@ -268,7 +268,6 @@ fn a_dante_output_loses_its_missed_blocks_and_risks_its_late_ones() {
         vec![
             Counter::loss(kinds::BLOCKS_DROPPED, 3),
             Counter::loss(kinds::PUMP_MISSED, 21),
-            Counter::risk(kinds::PUMP_LATE, 22),
             Counter::risk(kinds::PUMP_OVERRUN, 23),
         ]
     );

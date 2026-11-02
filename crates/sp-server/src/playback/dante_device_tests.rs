@@ -283,7 +283,12 @@ fn the_device_serves_a_receiver_the_rings_audio() {
     }
     assert!(left && right, "both channels on the wire");
     assert!(device.consumed_frames() >= 32);
-    assert!(device.poll().callbacks > 0);
+    let events = device.poll();
+    assert!(events.callbacks > 0);
+    assert_eq!(
+        events.late_callbacks, 0,
+        "a wake within the 5 ms margin is no late callback"
+    );
     assert!(!device.poll().reset);
     device.close();
     assert!(device.open("", [0, 1]).is_ok(), "the ports are free again");
