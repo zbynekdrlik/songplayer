@@ -347,7 +347,14 @@ fn planned(place: Place, name: &str, is_dir: bool) -> Planned {
 
 /// `(files, dirs, bytes, failed, left)` of `execute` over `delete`.
 fn counts(cache: &Path, delete: Vec<Planned>, left: usize) -> (u64, u64, u64, u64, u64) {
-    let swept = execute(cache, &Plan { delete, left });
+    let swept = execute(
+        cache,
+        &Plan {
+            delete,
+            left,
+            held: 0,
+        },
+    );
     (
         swept.files,
         swept.dirs,
@@ -389,6 +396,7 @@ fn a_part_is_deleted_in_the_parts_dir() {
     let plan = Plan {
         delete: vec![planned(Place::Parts, "x.part", false)],
         left: 0,
+        held: 0,
     };
     let swept = execute(cache, &plan);
     assert_eq!(swept.files, 1);
