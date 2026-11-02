@@ -59,7 +59,8 @@ pub const DUB_PREV_AFTER_MS: i64 = 1_209_600_000;
 /// The most entries one pass deletes.
 pub const MAX_PER_PASS: usize = 500;
 /// From this many bytes of videos no row has, a pass may take at most a
-/// quarter of the cache ([`guarded`]).
+/// quarter of the cache ([`guarded`]). Under this floor the daily pass stays free:
+/// a few lost rows cost little, and the 500-a-pass cap still limits a bad day.
 pub const GUARD_MIN_BYTES: u64 = 10_737_418_240;
 /// The cleanup cache version the code writes (`lyrics/gather.rs`,
 /// `lyrics/title_search.rs`: `_cleaned_v3.json`; a test reads both, so a
