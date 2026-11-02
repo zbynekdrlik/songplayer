@@ -66,7 +66,7 @@ impl DanteParams {
             ip,
             rate: effective_rate(entry.rate, network_rate),
             dir: base.join("dante"),
-            clock: ClockSource::Dantesync,
+            clock: ClockSource::Dsync,
         })
     }
 

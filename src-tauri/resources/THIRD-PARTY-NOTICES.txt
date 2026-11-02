@@ -168,7 +168,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-SongPlayer.exe contains dstack 0.5.1 (its crates dlink, dstack and
+SongPlayer.exe contains dstack 0.5.11 (its crates dlink, dstack and
 dstack-audio-io), https://github.com/zbynekdrlik/dstack. dlink and dstack are
 licensed under the GNU General Public License, version 3 or later
 (GPL-3.0-or-later), and dstack adapts parts of teodly/inferno, taken under the

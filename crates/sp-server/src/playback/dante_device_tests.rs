@@ -114,7 +114,7 @@ fn an_entry_builds_at_the_network_rate_or_its_own() {
     let p = DanteParams::for_entry(&entry, 96_000).unwrap();
     assert_eq!(p.rate, 96_000);
     assert_eq!(p.ip, Ipv4Addr::new(10, 77, 9, 210));
-    assert_eq!(p.clock, ClockSource::Dantesync);
+    assert_eq!(p.clock, ClockSource::Dsync);
     assert_eq!(p.latency_frames(), 960);
     entry.rate = RateChoice::Fixed(48_000);
     assert_eq!(DanteParams::for_entry(&entry, 96_000).unwrap().rate, 48_000);
