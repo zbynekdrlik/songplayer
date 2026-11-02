@@ -43,7 +43,7 @@ capture grabs only their strip rows and columns
 than half a refresh after the one before is a blind span (a poll on time
 that finds no new picture is the wall holding one). A Spout sender
 (``--spout``, ``wall_spout``) is read the same way, from a picture that is
-off the desktop: only ``SPOUT_ROWS`` rows of the strips, polled with no sleep.
+off the desktop: only ``SPOUT_ROWS`` rows of the strips, polled ``SPOUT_POLL_GAP_S`` apart.
 
 Usage::
 
@@ -110,6 +110,11 @@ LOCATE_S = 10.0
 # The rows a Spout capture reads of each strip: 24 rows poll at ~0.6 ms on SNV,
 # the whole strip's 150 at ~1.75 ms, over a tenth of a 60 Hz refresh.
 SPOUT_ROWS = 24
+# What an empty Spout poll waits, spun: a sleep of 1 ms takes ~1.6 ms there, over
+# what a timed interval may have. With no wait the polls raised wall-bridge's
+# failed tries at Arena's output lock ~10x (#272, A/B/A x2). 8 takes at 0 read
+# 4-14 uneven boundaries and 1 was refused; 4 at 0.3 ms read 2-6, none refused.
+SPOUT_POLL_GAP_S = 0.0003
 # A Spout picture lands when Arena finishes it, not on a refresh: intervals of
 # 26-41 ms for 33.3 on SNV. At 0.5 and 1 ms the brackets contradict themselves
 # (2-41 boundaries a take), 2 and 3 ms read both clips clean, and at 4 ms and
@@ -372,7 +377,12 @@ def capture_spout(
     source = GlSender(sender)
     try:
         return capture_camera(
-            NewPictures(source), region, seconds, max_rows=SPOUT_ROWS, idle=0.0
+            NewPictures(source),
+            region,
+            seconds,
+            max_rows=SPOUT_ROWS,
+            idle=0.0,
+            spin=SPOUT_POLL_GAP_S,
         )
     finally:
         source.close()
@@ -384,9 +394,11 @@ def capture_camera(
     seconds: float,
     max_rows: int | None = None,
     idle: float = 0.001,
+    spin: float = 0.0,
 ) -> tuple[list[float], list[np.ndarray], list[float], list[float], Located | None]:
     """The timed polls of ``capture_dxcam`` on anything with its ``grab``.
-    ``idle``: what a poll that finds nothing sleeps; ``max_rows`` as
+    ``idle``: what a poll that finds nothing sleeps, then ``spin``: what it
+    spins (a sleep this short overshoots); ``max_rows`` as
     ``capture_region``'s."""
     acquired = time_acquire(camera)
     times: list[float] = []
@@ -405,6 +417,9 @@ def capture_camera(
         picture = camera.grab(region=located.region)
         if picture is None:
             time.sleep(idle)
+            until = time.perf_counter() + spin
+            while time.perf_counter() < until:
+                pass
             continue
         ended = acquired[0] if acquired[0] is not None else time.perf_counter()
         times.append(now)

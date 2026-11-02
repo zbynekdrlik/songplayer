@@ -563,7 +563,13 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
   desktop (PP).
 - **Arena's sender keeps no frame count**, so every Spout read answers:
   `NewPictures` calls a poll with the same bytes as the last one a poll
-  with nothing new, as an empty dxcam grab. No sleep between polls.
+  with nothing new, as an empty dxcam grab.
+- **Polls stay `SPOUT_POLL_GAP_S` (0.3 ms, spun) apart** (#272, 2.11.2026).
+  wall-bridge reads the same sender: with no gap the polls raised its failed
+  tries at `Arena - Screen 2_SpoutAccessMutex` from 3-20k to 51-66k a minute
+  (A/B/A x2). Takes at 0: 4-14 uneven boundaries and one refused; at 0.3 ms:
+  2-6 (n = 4). A gap of 0.9 ms or a 1 ms sleep leaves too few timed intervals
+  (exit 5). That the polling caused the refusals is not proven.
 - **A copy cut by a seam is left out (`same_scale`, 30.10.2026):** SNV's
   output is slices of the composition, and a copy across one read 58.33 px
   cells beside 60. Its samples sat near the cell edges, each bit change read

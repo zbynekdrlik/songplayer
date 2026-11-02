@@ -255,6 +255,15 @@ def test_a_spout_poll_that_finds_nothing_does_not_sleep_a_millisecond(monkeypatc
     assert slept and set(slept) == {0.0}
 
 
+def test_empty_spout_polls_keep_a_gap_that_a_timed_interval_allows(monkeypatch):
+    sender = FakeSender([frame(100, 30)])
+    monkeypatch.setattr(wf, "GlSender", lambda name: Closing(sender))
+    times, _sums, polls, _ended, _located = wf.capture_spout("Arena", None, 0.02)
+    gaps = [b - a for a, b in zip(polls, polls[1:]) if a not in times]
+    assert gaps and min(gaps) >= wf.SPOUT_POLL_GAP_S
+    assert wf.SPOUT_POLL_GAP_S + 0.00063 < 0.1 / 60
+
+
 def spout_run(monkeypatch, capsys, result, *extra) -> tuple[int, str, str]:
     seen = []
 
