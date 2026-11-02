@@ -1396,8 +1396,10 @@ difference with its UTC time.
   sets up and starts in one call, so a refused address fails the seam's `start`;
   only a refused config fails `open`. `Link` hides `PumpStats`, so a panicked
   callback no longer reads `faulted`: the worker's 2 s stall watch ends that run.
-  The rule against `timing = "normal"` (the 31.10 peaks) holds until the FOH
-  console, read by dstack, has judged a dlink build.
+  The FOH console, read by dstack, judged dlink v0.5.1 on 2.11.2026: 3 h 17 min,
+  8782 windows, late 0 in every one, peak max 4365 us, p99 3719 us, median
+  2208 us at 10 ms latency. So the `normal` profile stands; the 31.10 rule
+  against it applied to the old pump, not to dlink.
 - `outputs[i]` = the ASIO worker's line under `asio` plus `dante`
   (`sp_core::dante_status::DanteFigures`) while a device runs: read through
   `DanteLink`, which the worker sets at the start and clears at the close, from
