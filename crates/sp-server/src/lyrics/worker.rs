@@ -152,8 +152,8 @@ impl LyricsWorker {
         }
     }
 
-    /// Build a minimal LyricsWorker for unit tests. Fields not used by the
-    /// asr_path branch get placeholder values; tests must not exercise
+    /// Build a minimal LyricsWorker for unit tests. Fields the tests' paths do
+    /// not read get placeholder values; tests must not exercise
     /// downloader / tools / orchestrator paths against this instance.
     #[cfg(test)]
     pub(crate) fn new_for_test(

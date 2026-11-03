@@ -13,8 +13,8 @@ use tracing::warn;
 
 /// Read the global `lyrics_lead_ms` setting from the DB, falling back to
 /// 0 when absent or unparseable. An unparseable value warns but does not
-/// fail — lead time is cosmetic, not correctness-critical. Timings are
-/// real per WhisperX alignment; lead is optional operator override.
+/// fail — lead time is cosmetic, not correctness-critical. Timings come from
+/// the pipeline (mtl or the g35t transcript); lead is optional operator override.
 #[cfg_attr(test, mutants::skip)] // I/O wrapper; the renderer's
 // `lead_ms_is_applied_from_state` unit test exercises the constructor
 // this wrapper feeds, which is the observable behavior.

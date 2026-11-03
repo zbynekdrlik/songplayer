@@ -104,7 +104,7 @@ pub async fn probe_sources_impl(
     // 2026-05-13 Jesus Saves id=175 was the trigger: yt description was an
     // Air1 promo blurb + social links, 14 non-empty lines but zero lyrics.
     // Raw-availability check passed; reprocess would have wasted Demucs +
-    // whisperx cycles before description_provider cleanup said no lyrics.
+    // transcription cycles before description_provider cleanup said no lyrics.
     // Probe now consults the same Claude-cleanup path the worker uses, with
     // the same `{youtube_id}_description_lyrics.json` cache so subsequent
     // probes are instant. Without ai_client the probe is conservative and

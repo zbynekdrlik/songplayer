@@ -500,15 +500,16 @@ pub async fn mark_video_lyrics(
 /// pipeline_version, quality_score, alignment_model, and clears manual_priority
 /// — all in one query.
 ///
-/// `quality_score` is `None` for fallback paths (e.g. ensemble timeout) to avoid
-/// writing 0.0 which would poison the `ORDER BY lyrics_quality_score ASC NULLS FIRST`
-/// stale-bucket selector — songs with 0.0 score sort before all real scores.
+/// `quality_score` is `None` when no score exists (every v22 path passes `None`)
+/// to avoid writing 0.0 which would poison the `ORDER BY lyrics_quality_score
+/// ASC NULLS FIRST` stale-bucket selector — songs with 0.0 score sort before all
+/// real scores.
 ///
 /// `alignment_model` distinguishes between "no model ran" (None → SQL NULL,
 /// legacy / unknown) and "model literal `none`" (`Some(ALIGNMENT_MODEL_NONE)`,
-/// raw line-timed ship-through where whisperx was deliberately skipped). See
-/// the precedence comment in `worker.rs::process_song` near line 639 for how
-/// callers derive the literal from the source label.
+/// raw line-timed ship-through with no forced alignment). See
+/// `worker_reference::alignment_model_for_source` for how callers derive the
+/// literal from the source label.
 #[cfg_attr(test, mutants::skip)] // single UPDATE; covered by integration tests below
 pub async fn mark_video_lyrics_complete(
     pool: &SqlitePool,
@@ -520,7 +521,7 @@ pub async fn mark_video_lyrics_complete(
 ) -> Result<(), sqlx::Error> {
     // lyrics_alignment_model is Option<&str>: None writes SQL NULL — reserved
     // for legacy paths where no alignment ran AND the literal is unknown.
-    // For raw line-timed ship-through (yt_subs / lrclib / spotify, no whisperx),
+    // For raw line-timed ship-through (yt_subs / lrclib / spotify, no mtl),
     // callers MUST pass Some(ALIGNMENT_MODEL_NONE) so the DB records the
     // explicit literal "none" rather than the ambiguous NULL.
     //
