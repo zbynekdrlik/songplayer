@@ -107,7 +107,7 @@ pub const VBAN_SEND_LATENCY_100NS: i64 = 2 * UNITS_PER_SECOND / GENLOCK_GRID_FPS
 /// maxima p50 0.3 ms, p90 9.1 ms), 14.7–20.7 ms only right after a process
 /// start: a block handed over later than L sends its past-due packets back
 /// to back, counted in `late_sends`.
-pub const VBAN_SEND_LATENCY_LOW_100NS: i64 = 666_666;
+pub const VBAN_SEND_LATENCY_LOW_100NS: i64 = 150_000;
 
 /// #289: the send latency L of an output: [`VBAN_SEND_LATENCY_100NS`] (two
 /// slots), or [`VBAN_SEND_LATENCY_LOW_100NS`] with `audio_low_latency` on.

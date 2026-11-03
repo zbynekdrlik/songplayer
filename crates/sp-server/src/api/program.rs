@@ -197,7 +197,7 @@ impl ProgramResponse {
             outputs: bus.outputs().status(),
             audio_network_rate: bus.outputs().network_rate(),
             outputs_problems: bus.outputs().problems(),
-            audio_low_latency: false,
+            audio_low_latency: bus.outputs().low_latency(),
             input: bus.input().status(&stored.input),
             remote: bus.remote().status(&stored.remote, &bus.on_air_now()),
             max: bus.max().status(),

@@ -97,7 +97,7 @@ pub fn plan(running: &[RunningOutput], wanted: &[OutputEntry], network_rate: u32
 /// ASIO / Dante one, a disabled or unbuilt one) is not built by the switch.
 pub fn built_at(output: &RunningOutput, low_latency: bool) -> bool {
     match &output.sink {
-        Some(OutputSink::Vban(out)) => out.low_latency() || !low_latency,
+        Some(OutputSink::Vban(out)) => out.low_latency() == low_latency,
         _ => true,
     }
 }

@@ -66,7 +66,7 @@ pub fn fifo_prime_frames(rate_hz: u32, converter_delay: usize) -> usize {
 /// `audio_low_latency` off, none with it on (the delay is then the
 /// converter's own).
 pub fn prime_frames(rate_hz: u32, converter_delay: usize, low_latency: bool) -> usize {
-    if low_latency && rate_hz == 0 {
+    if low_latency {
         0
     } else {
         fifo_prime_frames(rate_hz, converter_delay)
