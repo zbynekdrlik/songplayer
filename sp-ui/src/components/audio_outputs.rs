@@ -72,6 +72,9 @@ use sp_core::dante_status::{DanteFigures, dante_state_chips, dante_waiting_text}
 mod dante_fields;
 
 use dante_fields::{DanteFields, resampling_line};
+#[path = "audio_outputs_latency.rs"]
+mod latency;
+use latency::LowLatencySwitch;
 
 use crate::api;
 use crate::store::DashboardStore;
@@ -364,6 +367,7 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
     let saved = RwSignal::new(None::<(Vec<OutputEntry>, String)>);
     let bad: Unreadable = RwSignal::new(Vec::new());
     let live = RwSignal::new(ProgramOutputs::default());
+    let low_latency = latency::LowLatency::new(store);
     // The box's ASIO drivers, once: `None` until they are read, and for
     // good when the read failed (`drivers_failed`) — never an empty list
     // standing in for one the dashboard was not told (#233 review round 1).
@@ -516,6 +520,7 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
             if let Some(rate) = rate {
                 body.insert(SETTING_AUDIO_NETWORK_RATE.to_string(), rate);
             }
+            latency::add(&mut body, low_latency.to_send());
             match api::patch_json_empty("/api/v1/settings", &body).await {
                 Ok(()) => {
                     saved.set(Some((list, chosen)));
@@ -561,6 +566,7 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                         .collect_view()}
                 </select>
             </label>
+            <LowLatencySwitch state=low_latency />
             {move || {
                 blocker()
                     .map(|e| {

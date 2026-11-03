@@ -1220,6 +1220,18 @@ function paidAiRefusal(body) {
   return ["", "true", "false"].includes(v) ? null : "paid_ai_enabled must be true or false";
 }
 
+// #289: as `sp_core::audio_latency::low_latency` — only "true" (trimmed,
+// any case) is on; unset, blank or anything else is off.
+function lowLatency(raw) {
+  return raw !== undefined && raw !== null && String(raw).trim().toLowerCase() === "true";
+}
+// As `sp_core::audio_latency::checked`: true / false / "" only, stored lowercase.
+function lowLatencyRefusal(body) {
+  if (body.audio_low_latency === undefined) return null;
+  const v = String(body.audio_low_latency).trim().toLowerCase();
+  return ["", "true", "false"].includes(v) ? null : "audio_low_latency must be true or false";
+}
+
 // #229: as the server — a value exactly the mask for a secret setting keeps
 // the stored one (nothing written), any other value replaces it (`""` clears
 // it), and the answer is 204 with NO body.
@@ -1267,7 +1279,10 @@ function maxResolutionRefusal(body) {
 
 app.patch("/api/v1/settings", (req, res) => {
   const refusal =
-    outputsRefusal(req.body) ?? paidAiRefusal(req.body) ?? maxResolutionRefusal(req.body);
+    outputsRefusal(req.body) ??
+    paidAiRefusal(req.body) ??
+    lowLatencyRefusal(req.body) ??
+    maxResolutionRefusal(req.body);
   if (refusal) {
     res.status(400).send(refusal);
     return;
@@ -1276,7 +1291,7 @@ app.patch("/api/v1/settings", (req, res) => {
     if (value === SECRET_MASK && isSecretSetting(key)) {
       continue;
     }
-    if (key === "paid_ai_enabled") {
+    if (key === "paid_ai_enabled" || key === "audio_low_latency") {
       settings[key] = String(value).trim().toLowerCase();
     } else if (key === "max_resolution") {
       settings[key] = String(value).trim(); // stored trimmed, as `format::checked` does
@@ -2082,6 +2097,7 @@ function programBody() {
     // stored list, like the server's outputs task; the mock "runs" every
     // enabled entry. #210's top-level `vban` block moved under each entry.
     audio_network_rate: Number(settings.audio_network_rate || 48000),
+    audio_low_latency: lowLatency(settings.audio_low_latency),
     outputs_problems: mockOutputsProblems(),
     outputs: mockOutputs(),
     // #223 S2: SP-program-MAX (mirrors `MaxStatus`). The setting is ON unless
