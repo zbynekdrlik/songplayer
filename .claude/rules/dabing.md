@@ -504,13 +504,13 @@ song-lyrics pipeline. `LYRICS_PIPELINE_VERSION` is untouched.
   `song_input.rs`). So nothing may leave a stale `dub_error` on a live chain:
   the re-read that finds the audio clears that note, `set_dub_requested(true)`
   clears any earlier one, and `mark_dub_synth` / `mark_dub_ready` clear it.
-- `sp_core::mixer_model::dub_channel_labels(has_stems)` +
-  `components/dub_mixer.rs`: WITHOUT stems only 2 faders (`originál` / `dabing`,
-  ambient hidden — the 2-stream over-original mix); WITH stems the full 3-fader
-  strip (`originál hlas` / `dabing` / `ambient`). `has_stems = stem_status ==
-  "done"` for the mixer (current reality), broader for the chain (intent).
-  `e2e/mixer.spec.ts` asserts both fader shapes; `e2e/dabing.spec.ts` both chain
-  shapes; zero console errors.
+- The mixer side (#184 round G replaced `dub_channel_labels` and
+  `components/dub_mixer.rs`): `sp_core::mixer_model::fader_availability(stems_ready,
+  dub_ready)` + `components/live_mixer.rs` — WITHOUT stems `podklad` is locked
+  ("po separácii") and `vokály` carries the whole original; WITH stems all three
+  faders are live. `stems_ready = stem_status == "done"` for a dub row (current
+  reality), broader for the chain (intent). `e2e/mixer.spec.ts` asserts the fader
+  shapes; `e2e/dabing.spec.ts` both chain shapes; zero console errors.
 
 # Dabing round A+B (#184) — instant mix apply + one mixer rule on every page
 
@@ -520,21 +520,24 @@ song-lyrics pipeline. `LYRICS_PIPELINE_VERSION` is untouched.
 `'unsupported'`. This is a DIFFERENT vocabulary from the derived `stems_state`
 wire strings (`ready`/`queued`/`processing`/`failed`/`unavailable`) that
 `stems::models_stems::stems_state_of` produces for the karaoke/videos payloads.
-So `dub_mixer.rs` uses `stem_status == "done"` for `has_stems`, and
-`sp_core::mixer_model::mixer_controls`'s stems-capable set MUST include `"done"`
-(the real value a dub row carries) — the wire strings alone would make a
-stems-ready dub (`stem_status='done'`) fail the karaoke gate on the real box
-while passing under a mock that feeds `"ready"`. Never assume the two columns
+So `components/live_mixer.rs` reads a dub row's `stem_status == "done"` for
+`stems_ready` (a plain song reads the mix's `stems_state == "ready"`) — the wire
+strings alone would make a stems-ready dub (`stem_status='done'`) lock its
+`podklad` fader on the real box while passing under a mock that feeds
+`"ready"`. Never assume the two columns
 share a vocabulary.
 
-## Dub-mix applies live-first: push the engine command BEFORE the DB persist
-`api/dabing.rs::patch_dub_mix` awaits `EngineCommand::SetDubMix` FIRST, then
-`set_dub_mix_ratio` (the persist), via the pure seam
-`api/dabing_apply.rs::apply_dub_mix(push, persist)`. The old order (persist then
+## The mix applies live-first: push the engine command BEFORE the DB persist
+Round A put the per-video `patch_dub_mix` (`SetDubMix`, `dabing_apply.rs`) in
+this order; round G deleted those and kept the order in
+`api/mix.rs::patch_mix`: it awaits `EngineCommand::SetMix` FIRST, then the
+settings persist of that kind's faders, via the pure seam
+`api/mix_apply.rs::apply_mix(push, persist)`. The old order (persist then
 push) let the DB `acquire()` park up to sqlx's **30 s** default before the live
-gains moved — the owner's "~30 s to apply" report. Clamp once via
-`models_dabing::clamp_dub_ratio` so the push carries exactly what gets stored; a
-persist failure is logged + 500 while the live change already happened. Pairs
+gains moved — the owner's "~30 s to apply" report. The faders are clamped once
+by `sp_core::mixer_model::MixFaders::new`, so the push carries exactly what gets
+stored; a persist failure is logged + 500 while the live change already
+happened. Pairs
 with `db/mod.rs::pool_tuning()` (WAL + NORMAL sync + 5 s busy + **2 s** acquire),
 applied only to the FILE pool (`create_memory_pool` stays plain — WAL needs a
 file). No schema change.
@@ -544,11 +547,10 @@ file). No schema change.
 `store::poll_value` loop (`app.rs`, next to the playlists load), so the shared
 Player picks the dub mixer for a playing dub video on EVERY page — not only after
 visiting `/dabing`. `pages/dabing.rs` just READS the store now. `player.rs`
-renders `<DubMixer>` and/or `<KaraokeMixer>` from `mixer_controls(dub_status,
-stem_status)`, with `show_karaoke = controls.karaoke || !controls.dub` (a non-dub
-song always keeps the karaoke default; a dub video shows karaoke only when
-stems-capable). `e2e/dabing-mixer.spec.ts` proves it on Prehľad + Naživo without
-a `/dabing` visit.
+renders the ONE `<LiveMixer>` (round G deleted `<DubMixer>`, `<KaraokeMixer>` and
+`mixer_controls`), which reads the playing item's dub row from that store.
+`e2e/dabing-mixer.spec.ts` proves it on Prehľad + Naživo without a `/dabing`
+visit.
 
 # Dabing rounds C / E / E2 (#184) — DELETED by round H step 2 (history only)
 
