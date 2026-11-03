@@ -531,13 +531,13 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
             }
         });
     };
-    // "Uložené" only while the rows and the rate are what was saved.
     let message_shown = move || {
-        let unchanged = saved.with(|s| {
-            s.as_ref().is_some_and(|(list, rate)| {
-                entries.with(|e| e == list) && network_rate.with(|r| r == rate)
-            })
-        });
+        let unchanged = low_latency.unchanged()
+            && saved.with(|s| {
+                s.as_ref().is_some_and(|(list, rate)| {
+                    entries.with(|e| e == list) && network_rate.with(|r| r == rate)
+                })
+            });
         message.with(|m| shown_message(m, unchanged).to_string())
     };
 

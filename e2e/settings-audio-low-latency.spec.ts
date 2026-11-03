@@ -81,6 +81,13 @@ test("the low-latency switch is off, ticked and saved it is sent once and surviv
   program = await (await request.get("/api/v1/program")).json();
   expect(program.audio_low_latency).toBe(true);
 
+  // "Uložené" shows only while the switch is what was saved.
+  const message = page.locator('[data-testid="audio-outputs-message"]');
+  await box.uncheck();
+  await expect(message).not.toHaveText("Uložené");
+  await box.check();
+  await expect(message).toHaveText("Uložené");
+
   await page.reload();
   await openSettings(page);
   await expect(page.locator('[data-testid="settings-audio-low-latency"]')).toBeChecked();

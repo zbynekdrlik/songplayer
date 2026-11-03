@@ -35,6 +35,12 @@ impl LowLatency {
         Self { stored, checked }
     }
 
+    /// Whether the checkbox still shows the stored value ("Uložené" shows
+    /// only then).
+    pub(super) fn unchanged(self) -> bool {
+        self.checked.get() == self.stored.with(|v| low_latency(v.as_deref()))
+    }
+
     /// What the save sends for the switch, read as the PATCH is built.
     pub(super) fn to_send(self) -> Option<String> {
         let loaded = self.stored.get_untracked();
