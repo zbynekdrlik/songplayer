@@ -567,10 +567,17 @@ is a `#[cfg(test)]` shim over `AudioOutputs::single_vban` (#210's tests).
 - 48 kHz INT24 = `VbanFormat::PROGRAM`: no converter, #210's bytes — pinned
   against a verbatim copy of the 0.72.0 encoder (`vban_packet_tests_legacy.rs`,
   `vban_out_tests_dest.rs::a_migrated_foh_entry_sends_the_0_72_datagrams`).
-- Other rates: rubato `Fft` with `FixedSync::Both` (1600 in, `rate/30` out;
-  5.0.1 takes the whole block as ONE FFT, `fft_chunks = chunk / min_in`),
-  delay `rate/60` frames = 16.7 ms at every rate (`fft_delay_frames`). A
-  silent or malformed block goes through the filter as zeros.
+- Other rates (#285 step 3): dstack-resample's sinc `Converter::new(48000,
+  rate, 2, 1600, Fixed::Input)` (the same 256-tap filter as the ASIO path;
+  48→96 measured THD+N 152.6 dB, images −163 dBFS) into a FIFO the
+  destination drains by exactly `rate/30` frames a boundary. The FIFO
+  starts with `rate/60` minus the converter's own delay frames of silence
+  (`fifo_prime_frames`), so the delay stays `rate/60` frames = 16.7 ms
+  (`fft_delay_frames`, the old rubato `Fft` path's). ROZHODNUTÉ with
+  camera-box, 3.11.2026: FOH's VBAN timing stays exactly as it was, since
+  the CG song's audio and its NDI video line up at the venue through it.
+  The converter alone would be 2.67 ms. A silent or malformed block goes
+  through the filter as zeros.
 - The delay: the sender's send latency is `L + delay`, and its wait cap is
   `VBAN_MAX_WAIT_100NS` (4 × L = 8 slots) PLUS the delay (`plan_wait_up_to`;
   the 8-slot cap alone sent a delayed output's first packet early). That

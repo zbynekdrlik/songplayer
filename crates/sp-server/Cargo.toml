@@ -61,11 +61,11 @@ jpeg-encoder = "0.6"
 # if-addrs requirement so cargo unifies them into one build.
 mdns-sd = "0.21"
 if-addrs = "0.15"
-# #233: a VBAN destination's sample-rate conversion — rubato's synchronous
-# `Fft` (default `fft_resampler` feature: its fixed ratio,
-# `playback/vban_rate.rs`). The ASIO output's sinc is dstack-resample's
-# since #285 step 3 (the same rubato, unified by this pin). Pure Rust, MIT OR Apache-2.0 (its MIT notice
-# ships in THIRD-PARTY-NOTICES.txt), pinned exactly.
+# #285 step 3: every resampler (VBAN's and the ASIO output's) is
+# dstack-resample's sinc, built on this rubato. SongPlayer names only its
+# `SincInterpolationParameters` (`asrc_params`); the pin keeps one rubato in
+# the build and the installer's notice in step. Pure Rust, MIT OR
+# Apache-2.0 (its MIT notice ships in THIRD-PARTY-NOTICES.txt).
 rubato = "=5.0.1"
 # #233 lane 3: the lock-free single-producer / single-consumer ring between
 # an ASIO output's worker and its driver's buffer-switch callback (the
