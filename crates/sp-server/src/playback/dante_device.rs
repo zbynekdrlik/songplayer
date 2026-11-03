@@ -5,7 +5,7 @@
 //! [`RingProcess`] once per block as a driver's buffer switch would, on the
 //! Dante media clock.
 //!
-//! Two TX channels on dlink's defaults: 24-bit, block 32, latency 10 ms, a
+//! Two TX channels on dlink's defaults: 24-bit, block 128, latency 10 ms, a
 //! pump margin of half the latency, no real-time setup. The worker writes the
 //! program's 48 kHz; the device runs at the network's rate and dlink converts
 //! on the device's clock (`Config::network_rate`, #285 step 2, dstack #90).

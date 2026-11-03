@@ -75,7 +75,7 @@ fn a_short_ring_is_silence_and_an_underrun_only_once_primed() {
     assert_eq!(counts.consumed.load(Ordering::Relaxed), 4);
 }
 
-/// dstack's numbers for program audio (2.11.2026): 10 ms, block 32, a margin
+/// dstack's numbers for program audio (dlink v0.6.20): 10 ms, block 128, a margin
 /// of half the latency, the `normal` profile.
 #[test]
 fn the_device_is_two_tx_no_rx_on_dlinks_defaults_at_the_network_rate() {
@@ -91,7 +91,7 @@ fn the_device_is_two_tx_no_rx_on_dlinks_defaults_at_the_network_rate() {
     let config = params(Path::new("x"), Ipv4Addr::LOCALHOST).config();
     assert_eq!((config.device_rate(), config.converts()), (96_000, true));
     assert_eq!(cfg.encoding, 24);
-    assert_eq!(cfg.block, 32);
+    assert_eq!(cfg.block, 128);
     assert_eq!(cfg.latency_ns, 10_000_000);
     assert_eq!(cfg.work_margin, 480);
     assert_eq!(
@@ -246,9 +246,9 @@ fn the_device_serves_a_receiver_the_rings_audio() {
     let latency = u32::try_from(p.latency_frames()).unwrap();
     let mut device = DanteDevice::new(p);
     let opened = device.open("", [0, 1]).expect("the device set up");
-    // The worker writes 48 kHz: the 32-frame device block is 16 of its frames.
+    // The worker writes 48 kHz: the 128-frame device block is 64 of its frames.
     assert_eq!(opened.rate, 48_000.0);
-    assert_eq!(opened.buffer_frames, 16);
+    assert_eq!(opened.buffer_frames, 64);
     let (mut tx, rx) = rtrb::RingBuffer::new(1 << 16);
     assert_eq!(
         device
@@ -297,7 +297,7 @@ fn the_device_serves_a_receiver_the_rings_audio() {
         .expect("two 24-bit slots");
     }
     assert!(left && right, "both channels on the wire");
-    assert!(device.consumed_frames() >= 16);
+    assert!(device.consumed_frames() >= 64);
     let events = device.poll();
     assert!(events.callbacks > 0);
     assert_eq!(
