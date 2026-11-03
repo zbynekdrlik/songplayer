@@ -1380,16 +1380,17 @@ difference with its UTC time.
 
 ## The native Dante output (#285)
 
-- **Live on resolume-snv since 1.11.2026, never on PP** (the owner's hold). dstack
-  is GPL-3.0-or-later and SongPlayer MIT: no `main` before the owner's answer on
-  #285.
+- **Live on resolume-snv since 1.11.2026, never on PP** (the owner's hold).
+  Since dstack v0.6.12 (dstack #102, 3.11.2026) every dstack crate is MIT OR
+  Apache-2.0 (checked in the checkout's Cargo.toml files), so the license no
+  longer keeps #285 off `main`.
 - `type: dante` in `audio_outputs`, at most one, `DanteDest {device, ip}`: the
   device name by Dante's own rule, the `ip` one IPv4 of this PC (a second
   address beside DVS, `Place::Ip`).
 - `DanteDevice` (`dante_device.rs`) implements the `AsioDevice` seam **in this
   process**, on every platform, with no `sp-dante-host` (the owner's ruling):
   `asio_out`'s worker, ring, `asrc_servo` and status serve it, so a second servo
-  never appears. dstack by git tag (v0.6.10), no Dante protocol code here.
+  never appears. dstack by git tag (v0.6.12), no Dante protocol code here.
   #285 step 2 (the owner's ruling via dstack #90: one rate conversion, in
   dlink, for every app): `DanteParams.rate` is `PROGRAM_RATE` (48 kHz, what the
   worker writes) and `network_rate` the entry's effective rate; `config()` sets

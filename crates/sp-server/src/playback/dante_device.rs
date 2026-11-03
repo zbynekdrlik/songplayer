@@ -163,9 +163,9 @@ struct EngineLine {
     overruns: u64,
 }
 
-/// The stack's status line (`ctl::answer("status", ..)`) as the dashboard's
-/// figures: its TX flows' bins summed, their maxima taken, a flow that ended
-/// included. `None` for a line that does not read.
+/// The stack's status line (`ctl::status`, what `Link::status` returns) as
+/// the dashboard's figures: its TX flows' bins summed, their maxima taken, a
+/// flow that ended included. `None` for a line that does not read.
 pub fn figures_of(line: &str) -> Option<DanteFigures> {
     let line: StatusLine = serde_json::from_str(line).ok()?;
     let mut f = DanteFigures {
@@ -203,7 +203,7 @@ impl DanteLink {
     /// The stack's figures now; `None` while no device runs.
     pub fn figures(&self) -> Option<DanteFigures> {
         let media = self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()?;
-        figures_of(&ctl::answer("status", &media))
+        figures_of(&ctl::status(&media))
     }
 }
 
