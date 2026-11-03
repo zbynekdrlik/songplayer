@@ -8,6 +8,7 @@ pub mod audio_faults_timeline; // #257: the panel's timeline (buckets, bars, axi
 pub mod audio_fx; // #242: a playlist's own volume + parametric EQ (model, filters, curve)
 pub mod audio_fx_send; // #278: the EQ panel's live sends (50 ms throttle, one in flight)
 pub mod audio_fx_view; // #278: the EQ panel's view maths (drag, sliders, labels, grid, order)
+pub mod audio_latency; // #289: the `audio_low_latency` switch (read, check, send, texts)
 pub mod audio_level;
 pub mod audio_outputs;
 pub mod audio_outputs_save; // #233 release review: the dashboard's save decisions
