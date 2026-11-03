@@ -9,7 +9,6 @@ paths:
   - "crates/sp-server/src/playback/vban_packet_tests_format.rs"
   - "crates/sp-server/src/playback/vban_packet_tests_legacy.rs"
   - "crates/sp-server/src/playback/asrc*.rs"
-  - "crates/sp-asrc/**"
   - "crates/sp-core/src/dante_status*.rs"
   - "crates/sp-server/src/playback/dante_device*.rs"
   - "sp-ui/src/components/audio_outputs_dante.rs"
@@ -37,28 +36,68 @@ Spec `docs/superpowers/specs/2026-10-07-audio-outputs-asio-design.md`, plan
 
 ## The drift servo and the ASRC (`asrc_servo.rs`, `asrc.rs`) — lane 2
 
-Pure modules, no thread, no I/O, no runtime wiring yet: lane 3's ASIO worker
-calls `Servo::observe` once per program block, gives the answer to
-`Asrc::set_correction_ppm` and (through `frames_from_100ns`: positive =
-insert, negative = skip) `Splice::insert` / `skip`, and pushes
+Pure modules, no thread, no I/O: the ASIO worker (and the Dante output
+through the same seam) calls `Servo::observe` once per program block, gives
+the answer to `Asrc::set_correction_ppm` and (through `frames_from_100ns`:
+positive = insert, negative = skip) `Splice::insert` / `skip`, and pushes
 `Splice::process(Asrc::process(block))` into the card's ring.
 
-**The stage lives in `crates/sp-asrc`** (#233, 10.10.2026): `SincStage`, a
-non-generic wrapper of rubato's `Async<f32>` sinc. rubato is generic, so its
-code compiles in the crate that names `Async::<f32>`; the workspace compiles
-sp-asrc at `opt-level = 3` in the dev profile (test and mutants inherit it).
-Named from sp-server, the 256-tap cubic stage ran unoptimized in tests: tens
-of ms a block, 20–110 s per ASIO test, ~330 s of the suite. Keep every
-rubato `Async` call in sp-asrc and nothing there `#[inline]` or generic, or
-the cost moves back into sp-server's builds. rubato itself is optimized too
-(`[profile.dev.package.rubato]`): its AVX / SSE / NEON dot kernels
-(`dot_avx_f32_dyn`, `impl AvxSample for f32`) are NOT generic, so they
-compile in rubato — sp-asrc alone took the slowest ASIO test only from 46 s
-to 31 s (nextest, mutation shard logs, CI 38041182285). Read a slow test's
-time in the `mutants-report-shard-*` artifact's per-mutant logs (`PASS [
-31.123s]`); the Test job's `cargo test` prints only the binary's total. `asrc_params()` (the filter)
-stays in sp-server's `asrc.rs`. VBAN's `Fft` (`vban_rate.rs`) is still
-compiled in sp-server.
+**Since #285 step 3 the LAWS live in dstack-resample** (dstack tag v0.6.14,
+MIT OR Apache-2.0, `crates/dstack-resample/src/asrc.rs` + `lib.rs` in the
+dstack checkout): `Servo` is a thin ADAPTER over
+`dstack_resample::asrc::Controller` (`Controller::new(target, floor 38.3 ms,
+edge 133.3 ms, Basis::Arrival)` `.with_cushion_max_s(one slot)`
+`.with_calm_zone_ms(calm_zone_ms_for(callback / rate))` `.with_priming()`;
+per block `played_silence(underrun_frames / rate)`, then `observe(now =
+handled − the first block's handled, depth = the latency, other = consumed
+/ rate)`; `Step::{Hold, Prime, Recentre}` mapped onto `ServoAction` /
+`Recentre`, a re-centre's size the exact 100 ns error), and `Asrc` over
+`dstack_resample::Converter::drifting(48 000, rate, 2, 1600, Fixed::Input)`
+(f64 channel-major core; the adapter converts SongPlayer's interleaved f32
+in buffers sized once, `set_ppm` ramped; the adapter still REFUSES a
+correction outside `1/1.001 ..= 1.001`, where dstack would clamp to
+±1000 ppm). The public API the worker and the status read is unchanged:
+the constants are dstack's re-exported (`MAX_PPM`, the regression's, the
+level loop's, `CALM_ZONE_MS`, `LevelLoop`, `Offered`, `slew`,
+`braking_ppm`), `RateRegression` wraps dstack's `RateFit`; SongPlayer's own
+are the grid constants, the 100 ns observation, the `Splice` (dstack has
+none) and the status: the adapter keeps a shadow of the controller's
+window (it opens, closes and restarts where dstack's does) for the window's
+mean latency and `slew_eta_s`, and shows `offset_ms` / `cushion_ms` on the
+100 ns grain. `fold_cushion`, `kept_cushion`, `slew_err_100ns` and
+`hard_recentre` remain as the pure 100 ns forms of dstack's laws, pinned by
+their tests. The law description below is the one dstack carries over;
+where dstack's controller still DIFFERS (step 3's findings, reported to
+dstack, our pins unchanged and red until it is fixed):
+
+- **priming**: dstack primes only when the first depth is under the
+  target; SongPlayer's servo primed (a skip) on ANY first block. Eight
+  unit tests whose first block reads 100 ns over the target (6 400 frames
+  at 96 kHz = 666 667) fail on it — the window then starts at block 0;
+- **stall**: dstack compares two CONSECUTIVE window means (never the
+  first window, and a window the stall only starts in passes as a
+  measurement and moves the fit); SongPlayer's checked one window's first
+  and last point (`a_window_of_exactly_100_000_ppm_is_a_measurement`,
+  `a_starved_window_flushes_the_rate_and_holds_the_correction`);
+- **an underrun count that went back**: dstack folds the rise from the
+  lowered count; SongPlayer's folded only past the most seen
+  (`underrun_frames_fold_into_a_cushion_that_a_re_centre_drops`).
+
+The closed-loop sim (`asrc_servo_sim_tests.rs`), `asrc_tests.rs` (frame
+counts, the 3 213-frame bound, the delay, THD+N, images), the ASIO worker's
+ring pins and the Dante tests pass unchanged on dstack's code.
+
+**The stage is compiled in dstack-resample** (it names rubato's generic
+`Async::<f64>`): the workspace compiles it at `opt-level = 3` in the dev
+profile (`[profile.dev.package.dstack-resample]`; test and mutants inherit
+it), and rubato's AVX / SSE / NEON dot kernels in rubato
+(`[profile.dev.package.rubato]`). Unoptimized, the 256-tap cubic stage took
+tens of ms a block and 20–110 s per ASIO test (#233, when sp-asrc carried
+it; sp-asrc is deleted). Read a slow test's time in the
+`mutants-report-shard-*` artifact's per-mutant logs; the Test job's `cargo
+test` prints only the binary's total. VBAN's `Fft` (`vban_rate.rs`) is
+still rubato named from sp-server (it moves to dstack later, after a
+heads-up).
 
 **The observation** (per block, on the program wall, 100 ns): when the block
 was handled, its boundary (stamp), the frames buffered for the card (the
@@ -1192,8 +1231,8 @@ host's code path (the bin, `mod.rs`, `host.rs`, `host_win.rs`, the protocol
 and status, `remote_clock.rs`, `mono.rs`, `log_forward.rs`, `launch.rs`,
 `panic_hook.rs`, `log_rotate.rs`, the ASIO output and its glue, the servo, the ASRC, the
 queue, the clocks, `pipeline_paced.rs`, `vban_out.rs`, `vban_packet.rs`,
-`audio_out.rs`, `program_output.rs`, `mmcss.rs`, sp-asrc; comments are not
-scanned) for `Command::new`, `process::Command`, `tokio::process`,
+`audio_out.rs`, `program_output.rs`, `mmcss.rs`; comments are not
+scanned; dstack-resample's source is outside this repo) for `Command::new`, `process::Command`, `tokio::process`,
 `CreateProcess`, `ShellExecute`, `WinExec`, `posix_spawn`. A new file the
 host runs goes on that list; `client_win.rs` (SongPlayer starting the host)
 is deliberately not on it.
@@ -1383,14 +1422,16 @@ difference with its UTC time.
 - **Live on resolume-snv since 1.11.2026, never on PP** (the owner's hold).
   Since dstack v0.6.12 (dstack #102, 3.11.2026) every dstack crate is MIT OR
   Apache-2.0 (checked in the checkout's Cargo.toml files), so the license no
-  longer keeps #285 off `main`.
+  longer keeps #285 off `main`. `THIRD-PARTY-NOTICES.txt` names dstack
+  0.6.14 (dlink, dstack, dstack-audio-io, dstack-resample) with its
+  LICENSE-MIT verbatim (it named 0.5.11 under the GPL until step 3).
 - `type: dante` in `audio_outputs`, at most one, `DanteDest {device, ip}`: the
   device name by Dante's own rule, the `ip` one IPv4 of this PC (a second
   address beside DVS, `Place::Ip`).
 - `DanteDevice` (`dante_device.rs`) implements the `AsioDevice` seam **in this
   process**, on every platform, with no `sp-dante-host` (the owner's ruling):
   `asio_out`'s worker, ring, `asrc_servo` and status serve it, so a second servo
-  never appears. dstack by git tag (v0.6.12), no Dante protocol code here.
+  never appears. dstack by git tag (v0.6.14), no Dante protocol code here.
   #285 step 2 (the owner's ruling via dstack #90: one rate conversion, in
   dlink, for every app): `DanteParams.rate` is `PROGRAM_RATE` (48 kHz, what the
   worker writes) and `network_rate` the entry's effective rate; `config()` sets
@@ -1399,8 +1440,10 @@ difference with its UTC time.
   following drift only. The worker sees `buffer_frames` = the device block at
   48 kHz (16) and a latency of the device's 10 ms plus `Rated`'s TX delay
   (`convert_tx_ns`, about 136 frames). The dashboard's ASIO chip then reads
-  "48 kHz bez prevodu" for this output although dlink converts. Step 3 replaces
-  sp-asrc with dstack-resample. `RingProcess`
+  "48 kHz bez prevodu" for this output although dlink converts. Step 3 (dstack
+  v0.6.14): `asrc_servo.rs` and `asrc.rs` are adapters over dstack-resample's
+  `asrc::Controller` and `Converter::drifting` (lane 2's section above, with
+  the three laws where dstack still differs); sp-asrc is deleted. `RingProcess`
   is the stack's callback: like a buffer switch it allocates, locks and logs
   nothing. Two TX channels at the network rate on `dlink`'s defaults (24-bit,
   block 32, 10 ms, a margin of half the latency, the `normal` profile). `Link`
