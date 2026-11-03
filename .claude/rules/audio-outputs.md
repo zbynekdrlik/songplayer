@@ -1,6 +1,9 @@
 ---
 paths:
   - "crates/sp-core/src/audio_outputs*.rs"
+  - "crates/sp-core/src/audio_latency*.rs"
+  - "sp-ui/src/components/audio_outputs_latency.rs"
+  - "e2e/settings-audio-low-latency.spec.ts"
   - "crates/sp-core/src/asio_resampling*.rs"
   - "crates/sp-server/src/playback/resample_quality.rs"
   - "crates/sp-server/src/playback/audio_out*.rs"
@@ -33,6 +36,98 @@ Spec `docs/superpowers/specs/2026-10-07-audio-outputs-asio-design.md`, plan
 1: the output list + VBAN per destination; lane 3: the ASIO output over
 `azo`). Lane 2's section (the drift servo, the ASRC) comes first, then lane
 1's, then lane 3's (the ASIO output).
+
+## The low-latency switch `audio_low_latency` (#289 step 1)
+
+ROZHODNUTÉ on #289 (measured 3.11.2026 on resolume-snv, 4 h: the
+program's hand-off to the outputs, `health.timing.vban_feed_late_us`, is
+≤ 10 ms in steady state — window maxima p50 0.3 ms, p90 9.1 ms, peaks
+8.5–9.8 ms every few minutes — and 14.7–20.7 ms only right after a process
+start):
+
+- ONE boolean setting, DEFAULT OFF: `sp_core::audio_latency`
+  (`SETTING_AUDIO_LOW_LATENCY`, `low_latency`: only `"true"`, trimmed, any
+  case, is ON; unset / blank / anything else OFF). The settings PATCH
+  takes `"true"` / `"false"` / `""` only, stored lower case
+  (`audio_latency::checked`, called by `api/settings.rs::prepare` after
+  `paid_ai::checked`; 400 "audio_low_latency must be true or false",
+  nothing written).
+- Read live: the outputs task's 5 s pass reads it with the list
+  (`audio_out_config::load_low_latency`; a failed read changes nothing),
+  sets `AudioOutputs::low_latency` (one INFO on a change) and applies the
+  list with it (`plan_at`, `built_at`): a VBAN output built with the other
+  value is a changed entry — rebuilt (`discard` + a new output, its frame
+  counter from 0), never a restart. OFF is byte for byte today's: `plan`,
+  `VbanOut::for_entry`, `VbanRateConverter::new`, `send_latency_100ns`,
+  `max_wait_100ns` and `vban_latency_ms` are the OFF forms of the new
+  `*_at` / `*_in` / `for_latency` functions, and every #233 test is
+  unchanged.
+- ON, every VBAN output (`vban-out.md`, "The low-latency switch"): L =
+  15 ms (`VBAN_SEND_LATENCY_LOW_100NS` 150 000), the wait cap 4 × L =
+  60 ms + the delay (`max_wait_in`); a converting destination is NOT
+  padded to `rate / 60`: its FIFO starts empty
+  (`vban_rate::prime_frames`), and the converter's first call, which gives
+  `rate / 24 000` frames under a block (dstack v0.6.20: 1468 / 2936 / 3196
+  / 6392 instead of 1470 / 2940 / 3200 / 6400), is topped up ONCE with
+  leading silence (`Conversion::top_up`, counted in `delay_frames`) —
+  without it the FIFO would hold back a whole block (33 ms) for good.
+  Measured over 20 000 blocks: one top-up, never a short block after it.
+  So the delay is 119 / 239 / 260 / 520 frames at 44.1 / 88.2 / 96 /
+  192 kHz (FOH at 96 kHz: 15 + 2.708 ms); `latency_ms` on `GET
+  /api/v1/program` reports it (`vban_latency_ms_at`, the converter's delay
+  from `vban_rate::low_latency_delay_frames`, measured once per rate on a
+  real converter).
+- `GET /api/v1/program` → top-level `audio_low_latency` (the value the list
+  was last applied with).
+- Nastavenia "Zvukové výstupy": the checkbox `settings-audio-low-latency`
+  "Nízka latencia zvuku (~15 ms)" with the Slovak tooltip
+  (`audio_latency::TOOLTIP_SK`: audio leaves ~65 ms earlier against the
+  picture; camera-box A/B-measures it before it stays on), in its own child
+  module `audio_outputs_latency.rs` (the section is at the 1000-line cap),
+  saved with "Uložiť výstupy" and sent ONLY when it differs from the value
+  the page loaded (`low_latency_to_send`, the `paid_ai_to_send` rule). The
+  "Uložené" line does not watch the checkbox. Mock: the PATCH check and
+  `audio_low_latency` on the program; spec
+  `e2e/settings-audio-low-latency.spec.ts`.
+- **The ASIO / Dante servo is NOT switched (open, step 1 stopped here).**
+  The ruling asks for target = 15 ms + delay with the floor, the edge and
+  the ring re-derived from their stated reasons. The edge (4 slots off the
+  target) and the ring (target + 4 slots + one block, `ring_capacity_frames`)
+  are already relative to the target and carry over unchanged. The floor
+  does NOT re-derive: its reason (Q2) is "a missing boundary reads under it
+  and is ONE faded insert, never a run of unfaded underruns", which needs
+  a ring that can hold one missing slot — the target minus the splice's
+  5 ms hold minus the lateness must exceed a slot (61.7 ms at 66.7 ms). At
+  15 ms the ring holds 10 ms of lateness, so a missing boundary underruns
+  BEFORE any block reaches the servo; after it the reading is hold +
+  the next block's lateness (5.3–15 ms), indistinguishable from steady
+  state when that lateness is ~10 ms. The absolute 38.3 ms floor would
+  hard re-centre EVERY block at 15 ms. A scratch closed-loop sim (the
+  harness of `asrc_servo_sim_tests.rs`, target 15 ms, floor 5.5 / 7 /
+  9 ms — the floor changed nothing in this range; profile p50 ≤ 0.3 ms,
+  p99 ≤ 2 ms, 0.9 % at 2–9.8 ms, 0.1 % at 9.8–20 ms; 900 s): 0 hard
+  re-centres, but 17–18 underrun callbacks at 128 frames / 96 kHz and
+  64 / 48 kHz, 7–8 at 512 / 96 kHz (today's 66.7 ms target: 0), a cushion
+  of 11–14 ms kept; the sub-millisecond `Lateness::Measured` profile still
+  0–5; a missing boundary = 1 hard re-centre AND 14–35 unfaded underrun
+  callbacks (~47–75 ms of silence). An ASIO / Dante output therefore keeps
+  `BASE_LATENCY_100NS` with the switch on, and the outputs task does not
+  rebuild it (`built_at`: only a VBAN output carries the switch). The
+  owner decides whether the ASIO path takes a 15 ms target with those
+  underruns, or another target.
+- Not followed by the switch either: `program_output_timing::VBAN_FEED_BUDGET_US`
+  (66 666, the `vban_feed_late_over_budget` count and its WARN) stays on
+  the OFF L — `program_bus.rs`, which feeds it, is at the 1000-line cap.
+  With the switch on, a VBAN output's own `late_sends` / `late_events`
+  count the packets sent late against the 15 ms L.
+- Tests: sp-core `audio_latency_tests.rs`; `vban_out_tests_latency.rs`
+  (exact send instants at both settings, the 4 × L cap, a block 20 ms late,
+  a 96 kHz entry with a delay, the converter's delay at both settings for
+  every rate, an impulse leaving the converter after its reported delay,
+  the status latency); `audio_out_task_tests_latency.rs` (a flip rebuilds
+  every VBAN output and keeps an ASIO one, a pass reads the stored value);
+  `settings_tests_audio.rs` (the PATCH); `program_tests_outputs.rs` (the
+  top-level field).
 
 ## The drift servo and the ASRC (`asrc_servo.rs`, `asrc.rs`) — lane 2
 

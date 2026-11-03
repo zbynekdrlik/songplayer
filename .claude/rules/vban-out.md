@@ -139,6 +139,29 @@ sender, and its 48 kHz INT24 bytes are #210's.
   cuts and standby. While the output is disabled or has no resolved target,
   nothing is encoded or sent and the counter does not move.
 
+## The low-latency switch (#289 step 1, `audio_low_latency`)
+
+Default OFF (everything above). ON (`audio-outputs.md`, "The low-latency
+switch"), each VBAN output is rebuilt with `VbanOut::for_entry_at(entry,
+rate, true)`:
+
+- L = 15 ms (`VBAN_SEND_LATENCY_LOW_100NS` = 150 000,
+  `base_send_latency_100ns(low)`), so packet k goes at `due + 15 ms + delay
+  + offset(k)` (`send_latency_in`). Today's box hand-off (≤ 10 ms in steady
+  state) is inside it; a block handed over later than 15 ms sends its
+  past-due packets back to back, counted in that output's `late_sends`.
+- The wait cap keeps its relation to L: 4 × L = 60 ms + the delay
+  (`max_wait_in`); a block taken at its boundary still waits at most
+  L + 29.2 ms for its last 48 kHz packet. The queue bound (the program
+  queue's 10 + the delay's slots), the 7-slot sleep step and the 100 ms
+  idle wait do not depend on L (a const assert pins the idle wait under 8 ×
+  the low L too).
+- A converting destination (≠ 48 kHz) starts its FIFO empty and tops the
+  converter's short first call up once (`vban_rate.rs`): FOH at 96 kHz
+  leaves 15 + 2.708 ms after its boundary instead of 66.7 + 16.7 ms.
+- `health.timing.vban_feed_late_over_budget` stays on the OFF L (66.7 ms).
+- Tests: `vban_out_tests_latency.rs`.
+
 ## Wire format (verified against VB-Audio "VBAN Protocol Specifications" rev. 13)
 
 The 28-byte header is little-endian:
