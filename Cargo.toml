@@ -74,3 +74,10 @@ opt-level = 3
 
 [profile.dev.package.rubato]
 opt-level = 3
+
+# #285 step 3: the ASIO output's sinc stage is dstack-resample's
+# `Converter`, which names rubato's generic `Async::<f64>`: its glue compiles
+# there, so it is optimized like sp-asrc was (its f64 dot kernels are
+# rubato's, above).
+[profile.dev.package.dstack-resample]
+opt-level = 3

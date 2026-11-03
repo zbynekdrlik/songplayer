@@ -1,13 +1,16 @@
 //! #233: the ASIO output's resampler and its re-centre.
 //!
-//! `Asrc`: ONE rubato `Async` band-limited sinc stage converts the 48 kHz
-//! program to the card's rate, fixed input of one 1600-frame program block.
-//! The stage itself is `sp_asrc::SincStage`: rubato's generic glue is
-//! compiled in the crate that names it (sp-asrc) and its dot kernels in
-//! rubato; the workspace optimizes both even in tests (the ASIO tests push
-//! thousands of blocks).
-//! Its filter is the lane's measured choice ([`asrc_params`], pinned by a
-//! test; rubato documents no "highest" setting):
+//! `Asrc`: an adapter over dstack-resample's drifting converter
+//! (`dstack_resample::Converter::drifting`, #285 step 3: the conversion is
+//! dstack's, done once and measured once for every app). ONE rubato `Async`
+//! band-limited sinc stage converts the 48 kHz program to the card's rate,
+//! fixed input of one 1600-frame program block. dstack's core runs in `f64`,
+//! channel-major; this adapter takes and gives SongPlayer's interleaved `f32`
+//! stereo, through buffers sized once. dstack-resample is the crate that
+//! names rubato's generic `Async::<f64>`, so the workspace compiles it (and
+//! rubato's dot kernels) at `opt-level = 3` even in tests.
+//! Its filter is the lane's measured choice, now dstack's `PARAMS`
+//! ([`asrc_params`], pinned by a test):
 //! - 256 taps;
 //! - the sinc table oversampled 256× (twice rubato's default);
 //! - BlackmanHarris²;
@@ -17,76 +20,93 @@
 //! The servo (`asrc_servo.rs`) sets its relative ratio `1 + ppm·1e-6` once
 //! per block, ramped across the block: that ratio absorbs every difference
 //! (the owner's ruling of 8.10.2026). The splice below is used only to prime
-//! the ring and for a hard re-centre.
+//! the ring and for a hard re-centre. A correction outside
+//! `1/1.001 ..= 1.001` is refused here (dstack would clamp it to ±1000 ppm).
 //!
 //! Its delay is `sinc_len · ratio / 2` frames: 256 at 96 kHz, 2.7 ms (the
 //! oversampling does not change it).
 //!
 //! Measured through it, 48 → 96 kHz (`asrc_tests.rs`, the figures in the CI
-//! log, the scratch model of rubato in brackets):
-//! - a 1 kHz tone at −1 dBFS, at −300, 0 and +300 ppm: THD+N ≥ 120 dB (about
-//!   142 dB);
-//! - a 20 kHz tone: nothing above −120 dBFS between 24 and 48 kHz (≤ −149 dBFS).
+//! log):
+//! - a 1 kHz tone at −1 dBFS, at −300, 0 and +300 ppm: THD+N ≥ 120 dB;
+//! - a 20 kHz tone: nothing above −120 dBFS between 24 and 48 kHz.
 //!
-//! Allocation-free after `new` (`process_into_buffer` into its own buffer;
-//! rubato's `log` feature is off).
+//! Allocation-free after `new` (dstack's `process` allocates nothing; the
+//! adapter's buffers are its own).
 //!
 //! `Splice`: the priming and a hard re-centre on the resampler's output (the
 //! card's rate): a 5 ms fade out, the inserted silence or the skipped frames,
 //! a 5 ms fade in — never a click. It holds back its last 5 ms so a fade-out
 //! can still reach audio not yet in the ring (a constant 5 ms of latency,
-//! counted in the servo's `buffered_frames`).
+//! counted in the servo's `buffered_frames`). dstack has no splice: it stays
+//! SongPlayer's.
 
-use rubato::{SincInterpolationParameters, SincInterpolationType, WindowFunction};
-use sp_asrc::SincStage;
+use dstack_resample::{Converter, Fixed};
+use rubato::SincInterpolationParameters;
 use sp_core::audio_outputs::PROGRAM_RATE;
 
 use crate::playback::vban_packet::{VBAN_BLOCK_FRAMES, VBAN_BLOCK_SAMPLES, VBAN_CHANNELS};
 
-/// The sinc length (rubato's default; ~2.7 ms at 96 kHz).
-pub const ASRC_SINC_LEN: usize = 256;
-/// The sinc table's oversampling: the lane's measured choice, twice
-/// rubato's default of 128 (the scratch model: images −149 dBFS against
-/// −146 at 128; rubato documents cubic as the best quality per
-/// oversampling, not a highest setting).
-pub const ASRC_OVERSAMPLING: usize = 256;
-/// The ratio's room around nominal: ±1000 ppm, well past the servo's ±300.
+/// The sinc length (~2.7 ms at 96 kHz): dstack's.
+pub const ASRC_SINC_LEN: usize = dstack_resample::TAPS;
+/// The sinc table's oversampling: dstack's, the lane's measured choice
+/// (twice rubato's default of 128).
+pub const ASRC_OVERSAMPLING: usize = dstack_resample::OVERSAMPLING;
+/// The ratio's room around nominal that this adapter accepts: ±1000 ppm,
+/// well past the servo's ±300 (`1/1.001 ..= 1.001`, so −1000 ppm itself is
+/// refused).
 pub const ASRC_MAX_RELATIVE: f64 = 1.001;
 /// A re-centre's fade, s.
 pub const SPLICE_FADE_S: f64 = 0.005;
 
-/// The resampler's filter (the module doc): 256 taps, oversampled 256×,
-/// BlackmanHarris², cubic, the cutoff automatic.
+/// The resampler's filter (the module doc): dstack-resample's `PARAMS`.
 pub fn asrc_params() -> SincInterpolationParameters {
-    SincInterpolationParameters::new(ASRC_SINC_LEN, WindowFunction::BlackmanHarris2)
-        .oversampling_factor(ASRC_OVERSAMPLING)
-        .interpolation(SincInterpolationType::Cubic)
+    dstack_resample::PARAMS
 }
 
 /// The program (48 kHz, stereo, one 1600-frame block per boundary) at the
 /// card's rate, with the servo's correction.
 pub struct Asrc {
-    inner: SincStage,
+    inner: Converter,
+    /// One block, channel-major `f64`.
+    input: Vec<f64>,
+    /// The converter's output, channel-major, `max_out` frames a channel.
+    output: Vec<f64>,
+    max_out: usize,
+    /// What [`Asrc::process`] gives: interleaved `f32`.
     out: Vec<f32>,
 }
 
 impl Asrc {
     pub fn new(device_rate_hz: f64) -> Result<Self, String> {
-        let ratio = device_rate_hz / f64::from(PROGRAM_RATE);
-        let inner = SincStage::new(
-            ratio,
-            ASRC_MAX_RELATIVE,
-            &asrc_params(),
-            VBAN_BLOCK_FRAMES,
+        let inner = Converter::drifting(
+            PROGRAM_RATE,
+            device_rate_hz.round() as u32,
             VBAN_CHANNELS,
-        )?;
-        let out = vec![0.0; inner.max_out_frames() * VBAN_CHANNELS];
-        Ok(Self { inner, out })
+            VBAN_BLOCK_FRAMES,
+            Fixed::Input,
+        )
+        .map_err(|e| e.to_string())?;
+        let max_out = inner.output_frames_max();
+        Ok(Self {
+            inner,
+            input: vec![0.0; VBAN_BLOCK_SAMPLES],
+            output: vec![0.0; max_out * VBAN_CHANNELS],
+            max_out,
+            out: vec![0.0; max_out * VBAN_CHANNELS],
+        })
     }
 
-    /// The servo's correction (ramped across the next block).
+    /// The servo's correction (ramped across the next block); outside
+    /// [`ASRC_MAX_RELATIVE`] refused.
     pub fn set_correction_ppm(&mut self, ppm: f64) -> Result<(), String> {
-        self.inner.set_relative(1.0 + ppm * 1e-6, true)
+        let relative = 1.0 + ppm * 1e-6;
+        if !(1.0 / ASRC_MAX_RELATIVE..=ASRC_MAX_RELATIVE).contains(&relative) {
+            return Err(format!(
+                "a correction of {ppm} ppm is outside the resampler's room"
+            ));
+        }
+        self.inner.set_ppm(ppm).map_err(|e| e.to_string())
     }
 
     /// One program block (3200 interleaved samples) at the card's rate.
@@ -97,8 +117,27 @@ impl Asrc {
                 block.len()
             ));
         }
-        let produced = self.inner.process(block, &mut self.out)?;
-        Ok(&self.out[..produced * VBAN_CHANNELS])
+        let frames = VBAN_BLOCK_FRAMES;
+        for (i, frame) in block.chunks_exact(VBAN_CHANNELS).enumerate() {
+            for (c, &x) in frame.iter().enumerate() {
+                self.input[c * frames + i] = f64::from(x);
+            }
+        }
+        let (_, produced) = self
+            .inner
+            .process(&self.input, frames, &mut self.output, self.max_out)
+            .map_err(|e| e.to_string())?;
+        let max_out = self.max_out;
+        let samples = produced * VBAN_CHANNELS;
+        for (i, frame) in self.out[..samples]
+            .chunks_exact_mut(VBAN_CHANNELS)
+            .enumerate()
+        {
+            for (c, y) in frame.iter_mut().enumerate() {
+                *y = self.output[c * max_out + i] as f32;
+            }
+        }
+        Ok(&self.out[..samples])
     }
 
     /// The resampler's delay, in frames at the card's rate.
@@ -108,7 +147,7 @@ impl Asrc {
 
     /// The most frames one block can give.
     pub fn max_out_frames(&self) -> usize {
-        self.inner.max_out_frames()
+        self.max_out
     }
 }
 
