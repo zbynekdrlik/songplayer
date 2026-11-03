@@ -648,7 +648,7 @@ async fn a_dante_entry_is_built_at_the_network_rate_through_the_starter() {
     let seen = started.clone();
     let start = move |sink: &OutputSink, _: &str| {
         if let OutputSink::Dante(_, params, _) = sink {
-            seen.lock().unwrap().push(params.rate);
+            seen.lock().unwrap().push(params.network_rate);
         }
     };
     let outputs = AudioOutputs::new();

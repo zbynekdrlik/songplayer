@@ -32,7 +32,8 @@ fn params(dir: &Path, ip: Ipv4Addr) -> DanteParams {
     DanteParams {
         device: "SongPlayer-test".into(),
         ip,
-        rate: 96_000,
+        rate: 48_000,
+        network_rate: 96_000,
         dir: dir.to_path_buf(),
         clock: ClockSource::System,
     }
@@ -85,7 +86,10 @@ fn the_device_is_two_tx_no_rx_on_dlinks_defaults_at_the_network_rate() {
     assert_eq!(cfg.name, "SongPlayer-test");
     assert!(cfg.rx.is_empty());
     assert_eq!(cfg.tx.len(), 2);
+    // The device runs at the network's rate; the app writes the program's.
     assert_eq!(cfg.sample_rate, 96_000);
+    let config = params(Path::new("x"), Ipv4Addr::LOCALHOST).config();
+    assert_eq!((config.device_rate(), config.converts()), (96_000, true));
     assert_eq!(cfg.encoding, 24);
     assert_eq!(cfg.block, 32);
     assert_eq!(cfg.latency_ns, 10_000_000);
@@ -112,12 +116,20 @@ fn an_entry_builds_at_the_network_rate_or_its_own() {
     };
     let mut entry = OutputEntry::dante("out-1", "Dante", dest);
     let p = DanteParams::for_entry(&entry, 96_000).unwrap();
-    assert_eq!(p.rate, 96_000);
+    // #285 step 2: the worker writes the program's 48 kHz, dlink converts
+    // to the network's 96 kHz on the device's clock.
+    assert_eq!((p.rate, p.network_rate), (48_000, 96_000));
     assert_eq!(p.ip, Ipv4Addr::new(10, 77, 9, 210));
     assert_eq!(p.clock, ClockSource::Dsync);
-    assert_eq!(p.latency_frames(), 960);
+    // 10 ms device latency at 48 kHz (480 frames) plus the converter's TX
+    // delay, 2.83 ms by dlink's own measurement (about 136 frames).
+    let lat = p.latency_frames();
+    assert!((480 + 130..=480 + 140).contains(&lat), "latency {lat}");
     entry.rate = RateChoice::Fixed(48_000);
-    assert_eq!(DanteParams::for_entry(&entry, 96_000).unwrap().rate, 48_000);
+    let same = DanteParams::for_entry(&entry, 96_000).unwrap();
+    assert_eq!((same.rate, same.network_rate), (48_000, 48_000));
+    assert!(!same.config().converts());
+    assert_eq!(same.latency_frames(), 480);
 }
 
 #[test]
@@ -230,17 +242,20 @@ fn the_device_serves_a_receiver_the_rings_audio() {
     let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let ip = routed_ipv4();
-    let mut device = DanteDevice::new(params(dir.path(), ip));
+    let p = params(dir.path(), ip);
+    let latency = u32::try_from(p.latency_frames()).unwrap();
+    let mut device = DanteDevice::new(p);
     let opened = device.open("", [0, 1]).expect("the device set up");
-    assert_eq!(opened.rate, 96_000.0);
-    assert_eq!(opened.buffer_frames, 32);
+    // The worker writes 48 kHz: the 32-frame device block is 16 of its frames.
+    assert_eq!(opened.rate, 48_000.0);
+    assert_eq!(opened.buffer_frames, 16);
     let (mut tx, rx) = rtrb::RingBuffer::new(1 << 16);
     assert_eq!(
         device
             .start(rx)
             .expect("the device started")
             .output_latency_frames,
-        960
+        latency
     );
     device.mark_primed();
     let audio = UdpSocket::bind((ip, 0)).unwrap();
@@ -282,7 +297,7 @@ fn the_device_serves_a_receiver_the_rings_audio() {
         .expect("two 24-bit slots");
     }
     assert!(left && right, "both channels on the wire");
-    assert!(device.consumed_frames() >= 32);
+    assert!(device.consumed_frames() >= 16);
     let events = device.poll();
     assert!(events.callbacks > 0);
     assert_eq!(

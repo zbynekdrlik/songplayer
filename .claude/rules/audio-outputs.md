@@ -1389,7 +1389,17 @@ difference with its UTC time.
 - `DanteDevice` (`dante_device.rs`) implements the `AsioDevice` seam **in this
   process**, on every platform, with no `sp-dante-host` (the owner's ruling):
   `asio_out`'s worker, ring, `asrc_servo` and status serve it, so a second servo
-  never appears. dstack by git tag, no Dante protocol code here. `RingProcess`
+  never appears. dstack by git tag (v0.6.10), no Dante protocol code here.
+  #285 step 2 (the owner's ruling via dstack #90: one rate conversion, in
+  dlink, for every app): `DanteParams.rate` is `PROGRAM_RATE` (48 kHz, what the
+  worker writes) and `network_rate` the entry's effective rate; `config()` sets
+  `.sample_rate(rate).network_rate(network_rate)`, so dlink's `Rated` converts
+  on the device's clock (fixed ratio) and the worker's `Asrc` runs at ratio 1,
+  following drift only. The worker sees `buffer_frames` = the device block at
+  48 kHz (16) and a latency of the device's 10 ms plus `Rated`'s TX delay
+  (`convert_tx_ns`, about 136 frames). The dashboard's ASIO chip then reads
+  "48 kHz bez prevodu" for this output although dlink converts. Step 3 replaces
+  sp-asrc with dstack-resample. `RingProcess`
   is the stack's callback: like a buffer switch it allocates, locks and logs
   nothing. Two TX channels at the network rate on `dlink`'s defaults (24-bit,
   block 32, 10 ms, a margin of half the latency, the `normal` profile). `Link`

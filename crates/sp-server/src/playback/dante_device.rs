@@ -5,8 +5,10 @@
 //! [`RingProcess`] once per block as a driver's buffer switch would, on the
 //! Dante media clock.
 //!
-//! Two TX channels at the network rate on dlink's defaults: 24-bit, block 32,
-//! latency 10 ms, a pump margin of half the latency, no real-time setup.
+//! Two TX channels on dlink's defaults: 24-bit, block 32, latency 10 ms, a
+//! pump margin of half the latency, no real-time setup. The worker writes the
+//! program's 48 kHz; the device runs at the network's rate and dlink converts
+//! on the device's clock (`Config::network_rate`, #285 step 2, dstack #90).
 //! The stack pulls and never stretches time; the servo keeps the ring's fill.
 //! Without PTP the pump paces itself and drops its outputs, and the device
 //! keeps announcing: the stack starts sending once the clock is ready.
@@ -23,7 +25,7 @@ use dlink::Clock as ClockSource;
 use dlink::{Block, Config, HostError, Link, Map, Media, Place, Process};
 use dstack::ctl;
 use serde::Deserialize;
-use sp_core::audio_outputs::{DanteDest, OutputEntry, effective_rate};
+use sp_core::audio_outputs::{DanteDest, OutputEntry, PROGRAM_RATE, effective_rate};
 use sp_core::dante_status::DanteFigures;
 use tracing::{info, warn};
 
@@ -47,7 +49,11 @@ pub fn set_data_dir(dir: PathBuf) {
 pub struct DanteParams {
     pub device: String,
     pub ip: Ipv4Addr,
+    /// The rate the worker writes: the program's (#285 step 2).
     pub rate: u32,
+    /// The rate the device runs at on the network; dlink converts between
+    /// the two on the device's clock when they differ.
+    pub network_rate: u32,
     pub dir: PathBuf,
     pub clock: ClockSource,
 }
@@ -64,14 +70,45 @@ impl DanteParams {
         Ok(Self {
             device,
             ip,
-            rate: effective_rate(entry.rate, network_rate),
+            rate: PROGRAM_RATE,
+            network_rate: effective_rate(entry.rate, network_rate),
             dir: base.join("dante"),
             clock: ClockSource::Dsync,
         })
     }
 
+    /// The device latency at the worker's rate, plus dlink's TX conversion
+    /// delay when it converts (its own measured `Rated::delay_ns`).
     fn latency_frames(&self) -> u64 {
-        u64::from(self.rate) * dlink::LATENCY_NS / 1_000_000_000
+        let device_ns = dlink::LATENCY_NS;
+        let convert_ns = if self.rate == self.network_rate {
+            0
+        } else {
+            self.convert_tx_ns().unwrap_or(0)
+        };
+        u64::from(self.rate) * (device_ns + convert_ns) / 1_000_000_000
+    }
+
+    /// dlink's TX delay from the worker's rate to the device's, ns.
+    fn convert_tx_ns(&self) -> Option<u64> {
+        let block = usize::try_from(self.config().device().ok()?.block).ok()?;
+        let rated = dlink::Rated::new(
+            Quiet,
+            self.network_rate,
+            self.rate,
+            block,
+            0,
+            DANTE_CHANNELS,
+        )
+        .ok()?;
+        Some(rated.delay_ns().1)
+    }
+
+    /// The device's block at the worker's rate, frames (rounded up).
+    fn app_block(&self, device_block: u64) -> u32 {
+        let num = device_block * u64::from(self.rate);
+        let den = u64::from(self.network_rate.max(1));
+        u32::try_from(num.div_ceil(den)).unwrap_or(u32::MAX)
     }
 
     /// The device for the stack. Dante Controller's changes live in the
@@ -81,8 +118,16 @@ impl DanteParams {
         Config::new(self.device.clone(), self.dir.join("state.toml"))
             .tx(["01", "02"])
             .sample_rate(self.rate)
+            .network_rate(self.network_rate)
             .product("New Level", "SongPlayer")
     }
+}
+
+/// A processor that does nothing: only to ask dlink's converter its delay.
+struct Quiet;
+
+impl Process for Quiet {
+    fn process(&mut self, _block: &mut Block<'_>) {}
 }
 
 /// The fields of the stack's status line that `outputs[i].dante` shows (its
@@ -264,7 +309,7 @@ impl AsioDevice for DanteDevice {
         self.config = Some(config);
         Ok(Opened {
             rate: f64::from(self.params.rate),
-            buffer_frames: u32::try_from(device.block).unwrap_or(u32::MAX),
+            buffer_frames: self.params.app_block(device.block),
             out_channels: DANTE_CHANNELS as u32,
             sample: AsioSample::Float32,
         })
@@ -284,7 +329,11 @@ impl AsioDevice for DanteDevice {
         let place = Place::Ip(self.params.ip);
         let running =
             Link::start_on(&config, &place, map, process, self.params.clock).map_err(reason)?;
-        info!(rate = self.params.rate, "dante output: device announced");
+        info!(
+            rate = self.params.rate,
+            network_rate = self.params.network_rate,
+            "dante output: device announced"
+        );
         self.link.set(Some(Arc::clone(running.media())));
         self.running = Some(running);
         Ok(Started {
