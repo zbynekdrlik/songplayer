@@ -25,6 +25,7 @@
 //!
 //! - #229 item C: `paid_ai_enabled` takes `true`, `false` or `""` only
 //!   (`paid_ai::checked`); anything else refuses the PATCH (400).
+//! - #289: `audio_low_latency` likewise (`sp_core::audio_latency::checked`).
 //!
 //! The workers read the settings from the database, never through this API,
 //! so they always see the secrets in clear.

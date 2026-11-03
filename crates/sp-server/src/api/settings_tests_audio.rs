@@ -105,3 +105,45 @@ async fn an_asio_entry_is_stored_and_one_driver_twice_is_refused() {
         "the refused list wrote nothing"
     );
 }
+
+/// #289: `audio_low_latency` takes `true`, `false` or `""` only (stored
+/// lower case); anything else refuses the whole PATCH and writes nothing.
+#[tokio::test]
+async fn the_low_latency_switch_takes_true_false_or_blank_only() {
+    use sp_core::audio_latency::SETTING_AUDIO_LOW_LATENCY;
+    let state = test_state().await;
+    let (status, _) = patch(&state, &body(&[(SETTING_AUDIO_LOW_LATENCY, " TRUE ")])).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        stored(&state.pool, SETTING_AUDIO_LOW_LATENCY)
+            .await
+            .unwrap(),
+        "true"
+    );
+    let (status, text) = patch(
+        &state,
+        &body(&[
+            (SETTING_AUDIO_LOW_LATENCY, "yes"),
+            (SETTING_GEMINI_MODEL, "model-x"),
+        ]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(text, "audio_low_latency must be true or false");
+    assert_eq!(
+        stored(&state.pool, SETTING_AUDIO_LOW_LATENCY)
+            .await
+            .unwrap(),
+        "true",
+        "the refused value wrote nothing"
+    );
+    assert_eq!(stored(&state.pool, SETTING_GEMINI_MODEL).await, None);
+    let (status, _) = patch(&state, &body(&[(SETTING_AUDIO_LOW_LATENCY, "false")])).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        stored(&state.pool, SETTING_AUDIO_LOW_LATENCY)
+            .await
+            .unwrap(),
+        "false"
+    );
+}

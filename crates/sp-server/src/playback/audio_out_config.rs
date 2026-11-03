@@ -290,6 +290,14 @@ pub async fn load(pool: &SqlitePool) -> Result<OutputsSettings, sqlx::Error> {
     })
 }
 
+/// #289: the stored `audio_low_latency` (the outputs task, every 5 s): ON
+/// only for `"true"` (`sp_core::audio_latency::low_latency`).
+pub async fn load_low_latency(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
+    use sp_core::audio_latency::{SETTING_AUDIO_LOW_LATENCY, low_latency};
+    let raw = crate::db::models::get_setting(pool, SETTING_AUDIO_LOW_LATENCY).await?;
+    Ok(low_latency(raw.as_deref()))
+}
+
 #[cfg(test)]
 #[path = "audio_out_config_tests.rs"]
 mod tests;

@@ -25,7 +25,9 @@
 //! name, enabled, state + reason, rate, format, channels, delay, latency,
 //! blocks sent / dropped, and a VBAN entry's #210 telemetry under `vban` —
 //! the top-level `vban` block is gone), `audio_network_rate` and
-//! `outputs_problems` (stored entries this version could not run); `input`,
+//! `outputs_problems` (stored entries this version could not run),
+//! `audio_low_latency` (#289: the switch the outputs were last applied
+//! with); `input`,
 //! the #212 NDI input's (`playback::ndi_input::NdiInputStatus`), `remote`, the #213
 //! Companion remote control's (`remote::RemoteStatus`, #221 L3: with
 //! `program_scene`, SP-program's scene name), and `degraded_reason` (#221
@@ -120,6 +122,8 @@ pub struct ProgramResponse {
     pub audio_network_rate: u32,
     /// #233: stored entries this version could not run (named, skipped).
     pub outputs_problems: Vec<String>,
+    /// #289: `audio_low_latency` as the outputs were last applied with.
+    pub audio_low_latency: bool,
     pub input: NdiInputStatus,
     pub remote: RemoteStatus,
     pub max: MaxStatus,
@@ -193,6 +197,7 @@ impl ProgramResponse {
             outputs: bus.outputs().status(),
             audio_network_rate: bus.outputs().network_rate(),
             outputs_problems: bus.outputs().problems(),
+            audio_low_latency: false,
             input: bus.input().status(&stored.input),
             remote: bus.remote().status(&stored.remote, &bus.on_air_now()),
             max: bus.max().status(),

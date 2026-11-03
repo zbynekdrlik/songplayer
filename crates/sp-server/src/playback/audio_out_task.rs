@@ -20,6 +20,13 @@
 //! (its worker runs in the ASIO host process, `audio_host`); a running
 //! driver off the network's rate or with a buffer over a third of a grid
 //! slot is WARNed once (`OutputStatus::note`).
+//!
+//! #289: the pass also reads `audio_low_latency` (`load_low_latency`) and
+//! applies the list with it (`AudioOutputs::low_latency`): a VBAN output
+//! built with the other value is a changed entry — rebuilt (its send
+//! latency and its converter's padding change), never a restart. An ASIO /
+//! Dante output is kept: its servo's target is still two slots (the switch
+//! does not reach it yet, see `audio-outputs.md`).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -32,7 +39,7 @@ use tracing::{info, warn};
 
 use crate::playback::asio_out::{AsioOut, run_asio_worker};
 use crate::playback::audio_out::{AudioOutputs, OutputSink, OutputStatus, RunningOutput};
-use crate::playback::audio_out_config::{OutputsSettings, load};
+use crate::playback::audio_out_config::{OutputsSettings, load, load_low_latency};
 use crate::playback::audio_out_migrate::{MigrationOutcome, migrate_vban_settings};
 use crate::playback::dante_device::{DanteDevice, DanteLink, DanteParams};
 use crate::playback::vban_out::{VbanConfig, VbanOut, needs_resolve, resolve_dest};
@@ -82,6 +89,27 @@ pub fn same_but_name(running: &OutputEntry, wanted: &OutputEntry) -> bool {
 /// output matches a wanted entry. An output whose thread could not start is
 /// never kept: it is rebuilt (retried) on every pass until it starts.
 pub fn plan(running: &[RunningOutput], wanted: &[OutputEntry], network_rate: u32) -> Plan {
+    plan_at(running, wanted, network_rate, false)
+}
+
+/// #289: whether a running output was built with `audio_low_latency` =
+/// `low_latency`: a VBAN output compares its own; any other output (an
+/// ASIO / Dante one, a disabled or unbuilt one) is not built by the switch.
+pub fn built_at(output: &RunningOutput, low_latency: bool) -> bool {
+    match &output.sink {
+        Some(OutputSink::Vban(out)) => out.low_latency() || !low_latency,
+        _ => true,
+    }
+}
+
+/// #289: [`plan`] with `audio_low_latency` = `low_latency`: a VBAN output
+/// built with the other value is not kept (it is rebuilt).
+pub fn plan_at(
+    running: &[RunningOutput],
+    wanted: &[OutputEntry],
+    network_rate: u32,
+    low_latency: bool,
+) -> Plan {
     let mut kept = vec![false; running.len()];
     let mut steps = Vec::with_capacity(wanted.len());
     for w in wanted {
@@ -90,6 +118,7 @@ pub fn plan(running: &[RunningOutput], wanted: &[OutputEntry], network_rate: u32
             same_but_name(&running[i].entry, w)
                 && running[i].built_rate == rate
                 && !running[i].start_failed()
+                && built_at(&running[i], low_latency)
         });
         match same {
             Some(i) => {
@@ -115,7 +144,13 @@ pub async fn apply(
         return;
     }
     let running = outputs.running();
-    let plan = plan(&running, &settings.entries, settings.network_rate);
+    let low_latency = outputs.low_latency();
+    let plan = plan_at(
+        &running,
+        &settings.entries,
+        settings.network_rate,
+        low_latency,
+    );
     for &i in &plan.stop {
         resolved.remove(&running[i].entry.id);
     }
@@ -128,7 +163,7 @@ pub async fn apply(
                 refresh_vban(&kept, resolved).await;
                 kept
             }
-            Step::Build => build(entry, settings.network_rate, resolved, start).await,
+            Step::Build => build(entry, settings.network_rate, low_latency, resolved, start).await,
         };
         next.push(output);
     }
@@ -148,6 +183,7 @@ pub async fn apply(
 async fn build(
     entry: &OutputEntry,
     network_rate: u32,
+    low_latency: bool,
     resolved: &mut HashMap<String, Instant>,
     start: &StartThread,
 ) -> RunningOutput {
@@ -162,7 +198,10 @@ async fn build(
         return output;
     }
     match entry.kind {
-        OutputType::Vban => match (VbanOut::for_entry(entry, network_rate), entry.vban.clone()) {
+        OutputType::Vban => match (
+            VbanOut::for_entry_at(entry, network_rate, low_latency),
+            entry.vban.clone(),
+        ) {
             (Ok(out), Some(dest)) => {
                 let out = Arc::new(out);
                 out.set_config(resolve_dest(dest, true, Vec::new()).await);
@@ -247,14 +286,16 @@ pub async fn tick(
             ),
         }
     }
-    match load(pool).await {
-        Ok(settings) => {
+    match (load(pool).await, load_low_latency(pool).await) {
+        (Ok(settings), Ok(low_latency)) => {
+            log_low_latency(outputs.low_latency(), low_latency);
+            outputs.set_low_latency(low_latency);
             warn_new_problems(&settings.problems, &state.reported);
             state.reported = settings.problems.clone();
             apply(outputs, settings, &mut state.resolved, start).await;
             warn_new_notes(&outputs.status(), &mut state.noted);
         }
-        Err(e) => warn!(%e, "audio outputs: reading the settings failed"),
+        (Err(e), _) | (_, Err(e)) => warn!(%e, "audio outputs: reading the settings failed"),
     }
 }
 
@@ -342,6 +383,16 @@ fn warn_new_notes(status: &[OutputStatus], noted: &mut Vec<String>) {
 fn warn_new_problems(problems: &[String], reported: &[String]) {
     for p in problems.iter().filter(|p| !reported.contains(p)) {
         warn!(problem = %p, "audio outputs: a stored entry is skipped");
+    }
+}
+
+#[cfg_attr(test, mutants::skip)] // logging only
+fn log_low_latency(was: bool, now: bool) {
+    if was != now {
+        info!(
+            audio_low_latency = now,
+            "audio outputs: the low-latency switch changed — every VBAN output is rebuilt"
+        );
     }
 }
 

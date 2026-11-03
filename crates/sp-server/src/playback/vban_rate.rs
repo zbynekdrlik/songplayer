@@ -16,6 +16,11 @@
 //! converter's delay is 2.67 ms at 96 kHz, so it never needs that whole
 //! budget.
 //!
+//! #289: with `audio_low_latency` on ([`VbanRateConverter::for_latency`])
+//! the FIFO starts empty: the delay is the converter's own
+//! (`Converter::delay_frames`, 2.67 ms at 96 kHz), never padded to
+//! `rate / 60`.
+//!
 //! If dstack refuses the converter (never for a supported rate:
 //! `vban_rate_tests` builds each) the destination sends silence, and its VBAN
 //! thread logs one WARN naming why (`failed`, read by `VbanSender`); a block
@@ -57,6 +62,36 @@ pub fn fifo_prime_frames(rate_hz: u32, converter_delay: usize) -> usize {
     fft_delay_frames(rate_hz).saturating_sub(converter_delay)
 }
 
+/// #289: the silence the FIFO starts with: [`fifo_prime_frames`] with
+/// `audio_low_latency` off, none with it on (the delay is then the
+/// converter's own).
+pub fn prime_frames(rate_hz: u32, converter_delay: usize, low_latency: bool) -> usize {
+    if low_latency && rate_hz == 0 {
+        0
+    } else {
+        fifo_prime_frames(rate_hz, converter_delay)
+    }
+}
+
+/// #289: the conversion delay of a destination at `rate_hz` with
+/// `audio_low_latency` on, frames of its rate, as its sender runs it: the
+/// converter's own delay plus the first block's top-up (260 frames =
+/// 2.708 ms at 96 kHz), 0 at 48 kHz. Measured once per rate on a real
+/// converter (one silent block) and kept, for the status's `latency_ms`.
+pub fn low_latency_delay_frames(rate_hz: u32) -> usize {
+    use std::sync::Mutex;
+    static MEASURED: Mutex<Vec<(u32, usize)>> = Mutex::new(Vec::new());
+    let mut measured = MEASURED.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(&(_, frames)) = measured.iter().find(|(r, _)| *r == rate_hz) {
+        return frames;
+    }
+    let mut converter = VbanRateConverter::for_latency(rate_hz, true);
+    converter.convert(None);
+    let frames = converter.delay_frames();
+    measured.push((rate_hz, frames));
+    frames
+}
+
 /// The converter and its exact-size output.
 struct Conversion {
     converter: Converter,
@@ -70,8 +105,11 @@ struct Conversion {
     /// What [`VbanRateConverter::convert`] gives: `out_frames`, interleaved.
     out: Vec<f32>,
     out_frames: usize,
-    /// The silence the FIFO started with, frames.
+    /// The silence the FIFO started with, frames (#289: and every top-up).
     primed: usize,
+    /// #289 (`audio_low_latency` on): a FIFO short of a block is topped up
+    /// with leading silence instead of sending silence for the block.
+    top_up: bool,
 }
 
 /// One destination's converter (owned by its VBAN thread's sender).
@@ -81,7 +119,16 @@ pub struct VbanRateConverter {
 }
 
 impl VbanRateConverter {
+    /// The converter of a destination at `rate_hz`, padded to `rate / 60`
+    /// (#285's timing, `audio_low_latency` off).
     pub fn new(rate_hz: u32) -> Self {
+        Self::for_latency(rate_hz, false)
+    }
+
+    /// #289: the converter of a destination at `rate_hz`: padded to
+    /// `rate / 60` with `low_latency` off ([`VbanRateConverter::new`]), else
+    /// only the converter's own delay ([`prime_frames`]).
+    pub fn for_latency(rate_hz: u32, low_latency: bool) -> Self {
         if passes_through(rate_hz) {
             return Self {
                 conversion: None,
@@ -96,7 +143,7 @@ impl VbanRateConverter {
             Fixed::Input,
         ) {
             Ok(converter) => Self {
-                conversion: Some(Conversion::of(converter, rate_hz)),
+                conversion: Some(Conversion::of(converter, rate_hz, low_latency)),
                 failed: None,
             },
             Err(e) => Self::refused(&e.to_string()),
@@ -141,10 +188,10 @@ impl VbanRateConverter {
 }
 
 impl Conversion {
-    fn of(converter: Converter, rate_hz: u32) -> Self {
+    fn of(converter: Converter, rate_hz: u32, low_latency: bool) -> Self {
         let max_out = converter.output_frames_max();
         let out_frames = block_frames_at(rate_hz);
-        let primed = fifo_prime_frames(rate_hz, converter.delay_frames());
+        let primed = prime_frames(rate_hz, converter.delay_frames(), low_latency);
         let mut fifo = VecDeque::with_capacity((primed + out_frames + max_out) * VBAN_CHANNELS);
         fifo.extend(std::iter::repeat_n(0.0f32, primed * VBAN_CHANNELS));
         Self {
@@ -156,6 +203,7 @@ impl Conversion {
             out: vec![0.0; out_frames * VBAN_CHANNELS],
             out_frames,
             primed,
+            top_up: low_latency,
         }
     }
 
@@ -183,7 +231,17 @@ impl Conversion {
         }
         let want = self.out_frames * VBAN_CHANNELS;
         if self.fifo.len() < want {
-            return None;
+            if !self.top_up {
+                return None;
+            }
+            // #289: the converter's first call gives a few frames under a
+            // block (4 at 96 kHz); the FIFO starts empty, so that shortfall
+            // is put in front once, as silence, and counted in the delay.
+            let missing = want - self.fifo.len();
+            for _ in 0..missing {
+                self.fifo.push_front(0.0);
+            }
+            self.primed += missing / VBAN_CHANNELS;
         }
         for (o, x) in self.out.iter_mut().zip(self.fifo.drain(..want)) {
             *o = x;

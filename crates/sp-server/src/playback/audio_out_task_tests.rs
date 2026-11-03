@@ -694,3 +694,6 @@ async fn a_switched_off_dante_entry_starts_nothing() {
     assert_eq!(*started.lock().unwrap(), 0);
     assert!(outputs.running()[0].sink.is_none());
 }
+
+#[path = "audio_out_task_tests_latency.rs"]
+mod latency;

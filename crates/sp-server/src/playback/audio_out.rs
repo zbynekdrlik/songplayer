@@ -14,7 +14,7 @@
 //! per driver, its status under `asio` with a `note` when the driver's rate
 //! is not the network's or its buffer is over a third of a grid slot).
 
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -30,8 +30,8 @@ use crate::playback::audio_out_block::ProgramBlock;
 use crate::playback::audio_out_queue::lock;
 use crate::playback::dante_device::{DanteLink, DanteParams};
 use crate::playback::vban_out::{VbanOut, VbanStatus};
-use crate::playback::vban_packet::VBAN_SEND_LATENCY_100NS;
-use crate::playback::vban_rate::fft_delay_frames;
+use crate::playback::vban_packet::base_send_latency_100ns;
+use crate::playback::vban_rate::{fft_delay_frames, low_latency_delay_frames};
 
 pub const STATE_RUNNING: &str = "running";
 pub const STATE_OPENING: &str = "opening";
@@ -175,9 +175,21 @@ pub fn vban_reason_code(
 /// A VBAN output's latency from the boundary, ms: the send latency, the
 /// delay, the rate converter's delay.
 pub fn vban_latency_ms(delay_ms: u32, rate_hz: u32) -> f64 {
-    VBAN_SEND_LATENCY_100NS as f64 / 10_000.0
+    vban_latency_ms_at(delay_ms, rate_hz, false)
+}
+
+/// #289: a VBAN output's latency with `audio_low_latency` as built: its L
+/// (15 ms when on), the delay, and the converter's delay — `rate / 60`
+/// padded when off, the converter's own when on.
+pub fn vban_latency_ms_at(delay_ms: u32, rate_hz: u32, low_latency: bool) -> f64 {
+    let converter = if low_latency {
+        low_latency_delay_frames(rate_hz)
+    } else {
+        fft_delay_frames(rate_hz)
+    };
+    base_send_latency_100ns(low_latency) as f64 / 10_000.0
         + f64::from(delay_ms)
-        + fft_delay_frames(rate_hz) as f64 * 1_000.0 / f64::from(rate_hz)
+        + converter as f64 * 1_000.0 / f64::from(rate_hz)
 }
 
 impl RunningOutput {
@@ -244,7 +256,11 @@ impl RunningOutput {
             format: e.vban.as_ref().map_or("int24", |v| v.format.as_str()),
             channels: 2,
             delay_ms: e.delay_ms,
-            latency_ms: vban_latency_ms(e.delay_ms, self.built_rate),
+            latency_ms: vban_latency_ms_at(
+                e.delay_ms,
+                self.built_rate,
+                out.is_some_and(|out| out.low_latency()),
+            ),
             blocks_sent: telemetry.as_ref().map_or(0, |s| s.blocks_sent),
             blocks_dropped: telemetry.as_ref().map_or(0, |s| s.blocks_dropped),
             vban: telemetry,
@@ -309,6 +325,8 @@ pub struct AudioOutputs {
     problems: Mutex<Vec<String>>,
     /// #257: frames the program's limiter engaged on outside a fade.
     limiter_overs: AtomicU64,
+    /// #289: `audio_low_latency` as the outputs task read it last.
+    low_latency: AtomicBool,
 }
 
 impl Default for AudioOutputs {
@@ -325,7 +343,18 @@ impl AudioOutputs {
             network_rate: AtomicU32::new(DEFAULT_NETWORK_RATE),
             problems: Mutex::new(Vec::new()),
             limiter_overs: AtomicU64::new(0),
+            low_latency: AtomicBool::new(false),
         }
+    }
+
+    /// #289: `audio_low_latency` as the outputs task read it last (the list
+    /// is applied with it: a VBAN output built otherwise is rebuilt).
+    pub fn low_latency(&self) -> bool {
+        self.low_latency.load(Ordering::Relaxed)
+    }
+
+    pub fn set_low_latency(&self, on: bool) {
+        self.low_latency.store(on, Ordering::Relaxed);
     }
 
     /// #257: the program's limiter engaged on `n` more frames outside a
