@@ -83,9 +83,11 @@ fn underrun_frames_fold_into_a_cushion_that_a_re_centre_drops() {
     s.observe(obs(3, 6_400, 9_600, 1_000));
     assert_eq!(s.status().cushion_ms, 13.3333, "a count that went back");
     s.observe(obs(4, 6_400, 12_800, 1_908));
+    // 1 408 frames at 96 kHz = 14.666667 ms, shown on the 100 ns grain
+    // (dstack-resample folds exactly; the old servo rounded each fold).
     assert_eq!(
         s.status().cushion_ms,
-        14.6666,
+        14.6667,
         "128 frames past the most seen"
     );
     s.observe(obs(5, 6_400, 16_000, 5_748));
