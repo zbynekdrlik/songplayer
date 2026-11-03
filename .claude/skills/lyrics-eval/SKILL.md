@@ -89,9 +89,8 @@ Never propose "offset constants" to patch broken timing.
 
    | Backend | Required env var |
    |---|---|
-   | `whisperx-large-v3` | `REPLICATE_API_TOKEN` |
-   | `gemini-3-1-flash-lite` | `OPENROUTER_API_KEY` |
-   | `assemblyai-universal-3-pro` | `ASSEMBLYAI_API_KEY` |
+   | `gemini-3-5-transcribe` | `GEMINI_API_KEY` |
+   | `gemini38-flash` | `GEMINI_API_KEY` (a CSV list rotates) |
 
    Only the chosen backend's key is required. Missing → STOP and ask the
    user. Production keys are stored in the SongPlayer settings DB on
@@ -101,10 +100,17 @@ Never propose "offset constants" to patch broken timing.
 
 Ask the user (one `AskUserQuestion`):
 
-- **Backend** to test. Three are shipped today:
-  - `whisperx-large-v3` (production champion as of CHAMPION.md)
-  - `gemini-3-1-flash-lite` (OpenRouter; reference data point)
-  - `assemblyai-universal-3-pro` (eval front-runner: 7.6 mean, 5/5 wall-pass on the 5-fixture pilot — promotion to production is a separate PR)
+- **Backend** to test. Two are shipped today:
+  - `gemini-3-5-transcribe` (the ASR production uses since v22: the ★ tier's
+    gate transcript and the base tier's lines; `--wav` / `--out` CLI)
+  - `gemini38-flash` (the #144 one-call eval; its own CLI, driven by
+    `eval/lyrics/run_one_call.py` — see `.claude/rules/lyrics-eval-backends.md`)
+
+  The 2026-05-19 wrappers (`whisperx-large-v3`, `gemini-3-1-flash-lite`,
+  `assemblyai-universal-3-pro`) are deleted; production's v22 regime is one
+  forced aligner (mtl) + one ASR (Gemini 3.5 Transcribe). CHAMPION.md still
+  records the 2026-05-19 baseline — a new run diffs against it as history,
+  not as the production route.
 - **Fixtures** subset: `all`, a category name, or a comma-separated list of
   `video_id`s.
 
@@ -114,7 +120,7 @@ Load `eval/lyrics/manifest.json`. Validate against
 Load the current `eval/lyrics/reports/CHAMPION.md` to know what to diff against
 at the end.
 
-- **Backend-id ↔ filename convention:** the file at `eval/lyrics/backends/X.py` exposes `BACKEND_ID = "X-with-underscores-replaced-by-hyphens"` (e.g. `whisperx_large_v3.py` → `BACKEND_ID = "whisperx-large-v3"`). Filenames use underscores so Python can import them; report labels use hyphens because that is what is persisted in CHAMPION.md and history.md.
+- **Backend-id ↔ filename convention:** the file at `eval/lyrics/backends/X.py` exposes `BACKEND_ID = "X-with-underscores-replaced-by-hyphens"` (e.g. `gemini_3_5_transcribe.py` → `BACKEND_ID = "gemini-3-5-transcribe"`). Filenames use underscores so Python can import them; report labels use hyphens because that is what is persisted in CHAMPION.md and history.md.
 
 ## Phase 2 — Per-fixture loop
 

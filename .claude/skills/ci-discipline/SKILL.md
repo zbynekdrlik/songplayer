@@ -49,7 +49,7 @@ Without this gate, silent provider regressions ship and only surface when the
 user wall-verifies.
 
 Also assert line-count is within a reasonable band (description-extracted ≈ 25
-lines, NOT 95 from whisperx re-segmentation).
+lines, NOT 95 from an ASR transcript re-segmented into lines).
 
 Add this BEFORE building any new lyrics provider to lock in the contract.
 
