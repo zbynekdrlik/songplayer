@@ -465,6 +465,50 @@ def poll_blind(times: list[float], polls: list[float]) -> list[float]:
     return out
 
 
+def utc_anchor(
+    clock: Callable[[], float] = time.perf_counter,
+    wall: Callable[[], int] = time.time_ns,
+    tries: int = 5,
+) -> tuple[float, int]:
+    """One ``perf_counter`` instant and its UTC (ns), #289: the pair read
+    closest together of ``tries`` (the wall read between two counter reads,
+    the counter taken as their middle)."""
+    best: tuple[float, float, int] | None = None
+    for _ in range(tries):
+        before = clock()
+        ns = wall()
+        after = clock()
+        if best is None or after - before < best[0]:
+            best = (after - before, (before + after) / 2, ns)
+    assert best is not None
+    return best[1], best[2]
+
+
+def to_utc_ns(t: float, start: tuple[float, int], end: tuple[float, int]) -> int:
+    """``perf_counter`` instant ``t`` in UTC (ns), on the line through the
+    two anchors (the counter's rate against UTC measured over the capture)."""
+    (c0, n0), (c1, n1) = start, end
+    if c1 == c0:
+        return n0 + round((t - c0) * 1e9)
+    return n0 + round((t - c0) * (n1 - n0) / (c1 - c0))
+
+
+def first_seen_utc_ns(
+    readings: list[Reading],
+    times: list[float],
+    start: tuple[float, int],
+    end: tuple[float, int],
+) -> dict[str, int]:
+    """Each clip frame's first CLEAN picture (read ``ok``, no blend) in UTC
+    (ns), keyed by the frame index: when the output first showed it (#289,
+    the picture's lag behind its program boundary)."""
+    seen: dict[str, int] = {}
+    for r, t in zip(readings, times):
+        if r.ok and r.weight_q8 == 0 and r.index is not None:
+            seen.setdefault(str(r.index), to_utc_ns(t, start, end))
+    return seen
+
+
 def capture(args: argparse.Namespace) -> dict:
     """Capture or read the pictures ``args`` names, then the report."""
     late = None
@@ -483,6 +527,7 @@ def capture(args: argparse.Namespace) -> dict:
         blind = None  # since the picture before
         span = None  # the first picture's pts to the last one's
     else:
+        start = utc_anchor()
         if args.spout is not None:
             source = f"sender {args.spout!r}"
             times, sums, polls, ended, located = capture_spout(
@@ -504,6 +549,7 @@ def capture(args: argparse.Namespace) -> dict:
             report["located"] = None
             return report
         readings = [read_sums(s, list(located.copies)) for s in sums]
+        seen = first_seen_utc_ns(readings, times, start, utc_anchor())
         blind = poll_blind(times, polls)
         late = [max(0.0, e - t) for t, e in zip(times, ended)]
         spout = args.spout is not None
@@ -524,6 +570,8 @@ def capture(args: argparse.Namespace) -> dict:
         time_error=SPOUT_TIME_ERROR if spout else POLL_TIME_ERROR,
     )
     report["located"] = located.report() if located else None
+    if args.video is None:
+        report["first_seen_utc_ns"] = seen
     return report
 
 
