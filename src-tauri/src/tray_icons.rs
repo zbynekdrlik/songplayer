@@ -12,24 +12,6 @@ pub fn make_idle_icon() -> IconData {
     make_icon(&[100, 100, 120])
 }
 
-/// Green icon for playing state.
-#[allow(dead_code)]
-pub fn make_playing_icon() -> IconData {
-    make_icon(&[76, 175, 80])
-}
-
-/// Blue icon for downloading state.
-#[allow(dead_code)]
-pub fn make_downloading_icon() -> IconData {
-    make_icon(&[33, 150, 243])
-}
-
-/// Red icon for error state.
-#[allow(dead_code)]
-pub fn make_error_icon() -> IconData {
-    make_icon(&[233, 69, 96])
-}
-
 fn make_icon(color: &[u8; 3]) -> IconData {
     let size = 32u32;
     let mut data = vec![0u8; (size * size * 4) as usize];
@@ -119,21 +101,9 @@ mod tests {
     }
 
     #[test]
-    fn playing_icon_has_non_zero_pixels() {
-        let icon = make_playing_icon();
+    fn idle_icon_has_non_zero_pixels() {
+        let icon = make_idle_icon();
         let non_zero = icon.data.iter().filter(|&&b| b != 0).count();
         assert!(non_zero > 0);
-    }
-
-    #[test]
-    fn all_icon_variants_correct_size() {
-        for icon in [
-            make_idle_icon(),
-            make_playing_icon(),
-            make_downloading_icon(),
-            make_error_icon(),
-        ] {
-            assert_eq!(icon.data.len(), (icon.width * icon.height * 4) as usize);
-        }
     }
 }
