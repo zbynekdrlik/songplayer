@@ -66,9 +66,12 @@ const MAX_SLIPS = 3;
  *  even. Measured 1.11.2026 in takes with an even sender: 7 to 9 uneven
  *  boundaries + 2 to 3 inconsistent ones, 6 to 7 by this count. */
 export const ARENA_MAX_SLIPS = 8;
-/** A slip holds a picture one refresh long on a 60 Hz wall: 3. More is a
- *  stall, which never passes as a slip. */
-const MAX_SLIP_REFRESHES = 3;
+/** A slip holds a picture one refresh over the clip's longest even hold on a
+ *  60 Hz wall (the capture's rate on resolume-snv): wall-30 3, wall-25 and
+ *  wall-24 4. More is a stall, which never passes as a slip. */
+function maxSlipRefreshes(fps: number): number {
+  return Math.ceil(60 / fps) + 1;
+}
 
 /** How many slips a take may hold, and whether a boundary whose timing
  *  contradicts itself counts as one (Arena's output) or fails the take. */
@@ -104,7 +107,7 @@ function slipsOnly(report: WallFramesReport, budget: SlipBudget): boolean {
     r !== null &&
     r.uneven + r.unresolved + counted > 0 &&
     uneven.length === r.uneven &&
-    uneven.every((b) => b.refreshes <= MAX_SLIP_REFRESHES) &&
+    uneven.every((b) => b.refreshes <= maxSlipRefreshes(report.fps)) &&
     slipCount(uneven.map((b) => b.boundary)) + r.unresolved + counted <= budget.maxSlips &&
     inconsistent === counted &&
     r.judged >= MIN_JUDGED &&

@@ -70,7 +70,7 @@ test("the low-latency switch is off, ticked and saved it is sent once and surviv
   await expect(box).not.toBeChecked();
   const label = page.locator('label:has([data-testid="settings-audio-low-latency"])');
   await expect(label).toContainText("Nízka latencia zvuku (~15 ms)");
-  await expect(label).toHaveAttribute("title", /65 ms.*camera-box/);
+  await expect(label).toHaveAttribute("title", /VBAN.*LED stenu voči FOH/);
   let program = await (await request.get("/api/v1/program")).json();
   expect(program.audio_low_latency).toBe(false);
 

@@ -15,10 +15,11 @@ pub const SETTING_AUDIO_LOW_LATENCY: &str = "audio_low_latency";
 /// The checkbox's label in Nastavenia "Zvukové výstupy".
 pub const LABEL_SK: &str = "Nízka latencia zvuku (~15 ms)";
 
-/// The checkbox's tooltip: what changes, and that camera-box A/B-measures it
-/// before it stays on.
-pub const TOOLTIP_SK: &str = "Zvuk programu odchádza do výstupov o ~65 ms skôr voči obrazu \
-     (15 ms namiesto 67 ms). Kým zostane zapnutá, musí ju camera-box A/B premerať.";
+/// The checkbox's tooltip: which outputs change and by how much, and what must
+/// be measured before it stays on (the owner, #289: LED wall against FOH).
+pub const TOOLTIP_SK: &str = "Výstupy VBAN odosielajú zvuk programu skôr voči obrazu: 15 ms \
+     namiesto 67 ms pri 48 kHz, 18 ms namiesto 83 ms pri 96 kHz. ASIO a Dante sa nemenia. \
+     Kým zostane zapnutá, treba premerať LED stenu voči FOH.";
 
 /// The stored `audio_low_latency` read: `"true"` (trimmed, any case) = ON;
 /// unset, blank or any other value = OFF.

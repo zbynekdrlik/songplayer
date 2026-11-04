@@ -361,10 +361,12 @@ pub fn rate_note(driver_rate: u32, network: u32) -> Option<String> {
         .then(|| format!("the driver runs at {driver_rate} Hz, the network at {network} Hz"))
 }
 
-/// The rate note of an output of `kind`.
+/// The rate note of an output of `kind`: a Dante device takes the program's
+/// 48 kHz by design and dlink converts to the network, so it has none.
 pub fn output_rate_note(kind: OutputType, driver_rate: u32, network: u32) -> Option<String> {
-    let _ = kind;
-    rate_note(driver_rate, network)
+    (kind != OutputType::Dante)
+        .then(|| rate_note(driver_rate, network))
+        .flatten()
 }
 
 /// The status note of a driver buffer over a third of a grid slot: the

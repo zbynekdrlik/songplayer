@@ -67,6 +67,6 @@ fn a_save_sends_the_switch_only_when_it_changed() {
 #[test]
 fn the_texts_name_the_latency_and_the_measurement() {
     assert_eq!(LABEL_SK, "Nízka latencia zvuku (~15 ms)");
-    assert!(TOOLTIP_SK.contains("65 ms"));
-    assert!(TOOLTIP_SK.contains("camera-box"));
+    assert!(TOOLTIP_SK.contains("VBAN"));
+    assert!(TOOLTIP_SK.contains("LED stenu voči FOH"));
 }

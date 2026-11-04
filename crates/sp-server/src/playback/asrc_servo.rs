@@ -81,30 +81,6 @@ pub const HARD_EXCESS_100NS: i64 = 1_333_333;
 /// one slot. Beyond it the offset slew drains it.
 pub const CUSHION_MAX_100NS: i64 = SLOT_100NS;
 
-/// The cushion after `fresh_100ns` more of the card's underruns: the excess
-/// each one leaves added, at most [`CUSHION_MAX_100NS`] (dstack's
-/// `played_silence`, in 100 ns).
-pub fn fold_cushion(cushion_100ns: i64, fresh_100ns: i64) -> i64 {
-    cushion_100ns
-        .saturating_add(fresh_100ns)
-        .min(CUSHION_MAX_100NS)
-}
-
-/// The cushion after a window whose mean latency was `latency_100ns`: never
-/// more than what that window still held over `target_100ns` (dstack's
-/// window close, in 100 ns).
-pub fn kept_cushion(cushion_100ns: i64, latency_100ns: i64, target_100ns: i64) -> i64 {
-    cushion_100ns.min((latency_100ns - target_100ns).max(0))
-}
-
-/// The error the offset slew drains (target − latency sense: positive = too
-/// little buffered): the latency's distance from the band [target, target +
-/// cushion], 0 inside it (dstack's `band_error_ms`, in 100 ns).
-pub fn slew_err_100ns(latency_100ns: i64, target_100ns: i64, cushion_100ns: i64) -> i64 {
-    let top = target_100ns + cushion_100ns;
-    (target_100ns - latency_100ns).max(0) - (latency_100ns - top).max(0)
-}
-
 /// The calm zone for a driver calling back every `callback_frames` at
 /// `rate_hz`: dstack's `calm_zone_ms_for` — [`CALM_ZONE_MS`], or half the
 /// callback period when that is longer (512 frames at 96 kHz: 2.67 ms).
@@ -425,20 +401,6 @@ impl Servo {
             MAX_PPM + rate
         };
         self.slew_eta_s = slew_eta_s(slew_ms, self.controller.ppm() - rate, room, self.calm_ms);
-    }
-}
-
-/// A block's latency the slew cannot be left with: under
-/// [`HARD_FLOOR_100NS`], or more than [`HARD_EXCESS_100NS`] off `target`
-/// either way.
-pub fn hard_recentre(latency_100ns: i64, target_100ns: i64) -> Option<Recentre> {
-    let over = latency_100ns - target_100ns;
-    if latency_100ns < HARD_FLOOR_100NS || -over > HARD_EXCESS_100NS {
-        Some(Recentre::Deficit)
-    } else if over > HARD_EXCESS_100NS {
-        Some(Recentre::Excess)
-    } else {
-        None
     }
 }
 

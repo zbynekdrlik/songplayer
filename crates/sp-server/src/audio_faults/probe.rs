@@ -143,7 +143,9 @@ fn asio_into(probe: &mut Probe, asio: &AsioStatus) {
 }
 
 /// A Dante output's own faults, beside the ones its seam reports as ASIO.
+/// The seam's `overloads` is the very count of `pump_overruns`: one row.
 fn dante_into(probe: &mut Probe, dante: &DanteFigures) {
+    probe.counters.retain(|c| c.kind != kinds::OVERLOAD);
     probe.counters.extend([
         Counter::loss(kinds::PUMP_MISSED, dante.pump_missed),
         Counter::risk(kinds::PUMP_OVERRUN, dante.pump_overruns),
