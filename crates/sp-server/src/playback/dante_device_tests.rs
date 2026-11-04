@@ -75,9 +75,9 @@ fn a_short_ring_is_silence_and_an_underrun_only_once_primed() {
     assert_eq!(counts.consumed.load(Ordering::Relaxed), 4);
 }
 
-/// dstack's numbers for program audio (dlink v0.6.22): a 10 ms budget for
-/// the whole TX path, block 128; at 96 kHz with a 48 kHz app dlink's split
-/// gives the Dante latency 5.17 ms and the work margin 2 ms.
+/// dstack's numbers for program audio: a 10 ms budget for the whole TX
+/// path (dlink v0.6.22+), block 128, the device's latency and margin as
+/// dlink's own `Config::split` sizes them.
 #[test]
 fn the_device_is_two_tx_no_rx_on_dlinks_defaults_at_the_network_rate() {
     let cfg = params(Path::new("x"), Ipv4Addr::LOCALHOST)
@@ -93,8 +93,12 @@ fn the_device_is_two_tx_no_rx_on_dlinks_defaults_at_the_network_rate() {
     assert_eq!((config.device_rate(), config.converts()), (96_000, true));
     assert_eq!(cfg.encoding, 24);
     assert_eq!(cfg.block, 128);
-    assert_eq!(cfg.latency_ns, 5_166_666);
-    assert_eq!(cfg.work_margin, 192);
+    // dlink's own split of its 10 ms budget, whatever its release sizes:
+    // the device runs exactly the latency and margin dlink chose.
+    let split = config.split().unwrap();
+    assert_eq!(cfg.latency_ns, split.latency_ns);
+    assert_eq!(cfg.work_margin, split.margin);
+    assert!(split.tx_path_ns <= dlink::BUDGET_NS);
     assert_eq!(
         (cfg.manufacturer.as_str(), cfg.model.as_str()),
         ("New Level", "SongPlayer")
