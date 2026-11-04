@@ -31,6 +31,20 @@ fn a_rate_limit_or_a_key_refusal_moves_to_the_next_key() {
     assert_eq!(key_verdict(400, "API key expired. Please renew."), refused);
 }
 
+/// A key whose project's prepaid credits are spent answers 402
+/// `RESOURCE_EXHAUSTED` (resolume-snv, 4.11.2026, CI 41795619116: key 1 of 5
+/// stopped the walk). Another key is another project: try it.
+#[test]
+fn spent_prepaid_credits_move_to_the_next_key() {
+    let body = r#"{"error":{"code":402,"message":"Your prepayment credits are depleted.","status":"RESOURCE_EXHAUSTED"}}"#;
+    assert_eq!(
+        key_verdict(402, body),
+        KeyVerdict::NextKey {
+            rate_limited: false
+        }
+    );
+}
+
 #[test]
 fn a_server_error_is_retried_on_the_same_key() {
     assert_eq!(key_verdict(500, ""), KeyVerdict::RetrySameKey);
