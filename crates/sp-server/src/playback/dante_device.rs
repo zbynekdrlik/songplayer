@@ -6,7 +6,7 @@
 //! Dante media clock.
 //!
 //! Two TX channels on dlink's defaults: 24-bit, block 128, a 15 ms budget, a
-//! pump margin of half the latency, no real-time setup. The worker writes the
+//! pump margin of 2/5 of the budget, no real-time setup. The worker writes the
 //! program's 48 kHz; the device runs at the network's rate and dlink converts
 //! on the device's clock (`Config::network_rate`, #285 step 2, dstack #90).
 //! The stack pulls and never stretches time; the servo keeps the ring's fill.

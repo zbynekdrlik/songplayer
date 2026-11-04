@@ -42,6 +42,15 @@ tauri-build = { version = "2", features = [] }
 [dev-dependencies]
 tempfile = "3"
 
+# #285: src-tauri is its own top workspace, so the root's overrides do not reach
+# it. dlink's converter runs unoptimised otherwise and overruns its blocks in a
+# debug build (dstack's changelog, 0.6.25).
+[profile.dev.package.dstack-resample]
+opt-level = 3
+
+[profile.dev.package.rubato]
+opt-level = 3
+
 # src-tauri is EXCLUDED from the workspace, so the root Cargo.toml
 # [profile.release] does NOT apply to the shipped SongPlayer.exe — it builds
 # with cargo's default release profile (panic = "unwind", no debuginfo, no PDB).

@@ -29,7 +29,7 @@ pub struct DanteFigures {
 const CLOCK_TIP: &str = "Hodiny siete Dante: SongPlayer ich číta z dantesync. Bez nich zariadenie ostáva ohlásené v sieti, ale neposiela zvuk.";
 const FLOWS_TIP: &str =
     "Koľko prúdov zvuku odoberá zariadenie v sieti Dante (nastavuje sa v Dante Controlleri).";
-const LATE_TIP: &str = "Najväčšie oneskorenie paketu pri odchode a najdlhšie jedno odoslanie, odkedy výstup beží. Musí ostať hlboko pod latenciou zariadenia 10 ms.";
+const LATE_TIP: &str = "Najväčšie oneskorenie paketu pri odchode a najdlhšie jedno odoslanie, odkedy výstup beží. Musí ostať hlboko pod latenciou zariadenia.";
 const PUMP_TIP: &str = "Bloky zvuku, ktoré vlákno zariadenia spracovalo neskoro, vynechalo alebo nestihlo, odkedy výstup beží.";
 
 /// The ASIO chips' phrases for a card or a driver, as a Dante output's, whole
