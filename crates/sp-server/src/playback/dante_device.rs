@@ -5,7 +5,7 @@
 //! [`RingProcess`] once per block as a driver's buffer switch would, on the
 //! Dante media clock.
 //!
-//! Two TX channels on dlink's defaults: 24-bit, block 128, latency 10 ms, a
+//! Two TX channels on dlink's defaults: 24-bit, block 128, a 15 ms budget, a
 //! pump margin of half the latency, no real-time setup. The worker writes the
 //! program's 48 kHz; the device runs at the network's rate and dlink converts
 //! on the device's clock (`Config::network_rate`, #285 step 2, dstack #90).
@@ -78,7 +78,7 @@ impl DanteParams {
     }
 
     /// dlink's TX path at the worker's rate: its work margin, the Dante
-    /// latency it derives from its 10 ms budget and the rate converter's TX
+    /// latency it derives from its 15 ms budget and the rate converter's TX
     /// delay (`Config::split`, dstack v0.6.22: the budget is the app's whole
     /// path, the owner's ruling to dstack of 3.11.2026).
     fn latency_frames(&self) -> u64 {

@@ -137,7 +137,7 @@ the answer to `Asrc::set_correction_ppm` and (through `frames_from_100ns`:
 positive = insert, negative = skip) `Splice::insert` / `skip`, and pushes
 `Splice::process(Asrc::process(block))` into the card's ring.
 
-**Since #285 step 3 the LAWS live in dstack-resample** (dstack tag v0.6.25,
+**Since #285 step 3 the LAWS live in dstack-resample** (dstack tag v0.6.28,
 MIT OR Apache-2.0, `crates/dstack-resample/src/asrc.rs` + `lib.rs` in the
 dstack checkout): `Servo` is a thin ADAPTER over
 `dstack_resample::asrc::Controller` (`Controller::new(target, floor 38.3 ms,
@@ -1525,7 +1525,7 @@ difference with its UTC time.
   Since dstack v0.6.12 (dstack #102, 3.11.2026) every dstack crate is MIT OR
   Apache-2.0 (checked in the checkout's Cargo.toml files), so the license no
   longer keeps #285 off `main`. `THIRD-PARTY-NOTICES.txt` names dstack
-  0.6.25 (dlink, dstack, dstack-audio-io, dstack-resample) with its
+  0.6.28 (dlink, dstack, dstack-audio-io, dstack-resample) with its
   LICENSE-MIT verbatim (it named 0.5.11 under the GPL until step 3).
 - `type: dante` in `audio_outputs`, at most one, `DanteDest {device, ip}`: the
   device name by Dante's own rule, the `ip` one IPv4 of this PC (a second
@@ -1533,7 +1533,7 @@ difference with its UTC time.
 - `DanteDevice` (`dante_device.rs`) implements the `AsioDevice` seam **in this
   process**, on every platform, with no `sp-dante-host` (the owner's ruling):
   `asio_out`'s worker, ring, `asrc_servo` and status serve it, so a second servo
-  never appears. dstack by git tag (v0.6.25), no Dante protocol code here.
+  never appears. dstack by git tag (v0.6.28), no Dante protocol code here.
   #285 step 2 (the owner's ruling via dstack #90: one rate conversion, in
   dlink, for every app): `DanteParams.rate` is `PROGRAM_RATE` (48 kHz, what the
   worker writes) and `network_rate` the entry's effective rate; `config()` sets
@@ -1541,16 +1541,17 @@ difference with its UTC time.
   on the device's clock (fixed ratio) and the worker's `Asrc` runs at ratio 1,
   following drift only. The worker sees `buffer_frames` = the device block at
   48 kHz (64; block 128 since dlink v0.6.20, its pump threads at THREAD_PRIORITY_HIGHEST) and a latency of dlink's whole TX path
-  (`Config::split().tx_path_ns`: since v0.6.22 dlink's 10 ms is the app's TOTAL
-  budget; the Dante latency, the margin and the converter's
-  2.83 ms inside it; the owner's ruling to dstack of 3.11.2026). The dashboard's ASIO chip then reads
+  (`Config::split().tx_path_ns`: dlink's budget is the app's TOTAL, the Dante
+  latency, the margin and the converter's delay inside it; 15 ms since v0.6.28,
+  10 ms in v0.6.22-27: P 8.36 ms, W 6 ms, a 0.64 ms half-band converter, after
+  P 4.01 ms left a receiver 137 late packets in 1 h 50 min). The dashboard's ASIO chip then reads
   "48 kHz bez prevodu" for this output although dlink converts. Step 3 (dstack
   v0.6.25): `asrc_servo.rs` and `asrc.rs` are adapters over dstack-resample's
   `asrc::Controller` and `Converter::drifting` (lane 2's section above; dstack v0.6.15 aligned
   the priming, the stall and the underrun fold with ours); sp-asrc is deleted. `RingProcess`
   is the stack's callback: like a buffer switch it allocates, locks and logs
   nothing. Two TX channels at the network rate on `dlink`'s defaults (24-bit,
-  block 128, a 10 ms budget for the whole path, the `normal` profile). `Link`
+  block 128, a 15 ms budget for the whole path, the `normal` profile). `Link`
   sets up and starts in one call, so a refused address fails the seam's `start`;
   only a refused config fails `open`. `Link` hides `PumpStats`, so a panicked
   callback no longer reads `faulted`: the worker's 2 s stall watch ends that run.

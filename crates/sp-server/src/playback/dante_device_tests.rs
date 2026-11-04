@@ -75,8 +75,8 @@ fn a_short_ring_is_silence_and_an_underrun_only_once_primed() {
     assert_eq!(counts.consumed.load(Ordering::Relaxed), 4);
 }
 
-/// dstack's numbers for program audio: a 10 ms budget for the whole TX
-/// path (dlink v0.6.22+), block 128, the device's latency and margin as
+/// dstack's numbers for program audio: a 15 ms budget for the whole TX
+/// path (dlink v0.6.28+), block 128, the device's latency and margin as
 /// dlink's own `Config::split` sizes them.
 #[test]
 fn the_device_is_two_tx_no_rx_on_dlinks_defaults_at_the_network_rate() {
@@ -93,7 +93,7 @@ fn the_device_is_two_tx_no_rx_on_dlinks_defaults_at_the_network_rate() {
     assert_eq!((config.device_rate(), config.converts()), (96_000, true));
     assert_eq!(cfg.encoding, 24);
     assert_eq!(cfg.block, 128);
-    // dlink's own split of its 10 ms budget, whatever its release sizes:
+    // dlink's own split of its 15 ms budget, whatever its release sizes:
     // the device runs exactly the latency and margin dlink chose.
     let split = config.split().unwrap();
     assert_eq!(cfg.latency_ns, split.latency_ns);
@@ -126,15 +126,15 @@ fn an_entry_builds_at_the_network_rate_or_its_own() {
     assert_eq!((p.rate, p.network_rate), (48_000, 96_000));
     assert_eq!(p.ip, Ipv4Addr::new(10, 77, 9, 210));
     assert_eq!(p.clock, ClockSource::Dsync);
-    // dlink's whole TX path is its 10 ms budget: 480 frames at 48 kHz,
+    // dlink's whole TX path is its 15 ms budget: 720 frames at 48 kHz,
     // the converter's delay included.
     let lat = p.latency_frames();
-    assert!((478..=480).contains(&lat), "latency {lat}");
+    assert!((718..=720).contains(&lat), "latency {lat}");
     entry.rate = RateChoice::Fixed(48_000);
     let same = DanteParams::for_entry(&entry, 96_000).unwrap();
     assert_eq!((same.rate, same.network_rate), (48_000, 48_000));
     assert!(!same.config().converts());
-    assert!((478..=480).contains(&same.latency_frames()));
+    assert!((718..=720).contains(&same.latency_frames()));
 }
 
 #[test]
