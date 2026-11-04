@@ -21,6 +21,7 @@
 //!   servo's per-block latency saws by one callback period).
 
 use serde::{Deserialize, Serialize};
+use sp_core::audio_outputs::OutputType;
 
 use crate::playback::asrc_servo::{SLOT_100NS, frames_from_100ns};
 
@@ -358,6 +359,12 @@ pub fn admit_rate(rate: f64) -> Result<u32, Reason> {
 pub fn rate_note(driver_rate: u32, network: u32) -> Option<String> {
     (driver_rate != network)
         .then(|| format!("the driver runs at {driver_rate} Hz, the network at {network} Hz"))
+}
+
+/// The rate note of an output of `kind`.
+pub fn output_rate_note(kind: OutputType, driver_rate: u32, network: u32) -> Option<String> {
+    let _ = kind;
+    rate_note(driver_rate, network)
 }
 
 /// The status note of a driver buffer over a third of a grid slot: the

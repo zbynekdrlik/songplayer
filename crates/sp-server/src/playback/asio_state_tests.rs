@@ -532,3 +532,14 @@ fn a_callback_gap_is_late_over_two_periods_and_fast_under_a_quarter() {
     assert_eq!(callback_gap_kind(3_334, dvs), GapKind::Normal);
     assert_eq!(callback_gap_kind(3_333, dvs), GapKind::Fast);
 }
+
+/// #285: a Dante device takes the program's 48 kHz by design and dlink
+/// converts to the network, so there is no rate difference to name.
+#[test]
+fn a_dante_output_has_no_rate_note_and_an_asio_driver_keeps_it() {
+    assert_eq!(output_rate_note(OutputType::Dante, 48_000, 96_000), None);
+    assert_eq!(
+        output_rate_note(OutputType::Asio, 48_000, 96_000),
+        rate_note(48_000, 96_000)
+    );
+}

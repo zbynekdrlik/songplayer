@@ -273,6 +273,32 @@ fn a_dante_output_loses_its_missed_blocks_and_a_pump_within_its_margin_is_no_ris
     );
 }
 
+/// The seam's `overloads` on a Dante output is the very count of
+/// `pump_overruns`: one fault, one row.
+#[test]
+fn a_dante_overrun_is_one_risk_not_two() {
+    let out = OutputStatus {
+        kind: "dante",
+        asio: Some(AsioStatus {
+            overloads: 23,
+            ..AsioStatus::default()
+        }),
+        dante: Some(DanteFigures {
+            pump_overruns: 23,
+            ..DanteFigures::default()
+        }),
+        ..output("out-4", true, 1_800, 3)
+    };
+    let probes = output_probes(&[out]);
+    let kinds_seen: Vec<&str> = probes[0]
+        .counters
+        .iter()
+        .filter(|c| c.value == 23)
+        .map(|c| c.kind)
+        .collect();
+    assert_eq!(kinds_seen, [kinds::PUMP_OVERRUN]);
+}
+
 #[test]
 fn an_asio_output_loses_its_faults_risks_its_late_callbacks_and_its_host_down_is_a_state() {
     let asio = AsioStatus {

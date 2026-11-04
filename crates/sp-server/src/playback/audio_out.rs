@@ -25,7 +25,7 @@ use sp_core::audio_outputs_save::{
 use sp_core::dante_status::DanteFigures;
 
 use crate::playback::asio_out::{AsioOut, AsioStatus};
-use crate::playback::asio_state::{Reason, buffer_note, rate_note};
+use crate::playback::asio_state::{Reason, buffer_note, output_rate_note};
 use crate::playback::audio_out_block::ProgramBlock;
 use crate::playback::audio_out_queue::lock;
 use crate::playback::dante_device::{DanteLink, DanteParams};
@@ -286,7 +286,7 @@ impl RunningOutput {
         let status = snap.as_ref().map(|s| s.status.clone());
         let rate = status.as_ref().map_or(0, |s| s.driver_rate);
         let notes: Vec<String> = [
-            rate_note(rate, network_rate),
+            output_rate_note(e.kind, rate, network_rate),
             status
                 .as_ref()
                 .and_then(|s| buffer_note(s.buffer_frames, rate)),

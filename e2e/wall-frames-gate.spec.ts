@@ -76,6 +76,20 @@ test("a lone uneven boundary is one slip and passes (#272, CI 41189187432)", () 
   expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toEqual([]);
 });
 
+test("a slip is one refresh over the clip's own longest hold, at 25 fps too (#272)", () => {
+  const take = (refreshes: number): WallFramesReport => {
+    const report = { ...oneSlip(), fps: 25 };
+    report.refreshes = {
+      ...report.refreshes!,
+      uneven: 1,
+      uneven_boundaries: [{ boundary: 708, refreshes }],
+    };
+    return report;
+  };
+  expect(wallFramesFailures("wall-25", EXIT_DEFECTS, take(4))).toEqual([]);
+  expect(wallFramesFailures("wall-25", EXIT_DEFECTS, take(5))).not.toEqual([]);
+});
+
 test("a freeze is no slip, however few boundaries it touches (#272)", () => {
   const report = oneSlip();
   report.refreshes!.uneven = 1;
