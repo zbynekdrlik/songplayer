@@ -77,31 +77,16 @@ impl DanteParams {
         })
     }
 
-    /// The device latency at the worker's rate, plus dlink's TX conversion
-    /// delay when it converts (its own measured `Rated::delay_ns`).
+    /// dlink's TX path at the worker's rate: its work margin, the Dante
+    /// latency it derives from its 10 ms budget and the rate converter's TX
+    /// delay (`Config::split`, dstack v0.6.22: the budget is the app's whole
+    /// path, the owner's ruling to dstack of 3.11.2026).
     fn latency_frames(&self) -> u64 {
-        let device_ns = dlink::LATENCY_NS;
-        let convert_ns = if self.rate == self.network_rate {
-            0
-        } else {
-            self.convert_tx_ns().unwrap_or(0)
-        };
-        u64::from(self.rate) * (device_ns + convert_ns) / 1_000_000_000
-    }
-
-    /// dlink's TX delay from the worker's rate to the device's, ns.
-    fn convert_tx_ns(&self) -> Option<u64> {
-        let block = usize::try_from(self.config().device().ok()?.block).ok()?;
-        let rated = dlink::Rated::new(
-            Quiet,
-            self.network_rate,
-            self.rate,
-            block,
-            0,
-            DANTE_CHANNELS,
-        )
-        .ok()?;
-        Some(rated.delay_ns().1)
+        let path_ns = self
+            .config()
+            .split()
+            .map_or(dlink::BUDGET_NS, |s| s.tx_path_ns);
+        u64::from(self.rate) * path_ns / 1_000_000_000
     }
 
     /// The device's block at the worker's rate, frames (rounded up).
@@ -121,13 +106,6 @@ impl DanteParams {
             .network_rate(self.network_rate)
             .product("New Level", "SongPlayer")
     }
-}
-
-/// A processor that does nothing: only to ask dlink's converter its delay.
-struct Quiet;
-
-impl Process for Quiet {
-    fn process(&mut self, _block: &mut Block<'_>) {}
 }
 
 /// The fields of the stack's status line that `outputs[i].dante` shows (its

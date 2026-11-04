@@ -75,8 +75,9 @@ fn a_short_ring_is_silence_and_an_underrun_only_once_primed() {
     assert_eq!(counts.consumed.load(Ordering::Relaxed), 4);
 }
 
-/// dstack's numbers for program audio (dlink v0.6.20): 10 ms, block 128, a margin
-/// of half the latency, the `normal` profile.
+/// dstack's numbers for program audio (dlink v0.6.22): a 10 ms budget for
+/// the whole TX path, block 128; at 96 kHz with a 48 kHz app dlink's split
+/// gives the Dante latency 5.17 ms and the work margin 2 ms.
 #[test]
 fn the_device_is_two_tx_no_rx_on_dlinks_defaults_at_the_network_rate() {
     let cfg = params(Path::new("x"), Ipv4Addr::LOCALHOST)
@@ -92,8 +93,8 @@ fn the_device_is_two_tx_no_rx_on_dlinks_defaults_at_the_network_rate() {
     assert_eq!((config.device_rate(), config.converts()), (96_000, true));
     assert_eq!(cfg.encoding, 24);
     assert_eq!(cfg.block, 128);
-    assert_eq!(cfg.latency_ns, 10_000_000);
-    assert_eq!(cfg.work_margin, 480);
+    assert_eq!(cfg.latency_ns, 5_166_666);
+    assert_eq!(cfg.work_margin, 192);
     assert_eq!(
         (cfg.manufacturer.as_str(), cfg.model.as_str()),
         ("New Level", "SongPlayer")
@@ -121,15 +122,15 @@ fn an_entry_builds_at_the_network_rate_or_its_own() {
     assert_eq!((p.rate, p.network_rate), (48_000, 96_000));
     assert_eq!(p.ip, Ipv4Addr::new(10, 77, 9, 210));
     assert_eq!(p.clock, ClockSource::Dsync);
-    // 10 ms device latency at 48 kHz (480 frames) plus the converter's TX
-    // delay, 2.83 ms by dlink's own measurement (about 136 frames).
+    // dlink's whole TX path is its 10 ms budget: 480 frames at 48 kHz,
+    // the converter's delay included.
     let lat = p.latency_frames();
-    assert!((480 + 130..=480 + 140).contains(&lat), "latency {lat}");
+    assert!((478..=480).contains(&lat), "latency {lat}");
     entry.rate = RateChoice::Fixed(48_000);
     let same = DanteParams::for_entry(&entry, 96_000).unwrap();
     assert_eq!((same.rate, same.network_rate), (48_000, 48_000));
     assert!(!same.config().converts());
-    assert_eq!(same.latency_frames(), 480);
+    assert!((478..=480).contains(&same.latency_frames()));
 }
 
 #[test]
