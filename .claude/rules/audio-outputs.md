@@ -81,8 +81,9 @@ start):
   was last applied with).
 - Nastavenia "Zvukové výstupy": the checkbox `settings-audio-low-latency`
   "Nízka latencia zvuku (~15 ms)" with the Slovak tooltip
-  (`audio_latency::TOOLTIP_SK`: audio leaves ~65 ms earlier against the
-  picture; camera-box A/B-measures it before it stays on), in its own child
+  (`audio_latency::TOOLTIP_SK`: VBAN sends 15 ms instead of 67 ms at 48 kHz,
+  18 ms instead of 83 ms at 96 kHz, ASIO and Dante unchanged, and the LED wall
+  must be measured against FOH before it stays on), in its own child
   module `audio_outputs_latency.rs` (the section is at the 1000-line cap),
   saved with "Uložiť výstupy" and sent ONLY when it differs from the value
   the page loaded (`low_latency_to_send`, the `paid_ai_to_send` rule). The
@@ -159,9 +160,7 @@ are the grid constants, the 100 ns observation, the `Splice` (dstack has
 none) and the status: the adapter keeps a shadow of the controller's
 window (it opens, closes and restarts where dstack's does) for the window's
 mean latency and `slew_eta_s`, and shows `offset_ms` / `cushion_ms` on the
-100 ns grain. `fold_cushion`, `kept_cushion`, `slew_err_100ns` and
-`hard_recentre` remain as the pure 100 ns forms of dstack's laws, pinned by
-their tests. The law description below is the one dstack carries over;
+100 ns grain. The law description below is the one dstack carries over;
 where dstack's controller still DIFFERS (step 3's findings, reported to
 dstack, our pins unchanged and red until it is fixed):
 
@@ -305,17 +304,17 @@ or a window mean 10 ms off). SNV's DVS had 45 such re-centres in 3.5 h
   time). Now:
   - each block's new `underrun_frames` (cumulative; the first block's count
     is the start, a count that went back folds nothing) are folded into
-    `cushion_100ns` (`fold_cushion`: added, at most `CUSHION_MAX_100NS` =
+    `cushion_100ns` (dstack `played_silence`: added, at most `CUSHION_MAX_100NS` =
     one slot);
   - the offset slew's error is the window mean's distance from the band
-    [target, target + cushion] (`slew_err_100ns`, branch-free: `(t − L)⁺ −
+    [target, target + cushion] (dstack `band_error_ms`, branch-free: `(t − L)⁺ −
     (L − top)⁺`; a comparison form has an equivalent `>=` mutant at the
     top): a kept excess is not braked, what lies beyond the cap is drained
     as before, a deficit is measured from the target itself;
   - the level loop (P on the EMA, I) keeps the CONFIGURED target, so the
     kept excess decays slowly through it (P ≤ 50 ppm: tens of minutes; the
     sim's 150 ms stall still holds ~20 of its 33.3 ms 400 s later);
-  - at each window the cushion follows the mean down (`kept_cushion`:
+  - at each window the cushion follows the mean down (dstack's window close:
     never more than the mean held over the target, 0 at or under it); a
     window that FOLDED an underrun keeps it whole, since its mean still
     holds the blocks before the underrun (`folded`, taken at the close).
@@ -328,7 +327,7 @@ or a window mean 10 ms off). SNV's DVS had 45 such re-centres in 3.5 h
     0 while only a cushion is held, and the dashboard's slew chip reads
     "drží rezervu +13,3 ms po výpadku" then (`sp_core::asio_resampling`,
     shown while its tenths are not zero; a drain is named first).
-- **The last resort** (`hard_recentre(latency, target)`): a block whose
+- **The last resort** (dstack `Step::Recentre`): a block whose
   latency is under 38.3 ms (`HARD_FLOOR_100NS`, the splice's 5 ms hold + one
   slot, Q2: a missing program boundary at delay 0, −33.3 ms, which with
   the sub-millisecond hand-off only a real stall makes, reads under it and
