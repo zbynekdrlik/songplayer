@@ -137,10 +137,6 @@ impl NdiBackend for HookedNdi {
         )
     }
 
-    fn send_get_tally(&self, handle: usize, timeout_ms: u32) -> Option<(bool, bool)> {
-        self.inner.send_get_tally(handle, timeout_ms)
-    }
-
     fn send_get_no_connections(&self, handle: usize, timeout_ms: u32) -> i32 {
         self.inner.send_get_no_connections(handle, timeout_ms)
     }

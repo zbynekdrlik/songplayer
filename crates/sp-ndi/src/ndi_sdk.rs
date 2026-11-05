@@ -11,7 +11,7 @@ use crate::network_ready;
 use crate::receive::RecvFns;
 use crate::types::{
     NDIlib_audio_frame_v3_t, NDIlib_find_create_t, NDIlib_find_instance_t, NDIlib_send_create_t,
-    NDIlib_send_instance_t, NDIlib_source_t, NDIlib_tally_t, NDIlib_video_frame_v2_t,
+    NDIlib_send_instance_t, NDIlib_source_t, NDIlib_video_frame_v2_t,
 };
 
 // ---------------------------------------------------------------------------
@@ -29,8 +29,6 @@ type FnSendVideoAsyncV2 =
     unsafe extern "C" fn(*mut NDIlib_send_instance_t, *const NDIlib_video_frame_v2_t);
 type FnSendAudioV3 =
     unsafe extern "C" fn(*mut NDIlib_send_instance_t, *const NDIlib_audio_frame_v3_t);
-type FnSendGetTally =
-    unsafe extern "C" fn(*mut NDIlib_send_instance_t, *mut NDIlib_tally_t, u32) -> bool;
 type FnSendGetNoConnections = unsafe extern "C" fn(*mut NDIlib_send_instance_t, u32) -> i32;
 // The NDI source finder: the NDI input "OBS manuál" lists its sources (#212).
 type FnFindCreateV2 =
@@ -59,7 +57,6 @@ pub struct NdiLib {
     pub(crate) send_send_video_v2: FnSendVideoV2,
     pub(crate) send_send_video_async_v2: FnSendVideoAsyncV2,
     pub(crate) send_send_audio_v3: FnSendAudioV3,
-    pub(crate) send_get_tally: FnSendGetTally,
     pub(crate) send_get_no_connections: FnSendGetNoConnections,
     // The source finder (#212's source list).
     pub(crate) find_create_v2: FnFindCreateV2,
@@ -105,8 +102,6 @@ impl NdiLib {
             )?;
             let send_send_audio_v3 =
                 Self::resolve::<FnSendAudioV3>(&library, b"NDIlib_send_send_audio_v3\0")?;
-            let send_get_tally =
-                Self::resolve::<FnSendGetTally>(&library, b"NDIlib_send_get_tally\0")?;
             let send_get_no_connections = Self::resolve::<FnSendGetNoConnections>(
                 &library,
                 b"NDIlib_send_get_no_connections\0",
@@ -155,7 +150,6 @@ impl NdiLib {
                 send_send_video_v2,
                 send_send_video_async_v2,
                 send_send_audio_v3,
-                send_get_tally,
                 send_get_no_connections,
                 find_create_v2,
                 find_wait_for_sources,

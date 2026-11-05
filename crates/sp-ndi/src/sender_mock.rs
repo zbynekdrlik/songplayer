@@ -182,14 +182,6 @@ impl NdiBackend for MockNdiBackend {
         *self.last_audio_planar.lock().unwrap() = scratch;
     }
 
-    fn send_get_tally(&self, handle: usize, timeout_ms: u32) -> Option<(bool, bool)> {
-        self.calls
-            .lock()
-            .unwrap()
-            .push(format!("send_get_tally({handle},{timeout_ms})"));
-        None
-    }
-
     fn send_get_no_connections(&self, handle: usize, timeout_ms: u32) -> i32 {
         self.calls
             .lock()

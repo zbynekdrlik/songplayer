@@ -60,12 +60,6 @@ mod tests {
     }
 
     #[test]
-    fn tally_t_is_small() {
-        // Two bools — should be at most a few bytes.
-        assert!(mem::size_of::<types::NDIlib_tally_t>() <= 4);
-    }
-
-    #[test]
     fn fourcc_video_bgra_value_and_bytes() {
         assert_eq!(FourCCVideoType::BGRA as u32, 0x4152_4742);
         let bytes = (FourCCVideoType::BGRA as u32).to_le_bytes();

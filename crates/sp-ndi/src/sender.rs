@@ -129,9 +129,6 @@ pub trait NdiBackend: Send + Sync {
         timecode_100ns: Option<i64>,
     );
 
-    /// Query tally state. Returns `None` if the timeout expired with no change.
-    fn send_get_tally(&self, handle: usize, timeout_ms: u32) -> Option<(bool, bool)>;
-
     /// Return the current number of NDI receivers connected to this sender.
     /// Returns `>= 0` when the SDK reports a count; the caller must treat any
     /// negative value as "unknown" and not as a failure (the NDI SDK may
