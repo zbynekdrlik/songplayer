@@ -103,6 +103,15 @@ def test_a_slip_still_reads_as_judder_at_the_spout_time_error():
     assert (long["refreshes"], short["refreshes"]) == (3, 1)
 
 
+def test_the_list_holds_every_boundary_of_arena_s_budget():
+    # The gate counts slips from this list and fails a take whose list is
+    # shorter than `uneven`, so it must hold 20 slips of two boundaries each.
+    slip = [50.0, 16.67] + jitter(20)
+    report = spout_take(jitter(200) + slip * 21)
+    assert report["refreshes"]["uneven"] == 42
+    assert len(report["refreshes"]["uneven_boundaries"]) == 42
+
+
 def test_a_freeze_reports_its_length():
     report = spout_take(jitter(200) + [5000.0] + jitter(200))
     held = report["refreshes"]["uneven_boundaries"]

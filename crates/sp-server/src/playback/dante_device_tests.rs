@@ -232,6 +232,41 @@ fn an_address_no_adapter_holds_fails_the_start_and_names_no_panic() {
     device.close();
 }
 
+/// A rebuilt entry's successor starts while its predecessor still stops: it
+/// must not bind the Dante ports or announce the name until the old one is out.
+#[test]
+fn a_successor_waits_until_its_predecessor_closed() {
+    let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let mut old = DanteDevice::new(params(dir.path(), routed_ipv4()));
+    old.open("", [0, 1]).unwrap();
+    let (_tx, rx) = rtrb::RingBuffer::new(1024);
+    old.start(rx).unwrap();
+
+    let mut successor = DanteDevice::new(params(dir.path(), routed_ipv4()));
+    assert_eq!(successor.open("", [0, 1]).err(), Some(Reason::Held));
+
+    old.close();
+    successor.open("", [0, 1]).unwrap();
+    let (_tx, rx) = rtrb::RingBuffer::new(1024);
+    successor.start(rx).unwrap();
+    successor.close();
+}
+
+/// A start the stack refused is closed by the worker, and the next try opens.
+#[test]
+fn a_failed_start_gives_the_hold_back_at_its_close() {
+    let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let mut device = DanteDevice::new(params(dir.path(), Ipv4Addr::new(192, 0, 2, 77)));
+    device.open("", [0, 1]).unwrap();
+    let (_tx, rx) = rtrb::RingBuffer::new(1024);
+    assert!(device.start(rx).is_err());
+    device.close();
+    device.open("", [0, 1]).unwrap();
+    device.close();
+}
+
 #[test]
 fn a_name_the_stack_refuses_fails_the_open() {
     let dir = tempfile::tempdir().unwrap();
