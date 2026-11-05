@@ -63,9 +63,10 @@ const MIN_JUDGED = 300;
 /** The slips a take may hold (the owner, #272, 31.10.2026). */
 const MAX_SLIPS = 3;
 /** The slips Arena's own output may hold per 40 s take while the sender is
- *  even. Measured 1.11.2026 in takes with an even sender: 7 to 9 uneven
- *  boundaries + 2 to 3 inconsistent ones, 6 to 7 by this count. */
-export const ARENA_MAX_SLIPS = 8;
+ *  even (the owner, #272, 5.11.2026). Measured over 21 push runs: the count ran
+ *  2 to 19 with no trend and the sender stayed even in all 42 takes, so the
+ *  earlier budget of 8 failed about every second deploy. */
+export const ARENA_MAX_SLIPS = 20;
 /** A slip holds a picture one refresh over the clip's longest even hold on a
  *  60 Hz wall (the capture's rate on resolume-snv): wall-30 3, wall-25 and
  *  wall-24 4. More is a stall, which never passes as a slip. */
