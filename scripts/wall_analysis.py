@@ -94,6 +94,10 @@ MIN_COVERAGE = 0.95
 # seconds. ``--min-boundaries`` sets it.
 MIN_BOUNDARIES = 300
 LIST_MAX = 20
+# The gate counts slips from `uneven_boundaries`, two boundaries a slip, and
+# fails a take whose list is shorter than `uneven`: it holds ARENA_MAX_SLIPS
+# (e2e/wall-frames-gate.ts) twice over and then some.
+UNEVEN_BOUNDARIES_MAX = 64
 # check_present_rate() needs this many timed intervals.
 MIN_TIMED = 10
 
@@ -790,7 +794,7 @@ def refresh_report(
         "judged": judged,
         "uneven": len(uneven),
         "uneven_samples": uneven[:LIST_MAX],
-        "uneven_boundaries": uneven_boundaries[:LIST_MAX],
+        "uneven_boundaries": uneven_boundaries[:UNEVEN_BOUNDARIES_MAX],
         "unresolved": unresolved,
         "inconsistent": inconsistent,
         "seam_hold_s": round(seam_hold * timing.period, 3),

@@ -30,6 +30,7 @@ use sp_core::dante_status::DanteFigures;
 use tracing::{info, warn};
 
 use crate::playback::asio_format::AsioSample;
+use crate::playback::asio_hold::{DriverHold, DriverHolds};
 use crate::playback::asio_out::{AsioDevice, Opened, Started};
 use crate::playback::asio_state::{DeviceEvents, Reason};
 
@@ -250,6 +251,13 @@ fn reason(e: HostError) -> Reason {
     }
 }
 
+/// The Dante device this process holds. A rebuilt entry's successor starts
+/// while the old worker still stops, and one device binds the Dante ports on
+/// its address and announces its name. The list allows one Dante entry
+/// (`MAX_DANTE_OUTPUTS`), so the hold has one name.
+static HELD: DriverHolds = DriverHolds::new();
+const HOLD_NAME: &str = "dante";
+
 /// The output's device on its worker thread.
 pub struct DanteDevice {
     params: DanteParams,
@@ -257,6 +265,8 @@ pub struct DanteDevice {
     running: Option<Link>,
     counts: Arc<Counts>,
     link: DanteLink,
+    /// From `open` until after the stack stopped. Last: it drops after `running`.
+    hold: Option<DriverHold<'static>>,
 }
 
 impl DanteDevice {
@@ -272,6 +282,7 @@ impl DanteDevice {
             running: None,
             counts: Arc::default(),
             link,
+            hold: None,
         }
     }
 }
@@ -284,6 +295,7 @@ impl AsioDevice for DanteDevice {
         let device = config
             .device()
             .map_err(|problems| Reason::Refused(problems.join("; ")))?;
+        self.hold = Some(HELD.claim(HOLD_NAME).ok_or(Reason::Held)?);
         self.config = Some(config);
         Ok(Opened {
             rate: f64::from(self.params.rate),
@@ -359,6 +371,7 @@ impl AsioDevice for DanteDevice {
             let stopped = run.stop();
             info!(?stopped, "dante output: device stopped");
         }
+        self.hold = None;
     }
 }
 

@@ -87,7 +87,8 @@ start):
   module `audio_outputs_latency.rs` (the section is at the 1000-line cap),
   saved with "Uložiť výstupy" and sent ONLY when it differs from the value
   the page loaded (`low_latency_to_send`, the `paid_ai_to_send` rule). The
-  "Uložené" line does not watch the checkbox. Mock: the PATCH check and
+  "Uložené" line hides while the checkbox differs from the loaded value
+  (`low_latency.unchanged()`). Mock: the PATCH check and
   `audio_low_latency` on the program; spec
   `e2e/settings-audio-low-latency.spec.ts`.
 - **The ASIO / Dante servo is NOT switched (open, step 1 stopped here).**
@@ -161,21 +162,7 @@ none) and the status: the adapter keeps a shadow of the controller's
 window (it opens, closes and restarts where dstack's does) for the window's
 mean latency and `slew_eta_s`, and shows `offset_ms` / `cushion_ms` on the
 100 ns grain. The law description below is the one dstack carries over;
-where dstack's controller still DIFFERS (step 3's findings, reported to
-dstack, our pins unchanged and red until it is fixed):
-
-- **priming**: dstack primes only when the first depth is under the
-  target; SongPlayer's servo primed (a skip) on ANY first block. Eight
-  unit tests whose first block reads 100 ns over the target (6 400 frames
-  at 96 kHz = 666 667) fail on it — the window then starts at block 0;
-- **stall**: dstack compares two CONSECUTIVE window means (never the
-  first window, and a window the stall only starts in passes as a
-  measurement and moves the fit); SongPlayer's checked one window's first
-  and last point (`a_window_of_exactly_100_000_ppm_is_a_measurement`,
-  `a_starved_window_flushes_the_rate_and_holds_the_correction`);
-- **an underrun count that went back**: dstack folds the rise from the
-  lowered count; SongPlayer's folded only past the most seen
-  (`underrun_frames_fold_into_a_cushion_that_a_re_centre_drops`).
+dstack v0.6.15 aligned priming, the stall check and the underrun fold with it.
 
 The closed-loop sim (`asrc_servo_sim_tests.rs`), `asrc_tests.rs` (frame
 counts, the 3 213-frame bound, the delay, THD+N, images), the ASIO worker's
@@ -189,9 +176,7 @@ it), and rubato's AVX / SSE / NEON dot kernels in rubato
 tens of ms a block and 20–110 s per ASIO test (#233, when sp-asrc carried
 it; sp-asrc is deleted). Read a slow test's time in the
 `mutants-report-shard-*` artifact's per-mutant logs; the Test job's `cargo
-test` prints only the binary's total. VBAN's `Fft` (`vban_rate.rs`) is
-still rubato named from sp-server (it moves to dstack later, after a
-heads-up).
+test` prints only the binary's total.
 
 **The observation** (per block, on the program wall, 100 ns): when the block
 was handled, its boundary (stamp), the frames buffered for the card (the
@@ -1558,10 +1543,15 @@ difference with its UTC time.
   8782 windows, late 0 in every one, peak max 4365 us, p99 3719 us, median
   2208 us at 10 ms latency. So the `normal` profile stands; the 31.10 rule
   against it applied to the old pump, not to dlink.
+- One Dante device at a time in the process (`dante_device::HELD`): `open`
+  takes the hold, `close` gives it back after the stack stopped. A rebuilt
+  entry's successor starts while its predecessor still stops, so it reads
+  `Reason::Held` and tries again after the 2 s backoff, instead of failing on
+  the Dante ports or announcing the name twice.
 - `outputs[i]` = the ASIO worker's line under `asio` plus `dante`
   (`sp_core::dante_status::DanteFigures`) while a device runs: read through
   `DanteLink`, which the worker sets at the start and clears at the close, from
-  `ctl::answer("status", ..)`. Nothing on the audio path takes its lock. **The
+  `ctl::status`. Nothing on the audio path takes its lock. **The
   stack's status flags are 0 / 1, not booleans**: a typed `bool` fails the
   whole line (only the test on the real stack caught it).
 - The dashboard's texts: `dante_status.rs` rewrites the ASIO chips by whole

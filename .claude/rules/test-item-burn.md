@@ -542,7 +542,8 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
     held over one refresh more than the clip's longest even hold is a stall,
     never a slip (`maxSlipRefreshes`: wall-30 3, wall-25 and wall-24 4;
     `uneven_boundaries`: a 15 s freeze reads 1
-    uneven boundary, no loss). CI takes read 0-5, off-CI takes 0-1. Their cause is not
+    uneven boundary, no loss; the reader keeps `UNEVEN_BOUNDARIES_MAX` = 64 of
+    them, more than the budget's 40). Their cause is not
     proven, and whether a slip shows on the wall is not verified.
   - `defects` names every counter: judder (`refreshes.uneven` of `judged`),
     jumps back, lost frames and boundaries, cadence, weights, frozen.
