@@ -82,8 +82,8 @@ fn should_resample_b7_vectors() {
 }
 
 // ===========================================================================
-// Boundary-paced emission vectors (#147) — digest §B, ported 1:1 from
-// camera-box `src/genlock_pacing.rs`. Pacing works in wall-clock ns.
+// Boundary-paced emission (#147): the catch-up contract shared with
+// camera-box `src/genlock_pacing.rs`. SongPlayer's pacing works in 100 ns.
 // ===========================================================================
 
 #[test]
@@ -187,7 +187,7 @@ fn emit_gate_100ns_6_zero_fps_keeps_boundary() {
 
 #[test]
 fn emit_gate_100ns_7_off_grid_nb_realigns_on_grid() {
-    // The ns port keeps a misaligned nb misaligned; the exact grid REALIGNS —
+    // camera-box's ns gate keeps a misaligned nb misaligned; the exact grid REALIGNS —
     // a catch-up lands on the grid, one slot past.
     let nb = b(7) + 5; // deliberately off the exact grid
     let (emit, next) = genlock_emit_gate_100ns(nb, nb, 30, false);

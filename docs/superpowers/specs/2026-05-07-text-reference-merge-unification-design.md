@@ -231,7 +231,7 @@ None at spec time. Routing rules are deterministic; priorities are user-decided;
 ## Approval gates
 
 1. **Spec approval (this doc).** User reviews and approves before plan-writing.
-2. **Plan approval.** `writing-plans` produces task-by-task plan in `docs/superpowers/plans/2026-05-07-text-reference-merge-unification.md`. User reviews.
+2. **Plan approval.** `writing-plans` produces a task-by-task plan. User reviews.
 3. **Implementation review.** Subagent-driven-development; per-task spec-compliance + code-quality review per project workflow.
 4. **CI green.** All gates pass before merge candidate.
 5. **Wall-verify.** `id=21` reprocessed post-deploy, played on sp-live, user wall-verifies.
