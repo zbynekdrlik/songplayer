@@ -350,17 +350,8 @@ fn spawn_worker(shared: Arc<PreviewShared>) {
 /// aspect ratio and never upscales (output width is `min(max_width, width)`).
 /// Returns `None` for degenerate dimensions or a too-short buffer (the frame
 /// is simply dropped from the preview — never a decode error).
-pub fn downscale_nv12_to_rgb(
-    width: u32,
-    height: u32,
-    stride: u32,
-    nv12: &[u8],
-    max_width: u32,
-) -> Option<RawPreviewFrame> {
-    downscale_nv12_to_rgb_into(width, height, stride, nv12, max_width, Vec::new())
-}
-
-/// [`downscale_nv12_to_rgb`] into a caller-supplied buffer (#147 round 10):
+///
+/// Writes into a caller-supplied buffer (#147 round 10):
 /// `rgb` is cleared and resized to the output size, so its capacity is reused
 /// and a recycled buffer never costs a fresh allocation. Every output byte is
 /// written, so no stale pixel survives from the buffer's previous frame.
@@ -577,13 +568,13 @@ mod tests {
     #[test]
     fn downscale_preserves_aspect_and_never_upscales() {
         let nv12 = grey_nv12(1920, 1080, 1920);
-        let f = downscale_nv12_to_rgb(1920, 1080, 1920, &nv12, 320).unwrap();
+        let f = downscale_nv12_to_rgb_into(1920, 1080, 1920, &nv12, 320, Vec::new()).unwrap();
         assert_eq!((f.width, f.height), (320, 180), "16:9 downscale geometry");
         assert_eq!(f.rgb.len(), 320 * 180 * 3);
 
         // max_width larger than source: no upscale.
         let small = grey_nv12(4, 2, 4);
-        let f2 = downscale_nv12_to_rgb(4, 2, 4, &small, 320).unwrap();
+        let f2 = downscale_nv12_to_rgb_into(4, 2, 4, &small, 320, Vec::new()).unwrap();
         assert_eq!((f2.width, f2.height), (4, 2));
     }
 
@@ -591,21 +582,21 @@ mod tests {
     fn downscale_honours_stride_padding() {
         // stride > width — the extra padding bytes must not corrupt geometry.
         let nv12 = grey_nv12(6, 4, 8);
-        let f = downscale_nv12_to_rgb(6, 4, 8, &nv12, 3).unwrap();
+        let f = downscale_nv12_to_rgb_into(6, 4, 8, &nv12, 3, Vec::new()).unwrap();
         assert_eq!((f.width, f.height), (3, 2));
         assert_eq!(f.rgb.len(), 3 * 2 * 3);
     }
 
     #[test]
     fn downscale_rejects_degenerate_and_short_buffers() {
-        assert!(downscale_nv12_to_rgb(0, 10, 10, &[0; 200], 320).is_none());
-        assert!(downscale_nv12_to_rgb(10, 0, 10, &[0; 200], 320).is_none());
+        assert!(downscale_nv12_to_rgb_into(0, 10, 10, &[0; 200], 320, Vec::new()).is_none());
+        assert!(downscale_nv12_to_rgb_into(10, 0, 10, &[0; 200], 320, Vec::new()).is_none());
         assert!(
-            downscale_nv12_to_rgb(10, 10, 8, &[0; 200], 320).is_none(),
+            downscale_nv12_to_rgb_into(10, 10, 8, &[0; 200], 320, Vec::new()).is_none(),
             "stride<width"
         );
         // Buffer far too short for the declared dims.
-        assert!(downscale_nv12_to_rgb(1920, 1080, 1920, &[0; 10], 320).is_none());
+        assert!(downscale_nv12_to_rgb_into(1920, 1080, 1920, &[0; 10], 320, Vec::new()).is_none());
     }
 
     #[test]

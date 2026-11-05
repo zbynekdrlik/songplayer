@@ -217,8 +217,7 @@ three-fader console (`vokaly` / `podklad` / `dabing`) — see
   podklad full, else `[0,vokaly,podklad,dabing]`); `DubOverOriginal` uses
   `stream_gains_dub_no_stems(f)` = `[vokaly, dabing]` — the whole original at the
   `vokaly` fader, **NO −18 dB floor**. `MixControl` publishes both from
-  `set_faders(f)`; `reader::dub_gains_for(kind, MixFaders)` is the pure per-kind
-  gain (still unit-tested).
+  `set_faders(f)`.
 - The mix is set via `PATCH /api/v1/mix {kind, vokaly?, podklad?, dabing?}` →
   `EngineCommand::SetMix{kind, faders}` → `engine.set_mix` → `control.set_faders(kind, f)`;
   the persist is done by the API handler AFTER the live push
@@ -258,8 +257,7 @@ Default r=1.0. `PATCH /api/v1/videos/{id}/dub-mix` persists to DB AND sends
 `EngineCommand::SetDubMix{video_id, ratio}` → `engine.set_dub_mix` →
 `control.set_dub_ratio`, which publishes BOTH the 4-stream quad AND the 2-stream
 pair from the same `r` (live, no pipeline reopen — the #186 seam; only one mix is
-ever open). `dub_gains_for(kind, r)` is the pure, unit-tested per-kind gain
-chooser. Any dub-reader open failure degrades to the stem/plain mix.
+ever open). Any dub-reader open failure degrades to the stem/plain mix.
 
 ## Cap note
 `lib.rs` was at exactly 1000 lines, so the `EngineCommand` match was extracted to a

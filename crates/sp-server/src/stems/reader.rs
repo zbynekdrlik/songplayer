@@ -16,8 +16,6 @@ use std::path::Path;
 use sp_decoder::{AudioStream, DecoderError, StemMixReader, SymphoniaAudioReader};
 use tracing::{info, warn};
 
-use sp_core::mixer_model::{MixFaders, stream_gains_dub, stream_gains_dub_no_stems};
-
 use crate::stems::control::MixControl;
 
 /// One of the streams the decode loop can open — INDEPENDENT of the karaoke
@@ -83,21 +81,6 @@ pub fn audio_source_kind(
     match stream_roles(vocals_exist, instrumental_exist) {
         [StemRole::Original, StemRole::Vocals, StemRole::Instrumental] => AudioSourceKind::StemMix,
         _ => AudioSourceKind::PlainMix,
-    }
-}
-
-/// Pure per-stream live gains a dub reader is fed for a given source kind and the
-/// live mixer faders (#184 round G). `DubMix` → the 4-stream
-/// `stream_gains_dub(f)`; `DubOverOriginal` → the 2-stream
-/// `stream_gains_dub_no_stems(f)`; a non-dub kind has no dub gains (`[]`).
-/// Extracted as an OBSERVABLE `Vec<f32>` so the per-kind gain choice is
-/// unit-tested without opening a reader (both readers report 48 kHz stereo, so
-/// the choice is otherwise invisible — the #186 mutation gotcha).
-pub fn dub_gains_for(kind: AudioSourceKind, f: MixFaders) -> Vec<f32> {
-    match kind {
-        AudioSourceKind::DubMix => stream_gains_dub(f).to_vec(),
-        AudioSourceKind::DubOverOriginal => stream_gains_dub_no_stems(f).to_vec(),
-        AudioSourceKind::StemMix | AudioSourceKind::PlainMix => Vec::new(),
     }
 }
 
@@ -359,51 +342,6 @@ mod tests {
             audio_source_kind(true, false, true),
             AudioSourceKind::DubOverOriginal
         );
-    }
-
-    #[test]
-    fn dub_gains_for_matches_the_source_kind() {
-        // 4-stream DubMix → stream_gains_dub(f). Both faders full = bit-exact
-        // original + the dub.
-        assert_eq!(
-            dub_gains_for(AudioSourceKind::DubMix, MixFaders::new(1.0, 1.0, 1.0)),
-            vec![1.0, 0.0, 0.0, 1.0]
-        );
-        // Off the corner: original silent, stems + dub at the fader positions.
-        assert_eq!(
-            dub_gains_for(AudioSourceKind::DubMix, MixFaders::new(0.0, 1.0, 0.0)),
-            vec![0.0, 0.0, 1.0, 0.0]
-        );
-        assert_eq!(
-            dub_gains_for(AudioSourceKind::DubMix, MixFaders::new(0.3, 1.0, 0.25)),
-            vec![0.0, 0.3, 1.0, 0.25]
-        );
-        // 2-stream DubOverOriginal → stream_gains_dub_no_stems(f) = [vokály, dabing]
-        // (no floor since round G).
-        assert_eq!(
-            dub_gains_for(
-                AudioSourceKind::DubOverOriginal,
-                MixFaders::new(0.0, 1.0, 1.0)
-            ),
-            vec![0.0, 1.0]
-        );
-        assert_eq!(
-            dub_gains_for(
-                AudioSourceKind::DubOverOriginal,
-                MixFaders::new(1.0, 1.0, 0.0)
-            ),
-            vec![1.0, 0.0]
-        );
-        assert_eq!(
-            dub_gains_for(
-                AudioSourceKind::DubOverOriginal,
-                MixFaders::new(0.5, 1.0, 0.5)
-            ),
-            vec![0.5, 0.5]
-        );
-        // Non-dub kinds have no dub gains.
-        assert!(dub_gains_for(AudioSourceKind::StemMix, MixFaders::default()).is_empty());
-        assert!(dub_gains_for(AudioSourceKind::PlainMix, MixFaders::default()).is_empty());
     }
 
     /// A dub track WITHOUT stems → the 2-stream `[original, dub]` reader opens and

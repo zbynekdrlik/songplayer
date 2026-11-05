@@ -50,8 +50,8 @@ async fn fetch_bucket_manual(
     pool: &SqlitePool,
     current_version: u32,
 ) -> Result<Option<VideoLyricsRow>> {
-    // Skip rows the worker has already tried and bailed on — mark_video_lyrics
-    // on the failure path does NOT clear manual_priority, so without this
+    // Skip rows the worker has already tried and bailed on — such a parked row
+    // can still carry manual_priority, so without this
     // filter a failed manual-reprocess loops forever.
     // Exception: if a row's recorded failure is from an OLDER pipeline version,
     // allow it through — the worker may have new capability that succeeds now.
@@ -189,12 +189,6 @@ async fn fetch_bucket_fullmix_upgrade(
     .fetch_optional(pool)
     .await?;
     Ok(row)
-}
-
-/// Composite quality score written to `videos.lyrics_quality_score`. Higher = better.
-/// Range typically in [-1.0, 1.0] but effectively [0.0, 1.0] for healthy alignments.
-pub fn compute_quality_score(avg_confidence: f32, duplicate_start_pct: f32) -> f32 {
-    avg_confidence - duplicate_start_pct / 100.0
 }
 
 #[cfg(test)]
@@ -398,7 +392,7 @@ mod tests {
     async fn manual_bucket_skips_failed_songs_so_user_reprocess_does_not_loop() {
         // Regression: without this, clicking "Reprocess" on a song that has
         // no text sources (no yt_subs, no LRCLIB) would loop forever in
-        // bucket 0 — mark_video_lyrics on failure does not clear
+        // bucket 0 — such a parked row can still carry
         // manual_priority, so the selector re-picks it on every tick.
         // The selector must skip rows marked as previously-failed so the
         // manual queue advances even for no-source songs.
@@ -739,13 +733,6 @@ mod tests {
         .await
         .unwrap();
         assert!(get_next_video_for_lyrics(&pool, 2).await.unwrap().is_none());
-    }
-
-    #[test]
-    fn quality_score_formula() {
-        assert!((compute_quality_score(0.8, 10.0) - 0.7).abs() < 1e-6);
-        assert!((compute_quality_score(0.5, 50.0) - 0.0).abs() < 1e-6);
-        assert!((compute_quality_score(0.9, 0.0) - 0.9).abs() < 1e-6);
     }
 
     #[tokio::test]

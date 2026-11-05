@@ -51,7 +51,7 @@ once, kept a year, then deleted with its files.
 
 - **Picked:** the youtube selector's queries (`get_unplayed_normalized_video_ids`,
   `get_normalized_video_ids`, so the Continuous / Single pick AND its
-  rotation restart), `get_unplayed_video_ids`, Loop's remembered song
+  rotation restart), Loop's remembered song
   after a restart (`loop_memory::remembered`), a play-video by id
   (`models_membership::video_playlist_membership` → 404 "video not in
   playlist", the engine told nothing).
@@ -203,7 +203,7 @@ archiv!". Design: #261 comment 6228880917; the lane's notes: the
   `counts`; `next_song` asks `p.is_active = 1`), as the download and lyrics
   queues already did. A NEW worker queue splices both fragments.
 - **The rotation counts only the playlist's OWN plays** (RED/GREEN):
-  `get_unplayed_normalized_video_ids` / `get_unplayed_video_ids` join
+  `get_unplayed_normalized_video_ids` joins
   `ph.playlist_id = v.playlist_id`. A song played on ytlive's set list used
   to read as played at home for good (the home restart clears only its own
   plays). V43 `idx_play_history_video (video_id, playlist_id)`.

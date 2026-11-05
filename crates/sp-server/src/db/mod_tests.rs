@@ -311,78 +311,27 @@ async fn model_query_roundtrips() {
         .unwrap();
 
     // Get unplayed — should be empty now
-    let unplayed = models::get_unplayed_video_ids(&pool, playlist.id)
+    sqlx::query("UPDATE videos SET normalized = 1")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let unplayed = models::get_unplayed_normalized_video_ids(&pool, playlist.id)
         .await
         .unwrap();
     assert!(unplayed.is_empty());
 
     // Add second video, should be unplayed
-    models::upsert_video(&pool, playlist.id, "def456", Some("Song 2"))
+    let second = models::upsert_video(&pool, playlist.id, "def456", Some("Song 2"))
         .await
         .unwrap();
-    let unplayed = models::get_unplayed_video_ids(&pool, playlist.id)
-        .await
-        .unwrap();
-    assert_eq!(unplayed.len(), 1);
-    assert_eq!(unplayed[0], "def456");
-}
-
-#[tokio::test]
-async fn get_video_file_path_returns_none_for_unnormalized() {
-    let pool = setup().await;
-
-    sqlx::query("INSERT INTO playlists (name, youtube_url) VALUES ('P', 'url')")
+    sqlx::query("UPDATE videos SET normalized = 1")
         .execute(&pool)
         .await
         .unwrap();
-
-    sqlx::query("INSERT INTO videos (playlist_id, youtube_id) VALUES (1, 'vid1')")
-        .execute(&pool)
+    let unplayed = models::get_unplayed_normalized_video_ids(&pool, playlist.id)
         .await
         .unwrap();
-
-    // Not normalized → should return None.
-    let path = models::get_video_file_path(&pool, 1).await.unwrap();
-    assert!(path.is_none());
-}
-
-#[tokio::test]
-async fn get_video_file_path_returns_path_for_normalized() {
-    let pool = setup().await;
-
-    sqlx::query("INSERT INTO playlists (name, youtube_url) VALUES ('P', 'url')")
-        .execute(&pool)
-        .await
-        .unwrap();
-
-    sqlx::query("INSERT INTO videos (playlist_id, youtube_id, normalized, file_path) VALUES (1, 'vid1', 1, '/cache/song.mp4')")
-        .execute(&pool)
-        .await
-        .unwrap();
-
-    let path = models::get_video_file_path(&pool, 1).await.unwrap();
-    assert_eq!(path, Some("/cache/song.mp4".to_string()));
-}
-
-#[tokio::test]
-async fn get_video_metadata_returns_song_and_artist() {
-    let pool = setup().await;
-
-    sqlx::query("INSERT INTO playlists (name, youtube_url) VALUES ('P', 'url')")
-        .execute(&pool)
-        .await
-        .unwrap();
-
-    sqlx::query("INSERT INTO videos (playlist_id, youtube_id, song, artist) VALUES (1, 'vid1', 'My Song', 'Artist Name')")
-        .execute(&pool)
-        .await
-        .unwrap();
-
-    let meta = models::get_video_metadata(&pool, 1).await.unwrap();
-    assert_eq!(
-        meta,
-        Some(("My Song".to_string(), "Artist Name".to_string()))
-    );
+    assert_eq!(unplayed, vec![second.id]);
 }
 
 #[tokio::test]

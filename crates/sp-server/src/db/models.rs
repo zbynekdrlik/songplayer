@@ -220,26 +220,6 @@ pub async fn record_play(
     Ok(())
 }
 
-/// Return youtube_ids of videos in the playlist never played ON IT (#261: a
-/// play on a custom set list is no play of the song's home playlist).
-pub async fn get_unplayed_video_ids(
-    pool: &SqlitePool,
-    playlist_id: i64,
-) -> Result<Vec<String>, sqlx::Error> {
-    let rows = sqlx::query(
-        "SELECT v.youtube_id
-         FROM videos v
-         LEFT JOIN play_history ph ON ph.video_id = v.id AND ph.playlist_id = v.playlist_id
-         WHERE v.playlist_id = ? AND v.removed_at IS NULL AND ph.id IS NULL
-         ORDER BY v.id",
-    )
-    .bind(playlist_id)
-    .fetch_all(pool)
-    .await?;
-
-    Ok(rows.iter().map(|r| r.get("youtube_id")).collect())
-}
-
 /// Return IDs (from videos table) of normalized videos in a playlist.
 pub async fn get_normalized_video_ids(
     pool: &SqlitePool,
@@ -274,19 +254,6 @@ pub async fn get_unplayed_normalized_video_ids(
     .await?;
 
     Ok(rows.iter().map(|r| r.get("id")).collect())
-}
-
-/// Return the file_path for a video by its ID, or `None` if not normalized.
-pub async fn get_video_file_path(
-    pool: &SqlitePool,
-    video_id: i64,
-) -> Result<Option<String>, sqlx::Error> {
-    let row = sqlx::query("SELECT file_path FROM videos WHERE id = ? AND normalized = 1")
-        .bind(video_id)
-        .fetch_optional(pool)
-        .await?;
-
-    Ok(row.and_then(|r| r.get("file_path")))
 }
 
 /// Update a video row with both sidecar paths after a successful download.
@@ -357,23 +324,6 @@ pub async fn get_song_paths(
             (Some(vp), Some(ap)) => Some((vp, ap)),
             _ => None,
         }
-    }))
-}
-
-/// Return the song and artist for a video (for title display).
-pub async fn get_video_metadata(
-    pool: &SqlitePool,
-    video_id: i64,
-) -> Result<Option<(String, String)>, sqlx::Error> {
-    let row = sqlx::query("SELECT song, artist FROM videos WHERE id = ?")
-        .bind(video_id)
-        .fetch_optional(pool)
-        .await?;
-
-    Ok(row.map(|r| {
-        let song: String = r.get::<Option<String>, _>("song").unwrap_or_default();
-        let artist: String = r.get::<Option<String>, _>("artist").unwrap_or_default();
-        (song, artist)
     }))
 }
 
@@ -450,50 +400,6 @@ pub struct VideoLyricsRow {
     /// gate uses (spotify_track_id IS NULL AND spotify_resolved_at IS NULL) to
     /// decide whether to ask Claude.
     pub spotify_resolved_at: Option<String>,
-}
-
-/// Mark a video's lyrics status, source, AND pipeline version.
-///
-/// The pipeline_version stamp is critical on the failure path: without it, a
-/// row marked `no_source` under pipeline v5 keeps its pipeline_version at 0,
-/// and the `OR lyrics_pipeline_version < current` retry clause in
-/// `fetch_bucket_null` / `fetch_bucket_manual` then loops it forever because
-/// `0 < 5` is always true. Stamping the current version here means the song
-/// only gets retried when a NEW pipeline version ships.
-#[cfg_attr(test, mutants::skip)]
-pub async fn mark_video_lyrics(
-    pool: &SqlitePool,
-    video_id: i64,
-    has_lyrics: bool,
-    lyrics_source: Option<&str>,
-    pipeline_version: u32,
-) -> Result<(), sqlx::Error> {
-    // lyrics_processed_at = strftime() so the timestamp comes from SQLite
-    // (no clock-skew between server process and DB). lyrics_alignment_model
-    // = NULL because the failure path has no successful alignment to record.
-    //
-    // lyrics_manual_priority = 0: this helper is the worker's terminal-failure
-    // exit (`no_source` / `empty` / `failed`). The row is now parked by the
-    // skip-list (`reprocess.rs::fetch_bucket_*`), so the manual flag has no
-    // future meaning. Without clearing it, audit queries report dangling
-    // queue entries (10 rows observed in production after the 2026-05-16
-    // catalog reprocess).
-    // #144 F1: every row of the video (the lyrics file is the video's).
-    sqlx::query(
-        "UPDATE videos SET has_lyrics = ?, lyrics_source = ?, lyrics_pipeline_version = ?, \
-         lyrics_manual_priority = 0, \
-         lyrics_attempts = 0, lyrics_next_attempt_at = NULL, \
-         lyrics_processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
-         lyrics_alignment_model = NULL, lyrics_reference = 0 \
-         WHERE youtube_id = (SELECT youtube_id FROM videos WHERE id = ?)",
-    )
-    .bind(has_lyrics as i32)
-    .bind(lyrics_source)
-    .bind(pipeline_version as i64)
-    .bind(video_id)
-    .execute(pool)
-    .await?;
-    Ok(())
 }
 
 /// Persist a successful lyrics processing run: sets has_lyrics=1, records source,
