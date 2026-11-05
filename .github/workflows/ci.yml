@@ -1253,7 +1253,7 @@ jobs:
           Get-ChildItem $distTarget | Select-Object Name
 
           # Grant Resolume user write access to data directory (ProgramData defaults to read-only for Users).
-          # NO /T flag — recursive grant on $DataDir traverses 270k+ files in cache/tools (whisperx_venv,
+          # NO /T flag — recursive grant on $DataDir traverses 270k+ files in cache/tools (lyrics_venv,
           # hf_models, etc.) and runs 25-45 min, blocking deploy. (OI)(CI) inheritance covers all NEW
           # files created by SongPlayer; existing children already have the ACL from prior /T runs and
           # don't need it re-applied on every deploy.

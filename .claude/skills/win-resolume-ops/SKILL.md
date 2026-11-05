@@ -129,9 +129,9 @@ dev box — never echo or commit it.
 ## This box IS the local-model machine (not dev2)
 
 Local ML models run HERE, not on any other box. Established venvs under
-`C:\ProgramData\SongPlayer\cache\tools\`: `whisperx_venv`, `crisper_venv`,
-`parakeet_venv`, `vibevoice_venv`, `lyrics_venv`, plus an `hf_models` HuggingFace
-cache. When a task needs a local model, inspect those first and mirror a proven
+`C:\ProgramData\SongPlayer\cache\tools\`: `lyrics_venv`, `mtl_aligner_venv`, plus
+an `hf_models` HuggingFace cache (the old whisperx, parakeet, vibevoice, crisper and
+ctc venvs were deleted 5.11.2026, #286). When a task needs a local model, inspect those first and mirror a proven
 torch/CUDA build rather than starting from zero — and never propose moving this
 project's model work to another machine.
 
