@@ -400,9 +400,9 @@ fn an_operators_text_or_a_star_text_is_never_rewritten() {
     assert!(may_fix(&with_source("gemini-3-5-transcribe")));
     assert!(may_fix(&with_source("lrclib")));
     assert!(!may_fix(&with_source("override")));
-    assert!(!may_fix(&with_source("genius+mtl@rev1/g35t-ok")));
+    assert!(!may_fix(&with_source("lyrics_ovh+mtl@rev1/g35t-ok")));
     // A ★ track's misheard line is flagged, its text left as it is.
-    let mut track = with_source("genius+mtl@rev1/g35t-ok");
+    let mut track = with_source("lyrics_ovh+mtl@rev1/g35t-ok");
     let before = track.clone();
     let check = apply(&mut track, vec![fix(1, "I will dwell", "Budem prebývať")]);
     assert_eq!(check.verdict, RegisterVerdict::Flagged);

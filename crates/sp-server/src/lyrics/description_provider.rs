@@ -175,7 +175,7 @@ pub(crate) async fn fetch_raw_description(
 ///
 /// Caller policy decides whether `Ok(None)` is fatal:
 /// - description: `Ok(None)` is normal (description had no lyrics).
-/// - genius / lrclib-plain: `Ok(None)` is fatal (caller must bail).
+/// - lrclib-plain: `Ok(None)` is fatal (caller must bail).
 ///
 /// Cache contract matches `write_lyrics_cache`: on success the result is
 /// persisted so subsequent reprocesses skip Claude. On `Err`, no cache is
@@ -262,7 +262,7 @@ pub async fn fetch_description_lyrics(
 
     // Delegate Claude call + cache write to the shared helper.
     // description-specific policy: swallow Claude errors to Ok(None) so other
-    // gather sources (yt_subs / lrclib / genius) still get a chance. The
+    // gather sources (yt_subs / lrclib / lyrics.ovh) still get a chance. The
     // shared helper does NOT write the cache on Err, so the next reprocess
     // retries cleanly.
     match clean_lyrics_via_claude(
@@ -697,7 +697,7 @@ mod tests {
     #[tokio::test]
     async fn clean_lyrics_via_claude_returns_parsed_lines() {
         let dir = tempfile::tempdir().unwrap();
-        let cache_path = dir.path().join("vidCLEAN_genius_cleaned.json");
+        let cache_path = dir.path().join("vidCLEAN_lrclib_cleaned.json");
 
         let mock = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("POST"))
@@ -742,7 +742,7 @@ mod tests {
     #[tokio::test]
     async fn clean_lyrics_via_claude_uses_cache_on_second_call() {
         let dir = tempfile::tempdir().unwrap();
-        let cache_path = dir.path().join("vidCACHED_genius_cleaned.json");
+        let cache_path = dir.path().join("vidCACHED_lrclib_cleaned.json");
 
         // Pre-seed the cache to skip the Claude call entirely.
         write_lyrics_cache(
@@ -779,7 +779,7 @@ mod tests {
     #[tokio::test]
     async fn clean_lyrics_via_claude_returns_err_on_claude_error() {
         let dir = tempfile::tempdir().unwrap();
-        let cache_path = dir.path().join("vidERR_genius_cleaned.json");
+        let cache_path = dir.path().join("vidERR_lrclib_cleaned.json");
 
         let mock = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("POST"))
@@ -815,7 +815,7 @@ mod tests {
     #[tokio::test]
     async fn clean_lyrics_via_claude_returns_none_when_claude_says_null() {
         let dir = tempfile::tempdir().unwrap();
-        let cache_path = dir.path().join("vidNULL_genius_cleaned.json");
+        let cache_path = dir.path().join("vidNULL_lrclib_cleaned.json");
 
         let mock = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("POST"))
@@ -860,8 +860,8 @@ mod tests {
     /// Sanity-checks the keep-repeats / ad-lib / hype-intro instructions are
     /// present in the scraped-lyrics prompt. Catches accidental prompt
     /// regressions that would silently fall back to description-style behavior
-    /// (which on genius input produces no cleanup — confirmed in production on
-    /// id=233 Saints, 2026-05-11).
+    /// (which on scraped input produces no cleanup — confirmed in production on
+    /// id=233 Saints, 2026-05-11, on a Genius page, a source since removed, #232).
     ///
     /// #144: the prompt used to DEDUPE consecutive identical lines for the
     /// deleted v20 `text_reference_merge` chorus projection. mtl times exactly
@@ -916,7 +916,7 @@ mod tests {
 
     /// Verifies `clean_lyrics_via_claude` actually dispatches on `CleanupMode`.
     /// A regression in the match arm (e.g., both modes using the description
-    /// prompt) would silently make the genius path useless. The test stubs
+    /// prompt) would silently make the lrclib-plain path useless. The test stubs
     /// Claude and inspects the request body to confirm the SCRAPED prompt's
     /// rule-text was sent, not the description prompt's.
     #[tokio::test]
@@ -926,7 +926,7 @@ mod tests {
         use wiremock::matchers::{method, path};
 
         let dir = tempfile::tempdir().unwrap();
-        let cache_path = dir.path().join("vidMODE_genius_cleaned_v2.json");
+        let cache_path = dir.path().join("vidMODE_lrclib_cleaned_v2.json");
         let captured_body = Arc::new(Mutex::new(String::new()));
 
         let mock = wiremock::MockServer::start().await;

@@ -21,7 +21,7 @@ const SEEDED = {
   gemini_api_key: "example-gemini-one,example-gemini-two",
   obs_websocket_password: "example-obs-pass",
   remote_ws_password: "example-remote-pass",
-  genius_access_token: "example-genius-token",
+  peer_api_key: "example-peer-key-for-the-tests-1",
 };
 
 /** Every clear text the seed stored: none of them may ever be shown. */
@@ -136,7 +136,7 @@ test("every stored secret reads as the mask, in the API and in the Nastavenia fo
   expect(json["gemini_api_key"]).toBe(MASK);
   expect(json["obs_websocket_password"]).toBe(MASK);
   expect(json["remote_ws_password"]).toBe(MASK);
-  expect(json["genius_access_token"]).toBe(MASK);
+  expect(json["peer_api_key"]).toBe(MASK);
   expect(json["gemini_model"], "a plain setting reads as stored").toBe(
     "gemini-2.5-flash",
   );
@@ -182,7 +182,7 @@ test("a save that changes only a plain setting sends the masks back and keeps th
   expect(json["gemini_api_key"]).toBe(MASK);
   expect(json["obs_websocket_password"]).toBe(MASK);
   expect(json["remote_ws_password"]).toBe(MASK);
-  expect(json["genius_access_token"]).toBe(MASK);
+  expect(json["peer_api_key"]).toBe(MASK);
   expect(json["gemini_model"]).toBe("gemini-2.5-pro");
   expectNoClearValue(text);
 

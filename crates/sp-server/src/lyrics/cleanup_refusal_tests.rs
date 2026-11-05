@@ -23,7 +23,7 @@ fn the_raw_text_is_known_by_its_sha256() {
 #[tokio::test]
 async fn a_cleanups_answer_records_no_refusal() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("yt_genius_cleaned_v3.json");
+    let path = dir.path().join("yt_lrclib_cleaned_v3.json");
     std::fs::write(&path, r#"{"lines":["amazing grace"]}"#).unwrap();
     assert!(!records_a_refusal(&path).await);
     assert!(!refused_earlier(&path, "amazing grace").await);
@@ -56,7 +56,7 @@ async fn a_refused_cleanup_is_never_sent_again_for_the_same_text() {
     })
     .with_retry_policy(RetryPolicy::NO_WAIT);
     let dir = tempfile::tempdir().unwrap();
-    let cache = dir.path().join("yt_genius_cleaned_v3.json");
+    let cache = dir.path().join("yt_lrclib_cleaned_v3.json");
 
     for _ in 0..3 {
         let err = refused(&client, &cache, "line one\nline two").await;

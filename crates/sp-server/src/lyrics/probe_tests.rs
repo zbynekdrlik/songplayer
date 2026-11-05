@@ -27,8 +27,8 @@ fn fixture_row(song: &str, artist: &str, spotify_track_id: Option<&str>) -> Vide
 
 #[tokio::test]
 async fn probe_reports_any_text_source_false_when_all_providers_miss() {
-    // All six probes miss: empty song/artist short-circuits the song-title
-    // providers; no spotify_track_id; no genius token; bogus ytdlp path so
+    // All five probes miss: empty song/artist short-circuits the song-title
+    // providers; no spotify_track_id; bogus ytdlp path so
     // yt_subs + description return None.
     let report = probe_sources_impl(
         None, // ai_client: not used by probe (no Claude)
@@ -36,7 +36,6 @@ async fn probe_reports_any_text_source_false_when_all_providers_miss() {
         std::path::Path::new("/tmp"),
         &reqwest::Client::new(),
         &fixture_row("", "", None),
-        "", // genius_access_token empty
     )
     .await;
 
@@ -47,9 +46,10 @@ async fn probe_reports_any_text_source_false_when_all_providers_miss() {
     assert!(names.contains(&"yt_subs"));
     assert!(names.contains(&"description"));
     assert!(names.contains(&"lyrics_ovh"));
-    assert!(names.contains(&"genius"));
     assert!(names.contains(&"lrclib"));
     assert!(names.contains(&"spotify"));
+    // #232: Genius is gone — exactly the five providers above, no others.
+    assert_eq!(names.len(), 5, "probes: {names:?}");
 }
 
 #[tokio::test]
@@ -60,7 +60,6 @@ async fn probe_reports_spotify_skipped_when_no_track_id() {
         std::path::Path::new("/tmp"),
         &reqwest::Client::new(),
         &fixture_row("Song", "Artist", None),
-        "",
     )
     .await;
     let spotify = report
@@ -73,29 +72,6 @@ async fn probe_reports_spotify_skipped_when_no_track_id() {
 }
 
 #[tokio::test]
-async fn probe_reports_genius_skipped_when_no_token() {
-    let report = probe_sources_impl(
-        None,
-        std::path::Path::new("/nonexistent/ytdlp"),
-        std::path::Path::new("/tmp"),
-        &reqwest::Client::new(),
-        &fixture_row("Song", "Artist", None),
-        "", // empty token
-    )
-    .await;
-    let genius = report
-        .probes
-        .iter()
-        .find(|p| p.provider == "genius")
-        .expect("genius probe must be present");
-    assert!(!genius.available);
-    assert!(
-        genius.note.to_lowercase().contains("no genius token")
-            || genius.note.to_lowercase().contains("skipped")
-    );
-}
-
-#[tokio::test]
 async fn probe_reports_yt_subs_and_description_skipped_when_ytdlp_unavailable() {
     let report = probe_sources_impl(
         None,
@@ -103,7 +79,6 @@ async fn probe_reports_yt_subs_and_description_skipped_when_ytdlp_unavailable() 
         std::path::Path::new("/tmp"),
         &reqwest::Client::new(),
         &fixture_row("Song", "Artist", None),
-        "",
     )
     .await;
     let yt_subs = report
@@ -132,7 +107,6 @@ async fn probe_description_unavailable_when_no_ai_client_present() {
         std::path::Path::new("/tmp"),
         &reqwest::Client::new(),
         &fixture_row("Song", "Artist", None),
-        "",
     )
     .await;
     let descr = report
@@ -188,7 +162,6 @@ async fn probe_description_reports_error_when_fetch_fails() {
         cache_dir,
         &reqwest::Client::new(),
         &fixture_row("Song", "Artist", None),
-        "",
     )
     .await;
 
@@ -214,7 +187,6 @@ async fn probe_emits_provider_url_for_every_provider() {
         std::path::Path::new("/tmp"),
         &reqwest::Client::new(),
         &fixture_row("Jesus Saves", "Chris Tomlin", Some("4abcDeFg")),
-        "",
     )
     .await;
     for p in &report.probes {
@@ -239,7 +211,6 @@ async fn probe_emits_provider_url_for_every_provider() {
         url("lyrics_ovh").contains("api.lyrics.ovh")
             || url("lyrics_ovh") == "https://www.lyrics.ovh/"
     );
-    assert!(url("genius").starts_with("https://genius.com/"));
     assert!(url("lrclib").starts_with("https://lrclib.net/"));
     assert!(url("spotify").starts_with("https://open.spotify.com/"));
 }

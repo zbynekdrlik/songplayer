@@ -314,7 +314,6 @@ const settingsInitial = { ...settings };
 const SECRET_MASK = "********";
 const SECRET_SETTINGS = [
   "gemini_api_key",
-  "genius_access_token",
   "obs_websocket_password",
   "peer_api_key",
   "remote_ws_password",

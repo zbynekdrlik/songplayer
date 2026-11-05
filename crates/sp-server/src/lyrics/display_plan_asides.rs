@@ -1,6 +1,6 @@
 //! #280: the parenthesised asides the wall and the Presenter leave out.
 //!
-//! The ★-tier text often comes from Genius, which writes ad-libs, backing
+//! The ★-tier text often comes from a community lyric that writes ad-libs, backing
 //! vocals and the leader's calls in parentheses: `Hallelu (Hey, oh,
 //! hallelujah), hallelujah (I have been redeemed, yeah)`. Shown as stored they
 //! made wall lines of up to 84 chars (song 361, owner 16.10.2026). The display

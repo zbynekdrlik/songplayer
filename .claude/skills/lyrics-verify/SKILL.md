@@ -39,7 +39,7 @@ etc.) during a verify loop: that disrupts the user's wall state for nothing.
 ## Pre-flight probe before reprocess
 
 Always call `/api/v1/lyrics/probe-sources` before reprocessing a song. If
-`any_text_source=false` (no yt_subs / description / Genius / LRCLIB /
+`any_text_source=false` (no yt_subs / description / lyrics.ovh / LRCLIB /
 Spotify text), skip the song silently — such a song can only reach the base
 tier (the Gemini 3.5 Transcribe transcript grouped into lines), so a
 reprocess spends FFmpeg/Gemini cycles for no text-backed result.
@@ -61,11 +61,11 @@ regression is found. Never ask "should I rollback?" — fix the code.
 
 During verify sessions, every song outcome MUST report:
 - **lyrics_source** — where lyrics came from: `yt_subs` / `description` /
-  `genius` / `lrclib` / `spotify`, each as its v22 provenance — ★ tier
+  `lyrics_ovh` / `lrclib` / `spotify` (older rows: `genius`), each as its v22 provenance — ★ tier
   `<text>+mtl@rev1/g35t-ok`, base tier `gemini-3-5-transcribe` (or
   `…/fullmix`) — or `asr_gap`
 - **YouTube URL** — `https://youtube.com/watch?v=<id>`
-- **Provider page URL** — Genius/LRCLib/Spotify page if used
+- **Provider page URL** — LRCLib/lyrics.ovh/Spotify page if used
 - **First 6 lines sample** — so user can spot-check text
 - **Honest one-sentence assessment** — not "looks good"; state what was observed
 

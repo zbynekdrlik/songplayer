@@ -1,6 +1,6 @@
 //! #280: the bare interjections the wall and the Presenter leave out.
 //!
-//! The base-tier transcript and Genius keep every sung `oh` / `yeah` / `hey`
+//! The base-tier transcript and community lyrics keep every sung `oh` / `yeah` / `hey`
 //! as words, and the translator renders them literally (`Och`, `Áno`,
 //! `Jeah`). The owner saw "One more time we say" + "Oh." shown as "Ešte raz
 //! hovoríme Och." (16.10.2026). On SNV 1353 EN lines (4.1 %) of 349 songs

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CandidateText {
-    /// "tier1:spotify" / "tier1:lrclib" / "tier1:yt_subs" / "genius" etc.
+    /// "tier1:spotify" / "lrclib" / "yt_subs" / "lyrics_ovh" etc.
     pub source: String,
     pub lines: Vec<String>,
     /// `Some` when the fetcher has line-level timing. `start_ms`, `end_ms` per line.

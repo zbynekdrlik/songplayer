@@ -527,7 +527,7 @@ pub async fn post_probe_sources(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    // Pull ytdlp path + genius token (best-effort; probe degrades gracefully).
+    // Pull the ytdlp path (best-effort; probe degrades gracefully).
     let ytdlp_path = state
         .tool_paths
         .read()
@@ -535,11 +535,6 @@ pub async fn post_probe_sources(
         .as_ref()
         .map(|tp| tp.ytdlp.clone())
         .unwrap_or_else(|| std::path::PathBuf::from("/nonexistent/ytdlp"));
-    let genius_token = crate::db::models::get_setting(&state.pool, "genius_access_token")
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_default();
     let client = reqwest::Client::new();
 
     // #229 item C: the description probe asks Claude only while this
@@ -551,7 +546,6 @@ pub async fn post_probe_sources(
         &state.cache_dir,
         &client,
         &row,
-        &genius_token,
     )
     .await;
 

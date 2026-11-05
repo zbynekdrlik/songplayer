@@ -14,7 +14,6 @@ pub mod g35t_client;
 pub mod g35t_probe; // #144: the live post-deploy probe of g35t (POST /api/v1/lyrics/g35t/probe)
 pub mod g35t_transcript;
 pub mod gather;
-pub mod genius;
 pub mod gpu_policy;
 pub mod haleluja; // #284: the SK lines say "haleluja"
 pub mod heavy_alloc_env;

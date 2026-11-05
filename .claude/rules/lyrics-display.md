@@ -120,8 +120,8 @@ loaded track (in `LyricsState::with_lead_and_offset`; `new` delegates to it).
   `display_profile`.
 
 **#280: parenthesised asides are left out** (`display_plan_asides.rs`, a
-child of `display_plan.rs`). Genius writes ad-libs, backing vocals and the
-leader's calls in parentheses. Song 361 "Redeemed" had wall lines of up to
+child of `display_plan.rs`). Community lyrics (Genius, then; removed by
+#232) write ad-libs, backing vocals and the leader's calls in parentheses. Song 361 "Redeemed" had wall lines of up to
 84 chars, and the owner disliked them (16.10.2026).
 
 - `build_plan` reads every source line through `without_asides` BEFORE
