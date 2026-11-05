@@ -373,10 +373,10 @@ test("the sender does not get Arena's budget (#285)", () => {
   expect(wallFramesFailures("wall-25", EXIT_DEFECTS, arenaTake(1, 1))).not.toEqual([]);
 });
 
-test("Arena's output fails over 8 slips, contradictory boundaries counted (#285)", () => {
-  expect(arenaOutputFailures("wall-25", EXIT_DEFECTS, arenaTake(8, 0))).toEqual([]);
-  expect(arenaOutputFailures("wall-25", EXIT_DEFECTS, arenaTake(6, 3))).not.toEqual([]);
-  expect(arenaOutputFailures("wall-25", EXIT_DEFECTS, arenaTake(9, 0))).not.toEqual([]);
+test("Arena's output fails over 20 slips, contradictory boundaries counted (owner, #272, 5.11.2026)", () => {
+  expect(arenaOutputFailures("wall-25", EXIT_DEFECTS, arenaTake(20, 0))).toEqual([]);
+  expect(arenaOutputFailures("wall-25", EXIT_DEFECTS, arenaTake(18, 3))).not.toEqual([]);
+  expect(arenaOutputFailures("wall-25", EXIT_DEFECTS, arenaTake(21, 0))).not.toEqual([]);
 });
 
 test("Arena's budget never covers a lost frame, a jump back or a stall (#285)", () => {
