@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use dlink::Clock as ClockSource;
-use dlink::{Block, Config, HostError, Link, Map, Media, Place, Process};
+use dlink::{Block, Config, HostError, Link, Map, Media, Place, Process, Stopped};
 use dstack::ctl;
 use serde::Deserialize;
 use sp_core::audio_outputs::{DanteDest, OutputEntry, PROGRAM_RATE, effective_rate};
@@ -258,6 +258,17 @@ fn reason(e: HostError) -> Reason {
 static HELD: DriverHolds = DriverHolds::new();
 const HOLD_NAME: &str = "dante";
 
+/// The hold for a device about to open: told apart from a stack that never
+/// stopped, which holds it until SongPlayer restarts.
+fn claim_device(holds: &DriverHolds) -> Result<DriverHold<'_>, Reason> {
+    holds.claim(HOLD_NAME).ok_or(Reason::Held)
+}
+
+/// The hold after the stack's stop.
+fn settle_hold(hold: Option<DriverHold<'_>>, _stopped: &Stopped) {
+    drop(hold);
+}
+
 /// The output's device on its worker thread.
 pub struct DanteDevice {
     params: DanteParams,
@@ -295,7 +306,7 @@ impl AsioDevice for DanteDevice {
         let device = config
             .device()
             .map_err(|problems| Reason::Refused(problems.join("; ")))?;
-        self.hold = Some(HELD.claim(HOLD_NAME).ok_or(Reason::Held)?);
+        self.hold = Some(claim_device(&HELD)?);
         self.config = Some(config);
         Ok(Opened {
             rate: f64::from(self.params.rate),
@@ -367,11 +378,12 @@ impl AsioDevice for DanteDevice {
     fn close(&mut self) {
         self.link.set(None);
         self.config = None;
-        if let Some(run) = self.running.take() {
-            let stopped = run.stop();
+        let hold = self.hold.take();
+        let stopped = self.running.take().map(Link::stop);
+        if let Some(stopped) = &stopped {
             info!(?stopped, "dante output: device stopped");
+            settle_hold(hold, stopped);
         }
-        self.hold = None;
     }
 }
 
