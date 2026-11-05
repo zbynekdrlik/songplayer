@@ -261,12 +261,21 @@ const HOLD_NAME: &str = "dante";
 /// The hold for a device about to open: told apart from a stack that never
 /// stopped, which holds it until SongPlayer restarts.
 fn claim_device(holds: &DriverHolds) -> Result<DriverHold<'_>, Reason> {
+    if holds.is_parked(HOLD_NAME) {
+        return Err(Reason::Parked);
+    }
     holds.claim(HOLD_NAME).ok_or(Reason::Held)
 }
 
-/// The hold after the stack's stop.
-fn settle_hold(hold: Option<DriverHold<'_>>, _stopped: &Stopped) {
-    drop(hold);
+/// The hold after the stack's stop. It takes the stop's result, so it can only
+/// run after the stop: a stack left running keeps the hold for good.
+fn settle_hold(hold: Option<DriverHold<'_>>, stopped: &Stopped) {
+    if let (Stopped::StillRunning, Some(hold)) = (stopped, hold) {
+        warn!(
+            "dante output: the stack did not stop, the device is parked until SongPlayer restarts"
+        );
+        hold.park();
+    }
 }
 
 /// The output's device on its worker thread.
@@ -276,7 +285,7 @@ pub struct DanteDevice {
     running: Option<Link>,
     counts: Arc<Counts>,
     link: DanteLink,
-    /// From `open` until after the stack stopped. Last: it drops after `running`.
+    /// From `open` until after the stack stopped.
     hold: Option<DriverHold<'static>>,
 }
 
@@ -384,6 +393,13 @@ impl AsioDevice for DanteDevice {
             info!(?stopped, "dante output: device stopped");
             settle_hold(hold, stopped);
         }
+    }
+}
+
+impl Drop for DanteDevice {
+    /// A dropped `Link` does not stop its stack, so a worker's panic stops it here.
+    fn drop(&mut self) {
+        self.close();
     }
 }
 

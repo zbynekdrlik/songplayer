@@ -1544,10 +1544,12 @@ difference with its UTC time.
   2208 us at 10 ms latency. So the `normal` profile stands; the 31.10 rule
   against it applied to the old pump, not to dlink.
 - One Dante device at a time in the process (`dante_device::HELD`): `open`
-  takes the hold, `close` gives it back after the stack stopped. A rebuilt
-  entry's successor starts while its predecessor still stops, so it reads
-  `Reason::Held` and tries again after the 2 s backoff, instead of failing on
-  the Dante ports or announcing the name twice.
+  takes the hold, `close` (also at a drop: a dropped `Link` does not stop its
+  stack) gives it back after the stack stopped. A rebuilt entry's successor
+  starts while its predecessor still stops, so it reads `Reason::Held` and tries
+  again on the backoff (2 s first), instead of failing on the Dante ports or
+  announcing the name twice. A stack still running after dlink's 5 s stop wait
+  keeps the hold until SongPlayer restarts (`Reason::Parked`).
 - `outputs[i]` = the ASIO worker's line under `asio` plus `dante`
   (`sp_core::dante_status::DanteFigures`) while a device runs: read through
   `DanteLink`, which the worker sets at the start and clears at the close, from
