@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import {
   WINDOW_BLOCKS,
   asioGateFailures,
-  fohPathFailures,
+  lv1PathFailures,
   gatedAsioOutputs,
   waitingForClock,
   parseVbanHeader,
@@ -12,17 +12,17 @@ import {
 } from "./audio-outputs-gate";
 
 // #233: the post-deploy gate's pure functions (`audio-outputs-gate.ts`), run in
-// the mock suite: FOH's path through the output list, a VBAN receiver's
+// the mock suite: lv1's path through the output list, a VBAN receiver's
 // verdict on a destination's packets, and (lane 3) an ASIO output's minute.
 
-const foh = (blocks: number, over: Partial<OutputStatus> = {}): OutputStatus => ({
+const lv1 = (blocks: number, over: Partial<OutputStatus> = {}): OutputStatus => ({
   id: "out-1",
   type: "vban",
-  name: "fohabl.lan:6980",
+  name: "lv1.lan:6980",
   enabled: true,
   state: "running",
   reason: null,
-  rate: 96000,
+  rate: 48000,
   format: "int24",
   channels: 2,
   delay_ms: 0,
@@ -33,7 +33,7 @@ const foh = (blocks: number, over: Partial<OutputStatus> = {}): OutputStatus => 
     stream_name: "sp-program",
     packets_sent: blocks * 8,
     send_errors: 0,
-    targets: [{ target: "fohabl.lan:6980", addr: "10.77.7.30:6980", error: null }],
+    targets: [{ target: "lv1.lan:6980", addr: "10.77.7.31:6980", error: null }],
   },
   ...over,
 });
@@ -47,43 +47,43 @@ function packet(sr: number, frames: number, bit: number, name: string, counter: 
 }
 
 test.describe("audio outputs gate (#233)", () => {
-  test("FOH sending 96 kHz INT24 sp-program passes", () => {
-    expect(fohPathFailures([foh(100)], [foh(130)])).toEqual([]);
-    expect(fohPathFailures([foh(100)], [foh(125)]), "exactly 25 blocks").toEqual([]);
+  test("lv1 sending 48 kHz INT24 sp-program passes", () => {
+    expect(lv1PathFailures([lv1(100)], [lv1(130)])).toEqual([]);
+    expect(lv1PathFailures([lv1(100)], [lv1(125)]), "exactly 25 blocks").toEqual([]);
   });
 
-  test("a missing FOH output fails", () => {
-    expect(fohPathFailures([], [])).toEqual(["no VBAN output to fohabl.lan:6980"]);
-    const lv1 = foh(130, {
-      vban: { stream_name: "sp-program", packets_sent: 0, send_errors: 0, targets: [{ target: "lv1.lan:6980", addr: null, error: null }] },
+  test("a missing lv1 output fails", () => {
+    expect(lv1PathFailures([], [])).toEqual(["no VBAN output to lv1.lan:6980"]);
+    const elsewhere = lv1(130, {
+      vban: { stream_name: "sp-program", packets_sent: 0, send_errors: 0, targets: [{ target: "fohabl.lan:6980", addr: null, error: null }] },
     });
-    expect(fohPathFailures([foh(100)], [lv1])).toEqual(["no VBAN output to fohabl.lan:6980"]);
+    expect(lv1PathFailures([lv1(100)], [elsewhere])).toEqual(["no VBAN output to lv1.lan:6980"]);
   });
 
-  test("a FOH output moved off 96 kHz INT24 fails with each reason", () => {
-    const moved = foh(130, { rate: 48000, format: "int16", state: "waiting", reason: "no IPv4 address" });
-    expect(fohPathFailures([foh(100)], [moved])).toEqual([
-      "the FOH output is waiting (no IPv4 address)",
-      "the FOH output runs at 48000 Hz, not 96000",
-      "the FOH output sends int16, not int24",
+  test("an lv1 output moved off 48 kHz INT24 fails with each reason", () => {
+    const moved = lv1(130, { rate: 96000, format: "int16", state: "waiting", reason: "no IPv4 address" });
+    expect(lv1PathFailures([lv1(100)], [moved])).toEqual([
+      "the lv1 output is waiting (no IPv4 address)",
+      "the lv1 output runs at 96000 Hz, not 48000",
+      "the lv1 output sends int16, not int24",
     ]);
-    const renamed = foh(130, { delay_ms: 20, state: "opening" });
+    const renamed = lv1(130, { delay_ms: 20, state: "opening" });
     renamed.vban!.stream_name = "cg";
-    expect(fohPathFailures([foh(100)], [renamed])).toEqual([
-      "the FOH output is opening",
-      "the FOH stream is cg, not sp-program",
-      "the FOH output is delayed 20 ms",
+    expect(lv1PathFailures([lv1(100)], [renamed])).toEqual([
+      "the lv1 output is opening",
+      "the lv1 stream is cg, not sp-program",
+      "the lv1 output is delayed 20 ms",
     ]);
   });
 
-  test("a FOH output that stalled or errors fails", () => {
-    const stalled = foh(110);
+  test("an lv1 output that stalled or errors fails", () => {
+    const stalled = lv1(110);
     stalled.vban!.send_errors = 3;
-    expect(fohPathFailures([foh(100)], [stalled])).toEqual([
-      "only 10 FOH blocks went out between the reads",
-      "3 FOH send errors between the reads",
+    expect(lv1PathFailures([lv1(100)], [stalled])).toEqual([
+      "only 10 lv1 blocks went out between the reads",
+      "3 lv1 send errors between the reads",
     ]);
-    expect(fohPathFailures([foh(100)], [foh(124)])).toEqual(["only 24 FOH blocks went out between the reads"]);
+    expect(lv1PathFailures([lv1(100)], [lv1(124)])).toEqual(["only 24 lv1 blocks went out between the reads"]);
   });
 
   test("a VBAN header parses", () => {
@@ -206,7 +206,7 @@ test.describe("ASIO gate (#233)", () => {
   // (SP_ASIO_OUTPUTS_EXPECTED "0") must not fail on it. Any other waiting
   // reason, a disabled entry and a VBAN output keep their old treatment.
   test("an output waiting for its driver's clock is not counted or measured", () => {
-    const vban = foh(10);
+    const vban = lv1(10);
     const off = dvs(10, { id: "out-4", enabled: false });
     const noClock = dvs(10, { id: "out-5", state: "waiting", reason: "the driver gives no clock" }, {
       reason_code: "no_clock",
@@ -226,8 +226,8 @@ test.describe("ASIO gate (#233)", () => {
     const off = dvs(10, { id: "out-4", enabled: false, state: "waiting" }, { reason_code: "no_clock" });
     const reset = dvs(10, { id: "out-6", state: "waiting" }, { reason_code: "reset" });
     const ids = (list: OutputStatus[]) => waitingForClock(list).map((o) => o.id);
-    expect(ids([foh(10), dvs(10), noClock, off, reset])).toEqual(["out-5"]);
-    expect(ids([foh(10), dvs(10)])).toEqual([]);
+    expect(ids([lv1(10), dvs(10), noClock, off, reset])).toEqual(["out-5"]);
+    expect(ids([lv1(10), dvs(10)])).toEqual([]);
   });
 
   // #233 review round 1: an entry's delay (up to 2 s) is part of its

@@ -558,7 +558,7 @@ only IPv4 + QoS + Npcap bound, metric 900; `Ethernet` metric 10). Before
 250 µs latency → pops at FOH.
 
 - **Routing:** `10.77.7.0/24 via 10.77.8.1 on Ethernet` keeps every app's
-  FOH-subnet traffic (VBAN to fohabl / lv1) on the main NIC;
+  FOH-subnet traffic (VBAN to lv1) on the main NIC;
   `10.77.7.104/32 on-link on Dante` sends only the card's traffic over the
   Dante NIC. DVS's sockets bound to 10.77.7.107 use the Dante NIC (strong
   host model).

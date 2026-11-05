@@ -777,9 +777,9 @@ knobs: `/__mock/fail-mode {kind: "settings"}` and `/__mock/outputs-skip
 
 ## Live gates (`e2e/post-deploy-audio-outputs.spec.ts`)
 
-FOH (`fohabl.lan:6980`) at `FOH_RATE` 96 kHz INT24 (the owner's ruling of 11.10.2026, #233: one 96 kHz rule for the network; VB-Matrix takes the rate from the VBAN header, nothing changed on fohabl; 48 kHz before) `sp-program`, no delay, ≥ 25
+lv1 (`lv1.lan:6980`) at `LV1_RATE` 48 kHz INT24 (FOH left VBAN on 5.11.2026, the owner, #257: VB-Matrix is off on fohabl and FOH takes SongPlayer over Dante) `sp-program`, no delay, ≥ 25
 blocks between two reads, no send errors (`audio-outputs-gate.ts`, unit-
-tested in the mock suite), polled for first (after a restart FOH is listed
+tested in the mock suite), polled for first (after a restart lv1 is listed
 only once the outputs task's first pass ran); a temporary `e2e-96k` entry to a UDP receiver on
 127.0.0.1 reads index 4, 200-frame INT24 packets, a contiguous counter
 (480/s); `finally` restores the list stored NOW (an operator may have
