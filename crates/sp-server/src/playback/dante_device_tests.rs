@@ -272,26 +272,6 @@ fn dropping_a_running_device_stops_its_stack() {
     successor.close();
 }
 
-/// A stack left running keeps its ports and its name: no successor beside it.
-#[test]
-fn a_stack_that_never_stopped_keeps_the_hold_and_reads_parked() {
-    let holds = DriverHolds::new();
-    let hold = claim_device(&holds).ok();
-    settle_hold(hold, &Stopped::StillRunning);
-    assert_eq!(claim_device(&holds).err(), Some(Reason::Parked));
-}
-
-#[test]
-fn a_stopped_stack_gives_the_hold_back() {
-    let holds = DriverHolds::new();
-    for stopped in [Stopped::Done, Stopped::Failed("no goodbye".into())] {
-        let hold = claim_device(&holds).ok();
-        assert_eq!(claim_device(&holds).err(), Some(Reason::Held));
-        settle_hold(hold, &stopped);
-    }
-    assert!(claim_device(&holds).is_ok());
-}
-
 /// A start the stack refused is closed by the worker, and the next try opens.
 #[test]
 fn a_failed_start_gives_the_hold_back_at_its_close() {

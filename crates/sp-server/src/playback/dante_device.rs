@@ -258,26 +258,6 @@ fn reason(e: HostError) -> Reason {
 static HELD: DriverHolds = DriverHolds::new();
 const HOLD_NAME: &str = "dante";
 
-/// The hold for a device about to open: told apart from a stack that never
-/// stopped, which holds it until SongPlayer restarts.
-fn claim_device(holds: &DriverHolds) -> Result<DriverHold<'_>, Reason> {
-    if holds.is_parked(HOLD_NAME) {
-        return Err(Reason::Parked);
-    }
-    holds.claim(HOLD_NAME).ok_or(Reason::Held)
-}
-
-/// The hold after the stack's stop. It takes the stop's result, so it can only
-/// run after the stop: a stack left running keeps the hold for good.
-fn settle_hold(hold: Option<DriverHold<'_>>, stopped: &Stopped) {
-    if let (Stopped::StillRunning, Some(hold)) = (stopped, hold) {
-        warn!(
-            "dante output: the stack did not stop, the device is parked until SongPlayer restarts"
-        );
-        hold.park();
-    }
-}
-
 /// The output's device on its worker thread.
 pub struct DanteDevice {
     params: DanteParams,
@@ -315,7 +295,7 @@ impl AsioDevice for DanteDevice {
         let device = config
             .device()
             .map_err(|problems| Reason::Refused(problems.join("; ")))?;
-        self.hold = Some(claim_device(&HELD)?);
+        self.hold = Some(HELD.claim(HOLD_NAME).ok_or(Reason::Held)?);
         self.config = Some(config);
         Ok(Opened {
             rate: f64::from(self.params.rate),
@@ -387,12 +367,18 @@ impl AsioDevice for DanteDevice {
     fn close(&mut self) {
         self.link.set(None);
         self.config = None;
-        let hold = self.hold.take();
-        let stopped = self.running.take().map(Link::stop);
-        if let Some(stopped) = &stopped {
+        if let Some(run) = self.running.take() {
+            let stopped = run.stop();
             info!(?stopped, "dante output: device stopped");
-            settle_hold(hold, stopped);
+            if matches!(stopped, Stopped::StillRunning) {
+                // Left to end, and dlink gives no handle to wait on. The output
+                // must come back without a restart: a successor that finds the
+                // ports still bound fails its start and retries on the backoff.
+                warn!("dante output: the stack is still stopping after dlink's stop wait");
+            }
         }
+        // After the stop: the hold covers the ports and the name until then.
+        self.hold = None;
     }
 }
 

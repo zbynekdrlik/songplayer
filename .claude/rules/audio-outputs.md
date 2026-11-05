@@ -1548,8 +1548,10 @@ difference with its UTC time.
   stack) gives it back after the stack stopped. A rebuilt entry's successor
   starts while its predecessor still stops, so it reads `Reason::Held` and tries
   again on the backoff (2 s first), instead of failing on the Dante ports or
-  announcing the name twice. A stack still running after dlink's 5 s stop wait
-  keeps the hold until SongPlayer restarts (`Reason::Parked`).
+  announcing the name twice. A stack still running after dlink's 5 s stop wait is
+  left to end (a WARN) and the hold goes back: a successor that finds the ports
+  bound fails its start and retries on the backoff, never a parked output (the
+  band's in-ears must return with no restart).
 - `outputs[i]` = the ASIO worker's line under `asio` plus `dante`
   (`sp_core::dante_status::DanteFigures`) while a device runs: read through
   `DanteLink`, which the worker sets at the start and clears at the close, from
