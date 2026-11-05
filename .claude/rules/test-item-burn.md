@@ -530,16 +530,18 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
   - Only exit 0 with verdict `clean` passes, or a take whose ONE defect is
     slips (owner, #285, 1.11.2026: Arena is closed software, so each take also
     reads `SP-program-MAX` at the same time; that sender keeps `MAX_SLIPS`, and
-    Arena's output has `ARENA_MAX_SLIPS` = 8, a contradictory boundary counted
-    as a slip, `arenaOutputFailures`; a lost frame, jump back or stall fails on
-    either. Measured sender even, output 7-9 uneven) (owner, #272, 31.10.2026:
+    Arena's output has `ARENA_MAX_SLIPS` = 20 (owner, #272, 5.11.2026: 21 push
+    runs read 2 to 19 with no trend, sender even in all 42 takes), a
+    contradictory boundary counted as a slip, `arenaOutputFailures`; a lost
+    frame, jump back or stall fails on either) (owner, #272, 31.10.2026:
     at most 3 per 40 s take, `MAX_SLIPS`):
     one picture a refresh long and the next a refresh short, everything a
     clean verdict needs besides (`slipsOnly`). A run of neighbouring uneven
     boundaries counts one slip per two, rounded up, so a lone one is a slip
     (`slipCount`), an unresolved boundary counts as a slip, and a boundary
-    held over 3 refreshes is a stall, never a
-    slip (`MAX_SLIP_REFRESHES`, `uneven_boundaries`: a 15 s freeze reads 1
+    held over one refresh more than the clip's longest even hold is a stall,
+    never a slip (`maxSlipRefreshes`: wall-30 3, wall-25 and wall-24 4;
+    `uneven_boundaries`: a 15 s freeze reads 1
     uneven boundary, no loss). CI takes read 0-5, off-CI takes 0-1. Their cause is not
     proven, and whether a slip shows on the wall is not verified.
   - `defects` names every counter: judder (`refreshes.uneven` of `judged`),
