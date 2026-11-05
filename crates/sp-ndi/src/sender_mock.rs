@@ -19,7 +19,6 @@ use crate::types::{FourCCVideoType, NDI_SEND_TIMECODE_SYNTHESIZE};
 #[derive(Default)]
 pub struct MockNdiBackend {
     calls: StdMutex<Vec<String>>,
-    tally_response: StdMutex<Option<(bool, bool)>>,
     last_audio_planar: StdMutex<Vec<f32>>,
     connection_count: AtomicI32,
     /// Resolved video timecodes recorded per `send_video{,_async}` call —
@@ -84,10 +83,6 @@ impl MockNdiBackend {
     /// first.
     pub fn last_async_video_fourcc(&self) -> Option<FourCCVideoType> {
         *self.last_async_video_fourcc.lock().unwrap()
-    }
-
-    pub fn set_tally(&self, on_program: bool, on_preview: bool) {
-        *self.tally_response.lock().unwrap() = Some((on_program, on_preview));
     }
 
     /// Drive the value `MockNdiBackend::send_get_no_connections` returns.
@@ -192,7 +187,7 @@ impl NdiBackend for MockNdiBackend {
             .lock()
             .unwrap()
             .push(format!("send_get_tally({handle},{timeout_ms})"));
-        *self.tally_response.lock().unwrap()
+        None
     }
 
     fn send_get_no_connections(&self, handle: usize, timeout_ms: u32) -> i32 {

@@ -316,11 +316,6 @@ impl SplitSyncedDecoder {
         Ok(())
     }
 
-    /// Clear buffered audio (used by the pipeline on pause/restart).
-    pub fn clear_buffer(&mut self) {
-        self.pending_audio.clear();
-    }
-
     /// Return the next video frame together with all audio chunks whose
     /// timestamps are at or before `video_ts + audio_lead_ms`.
     ///
