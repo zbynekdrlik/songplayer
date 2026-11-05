@@ -1035,3 +1035,81 @@ test("an ASIO driver at the program's 48 kHz converts nothing (#233)", async ({ 
   await expect(chip(page, "asio-conversion")).toHaveText("48 kHz bez prevodu", { timeout: 10000 });
   expect(realConsoleErrors()).toEqual([]);
 });
+
+test("a Dante output: starts off, needs its address, saves and reloads as saved (#285)", async ({
+  page,
+}) => {
+  const patches = settingsPatches(page);
+  await openSettings(page);
+  await page.locator('[data-testid="audio-outputs-add-dante"]').click();
+  await expect(page.locator('[data-testid="audio-outputs-add-dante"]')).toBeDisabled();
+  const row = page.locator('[data-testid="audio-output-row"]');
+  await expect(row.locator('[data-testid="audio-output-type"]')).toHaveText("Dante");
+  await expect(row.locator('[data-testid="audio-output-enabled"]')).not.toBeChecked();
+  await expect(row.locator('[data-testid="audio-output-dante-device"]')).toHaveValue("SongPlayer");
+  await expect(row.locator('[data-testid="audio-output-asio-driver"]')).toHaveCount(0);
+  await page.locator('[data-testid="audio-outputs-save"]').click();
+  await expect(page.locator('[data-testid="audio-outputs-message"]')).toContainText("IPv4");
+  expect(patches).toEqual([]);
+  await row.locator('[data-testid="audio-output-dante-ip"]').fill("10.77.9.210");
+  await page.locator('[data-testid="audio-outputs-save"]').click();
+  await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText("Uložené");
+  const saved = JSON.parse(patches[patches.length - 1].audio_outputs);
+  expect(saved).toEqual([
+    {
+      id: "out-1",
+      name: "Dante",
+      type: "dante",
+      enabled: false,
+      rate: "network",
+      delay_ms: 0,
+      dante: { device: "SongPlayer", ip: "10.77.9.210" },
+    },
+  ]);
+  await page.reload();
+  await expect(page.locator('[data-testid="audio-output-dante-ip"]')).toHaveValue("10.77.9.210");
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+const DANTE_ENTRY = JSON.stringify([
+  { id: "out-1", name: "Dante", type: "dante", dante: { device: "SongPlayer", ip: "10.77.9.210" } },
+]);
+
+test("a running Dante output reads as Dante, with the stack's figures (#285)", async ({
+  page,
+  request,
+}) => {
+  const seeded = await request.patch("/api/v1/settings", {
+    data: { audio_outputs: DANTE_ENTRY, audio_network_rate: "96000" },
+  });
+  expect(seeded.status()).toBe(204);
+  await openSettings(page);
+  for (const [key, text] of [
+    ["dante-clock", "hodiny Dante v poriadku"],
+    ["dante-flows", "prúdy 1"],
+    ["dante-late", "paket neskoro max +0,4 ms · odoslanie max +0,1 ms"],
+    ["asio-card", "sieť Dante +0,4 ppm voči SongPlayeru (odhad zamknutý)"],
+  ]) {
+    await expect(chip(page, key)).toHaveText(text, { timeout: 10000 });
+  }
+  const row = page.locator('[data-testid="audio-output-row"]').first();
+  await expect(row).not.toContainText("karta");
+  await expect(row).not.toContainText("ovládač");
+  await expect(chip(page, "asio-card")).not.toHaveAttribute("title", /kart/);
+});
+
+test("a waiting Dante output says why, in Dante's words (#285)", async ({ page, request }) => {
+  const seeded = await request.patch("/api/v1/settings", {
+    data: { audio_outputs: DANTE_ENTRY },
+  });
+  expect(seeded.status()).toBe(204);
+  const held = await request.post("/__mock/asio-state", {
+    data: { id: "out-1", reason_code: "failed", reason: "the address is taken", retry_in_s: 10 },
+  });
+  expect(held.ok()).toBe(true);
+  await openSettings(page);
+  await expect(page.locator('[data-testid="audio-output-state"]')).toContainText(
+    "chyba zariadenia Dante · ďalší pokus o 10 s",
+    { timeout: 10000 },
+  );
+});

@@ -8,7 +8,7 @@
 //! (`client_win.rs`, which starts the host) is deliberately not listed.
 
 /// The host's code path, by file (comments are not scanned).
-const HOST_PATH: [(&str, &str); 40] = [
+const HOST_PATH: [(&str, &str); 39] = [
     (
         "src-tauri/src/bin/sp-audio-host.rs",
         include_str!("../../../../src-tauri/src/bin/sp-audio-host.rs"),
@@ -128,10 +128,6 @@ const HOST_PATH: [(&str, &str); 40] = [
     (
         "playback/stat_window.rs",
         include_str!("../playback/stat_window.rs"),
-    ),
-    (
-        "sp-asrc/src/lib.rs",
-        include_str!("../../../sp-asrc/src/lib.rs"),
     ),
 ];
 

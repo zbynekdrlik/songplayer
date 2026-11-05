@@ -207,5 +207,8 @@ fn points_at_one_instant_give_no_slope() {
         r.offer(5.0, 0.5);
     }
     assert_eq!(r.rate_ppm(), 0.0);
-    assert_eq!(r.fit(), None);
+    // The fit itself is dstack-resample's private `RateFit::fit` (#285 step
+    // 3): what shows here is that the points neither lock nor give a slope.
+    assert_eq!(r.point_count(), 40);
+    assert!(!r.locked(), "no span, no lock");
 }

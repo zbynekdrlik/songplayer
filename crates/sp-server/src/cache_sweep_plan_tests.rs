@@ -3,9 +3,10 @@
 use std::collections::HashMap;
 
 use super::{
-    CLEANED_VERSION, DAY_MS, DUB_PREV_AFTER_MS, Entry, MAX_PER_PASS, ORPHAN_AFTER_MS,
-    PART_AFTER_MS, Place, Plan, Planned, REPLACED_AFTER_MS, RowFacts, STALE_AFTER_MS, Why,
-    dub_prev_owner, file_name_of, is_stale_name, plan, replaced_owner, video_of, why,
+    CLEANED_VERSION, DAY_MS, DUB_PREV_AFTER_MS, Entry, GUARD_MIN_BYTES, MAX_PER_PASS,
+    ORPHAN_AFTER_MS, PART_AFTER_MS, Place, Plan, Planned, REPLACED_AFTER_MS, RowFacts,
+    STALE_AFTER_MS, Why, dub_prev_owner, file_name_of, guarded, is_stale_name, plan,
+    replaced_owner, video_of, why,
 };
 
 const NOW: i64 = 1_800_000_000_000;
@@ -492,7 +493,7 @@ fn a_pass_takes_the_oldest_five_hundred() {
         .map(|i| file(&format!("gone{i:07}_lyrics.json"), ORPHAN_AFTER_MS + i))
         .collect();
     entries.push(file("rowvideo001_lyrics.json", 400 * DAY_MS));
-    let Plan { delete, left } = plan(&entries, &facts(), NOW);
+    let Plan { delete, left, .. } = plan(&entries, &facts(), NOW);
     assert_eq!(left, 1);
     assert_eq!(delete.len(), 500);
     assert_eq!(
@@ -561,6 +562,7 @@ fn a_plan_names_each_reason() {
                 ),
             ],
             left: 0,
+            held: 0,
         }
     );
 }
@@ -594,4 +596,39 @@ fn every_reason_has_its_log_name() {
     for (why, name) in names {
         assert_eq!(why.as_str(), name);
     }
+}
+
+#[test]
+fn the_guard_holds_over_its_size_and_over_a_quarter_of_the_cache() {
+    let min = GUARD_MIN_BYTES;
+    assert!(guarded(min, min * 4 - 4), "at the size, over a quarter");
+    assert!(!guarded(min, min * 4), "exactly a quarter");
+    assert!(!guarded(min - 1, min), "under the size");
+    assert!(guarded(min + 1, min * 4), "just over a quarter");
+}
+
+/// Rows lost to a bad restore: the songs stay, what needs no row still goes.
+#[test]
+fn a_pass_that_would_take_too_much_holds_back_only_the_videos_no_row_has() {
+    let old = 30 * DAY_MS;
+    let gone = Entry {
+        bytes: GUARD_MIN_BYTES,
+        ..file(&song("gone0000001", "_video.mp4"), old)
+    };
+    let kept = Entry {
+        bytes: GUARD_MIN_BYTES,
+        ..file(&song("rowvideo001", "_video.mp4"), old)
+    };
+    let stale = file("rowvideo001_whisperx_track.json", old);
+    let held = plan(&[gone.clone(), kept.clone(), stale.clone()], &facts(), NOW);
+    assert_eq!(held.held, 1);
+    assert_eq!(held.delete.len(), 1);
+    assert_eq!(held.delete[0].why, Why::Stale);
+    let big = Entry {
+        bytes: 4 * GUARD_MIN_BYTES,
+        ..kept
+    };
+    let taken = plan(&[gone, big, stale], &facts(), NOW);
+    assert_eq!(taken.held, 0);
+    assert_eq!(taken.delete.len(), 2);
 }

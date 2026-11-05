@@ -295,44 +295,8 @@ fn the_first_block_primes_the_ring_and_is_no_re_centre() {
     assert_eq!(s.status().hard_recentres, 0);
 }
 
-/// A hard re-centre is a latency under the ABSOLUTE 38.3 ms floor (the
-/// splice's hold + one slot, Q2; review round 2: an entry's delay never
-/// moves it), or more than 4 slots off the target either way (review round
-/// 3: a delayed output's deficit had no bound — an 8-slot resync at a
-/// 300 ms delay was slewed for 15 min).
 #[test]
-fn a_hard_re_centre_is_under_the_floor_or_4_slots_off_the_target() {
-    let base = BASE_LATENCY_100NS;
-    assert_eq!(hard_recentre(base, base), None);
-    assert_eq!(hard_recentre(383_333, base), None);
-    assert_eq!(hard_recentre(383_332, base), Some(Recentre::Deficit));
-    assert_eq!(hard_recentre(base + 1_333_333, base), None);
-    assert_eq!(
-        hard_recentre(base + 1_333_334, base),
-        Some(Recentre::Excess)
-    );
-    // A 100 ms delay: 4 slots under its target (33.3 ms) is below the
-    // floor, so the floor is the edge (up to a delay of 105 ms).
-    let d100 = base + 1_000_000;
-    assert_eq!(hard_recentre(383_333, d100), None);
-    assert_eq!(hard_recentre(383_332, d100), Some(Recentre::Deficit));
-    assert_eq!(hard_recentre(d100 + 1_333_333, d100), None);
-    assert_eq!(
-        hard_recentre(d100 + 1_333_334, d100),
-        Some(Recentre::Excess)
-    );
-    // A 150 ms delay: 4 slots under its target (83.3 ms) is above the floor.
-    let d150 = base + 1_500_000;
-    assert_eq!(hard_recentre(d150 - 1_333_333, d150), None);
-    assert_eq!(
-        hard_recentre(d150 - 1_333_334, d150),
-        Some(Recentre::Deficit)
-    );
-    assert_eq!(hard_recentre(d150 + 1_333_333, d150), None);
-    assert_eq!(
-        hard_recentre(d150 + 1_333_334, d150),
-        Some(Recentre::Excess)
-    );
+fn a_recentres_cause_reads_as_its_wire_name() {
     assert_eq!(
         [Recentre::Prime, Recentre::Deficit, Recentre::Excess].map(Recentre::as_str),
         ["prime", "deficit", "excess"]

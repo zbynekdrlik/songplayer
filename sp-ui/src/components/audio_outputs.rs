@@ -55,19 +55,26 @@ use std::collections::HashMap;
 
 use leptos::prelude::*;
 use serde::Deserialize;
-use sp_core::asio_resampling::{
-    AsioFigures, Chip, LastFault, asio_resampling_chips, asio_state_chips,
-};
+use sp_core::asio_resampling::{AsioFigures, Chip, LastFault, asio_state_chips};
 use sp_core::audio_outputs::{
     OutputEntry, OutputType, RateChoice, SUPPORTED_RATES, VbanDest, VbanSampleFormat,
     asio_add_refusal, asio_channel_index, asio_channel_shown, asio_driver_options,
-    asio_waiting_text, new_asio, new_vban, validate_list,
+    asio_waiting_text, new_asio, new_dante, new_vban, validate_list,
 };
 use sp_core::audio_outputs_save::{
     NOT_CHECKED, SAVED, first_unreadable, latency_sk, parse_whole, rate_to_send, remove_one,
     save_refusal, shown_message, vban_waiting_text,
 };
 use sp_core::config::{SETTING_AUDIO_NETWORK_RATE, SETTING_AUDIO_OUTPUTS, audio_network_rate};
+use sp_core::dante_status::{DanteFigures, dante_state_chips, dante_waiting_text};
+
+#[path = "audio_outputs_dante.rs"]
+mod dante_fields;
+
+use dante_fields::{DanteFields, resampling_line};
+#[path = "audio_outputs_latency.rs"]
+mod latency;
+use latency::LowLatencySwitch;
 
 use crate::api;
 use crate::store::DashboardStore;
@@ -76,6 +83,8 @@ use crate::store::DashboardStore;
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 pub struct OutputLive {
     pub id: String,
+    #[serde(rename = "type", default)]
+    pub kind: String,
     pub state: String,
     #[serde(default)]
     pub reason: Option<String>,
@@ -91,6 +100,9 @@ pub struct OutputLive {
     pub note: Option<String>,
     #[serde(default)]
     pub asio: Option<AsioLive>,
+    /// #285: the stack's figures while a Dante device runs.
+    #[serde(default)]
+    pub dante: Option<DanteFigures>,
 }
 
 /// An ASIO output's live numbers (`outputs[i].asio`, the fields shown).
@@ -175,9 +187,14 @@ fn running_asio(live: &ProgramOutputs, id: &str) -> Option<AsioFigures> {
 /// A row's state line as chips: a running ASIO output's figures (each with
 /// its tooltip), else the one state text (the row's tooltip shows through).
 fn state_chips(live: &ProgramOutputs, id: &str, saved: bool) -> Vec<Chip> {
-    match running_asio(live, id) {
-        Some(f) => asio_state_chips(state_sk("running"), &f),
-        None => vec![Chip {
+    let dante = live
+        .outputs
+        .iter()
+        .find(|o| o.id == id && o.kind == "dante");
+    match (running_asio(live, id), dante) {
+        (Some(f), Some(o)) => dante_state_chips(state_sk("running"), &f, o.dante.as_ref()),
+        (Some(f), None) => asio_state_chips(state_sk("running"), &f),
+        (None, _) => vec![Chip {
             key: "audio-output-state-text",
             text: live_text(live, id, saved),
             title: None,
@@ -278,6 +295,9 @@ fn output_text(o: &OutputLive) -> String {
     match (&o.asio, o.state.as_str()) {
         (Some(_), "running") => state.to_string(),
         (None, "running") => format!("{state} · {}", latency_sk(o.latency_ms)),
+        (Some(a), _) if o.kind == "dante" => {
+            dante_waiting_text(state, a.reason_code.as_deref(), a.retry_in_s)
+        }
         (Some(a), _) => asio_waiting_text(state, a.reason_code.as_deref(), a.retry_in_s),
         (None, _) => vban_waiting_text(state, o.reason_code.as_deref()),
     }
@@ -347,6 +367,7 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
     let saved = RwSignal::new(None::<(Vec<OutputEntry>, String)>);
     let bad: Unreadable = RwSignal::new(Vec::new());
     let live = RwSignal::new(ProgramOutputs::default());
+    let low_latency = latency::LowLatency::new(store);
     // The box's ASIO drivers, once: `None` until they are read, and for
     // good when the read failed (`drivers_failed`) — never an empty list
     // standing in for one the dashboard was not told (#233 review round 1).
@@ -438,6 +459,16 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
         });
     };
 
+    let add_dante = move |_: leptos::ev::MouseEvent| {
+        let saved =
+            stored.with_untracked(|(list, _)| stored_list(list.as_deref()).unwrap_or_default());
+        entries.update(|l| {
+            let known: Vec<OutputEntry> = l.iter().cloned().chain(saved).collect();
+            let fresh = new_dante(&known);
+            l.push(fresh);
+        });
+    };
+
     let on_save = move |_: leptos::ev::MouseEvent| {
         // Never save before the load landed, nor over a stored list this
         // dashboard cannot read (its rows were reset to none).
@@ -489,6 +520,7 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
             if let Some(rate) = rate {
                 body.insert(SETTING_AUDIO_NETWORK_RATE.to_string(), rate);
             }
+            latency::add(&mut body, low_latency.to_send());
             match api::patch_json_empty("/api/v1/settings", &body).await {
                 Ok(()) => {
                     saved.set(Some((list, chosen)));
@@ -499,13 +531,13 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
             }
         });
     };
-    // "Uložené" only while the rows and the rate are what was saved.
     let message_shown = move || {
-        let unchanged = saved.with(|s| {
-            s.as_ref().is_some_and(|(list, rate)| {
-                entries.with(|e| e == list) && network_rate.with(|r| r == rate)
-            })
-        });
+        let unchanged = low_latency.unchanged()
+            && saved.with(|s| {
+                s.as_ref().is_some_and(|(list, rate)| {
+                    entries.with(|e| e == list) && network_rate.with(|r| r == rate)
+                })
+            });
         message.with(|m| shown_message(m, unchanged).to_string())
     };
 
@@ -534,6 +566,7 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                         .collect_view()}
                 </select>
             </label>
+            <LowLatencySwitch state=low_latency />
             {move || {
                 blocker()
                     .map(|e| {
@@ -575,6 +608,16 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                 </button>
                 <button
                     type="button"
+                    data-testid="audio-outputs-add-dante"
+                    prop:disabled=move || {
+                        entries.with(|l| l.iter().any(|e| e.kind == OutputType::Dante))
+                    }
+                    on:click=add_dante
+                >
+                    "Pridať výstup Dante"
+                </button>
+                <button
+                    type="button"
                     data-testid="audio-outputs-save"
                     prop:disabled=move || loaded.get() != Some(true) || load_error.get().is_some()
                     on:click=on_save
@@ -605,7 +648,11 @@ fn OutputRow(
     view! {
         <div class="audio-output-row" data-testid="audio-output-row" data-id=row_id>
             <span class="audio-output-type" data-testid="audio-output-type">
-                {move || if kind.get() == Some(OutputType::Asio) { "ASIO" } else { "VBAN" }}
+                {move || match kind.get() {
+                    Some(OutputType::Asio) => "ASIO",
+                    Some(OutputType::Dante) => "Dante",
+                    _ => "VBAN",
+                }}
             </span>
             <label>
                 "Názov"
@@ -658,6 +705,9 @@ fn OutputRow(
             </Show>
             <Show when=move || kind.get() == Some(OutputType::Vban)>
                 <VbanFields id=id entries=entries />
+            </Show>
+            <Show when=move || kind.get() == Some(OutputType::Dante)>
+                <DanteFields id=id entries=entries />
             </Show>
             <LiveState id=id live=live saved_ids=saved_ids />
             <button
@@ -942,8 +992,7 @@ fn LiveState(
         // line (empty otherwise).
         <div class="audio-output-resampling" data-testid="audio-output-resampling">
             {move || {
-                let figures = running_asio(&live.get(), &id.get_value());
-                chips_view(figures.map(|f| asio_resampling_chips(&f)).unwrap_or_default())
+                chips_view(resampling_line(&live.get(), &id.get_value()))
             }}
         </div>
     }

@@ -1,6 +1,6 @@
 [package]
 name = "sp-tauri"
-version = "0.84.0"
+version = "0.85.0"
 edition = "2024"
 license = "MIT"
 rust-version = "1.87"
@@ -27,8 +27,6 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-dialog = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -43,6 +41,15 @@ tauri-build = { version = "2", features = [] }
 
 [dev-dependencies]
 tempfile = "3"
+
+# #285: src-tauri is its own top workspace, so the root's overrides do not reach
+# it. dlink's converter runs unoptimised otherwise and overruns its blocks in a
+# debug build (dstack's changelog, 0.6.25).
+[profile.dev.package.dstack-resample]
+opt-level = 3
+
+[profile.dev.package.rubato]
+opt-level = 3
 
 # src-tauri is EXCLUDED from the workspace, so the root Cargo.toml
 # [profile.release] does NOT apply to the shipped SongPlayer.exe — it builds

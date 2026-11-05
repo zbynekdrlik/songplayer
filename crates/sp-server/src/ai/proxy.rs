@@ -5,7 +5,7 @@
 //! and handles Claude OAuth login via CLIProxyAPI's native `-claude-login`
 //! flow with callback URL forwarding.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::AsyncBufReadExt;
 use tokio::process::{Child, ChildStdout, Command};
@@ -545,30 +545,11 @@ request-retry: 2
         None
     }
 
-    /// Auto-start the proxy if the binary is available.
-    #[cfg_attr(test, mutants::skip)]
-    pub async fn auto_start(&self) {
-        if self.binary_path().is_some() {
-            if let Err(e) = self.start().await {
-                warn!(?e, "failed to auto-start CLIProxyAPI");
-            }
-        }
-    }
-
     /// Return the default port.
     #[cfg_attr(test, mutants::skip)]
     pub fn default_port() -> u16 {
         DEFAULT_PROXY_PORT
     }
-}
-
-/// Determine the data directory for CLIProxyAPI config and auth.
-#[cfg_attr(test, mutants::skip)]
-pub fn default_data_dir() -> PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(Path::to_path_buf))
-        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 #[cfg(test)]

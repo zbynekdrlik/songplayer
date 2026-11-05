@@ -7,6 +7,8 @@ use std::sync::Arc;
 use sp_core::config::{PROGRAM_BLANK_ID, PROGRAM_INPUT_ID, PROGRAM_INPUT_LABEL};
 
 use super::*;
+use sp_core::dante_status::DanteFigures;
+
 use crate::audio_faults::model::{Counter, Event, Meter, Probe, Severity, StateFlag, kinds};
 use crate::playback::asio_loop::{LoopEvent, LoopEventKind, LoopState, LoopStatus};
 use crate::playback::asio_out::AsioStatus;
@@ -129,6 +131,7 @@ fn output(id: &str, enabled: bool, sent: u64, dropped: u64) -> OutputStatus {
         vban: None,
         note: None,
         asio: None,
+        dante: None,
     }
 }
 
@@ -241,6 +244,59 @@ fn asio_output(asio: AsioStatus) -> OutputStatus {
         asio: Some(asio),
         ..output("out-2", true, 1_800, 3)
     }
+}
+
+/// #285: the date step cost `pump_missed` +1200 on dstack ≤ 0.4.15 and the
+/// ledger read clean, since only `GET /api/v1/program` carried the number.
+#[test]
+fn a_dante_output_loses_its_missed_blocks_and_a_pump_within_its_margin_is_no_risk() {
+    let dante = DanteFigures {
+        pump_missed: 21,
+        pump_late: 22,
+        pump_overruns: 23,
+        ..DanteFigures::default()
+    };
+    let out = OutputStatus {
+        kind: "dante",
+        dante: Some(dante),
+        ..output("out-4", true, 1_800, 3)
+    };
+    let probes = output_probes(&[out]);
+    assert_eq!(probes.len(), 1);
+    assert_eq!(
+        probes[0].counters,
+        vec![
+            Counter::loss(kinds::BLOCKS_DROPPED, 3),
+            Counter::loss(kinds::PUMP_MISSED, 21),
+            Counter::risk(kinds::PUMP_OVERRUN, 23),
+        ]
+    );
+}
+
+/// The seam's `overloads` on a Dante output is the very count of
+/// `pump_overruns`: one fault, one row.
+#[test]
+fn a_dante_overrun_is_one_risk_not_two() {
+    let out = OutputStatus {
+        kind: "dante",
+        asio: Some(AsioStatus {
+            overloads: 23,
+            ..AsioStatus::default()
+        }),
+        dante: Some(DanteFigures {
+            pump_overruns: 23,
+            ..DanteFigures::default()
+        }),
+        ..output("out-4", true, 1_800, 3)
+    };
+    let probes = output_probes(&[out]);
+    let kinds_seen: Vec<&str> = probes[0]
+        .counters
+        .iter()
+        .filter(|c| c.value == 23)
+        .map(|c| c.kind)
+        .collect();
+    assert_eq!(kinds_seen, [kinds::PUMP_OVERRUN]);
 }
 
 #[test]

@@ -1,6 +1,9 @@
 ---
 paths:
   - "crates/sp-core/src/audio_outputs*.rs"
+  - "crates/sp-core/src/audio_latency*.rs"
+  - "sp-ui/src/components/audio_outputs_latency.rs"
+  - "e2e/settings-audio-low-latency.spec.ts"
   - "crates/sp-core/src/asio_resampling*.rs"
   - "crates/sp-server/src/playback/resample_quality.rs"
   - "crates/sp-server/src/playback/audio_out*.rs"
@@ -9,7 +12,9 @@ paths:
   - "crates/sp-server/src/playback/vban_packet_tests_format.rs"
   - "crates/sp-server/src/playback/vban_packet_tests_legacy.rs"
   - "crates/sp-server/src/playback/asrc*.rs"
-  - "crates/sp-asrc/**"
+  - "crates/sp-core/src/dante_status*.rs"
+  - "crates/sp-server/src/playback/dante_device*.rs"
+  - "sp-ui/src/components/audio_outputs_dante.rs"
   - "crates/sp-server/src/playback/asio_*.rs"
   - "crates/sp-server/src/api/audio*.rs"
   - "crates/sp-server/src/api/program_tests_outputs.rs"
@@ -32,30 +37,146 @@ Spec `docs/superpowers/specs/2026-10-07-audio-outputs-asio-design.md`, plan
 `azo`). Lane 2's section (the drift servo, the ASRC) comes first, then lane
 1's, then lane 3's (the ASIO output).
 
+## The low-latency switch `audio_low_latency` (#289 step 1)
+
+ROZHODNUTÉ on #289 (measured 3.11.2026 on resolume-snv, 4 h: the
+program's hand-off to the outputs, `health.timing.vban_feed_late_us`, is
+≤ 10 ms in steady state — window maxima p50 0.3 ms, p90 9.1 ms, peaks
+8.5–9.8 ms every few minutes — and 14.7–20.7 ms only right after a process
+start):
+
+- ONE boolean setting, DEFAULT OFF: `sp_core::audio_latency`
+  (`SETTING_AUDIO_LOW_LATENCY`, `low_latency`: only `"true"`, trimmed, any
+  case, is ON; unset / blank / anything else OFF). The settings PATCH
+  takes `"true"` / `"false"` / `""` only, stored lower case
+  (`audio_latency::checked`, called by `api/settings.rs::prepare` after
+  `paid_ai::checked`; 400 "audio_low_latency must be true or false",
+  nothing written).
+- Read live: the outputs task's 5 s pass reads it with the list
+  (`audio_out_config::load_low_latency`; a failed read changes nothing),
+  sets `AudioOutputs::low_latency` (one INFO on a change) and applies the
+  list with it (`plan_at`, `built_at`): a VBAN output built with the other
+  value is a changed entry — rebuilt (`discard` + a new output, its frame
+  counter from 0), never a restart. OFF is byte for byte today's: `plan`,
+  `VbanOut::for_entry`, `VbanRateConverter::new`, `send_latency_100ns`,
+  `max_wait_100ns` and `vban_latency_ms` are the OFF forms of the new
+  `*_at` / `*_in` / `for_latency` functions, and every #233 test is
+  unchanged.
+- ON, every VBAN output (`vban-out.md`, "The low-latency switch"): L =
+  15 ms (`VBAN_SEND_LATENCY_LOW_100NS` 150 000), the wait cap 4 × L =
+  60 ms + the delay (`max_wait_in`); a converting destination is NOT
+  padded to `rate / 60`: its FIFO starts empty
+  (`vban_rate::prime_frames`), and the converter's first call, which gives
+  `rate / 24 000` frames under a block (dstack v0.6.20: 1468 / 2936 / 3196
+  / 6392 instead of 1470 / 2940 / 3200 / 6400), is topped up ONCE with
+  leading silence (`Conversion::top_up`, counted in `delay_frames`) —
+  without it the FIFO would hold back a whole block (33 ms) for good.
+  Measured over 20 000 blocks: one top-up, never a short block after it.
+  So the delay is 119 / 239 / 260 / 520 frames at 44.1 / 88.2 / 96 /
+  192 kHz (FOH at 96 kHz: 15 + 2.708 ms); `latency_ms` on `GET
+  /api/v1/program` reports it (`vban_latency_ms_at`, the converter's delay
+  from `vban_rate::low_latency_delay_frames`, measured once per rate on a
+  real converter).
+- `GET /api/v1/program` → top-level `audio_low_latency` (the value the list
+  was last applied with).
+- Nastavenia "Zvukové výstupy": the checkbox `settings-audio-low-latency`
+  "Nízka latencia zvuku (~15 ms)" with the Slovak tooltip
+  (`audio_latency::TOOLTIP_SK`: VBAN sends 15 ms instead of 67 ms at 48 kHz,
+  18 ms instead of 83 ms at 96 kHz, ASIO and Dante unchanged, and the LED wall
+  must be measured against FOH before it stays on), in its own child
+  module `audio_outputs_latency.rs` (the section is at the 1000-line cap),
+  saved with "Uložiť výstupy" and sent ONLY when it differs from the value
+  the page loaded (`low_latency_to_send`, the `paid_ai_to_send` rule). The
+  "Uložené" line hides while the checkbox differs from the loaded value
+  (`low_latency.unchanged()`). Mock: the PATCH check and
+  `audio_low_latency` on the program; spec
+  `e2e/settings-audio-low-latency.spec.ts`.
+- **The ASIO / Dante servo is NOT switched (open, step 1 stopped here).**
+  The ruling asks for target = 15 ms + delay with the floor, the edge and
+  the ring re-derived from their stated reasons. The edge (4 slots off the
+  target) and the ring (target + 4 slots + one block, `ring_capacity_frames`)
+  are already relative to the target and carry over unchanged. The floor
+  does NOT re-derive: its reason (Q2) is "a missing boundary reads under it
+  and is ONE faded insert, never a run of unfaded underruns", which needs
+  a ring that can hold one missing slot — the target minus the splice's
+  5 ms hold minus the lateness must exceed a slot (61.7 ms at 66.7 ms). At
+  15 ms the ring holds 10 ms of lateness, so a missing boundary underruns
+  BEFORE any block reaches the servo; after it the reading is hold +
+  the next block's lateness (5.3–15 ms), indistinguishable from steady
+  state when that lateness is ~10 ms. The absolute 38.3 ms floor would
+  hard re-centre EVERY block at 15 ms. A scratch closed-loop sim (the
+  harness of `asrc_servo_sim_tests.rs`, target 15 ms, floor 5.5 / 7 /
+  9 ms — the floor changed nothing in this range; profile p50 ≤ 0.3 ms,
+  p99 ≤ 2 ms, 0.9 % at 2–9.8 ms, 0.1 % at 9.8–20 ms; 900 s): 0 hard
+  re-centres, but 17–18 underrun callbacks at 128 frames / 96 kHz and
+  64 / 48 kHz, 7–8 at 512 / 96 kHz (today's 66.7 ms target: 0), a cushion
+  of 11–14 ms kept; the sub-millisecond `Lateness::Measured` profile still
+  0–5; a missing boundary = 1 hard re-centre AND 14–35 unfaded underrun
+  callbacks (~47–75 ms of silence). An ASIO / Dante output therefore keeps
+  `BASE_LATENCY_100NS` with the switch on, and the outputs task does not
+  rebuild it (`built_at`: only a VBAN output carries the switch). The
+  owner decides whether the ASIO path takes a 15 ms target with those
+  underruns, or another target.
+- Not followed by the switch either: `program_output_timing::VBAN_FEED_BUDGET_US`
+  (66 666, the `vban_feed_late_over_budget` count and its WARN) stays on
+  the OFF L — `program_bus.rs`, which feeds it, is at the 1000-line cap.
+  With the switch on, a VBAN output's own `late_sends` / `late_events`
+  count the packets sent late against the 15 ms L.
+- Tests: sp-core `audio_latency_tests.rs`; `vban_out_tests_latency.rs`
+  (exact send instants at both settings, the 4 × L cap, a block 20 ms late,
+  a 96 kHz entry with a delay, the converter's delay at both settings for
+  every rate, an impulse leaving the converter after its reported delay,
+  the status latency); `audio_out_task_tests_latency.rs` (a flip rebuilds
+  every VBAN output and keeps an ASIO one, a pass reads the stored value);
+  `settings_tests_audio.rs` (the PATCH); `program_tests_outputs.rs` (the
+  top-level field).
+
 ## The drift servo and the ASRC (`asrc_servo.rs`, `asrc.rs`) — lane 2
 
-Pure modules, no thread, no I/O, no runtime wiring yet: lane 3's ASIO worker
-calls `Servo::observe` once per program block, gives the answer to
-`Asrc::set_correction_ppm` and (through `frames_from_100ns`: positive =
-insert, negative = skip) `Splice::insert` / `skip`, and pushes
+Pure modules, no thread, no I/O: the ASIO worker (and the Dante output
+through the same seam) calls `Servo::observe` once per program block, gives
+the answer to `Asrc::set_correction_ppm` and (through `frames_from_100ns`:
+positive = insert, negative = skip) `Splice::insert` / `skip`, and pushes
 `Splice::process(Asrc::process(block))` into the card's ring.
 
-**The stage lives in `crates/sp-asrc`** (#233, 10.10.2026): `SincStage`, a
-non-generic wrapper of rubato's `Async<f32>` sinc. rubato is generic, so its
-code compiles in the crate that names `Async::<f32>`; the workspace compiles
-sp-asrc at `opt-level = 3` in the dev profile (test and mutants inherit it).
-Named from sp-server, the 256-tap cubic stage ran unoptimized in tests: tens
-of ms a block, 20–110 s per ASIO test, ~330 s of the suite. Keep every
-rubato `Async` call in sp-asrc and nothing there `#[inline]` or generic, or
-the cost moves back into sp-server's builds. rubato itself is optimized too
-(`[profile.dev.package.rubato]`): its AVX / SSE / NEON dot kernels
-(`dot_avx_f32_dyn`, `impl AvxSample for f32`) are NOT generic, so they
-compile in rubato — sp-asrc alone took the slowest ASIO test only from 46 s
-to 31 s (nextest, mutation shard logs, CI 38041182285). Read a slow test's
-time in the `mutants-report-shard-*` artifact's per-mutant logs (`PASS [
-31.123s]`); the Test job's `cargo test` prints only the binary's total. `asrc_params()` (the filter)
-stays in sp-server's `asrc.rs`. VBAN's `Fft` (`vban_rate.rs`) is still
-compiled in sp-server.
+**Since #285 step 3 the LAWS live in dstack-resample** (dstack tag v0.6.31,
+MIT OR Apache-2.0, `crates/dstack-resample/src/asrc.rs` + `lib.rs` in the
+dstack checkout): `Servo` is a thin ADAPTER over
+`dstack_resample::asrc::Controller` (`Controller::new(target, floor 38.3 ms,
+edge 133.3 ms, Basis::Arrival)` `.with_cushion_max_s(one slot)`
+`.with_calm_zone_ms(calm_zone_ms_for(callback / rate))` `.with_priming()`;
+per block `played_silence(underrun_frames / rate)`, then `observe(now =
+handled − the first block's handled, depth = the latency, other = consumed
+/ rate)`; `Step::{Hold, Prime, Recentre}` mapped onto `ServoAction` /
+`Recentre`, a re-centre's size the exact 100 ns error), and `Asrc` over
+`dstack_resample::Converter::drifting(48 000, rate, 2, 1600, Fixed::Input)`
+(f64 channel-major core; the adapter converts SongPlayer's interleaved f32
+in buffers sized once, `set_ppm` ramped; the adapter still REFUSES a
+correction outside `1/1.001 ..= 1.001`, where dstack would clamp to
+±1000 ppm). The public API the worker and the status read is unchanged:
+the constants are dstack's re-exported (`MAX_PPM`, the regression's, the
+level loop's, `CALM_ZONE_MS`, `LevelLoop`, `Offered`, `slew`,
+`braking_ppm`), `RateRegression` wraps dstack's `RateFit`; SongPlayer's own
+are the grid constants, the 100 ns observation, the `Splice` (dstack has
+none) and the status: the adapter keeps a shadow of the controller's
+window (it opens, closes and restarts where dstack's does) for the window's
+mean latency and `slew_eta_s`, and shows `offset_ms` / `cushion_ms` on the
+100 ns grain. The law description below is the one dstack carries over;
+dstack v0.6.15 aligned priming, the stall check and the underrun fold with it.
+
+The closed-loop sim (`asrc_servo_sim_tests.rs`), `asrc_tests.rs` (frame
+counts, the 3 213-frame bound, the delay, THD+N, images), the ASIO worker's
+ring pins and the Dante tests pass unchanged on dstack's code.
+
+**The stage is compiled in dstack-resample** (it names rubato's generic
+`Async::<f64>`): the workspace compiles it at `opt-level = 3` in the dev
+profile (`[profile.dev.package.dstack-resample]`; test and mutants inherit
+it), and rubato's AVX / SSE / NEON dot kernels in rubato
+(`[profile.dev.package.rubato]`). Unoptimized, the 256-tap cubic stage took
+tens of ms a block and 20–110 s per ASIO test (#233, when sp-asrc carried
+it; sp-asrc is deleted). Read a slow test's time in the
+`mutants-report-shard-*` artifact's per-mutant logs; the Test job's `cargo
+test` prints only the binary's total.
 
 **The observation** (per block, on the program wall, 100 ns): when the block
 was handled, its boundary (stamp), the frames buffered for the card (the
@@ -168,17 +289,17 @@ or a window mean 10 ms off). SNV's DVS had 45 such re-centres in 3.5 h
   time). Now:
   - each block's new `underrun_frames` (cumulative; the first block's count
     is the start, a count that went back folds nothing) are folded into
-    `cushion_100ns` (`fold_cushion`: added, at most `CUSHION_MAX_100NS` =
+    `cushion_100ns` (dstack `played_silence`: added, at most `CUSHION_MAX_100NS` =
     one slot);
   - the offset slew's error is the window mean's distance from the band
-    [target, target + cushion] (`slew_err_100ns`, branch-free: `(t − L)⁺ −
+    [target, target + cushion] (dstack `band_error_ms`, branch-free: `(t − L)⁺ −
     (L − top)⁺`; a comparison form has an equivalent `>=` mutant at the
     top): a kept excess is not braked, what lies beyond the cap is drained
     as before, a deficit is measured from the target itself;
   - the level loop (P on the EMA, I) keeps the CONFIGURED target, so the
     kept excess decays slowly through it (P ≤ 50 ppm: tens of minutes; the
     sim's 150 ms stall still holds ~20 of its 33.3 ms 400 s later);
-  - at each window the cushion follows the mean down (`kept_cushion`:
+  - at each window the cushion follows the mean down (dstack's window close:
     never more than the mean held over the target, 0 at or under it); a
     window that FOLDED an underrun keeps it whole, since its mean still
     holds the blocks before the underrun (`folded`, taken at the close).
@@ -191,7 +312,7 @@ or a window mean 10 ms off). SNV's DVS had 45 such re-centres in 3.5 h
     0 while only a cushion is held, and the dashboard's slew chip reads
     "drží rezervu +13,3 ms po výpadku" then (`sp_core::asio_resampling`,
     shown while its tenths are not zero; a drain is named first).
-- **The last resort** (`hard_recentre(latency, target)`): a block whose
+- **The last resort** (dstack `Step::Recentre`): a block whose
   latency is under 38.3 ms (`HARD_FLOOR_100NS`, the splice's 5 ms hold + one
   slot, Q2: a missing program boundary at delay 0, −33.3 ms, which with
   the sub-millisecond hand-off only a real stall makes, reads under it and
@@ -525,10 +646,17 @@ is a `#[cfg(test)]` shim over `AudioOutputs::single_vban` (#210's tests).
 - 48 kHz INT24 = `VbanFormat::PROGRAM`: no converter, #210's bytes — pinned
   against a verbatim copy of the 0.72.0 encoder (`vban_packet_tests_legacy.rs`,
   `vban_out_tests_dest.rs::a_migrated_foh_entry_sends_the_0_72_datagrams`).
-- Other rates: rubato `Fft` with `FixedSync::Both` (1600 in, `rate/30` out;
-  5.0.1 takes the whole block as ONE FFT, `fft_chunks = chunk / min_in`),
-  delay `rate/60` frames = 16.7 ms at every rate (`fft_delay_frames`). A
-  silent or malformed block goes through the filter as zeros.
+- Other rates (#285 step 3): dstack-resample's sinc `Converter::new(48000,
+  rate, 2, 1600, Fixed::Input)` (the same 256-tap filter as the ASIO path;
+  48→96 measured THD+N 152.6 dB, images −163 dBFS) into a FIFO the
+  destination drains by exactly `rate/30` frames a boundary. The FIFO
+  starts with `rate/60` minus the converter's own delay frames of silence
+  (`fifo_prime_frames`), so the delay stays `rate/60` frames = 16.7 ms
+  (`fft_delay_frames`, the old rubato `Fft` path's). ROZHODNUTÉ with
+  camera-box, 3.11.2026: FOH's VBAN timing stays exactly as it was, since
+  the CG song's audio and its NDI video line up at the venue through it.
+  The converter alone would be 2.67 ms. A silent or malformed block goes
+  through the filter as zeros.
 - The delay: the sender's send latency is `L + delay`, and its wait cap is
   `VBAN_MAX_WAIT_100NS` (4 × L = 8 slots) PLUS the delay (`plan_wait_up_to`;
   the 8-slot cap alone sent a delayed output's first packet early). That
@@ -1189,8 +1317,8 @@ host's code path (the bin, `mod.rs`, `host.rs`, `host_win.rs`, the protocol
 and status, `remote_clock.rs`, `mono.rs`, `log_forward.rs`, `launch.rs`,
 `panic_hook.rs`, `log_rotate.rs`, the ASIO output and its glue, the servo, the ASRC, the
 queue, the clocks, `pipeline_paced.rs`, `vban_out.rs`, `vban_packet.rs`,
-`audio_out.rs`, `program_output.rs`, `mmcss.rs`, sp-asrc; comments are not
-scanned) for `Command::new`, `process::Command`, `tokio::process`,
+`audio_out.rs`, `program_output.rs`, `mmcss.rs`; comments are not
+scanned; dstack-resample's source is outside this repo) for `Command::new`, `process::Command`, `tokio::process`,
 `CreateProcess`, `ShellExecute`, `WinExec`, `posix_spawn`. A new file the
 host runs goes on that list; `client_win.rs` (SongPlayer starting the host)
 is deliberately not on it.
@@ -1374,3 +1502,69 @@ difference with its UTC time.
   job). Pins from a scratch Python model of the analyzer and the search.
 - **Follow-up (owner, once measured):** PP's ASIO gate fails on any loop
   event during its minute.
+
+## The native Dante output (#285)
+
+- **Live on resolume-snv since 1.11.2026, never on PP** (the owner's hold).
+  Since dstack v0.6.12 (dstack #102, 3.11.2026) every dstack crate is MIT OR
+  Apache-2.0 (checked in the checkout's Cargo.toml files), so the license no
+  longer keeps #285 off `main`. `THIRD-PARTY-NOTICES.txt` names dstack
+  0.6.31 (dlink, dstack, dstack-audio-io, dstack-resample) with its
+  LICENSE-MIT verbatim (it named 0.5.11 under the GPL until step 3).
+- `type: dante` in `audio_outputs`, at most one, `DanteDest {device, ip}`: the
+  device name by Dante's own rule, the `ip` one IPv4 of this PC (a second
+  address beside DVS, `Place::Ip`).
+- `DanteDevice` (`dante_device.rs`) implements the `AsioDevice` seam **in this
+  process**, on every platform, with no `sp-dante-host` (the owner's ruling):
+  `asio_out`'s worker, ring, `asrc_servo` and status serve it, so a second servo
+  never appears. dstack by git tag (v0.6.31), no Dante protocol code here.
+  #285 step 2 (the owner's ruling via dstack #90: one rate conversion, in
+  dlink, for every app): `DanteParams.rate` is `PROGRAM_RATE` (48 kHz, what the
+  worker writes) and `network_rate` the entry's effective rate; `config()` sets
+  `.sample_rate(rate).network_rate(network_rate)`, so dlink's `Rated` converts
+  on the device's clock (fixed ratio) and the worker's `Asrc` runs at ratio 1,
+  following drift only. The worker sees `buffer_frames` = the device block at
+  48 kHz (64; block 128 since dlink v0.6.20, its pump threads at THREAD_PRIORITY_HIGHEST) and a latency of dlink's whole TX path
+  (`Config::split().tx_path_ns`: dlink's budget is the app's TOTAL, the Dante
+  latency, the margin and the converter's delay inside it; 15 ms since v0.6.28,
+  10 ms in v0.6.22-27: P 8.36 ms, W 6 ms, a 0.64 ms half-band converter, after
+  P 4.01 ms left a receiver 137 late packets in 1 h 50 min). The dashboard's ASIO chip then reads
+  "48 kHz bez prevodu" for this output although dlink converts. Step 3 (dstack
+  v0.6.25): `asrc_servo.rs` and `asrc.rs` are adapters over dstack-resample's
+  `asrc::Controller` and `Converter::drifting` (lane 2's section above; dstack v0.6.15 aligned
+  the priming, the stall and the underrun fold with ours); sp-asrc is deleted. `RingProcess`
+  is the stack's callback: like a buffer switch it allocates, locks and logs
+  nothing. Two TX channels at the network rate on `dlink`'s defaults (24-bit,
+  block 128, a 15 ms budget for the whole path, the `normal` profile). `Link`
+  sets up and starts in one call, so a refused address fails the seam's `start`;
+  only a refused config fails `open`. `Link` hides `PumpStats`, so a panicked
+  callback no longer reads `faulted`: the worker's 2 s stall watch ends that run.
+  The FOH console, read by dstack, judged dlink v0.5.1 on 2.11.2026: 3 h 17 min,
+  8782 windows, late 0 in every one, peak max 4365 us, p99 3719 us, median
+  2208 us at 10 ms latency. So the `normal` profile stands; the 31.10 rule
+  against it applied to the old pump, not to dlink.
+- One Dante device at a time in the process (`dante_device::HELD`): `open`
+  takes the hold, `close` (also at a drop: a dropped `Link` does not stop its
+  stack) gives it back after the stack stopped. A rebuilt entry's successor
+  starts while its predecessor still stops, so it reads `Reason::Held` and tries
+  again on the backoff (2 s first), instead of failing on the Dante ports or
+  announcing the name twice. A stack still running after dlink's 5 s stop wait is
+  left to end (a WARN) and the hold goes back: a successor that finds the ports
+  bound fails its start and retries on the backoff, never a parked output (the
+  band's in-ears must return with no restart).
+- `outputs[i]` = the ASIO worker's line under `asio` plus `dante`
+  (`sp_core::dante_status::DanteFigures`) while a device runs: read through
+  `DanteLink`, which the worker sets at the start and clears at the close, from
+  `ctl::status`. Nothing on the audio path takes its lock. **The
+  stack's status flags are 0 / 1, not booleans**: a typed `bool` fails the
+  whole line (only the test on the real stack caught it).
+- The dashboard's texts: `dante_status.rs` rewrites the ASIO chips by whole
+  phrases (`karta` is feminine, `zariadenie` neuter: a word swap broke the
+  grammar), and a test keeps `karta` / `ovládač` / `ASIO` out. A
+  changed ASIO tooltip can need a new phrase there. Chip keys stay `asio-*`.
+- Tests run the real stack on `ClockSource::System` (a test receiver over UDP,
+  `ONE_DEVICE`: each binds the Dante ports). Not proven yet: Windows media
+  threads at load, real PTP, a real receiver, Dante Controller.
+- `cargo fmt --all` does not reach `sp-ui`, and `cargo fmt` inside it
+  reformats unrelated files: run `rustfmt --edition 2024 <file>` on the ones
+  you touched.

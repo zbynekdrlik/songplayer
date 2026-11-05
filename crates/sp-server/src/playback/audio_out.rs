@@ -14,7 +14,7 @@
 //! per driver, its status under `asio` with a `note` when the driver's rate
 //! is not the network's or its buffer is over a third of a grid slot).
 
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -22,14 +22,16 @@ use sp_core::audio_outputs::{DEFAULT_NETWORK_RATE, OutputEntry, OutputType};
 use sp_core::audio_outputs_save::{
     VBAN_CONVERTER, VBAN_NOT_BUILT, VBAN_NOT_STARTED, VBAN_RESOLVING, VBAN_UNRESOLVED,
 };
+use sp_core::dante_status::DanteFigures;
 
 use crate::playback::asio_out::{AsioOut, AsioStatus};
-use crate::playback::asio_state::{Reason, buffer_note, rate_note};
+use crate::playback::asio_state::{Reason, buffer_note, output_rate_note};
 use crate::playback::audio_out_block::ProgramBlock;
 use crate::playback::audio_out_queue::lock;
+use crate::playback::dante_device::{DanteLink, DanteParams};
 use crate::playback::vban_out::{VbanOut, VbanStatus};
-use crate::playback::vban_packet::VBAN_SEND_LATENCY_100NS;
-use crate::playback::vban_rate::fft_delay_frames;
+use crate::playback::vban_packet::base_send_latency_100ns;
+use crate::playback::vban_rate::{fft_delay_frames, low_latency_delay_frames};
 
 pub const STATE_RUNNING: &str = "running";
 pub const STATE_OPENING: &str = "opening";
@@ -41,6 +43,8 @@ pub const STATE_DISABLED: &str = "disabled";
 pub enum OutputSink {
     Vban(Arc<VbanOut>),
     Asio(Arc<AsioOut>),
+    /// #285: the ASIO worker over the native Dante device, in this process.
+    Dante(Arc<AsioOut>, DanteParams, DanteLink),
 }
 
 impl OutputSink {
@@ -48,7 +52,7 @@ impl OutputSink {
     pub fn push(&self, block: ProgramBlock) {
         match self {
             Self::Vban(out) => out.push(block),
-            Self::Asio(out) => out.push(block),
+            Self::Asio(out) | Self::Dante(out, ..) => out.push(block),
         }
     }
 
@@ -56,7 +60,7 @@ impl OutputSink {
     pub fn stop(&self) {
         match self {
             Self::Vban(out) => out.stop(),
-            Self::Asio(out) => out.stop(),
+            Self::Asio(out) | Self::Dante(out, ..) => out.stop(),
         }
     }
 
@@ -65,7 +69,7 @@ impl OutputSink {
     pub fn discard(&self) {
         match self {
             Self::Vban(out) => out.discard(),
-            Self::Asio(out) => out.discard(),
+            Self::Asio(out) | Self::Dante(out, ..) => out.discard(),
         }
     }
 
@@ -73,7 +77,7 @@ impl OutputSink {
     fn start_error(&self) -> Option<String> {
         match self {
             Self::Vban(out) => out.start_error(),
-            Self::Asio(out) => out.start_error(),
+            Self::Asio(out) | Self::Dante(out, ..) => out.start_error(),
         }
     }
 }
@@ -119,6 +123,9 @@ pub struct OutputStatus {
     pub note: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub asio: Option<AsioStatus>,
+    /// #285: the stack's own figures while a Dante device runs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dante: Option<DanteFigures>,
 }
 
 /// A VBAN output's state: disabled, not built (the reason), its thread not
@@ -168,9 +175,21 @@ pub fn vban_reason_code(
 /// A VBAN output's latency from the boundary, ms: the send latency, the
 /// delay, the rate converter's delay.
 pub fn vban_latency_ms(delay_ms: u32, rate_hz: u32) -> f64 {
-    VBAN_SEND_LATENCY_100NS as f64 / 10_000.0
+    vban_latency_ms_at(delay_ms, rate_hz, false)
+}
+
+/// #289: a VBAN output's latency with `audio_low_latency` as built: its L
+/// (15 ms when on), the delay, and the converter's delay — `rate / 60`
+/// padded when off, the converter's own when on.
+pub fn vban_latency_ms_at(delay_ms: u32, rate_hz: u32, low_latency: bool) -> f64 {
+    let converter = if low_latency {
+        low_latency_delay_frames(rate_hz)
+    } else {
+        fft_delay_frames(rate_hz)
+    };
+    base_send_latency_100ns(low_latency) as f64 / 10_000.0
         + f64::from(delay_ms)
-        + fft_delay_frames(rate_hz) as f64 * 1_000.0 / f64::from(rate_hz)
+        + converter as f64 * 1_000.0 / f64::from(rate_hz)
 }
 
 impl RunningOutput {
@@ -186,8 +205,12 @@ impl RunningOutput {
     pub fn status(&self, network_rate: u32) -> OutputStatus {
         match (&self.sink, self.entry.kind) {
             (Some(OutputSink::Asio(out)), _) => self.asio_status(Some(out), network_rate),
+            (Some(OutputSink::Dante(out, _, link)), _) => OutputStatus {
+                dante: link.figures(),
+                ..self.asio_status(Some(out), network_rate)
+            },
             (Some(OutputSink::Vban(out)), _) => self.vban_status(Some(out)),
-            (None, OutputType::Asio) => self.asio_status(None, network_rate),
+            (None, OutputType::Asio | OutputType::Dante) => self.asio_status(None, network_rate),
             (None, OutputType::Vban) => self.vban_status(None),
         }
     }
@@ -233,12 +256,17 @@ impl RunningOutput {
             format: e.vban.as_ref().map_or("int24", |v| v.format.as_str()),
             channels: 2,
             delay_ms: e.delay_ms,
-            latency_ms: vban_latency_ms(e.delay_ms, self.built_rate),
+            latency_ms: vban_latency_ms_at(
+                e.delay_ms,
+                self.built_rate,
+                out.is_some_and(|out| out.low_latency()),
+            ),
             blocks_sent: telemetry.as_ref().map_or(0, |s| s.blocks_sent),
             blocks_dropped: telemetry.as_ref().map_or(0, |s| s.blocks_dropped),
             vban: telemetry,
             note: None,
             asio: None,
+            dante: None,
         }
     }
 
@@ -258,7 +286,7 @@ impl RunningOutput {
         let status = snap.as_ref().map(|s| s.status.clone());
         let rate = status.as_ref().map_or(0, |s| s.driver_rate);
         let notes: Vec<String> = [
-            rate_note(rate, network_rate),
+            output_rate_note(e.kind, rate, network_rate),
             status
                 .as_ref()
                 .and_then(|s| buffer_note(s.buffer_frames, rate)),
@@ -285,6 +313,7 @@ impl RunningOutput {
             vban: None,
             note: (running && !notes.is_empty()).then(|| notes.join("; ")),
             asio: status,
+            dante: None,
         }
     }
 }
@@ -296,6 +325,8 @@ pub struct AudioOutputs {
     problems: Mutex<Vec<String>>,
     /// #257: frames the program's limiter engaged on outside a fade.
     limiter_overs: AtomicU64,
+    /// #289: `audio_low_latency` as the outputs task read it last.
+    low_latency: AtomicBool,
 }
 
 impl Default for AudioOutputs {
@@ -312,7 +343,18 @@ impl AudioOutputs {
             network_rate: AtomicU32::new(DEFAULT_NETWORK_RATE),
             problems: Mutex::new(Vec::new()),
             limiter_overs: AtomicU64::new(0),
+            low_latency: AtomicBool::new(false),
         }
+    }
+
+    /// #289: `audio_low_latency` as the outputs task read it last (the list
+    /// is applied with it: a VBAN output built otherwise is rebuilt).
+    pub fn low_latency(&self) -> bool {
+        self.low_latency.load(Ordering::Relaxed)
+    }
+
+    pub fn set_low_latency(&self, on: bool) {
+        self.low_latency.store(on, Ordering::Relaxed);
     }
 
     /// #257: the program's limiter engaged on `n` more frames outside a

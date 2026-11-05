@@ -15,6 +15,7 @@ import {
   EXIT_USAGE,
   ArenaLayer,
   WallFramesReport,
+  arenaOutputFailures,
   coveringLayers,
   wallFramesFailures,
 } from "./wall-frames-gate";
@@ -50,12 +51,17 @@ test("judder fails and names the uneven boundaries", () => {
   ]);
 });
 
+/** Uneven boundaries held as a slip: long, then short, in turn. */
+function held(...at: number[]) {
+  return at.map((boundary, i) => ({ boundary, refreshes: i % 2 === 0 ? 3 : 1 }));
+}
+
 /** A take whose only defect is one slip at boundaries 708 and 709. */
 function oneSlip(): WallFramesReport {
   return {
     ...clean(),
     verdict: "defects",
-    refreshes: { judged: 1166, uneven: 2, unresolved: 0, uneven_samples: [708, 709] },
+    refreshes: { judged: 1166, uneven: 2, unresolved: 0, uneven_boundaries: held(708, 709) },
   };
 }
 
@@ -66,21 +72,42 @@ test("one slip per take passes (owner, #272, 30.10.2026)", () => {
 test("a lone uneven boundary is one slip and passes (#272, CI 41189187432)", () => {
   const report = oneSlip();
   report.refreshes!.uneven = 3;
-  report.refreshes!.uneven_samples = [8, 708, 709];
+  report.refreshes!.uneven_boundaries = held(8, 708, 709);
   expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toEqual([]);
+});
+
+test("a slip is one refresh over the clip's own longest hold, at 25 fps too (#272)", () => {
+  const take = (refreshes: number): WallFramesReport => {
+    const report = { ...oneSlip(), fps: 25 };
+    report.refreshes = {
+      ...report.refreshes!,
+      uneven: 1,
+      uneven_boundaries: [{ boundary: 708, refreshes }],
+    };
+    return report;
+  };
+  expect(wallFramesFailures("wall-25", EXIT_DEFECTS, take(4))).toEqual([]);
+  expect(wallFramesFailures("wall-25", EXIT_DEFECTS, take(5))).not.toEqual([]);
+});
+
+test("a freeze is no slip, however few boundaries it touches (#272)", () => {
+  const report = oneSlip();
+  report.refreshes!.uneven = 1;
+  report.refreshes!.uneven_boundaries = [{ boundary: 708, refreshes: 4 }];
+  expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toHaveLength(1);
 });
 
 test("three slips per take pass (owner, #272, 31.10.2026)", () => {
   const report = oneSlip();
   report.refreshes!.uneven = 6;
-  report.refreshes!.uneven_samples = [8, 9, 708, 709, 900, 901];
+  report.refreshes!.uneven_boundaries = held(8, 9, 708, 709, 900, 901);
   expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toEqual([]);
 });
 
 test("four slips fail", () => {
   const report = oneSlip();
   report.refreshes!.uneven = 8;
-  report.refreshes!.uneven_samples = [8, 9, 708, 709, 900, 901, 1000, 1001];
+  report.refreshes!.uneven_boundaries = held(8, 9, 708, 709, 900, 901, 1000, 1001);
   expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toEqual([
     "wall-30: JUDDER: 8 of 1166 judged boundaries were held the wrong number of refreshes",
   ]);
@@ -89,21 +116,21 @@ test("four slips fail", () => {
 test("four lone uneven boundaries are four slips and fail", () => {
   const report = oneSlip();
   report.refreshes!.uneven = 4;
-  report.refreshes!.uneven_samples = [8, 208, 708, 900];
+  report.refreshes!.uneven_boundaries = held(8, 208, 708, 900);
   expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toHaveLength(1);
 });
 
 test("a run of seven neighbours is four slips and fails", () => {
   const report = oneSlip();
   report.refreshes!.uneven = 7;
-  report.refreshes!.uneven_samples = [700, 701, 702, 703, 704, 705, 706];
+  report.refreshes!.uneven_boundaries = held(700, 701, 702, 703, 704, 705, 706);
   expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toHaveLength(1);
 });
 
 test("a run of six neighbours is three slips and passes", () => {
   const report = oneSlip();
   report.refreshes!.uneven = 6;
-  report.refreshes!.uneven_samples = [700, 701, 702, 703, 704, 705];
+  report.refreshes!.uneven_boundaries = held(700, 701, 702, 703, 704, 705);
   expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toEqual([]);
 });
 
@@ -115,8 +142,30 @@ test("fewer listed boundaries than uneven ones fail", () => {
 
 test("a slip with no listed boundaries fails", () => {
   const report = oneSlip();
-  delete report.refreshes!.uneven_samples;
+  delete report.refreshes!.uneven_boundaries;
   expect(wallFramesFailures("wall-30", EXIT_DEFECTS, report)).toHaveLength(1);
+});
+
+test("an unresolved boundary counts as a slip (#272, CI 41227214102)", () => {
+  const incomplete = { ...clean(), verdict: "incomplete" as const };
+  incomplete.refreshes = { judged: 1197, uneven: 0, unresolved: 2 };
+  expect(wallFramesFailures("wall-30", EXIT_INCOMPLETE, incomplete)).toEqual([]);
+  const report = oneSlip();
+  report.refreshes!.unresolved = 2;
+  expect(wallFramesFailures("wall-25", EXIT_DEFECTS, report)).toEqual([]);
+  report.refreshes!.unresolved = 3;
+  expect(wallFramesFailures("wall-25", EXIT_DEFECTS, report)).toHaveLength(1);
+});
+
+test("an incomplete take with a contradiction or a short decode still fails", () => {
+  const incomplete = { ...clean(), verdict: "incomplete" as const };
+  incomplete.refreshes = { judged: 1197, uneven: 0, unresolved: 1, inconsistent: 1 };
+  expect(wallFramesFailures("wall-30", EXIT_INCOMPLETE, incomplete)).toHaveLength(1);
+  const short = { ...clean(), verdict: "incomplete" as const, decoded: 2000 };
+  short.refreshes = { judged: 1197, uneven: 0, unresolved: 1 };
+  expect(wallFramesFailures("wall-30", EXIT_INCOMPLETE, short)).toHaveLength(1);
+  const quiet = { ...clean(), verdict: "incomplete" as const, decoded: 2000 };
+  expect(wallFramesFailures("wall-30", EXIT_INCOMPLETE, quiet)).toHaveLength(1);
 });
 
 test("a slip beside any other defect fails, and the slip is named", () => {
@@ -136,11 +185,11 @@ test("a slip beside any other defect fails, and the slip is named", () => {
 
 test("a slip in a take a clean verdict could not hold fails", () => {
   for (const weak of [
-    { refreshes: { judged: 1166, uneven: 2, unresolved: 0, inconsistent: 1, uneven_samples: [8, 9] } },
+    { refreshes: { judged: 1166, uneven: 2, unresolved: 0, inconsistent: 1, uneven_boundaries: held(8, 9) } },
     { unverified: { steps: 1 } },
     { decoded: 2000 },
-    { refreshes: { judged: 299, uneven: 2, unresolved: 0, uneven_samples: [8, 9] } },
-    { refreshes: { judged: 1166, uneven: 2, unresolved: 1, uneven_samples: [8, 9] } },
+    { refreshes: { judged: 299, uneven: 2, unresolved: 0, uneven_boundaries: held(8, 9) } },
+    { refreshes: { judged: 1166, uneven: 2, unresolved: 3, uneven_boundaries: held(8, 9) } },
   ]) {
     expect(wallFramesFailures("wall-30", EXIT_DEFECTS, { ...oneSlip(), ...weak })).not.toEqual([]);
   }
@@ -298,4 +347,52 @@ test("Arena's Blank generator draws nothing, so a Blank clip above the MAX clip 
     layer([["SNV BG", true, "NDI Source"]]),
   ];
   expect(coveringLayers(layers)).toEqual(["L4 'SNV BG'"]);
+});
+
+/** A take of Arena's output: `slips` slips + `inconsistent` contradictory boundaries. */
+function arenaTake(slips: number, inconsistent: number): WallFramesReport {
+  const report = oneSlip();
+  const uneven = unevenSlips(slips);
+  report.refreshes = { ...report.refreshes!, uneven: uneven.length, uneven_boundaries: uneven, inconsistent };
+  return report;
+}
+
+function unevenSlips(slips: number): { boundary: number; refreshes: number }[] {
+  return Array.from({ length: slips }, (_, i) => [
+    { boundary: 100 * (i + 1), refreshes: 3 },
+    { boundary: 100 * (i + 1) + 1, refreshes: 1 },
+  ]).flat();
+}
+
+test("Arena's output passes its measured take: 4 slips, 3 contradictory boundaries (#285)", () => {
+  expect(arenaOutputFailures("wall-25", EXIT_DEFECTS, arenaTake(4, 3))).toEqual([]);
+});
+
+test("the sender does not get Arena's budget (#285)", () => {
+  expect(wallFramesFailures("wall-25", EXIT_DEFECTS, arenaTake(4, 0))).not.toEqual([]);
+  expect(wallFramesFailures("wall-25", EXIT_DEFECTS, arenaTake(1, 1))).not.toEqual([]);
+});
+
+test("Arena's output fails over 20 slips, contradictory boundaries counted (owner, #272, 5.11.2026)", () => {
+  expect(arenaOutputFailures("wall-25", EXIT_DEFECTS, arenaTake(20, 0))).toEqual([]);
+  expect(arenaOutputFailures("wall-25", EXIT_DEFECTS, arenaTake(18, 3))).not.toEqual([]);
+  expect(arenaOutputFailures("wall-25", EXIT_DEFECTS, arenaTake(21, 0))).not.toEqual([]);
+});
+
+test("Arena's budget never covers a lost frame, a jump back or a stall (#285)", () => {
+  const stall = arenaTake(1, 0);
+  stall.refreshes!.uneven_boundaries![0].refreshes = 4;
+  for (const report of [
+    { ...arenaTake(1, 0), lost_frames: 1 },
+    { ...arenaTake(1, 0), jumps_back: 1 },
+    stall,
+  ]) {
+    expect(arenaOutputFailures("wall-25", EXIT_DEFECTS, report)).not.toEqual([]);
+  }
+});
+
+test("Arena's output with only contradictory boundaries, verdict incomplete, passes (#285)", () => {
+  const report = arenaTake(0, 2);
+  report.verdict = "incomplete";
+  expect(arenaOutputFailures("wall-25", EXIT_INCOMPLETE, report)).toEqual([]);
 });

@@ -376,6 +376,9 @@ pub fn kind_sk(kind: &str) -> &str {
         "limited" => "limiter",
         "ndi_late" => "NDI neskoro",
         "unserviced" => "neobslúžený slot",
+        "pump_missed" => "vynechaný blok Dante",
+        "pump_late" => "oneskorený blok Dante",
+        "pump_overrun" => "prekročený blok Dante",
         START => "spustenie",
         other => other,
     }

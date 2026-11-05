@@ -94,6 +94,10 @@ MIN_COVERAGE = 0.95
 # seconds. ``--min-boundaries`` sets it.
 MIN_BOUNDARIES = 300
 LIST_MAX = 20
+# The gate counts slips from `uneven_boundaries`, two boundaries a slip, and
+# fails a take whose list is shorter than `uneven`: it holds ARENA_MAX_SLIPS
+# (e2e/wall-frames-gate.ts) twice over and then some.
+UNEVEN_BOUNDARIES_MAX = 64
 # check_present_rate() needs this many timed intervals.
 MIN_TIMED = 10
 
@@ -752,11 +756,13 @@ def refresh_report(
     beside it: what it did not resolve could hide judder, so a clean
     verdict needs none (review rounds 5-6: a 60 fps camera on a 75 Hz wall
     left a 4-refresh boundary open; a stall that also stalled dxcam hid
-    judder). ``None`` without a refresh rate."""
+    judder). ``uneven_boundaries`` numbers each uneven boundary and gives the
+    fewest refreshes it surely held. ``None`` without a refresh rate."""
     if not timing.period:
         return None
     allowance = round(SEAM_HOLD_S / timing.period)
     uneven = []
+    uneven_boundaries = []
     judged = unresolved = inconsistent = 0
     seam_hold = 0
     last = len(runs) - 1
@@ -772,10 +778,12 @@ def refresh_report(
             if lo > max(expected) + allowance or hi < min(expected):
                 judged += 1
                 uneven.append(run.first_sample)
+                uneven_boundaries.append({"boundary": n, "refreshes": lo})
             continue
         if lo > max(expected) or hi < min(expected):
             judged += 1
             uneven.append(run.first_sample)
+            uneven_boundaries.append({"boundary": n, "refreshes": lo})
         elif hi <= max(expected) and all(m in expected for m in range(lo, hi + 1)):
             judged += 1
         elif 0 < n < last:
@@ -786,6 +794,7 @@ def refresh_report(
         "judged": judged,
         "uneven": len(uneven),
         "uneven_samples": uneven[:LIST_MAX],
+        "uneven_boundaries": uneven_boundaries[:UNEVEN_BOUNDARIES_MAX],
         "unresolved": unresolved,
         "inconsistent": inconsistent,
         "seam_hold_s": round(seam_hold * timing.period, 3),

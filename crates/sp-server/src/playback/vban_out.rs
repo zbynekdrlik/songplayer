@@ -64,8 +64,8 @@ use crate::playback::audio_out_queue::{BlockQueue, RunGuard, lock};
 use crate::playback::loop_stats::percentile_ceil;
 use crate::playback::program_output_timing::utc_label;
 use crate::playback::vban_packet::{
-    VBAN_SEND_LATENCY_100NS, VBAN_STREAM_NAME_LEN, VbanEncoder, VbanFormat, empty_packets,
-    packet_send_at_in, stream_name_bytes,
+    VBAN_SEND_LATENCY_100NS, VBAN_SEND_LATENCY_LOW_100NS, VBAN_STREAM_NAME_LEN, VbanEncoder,
+    VbanFormat, base_send_latency_100ns, empty_packets, packet_send_at_in, stream_name_bytes,
 };
 use crate::playback::vban_rate::VbanRateConverter;
 use crate::playback::vban_stall::{VbanLateEvent, VbanStallLog, VbanStallWarn};
@@ -129,6 +129,12 @@ pub const VBAN_IDLE_WAIT: Duration = Duration::from_millis(100);
 const _: () = assert!(
     VBAN_IDLE_WAIT.as_nanos() / 100
         < (crate::playback::program_output::MAX_TICKS_PER_WAKE * VBAN_SEND_LATENCY_100NS) as u128
+);
+// #289: the same relation holds for the low-latency L.
+const _: () = assert!(
+    VBAN_IDLE_WAIT.as_nanos() / 100
+        < (crate::playback::program_output::MAX_TICKS_PER_WAKE * VBAN_SEND_LATENCY_LOW_100NS)
+            as u128
 );
 
 /// How often DNS is re-resolved when the settings did not change.
@@ -343,6 +349,9 @@ pub struct VbanOut {
     format: VbanFormat,
     /// #233: the entry's delay, added to the send latency (100 ns).
     delay_100ns: i64,
+    /// #289: built with `audio_low_latency` on: L = 15 ms, a converting
+    /// destination unpadded (`VbanRateConverter::for_latency`).
+    low_latency: bool,
     /// #233: why the output's thread could not start (Windows: the UDP bind
     /// or the spawn failed); shown as the output's reason.
     start_error: Mutex<Option<String>>,
@@ -373,13 +382,25 @@ impl VbanOut {
             running: AtomicBool::new(false),
             format,
             delay_100ns,
+            low_latency: false,
             start_error: Mutex::new(None),
             fault: Mutex::new(None),
         }
     }
 
-    /// #233: the output of a VBAN entry at `network_rate`.
+    /// #233: the output of a VBAN entry at `network_rate` (#289: at the
+    /// default latency).
     pub fn for_entry(entry: &OutputEntry, network_rate: u32) -> Result<Self, String> {
+        Self::for_entry_at(entry, network_rate, false)
+    }
+
+    /// #289: the output of a VBAN entry at `network_rate`, with
+    /// `audio_low_latency` as read (`low_latency`).
+    pub fn for_entry_at(
+        entry: &OutputEntry,
+        network_rate: u32,
+        low_latency: bool,
+    ) -> Result<Self, String> {
         let dest = entry
             .vban
             .as_ref()
@@ -387,8 +408,14 @@ impl VbanOut {
         let format = VbanFormat::new(effective_rate(entry.rate, network_rate), dest.format)?;
         Ok(Self {
             id: entry.id.clone(),
+            low_latency,
             ..Self::for_destination(format, i64::from(entry.delay_ms) * 10_000)
         })
+    }
+
+    /// #289: built with `audio_low_latency` on.
+    pub fn low_latency(&self) -> bool {
+        self.low_latency
     }
 
     /// #233 release review: the entry's id ("" for an output no entry made).
@@ -631,13 +658,27 @@ pub fn plan_wait_up_to(now_100ns: i64, at_100ns: i64, max_100ns: i64) -> i64 {
 /// #233: an output's send latency, L + its delay (100 ns). Its own fn, not
 /// inside `VbanSender::new`: cargo-mutants never mutates a fn named `new`.
 pub fn send_latency_100ns(delay_100ns: i64) -> i64 {
-    VBAN_SEND_LATENCY_100NS + delay_100ns
+    send_latency_in(delay_100ns, false)
+}
+
+/// #289: an output's send latency with `audio_low_latency` as built: its L
+/// (`base_send_latency_100ns`) + its delay (100 ns).
+pub fn send_latency_in(delay_100ns: i64, low_latency: bool) -> i64 {
+    base_send_latency_100ns(low_latency) + delay_100ns
 }
 
 /// #233: an output's longest wait for a packet, [`VBAN_MAX_WAIT_100NS`] + its
 /// delay (100 ns): a due time further ahead is a clock mismatch.
 pub fn max_wait_100ns(delay_100ns: i64) -> i64 {
-    VBAN_MAX_WAIT_100NS + delay_100ns
+    max_wait_in(delay_100ns, false)
+}
+
+/// #289: the longest wait with `audio_low_latency` as built: 4 × its L
+/// (the relation of [`VBAN_MAX_WAIT_100NS`]) + its delay. At 15 ms that is
+/// 60 ms, still past every packet's planned wait (L + the delay + under a
+/// slot of packet offset).
+pub fn max_wait_in(delay_100ns: i64, low_latency: bool) -> i64 {
+    4 * base_send_latency_100ns(low_latency) + delay_100ns
 }
 
 /// #233: sleep from `now_100ns` until `end_100ns` in sleeps of at most
@@ -692,10 +733,16 @@ impl VbanSender {
             format,
             delay_100ns,
             VbanRateConverter::new(format.rate_hz()),
+            false,
         )
     }
 
-    fn build(format: VbanFormat, delay_100ns: i64, converter: VbanRateConverter) -> Self {
+    fn build(
+        format: VbanFormat,
+        delay_100ns: i64,
+        converter: VbanRateConverter,
+        low_latency: bool,
+    ) -> Self {
         if let Some(why) = converter.failed() {
             warn!(
                 rate = format.rate_hz(),
@@ -705,8 +752,8 @@ impl VbanSender {
         }
         Self {
             format,
-            latency_100ns: send_latency_100ns(delay_100ns),
-            max_wait_100ns: max_wait_100ns(delay_100ns),
+            latency_100ns: send_latency_in(delay_100ns, low_latency),
+            max_wait_100ns: max_wait_in(delay_100ns, low_latency),
             converter,
             encoder: VbanEncoder::default(),
             packets: empty_packets(format),
@@ -716,7 +763,10 @@ impl VbanSender {
 
     /// #233: the sender of `out`'s destination.
     pub fn for_out(out: &VbanOut) -> Self {
-        Self::with_converter(out, VbanRateConverter::new(out.format().rate_hz()))
+        Self::with_converter(
+            out,
+            VbanRateConverter::for_latency(out.format().rate_hz(), out.low_latency()),
+        )
     }
 
     /// #233 release review: the sender of `out`'s destination over
@@ -729,7 +779,12 @@ impl VbanSender {
                 out.format().rate_hz()
             ));
         }
-        Self::build(out.format(), out.delay_100ns(), converter)
+        Self::build(
+            out.format(),
+            out.delay_100ns(),
+            converter,
+            out.low_latency(),
+        )
     }
 
     /// The `nuFrame` the next packet carries.
@@ -903,6 +958,7 @@ pub fn spawn_vban_thread(out: Arc<VbanOut>, id: String) {
                 rate = format.rate_hz(),
                 format = format.sample().as_str(),
                 delay_100ns = out.delay_100ns(),
+                low_latency = out.low_latency(),
                 local = ?socket.local_addr().ok(),
                 "vban output thread started"
             );
@@ -925,3 +981,6 @@ pub(crate) mod tests;
 #[cfg(test)]
 #[path = "vban_out_tests_dest.rs"]
 mod tests_dest;
+#[cfg(test)]
+#[path = "vban_out_tests_latency.rs"]
+mod tests_latency;

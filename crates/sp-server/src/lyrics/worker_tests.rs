@@ -293,8 +293,9 @@ async fn gather_sources_pushes_description_candidate_when_claude_returns_lyrics(
 /// lyrics in its description, the description block must NOT push an empty
 /// CandidateText. The match guard `!lines.is_empty()` prevents that. With
 /// every source missing, `gather_sources_impl` returns Ok with an EMPTY
-/// candidate list (#120 follow-up) — no longer a bail — so `process_song`'s
-/// gate can route the song to asr_path blind. This test verifies both: the
+/// candidate list (#120 follow-up) — no longer a bail — so `process_song`
+/// can route the song to the v22 base tier (the g35t transcript). This test
+/// verifies both: the
 /// empty-array description is skipped, and the zero-candidate result is a
 /// clean empty `SongContext`, not an error.
 #[tokio::test]

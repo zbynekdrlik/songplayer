@@ -73,7 +73,7 @@ fn each_type_error_names_the_entry_and_the_field_never_the_value() {
         ),
         (
             r#"[{"id":"out-1","name":"a","type":"midi","vban":{"host":"h","port":1}}]"#,
-            "entry 1 (id out-1): type must be vban or asio",
+            "entry 1 (id out-1): type must be vban, asio or dante",
         ),
         (
             r#"[{"id":"out-1","name":"a","vban":{"host":"h","port":1}}]"#,
@@ -108,7 +108,7 @@ fn each_type_error_names_the_entry_and_the_field_never_the_value() {
         (r#"[1]"#, "entry 1 is not a JSON object"),
         (
             r#"[{"id":"Secret-Ish\u0000","name":"a","type":"x"}]"#,
-            "entry 1 (id ?ecret-?sh?): type must be vban or asio",
+            "entry 1 (id ?ecret-?sh?): type must be vban, asio or dante",
         ),
     ];
     for (input, want) in cases {
@@ -154,7 +154,7 @@ fn a_stored_entry_this_version_cannot_read_is_skipped_and_the_rest_run() {
     assert_eq!(
         stored.problems,
         vec![
-            "entry 2 (id out-2): type must be vban or asio".to_string(),
+            "entry 2 (id out-2): type must be vban, asio or dante".to_string(),
             "entry 3 (id out-1): id is used by an earlier entry".to_string(),
             "entry 4 (id out-4): vban.host is empty".to_string(),
         ]
@@ -413,4 +413,28 @@ fn the_stored_read_keeps_one_asio_entry_per_driver_and_four_at_most() {
             "entry 7 (id out-1): id is used by an earlier entry".to_string(),
         ]
     );
+}
+
+#[test]
+fn a_dante_entry_reads_its_own_block() {
+    let raw = r#"[{"id":"out-1","name":"Dante","type":"dante","enabled":false,
+        "dante":{"device":"SongPlayer","ip":"10.77.9.210"}}]"#;
+    let entries = parse_list(raw).unwrap();
+    assert_eq!(entries[0].kind, OutputType::Dante);
+    assert!(!entries[0].enabled);
+    assert_eq!(entries[0].dante.as_ref().unwrap().device, "SongPlayer");
+    assert_eq!(entries[0].dante.as_ref().unwrap().ip, "10.77.9.210");
+}
+
+#[test]
+fn a_dante_block_refuses_a_missing_field_and_a_bad_address() {
+    let missing = r#"[{"id":"out-1","name":"D","type":"dante","dante":{"device":"SongPlayer"}}]"#;
+    assert!(
+        parse_list(missing)
+            .unwrap_err()
+            .contains("dante.ip is missing")
+    );
+    let bad = r#"[{"id":"out-1","name":"D","type":"dante",
+        "dante":{"device":"SongPlayer","ip":"nowhere"}}]"#;
+    assert!(parse_list(bad).unwrap_err().contains("dante.ip"));
 }

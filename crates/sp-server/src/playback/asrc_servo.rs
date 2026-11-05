@@ -1,7 +1,10 @@
-//! #233: the ASIO output's drift servo — camera-box's `asrc-compensator`
-//! (libobs `media-io/asrc-compensator.{h,c}`; its MIT Rust model
-//! `camera-box/src/asrc_bench.rs` `RealtimeAsrcCompensator`; the line numbers
-//! below are camera-box's) turned around for an OUTPUT. The producer is
+//! #233: the ASIO output's drift servo. Since #285 step 3 an ADAPTER over
+//! dstack-resample's ASRC controller (`dstack_resample::asrc::Controller`):
+//! the laws — camera-box's `asrc-compensator` turned around for an output,
+//! with SongPlayer's cushion, calm zone and priming — live there, made
+//! generic (two clocks and a target depth); this file maps SongPlayer's
+//! observation (100 ns on the program wall, frames at the card's rate) onto
+//! it and keeps the worker's and the status's API. The producer is
 //! SongPlayer's program (the genlock wall, dantesync); the consumer is the
 //! card's clock (Dante PTP, SoundGrid). Pure: the ASIO worker feeds it one
 //! observation per program block and gives its answer to the resampler
@@ -10,104 +13,52 @@
 //! Per block, on the program wall: when the block was handled, its boundary,
 //! the frames buffered for the card (the ring + the splice's hold), the
 //! frames the card consumed so far and the frames it played silence for
-//! (its underruns).
+//! (its underruns). The adapter gives the controller:
 //!
-//! - latency = (buffered − the splice's pending skip, signed) / rate +
-//!   (handled − boundary): a boundary's time to its sound leaving SongPlayer.
-//!   Target:
-//!   two grid slots (VBAN's send budget) + the entry's delay — not "2–3
-//!   driver buffers": one 33 ms block
-//!   arrives per boundary, 10–33 ms late in normal operation, so a ring held
-//!   at a few driver buffers would underrun on every block.
-//! - rate point = (handled, consumed / rate − handled) per 1 s window (the
-//!   window's means): the least-squares slope over up to 600 s is the card's
-//!   ppm against the wall, used once 30 points span 60 s (camera-box #1084).
-//! - level loop: P 2 ppm/ms on a 10 s EMA of the window-mean latency error,
-//!   ±50 ppm (camera-box #1335 follow-up 5); I 0.0002 ppm/(ms·s), ±3 ppm,
-//!   frozen while rate + P + I saturates (the plan's form: camera-box freezes
-//!   on its estimate + bias + I, without P).
-//! - the offset slew (the owner's ruling of 8.10.2026, #233 comment
-//!   6053850076: the resampler absorbs a difference SMOOTHLY, by its ratio,
-//!   never by a skip or an insert): a window mean beyond the calm zone
-//!   ([`calm_zone_ms`]: 1 ms, or half the driver's callback period when that
-//!   is longer — a 1 s mean of a reading that saws by a period wanders by a
-//!   fraction of it) adds [`braking_ppm`] — the fastest
-//!   correction that can still stop at the calm zone's edge decelerating at
-//!   the slew limit — so a lasting offset (a date step's remainder ≤ one
-//!   slot, a callback period's sawtooth) is drained by the ratio, 33 ms in
-//!   about 2.5 min within ±300 ppm. Inside the calm zone only camera-box's
-//!   level loop acts. (A changed delay rebuilds the output and a driver's
-//!   buffer change reopens it: both start over with the priming.)
-//! - the excess an underrun leaves is KEPT as cushion (the main session's
-//!   ruling, #233 comment 6056680979, Q1): the card's underrun frames since
-//!   the last block are folded into a cushion over the target, at most
-//!   [`CUSHION_MAX_100NS`] (one slot); the offset slew drains only what lies
-//!   outside the band [target, target + cushion] ([`slew_err_100ns`]), so
-//!   the next late block finds the ring that much fuller; the level loop
-//!   keeps the configured target, so the kept excess decays slowly through
-//!   it (P ≤ 50 ppm), and the cushion follows the window mean down
-//!   ([`kept_cushion`]). A window that folded an underrun keeps its cushion
-//!   (its mean still holds the blocks before it).
-//! - output: clamp(rate + slew + P + I, ±300 ppm), moved at most 5 ppm per
-//!   second of the wall (camera-box #803: inaudible).
-//! - jitter: a late or clumped block finds the ring that much emptier, so
-//!   the latency it reads is the same — nothing moves. Only a lasting offset
-//!   does, and a block's own reading never kicks the ratio: the level loop
-//!   reads the 1 s window's mean.
-//! - the last resort: a block whose latency is under [`HARD_FLOOR_100NS`]
-//!   (the splice's hold + one slot, Q2: a missing boundary at delay 0 is one
-//!   faded insert, not a run of underruns; an absolute floor, so an entry's
-//!   delay never moves it) or more than
-//!   [`HARD_EXCESS_100NS`] off the target either way (over it, the next
-//!   block would overflow the ring; under it, a delayed output would play
-//!   that early for many minutes) is a HARD re-centre at once, by its
-//!   error: a
-//!   fault, counted (`hard_recentres`), WARNed by the worker, which inserts
-//!   or skips under fades (`asrc::Splice`). The first block primes the ring
-//!   to the target the same way, and that is no re-centre. Either drops the
-//!   cushion.
-//! - a rate point more than 10 ms off the fit re-bases the regression
-//!   (#1335 follow-up 2): it stays out, and the next point moves the line by
-//!   the whole step (the same straddle splits a step across two window
-//!   means); a whole step under 10 ms enters it as a point (camera-box's
-//!   design).
+//! - the depth = latency = (buffered − the splice's pending skip, signed) /
+//!   rate + (handled − boundary): a boundary's time to its sound leaving
+//!   SongPlayer. Target: two grid slots (VBAN's send budget) + the entry's
+//!   delay — not "2–3 driver buffers": one 33 ms block arrives per boundary,
+//!   10–33 ms late in normal operation;
+//! - "our" clock = handled − the first block's handled, s; the other clock =
+//!   consumed / rate (the rate point per 1 s window, the card's ppm);
+//! - the underrun frames / rate as the consumer's silence (the cushion, at
+//!   most [`CUSHION_MAX_100NS`], Q1);
+//! - the calm zone [`calm_zone_ms`] of the driver's callback, the floor
+//!   [`HARD_FLOOR_100NS`] and the edge [`HARD_EXCESS_100NS`], and the
+//!   priming of the first block.
 //!
-//! Integers (100 ns) where a boundary is pinned (latency, window span), f64
-//! for the regression. Sign: a POSITIVE correction makes MORE output per
-//! input — the card runs fast, or too little is buffered. rubato's relative
-//! ratio is `1 + ppm·1e-6`.
+//! dstack's laws (its `asrc.rs` module doc): the rate by least squares over
+//! ≤ 600 s of 1 s window means (30 points over 60 s to lock, a 10 ms
+//! residual re-bases); P 2 ppm/ms on a 10 s EMA (±50), I ±3 frozen while the
+//! sum saturates; beyond the calm zone [`braking_ppm`] (the owner's ruling
+//! of 8.10.2026: an offset is drained by the ratio, never by a skip or an
+//! insert) against the band [target, target + cushion]; ±300 ppm, 5 ppm/s;
+//! a window whose rate point moves > 100 000 ppm from the last is a stall
+//! (the fit flushed, the correction held); the last resort, a depth under
+//! the floor or more than the edge off the target, is a HARD re-centre at
+//! once by its error (a fault, counted, WARNed by the worker, which inserts
+//! or skips under fades, `asrc::Splice`). The first block primes the ring to
+//! the target the same way, and that is no re-centre.
+//!
+//! What stays SongPlayer's here: the 100 ns observation and its latency
+//! reading, the status (the window's mean latency, [`slew_eta_s`]), and the
+//! constants of its grid. Sign: a POSITIVE correction makes MORE output per
+//! input — the card runs fast, or too little is buffered. The resampler's
+//! relative ratio is `1 + ppm·1e-6`.
 
-use std::collections::VecDeque;
+use dstack_resample::asrc::{Basis, Controller, RateFit, Step, WINDOW_S, calm_zone_ms_for};
 
-/// Bound on the applied correction, ppm (camera-box `asrc_bench.rs:204`, `asrc-compensator.h:42`).
-pub const MAX_PPM: f64 = 300.0;
-/// The applied correction moves at most this per second of wall (`:209`, `.h:48`).
-pub const MAX_SLEW_PPM_PER_S: f64 = 5.0;
-/// The rate regression's span, s (`:223`, `.h:62`).
-pub const REGRESSION_SPAN_S: f64 = 600.0;
-/// Points before a slope is used (`:228`, `.h:67`).
-pub const REGRESSION_MIN_POINTS: usize = 30;
-/// Span before a slope is used, s (`:235`, `.h:76`).
-pub const REGRESSION_LOCK_SPAN_S: f64 = 60.0;
-/// Points kept at most (`:243`, `.h:82`).
-pub const REGRESSION_CAP: usize = 640;
-/// The measurement window, 100 ns (`WINDOW_S` 1.0, `:470`, `.h:120`).
+pub use dstack_resample::asrc::{
+    CALM_ZONE_MS, LEVEL_EMA_TAU_S, LEVEL_INTEGRAL_MAX_PPM, LEVEL_KI_PPM_PER_MS_S, LEVEL_KP_MAX_PPM,
+    LEVEL_KP_PPM_PER_MS, LevelLoop, MAX_PPM, MAX_SANE_WINDOW_PPM, MAX_SLEW_PPM_PER_S, Offered,
+    REGRESSION_CAP, REGRESSION_LOCK_SPAN_S, REGRESSION_MIN_POINTS, REGRESSION_SPAN_S,
+    STEP_RESIDUAL_S, braking_ppm, slew,
+};
+
+/// The measurement window, 100 ns: dstack's `WINDOW_S` (1 s).
 pub const WINDOW_100NS: i64 = 10_000_000;
-/// A rate point this far off the fit is a step, s (`STEP_RESIDUAL_MS` 10, `:284`, `.h:149`).
-pub const STEP_RESIDUAL_S: f64 = 0.010;
-/// The level loop's P gain, ppm per ms (`:373`, `.h:232`).
-pub const LEVEL_KP_PPM_PER_MS: f64 = 2.0;
-/// The P term's clamp, ppm (`:380`, `.h:239`).
-pub const LEVEL_KP_MAX_PPM: f64 = 50.0;
-/// The EMA that smooths the level error before P, s (`:392`, `.h:251`).
-pub const LEVEL_EMA_TAU_S: f64 = 10.0;
-/// The level loop's I gain, ppm per (ms · s) (`:264`, `.h:130`).
-pub const LEVEL_KI_PPM_PER_MS_S: f64 = 0.0002;
-/// The I term's clamp, ppm (`:271`, `.h:137`).
-pub const LEVEL_INTEGRAL_MAX_PPM: f64 = 3.0;
-/// A window measuring more than this is starved, not a clock
-/// (`MAX_SANE_INSTANTANEOUS_PPM`, `:447`, `.h:109`).
-pub const MAX_SANE_WINDOW_PPM: f64 = 100_000.0;
+const _: () = assert!(WINDOW_S == 1.0);
 /// SongPlayer's: one grid slot, one program block (a literal, pinned against
 /// the genlock grid by a test).
 pub const SLOT_100NS: i64 = 333_333;
@@ -117,222 +68,51 @@ pub const BASE_LATENCY_100NS: i64 = 666_666;
 /// SongPlayer's last resort for a deficit (the main session's ruling, #233
 /// comment 6056680979, Q2): a block whose latency is under the splice's
 /// 5 ms hold + one slot (38.3 ms) is a hard re-centre. A missing program
-/// boundary at delay 0 (−33.3 ms, which with a sub-millisecond hand-off
-/// only a real stall makes) reads under it: one faded insert, counted and
-/// logged as a fault, instead of a run of unfaded underruns while the slew
-/// restores the ring. ABSOLUTE (review round 2): an entry's delay raises the
-/// target, never this floor — a delayed output 50 ms short still holds its
-/// delay in the ring.
+/// boundary at delay 0 reads under it: one faded insert, counted and logged
+/// as a fault, instead of a run of unfaded underruns. ABSOLUTE (review round
+/// 2): an entry's delay raises the target, never this floor.
 pub const HARD_FLOOR_100NS: i64 = 383_333;
 /// SongPlayer's last resort for an offset: a block more than four slots
-/// (133.3 ms) over the target is a hard re-centre — the ring holds the
-/// target + 4 slots + one block, so the next block would overflow it. The
-/// same edge under the target (review round 3): above a delay of 105 ms
-/// it lies above the floor (at or under that delay the floor alone is the
-/// edge), and slewing 4 slots takes ~8 min.
+/// (133.3 ms) off the target either way is a hard re-centre — the ring
+/// holds the target + 4 slots + one block, so the next block would overflow
+/// it; under the target a delayed output would play that early for minutes.
 pub const HARD_EXCESS_100NS: i64 = 1_333_333;
 /// The most an underrun's excess is kept as cushion over the target (Q1):
 /// one slot. Beyond it the offset slew drains it.
 pub const CUSHION_MAX_100NS: i64 = SLOT_100NS;
-/// SongPlayer's: a window mean within this of the target is left to
-/// camera-box's level loop; beyond it the offset slew drains it (at least;
-/// [`calm_zone_ms`]).
-pub const CALM_ZONE_MS: f64 = 1.0;
-
-/// The cushion after `fresh_100ns` more of the card's underruns: the excess
-/// each one leaves added, at most [`CUSHION_MAX_100NS`].
-pub fn fold_cushion(cushion_100ns: i64, fresh_100ns: i64) -> i64 {
-    cushion_100ns
-        .saturating_add(fresh_100ns)
-        .min(CUSHION_MAX_100NS)
-}
-
-/// The cushion after a window whose mean latency was `latency_100ns`: never
-/// more than what that window still held over `target_100ns`, so it follows
-/// the level loop's drain down (and is gone once the latency is at or under
-/// the target).
-pub fn kept_cushion(cushion_100ns: i64, latency_100ns: i64, target_100ns: i64) -> i64 {
-    cushion_100ns.min((latency_100ns - target_100ns).max(0))
-}
-
-/// The error the offset slew drains (target − latency sense: positive = too
-/// little buffered): the latency's distance from the band [target, target +
-/// cushion], 0 inside it. A kept cushion is not drained by the stop curve;
-/// a deficit is measured from the target itself.
-pub fn slew_err_100ns(latency_100ns: i64, target_100ns: i64, cushion_100ns: i64) -> i64 {
-    let top = target_100ns + cushion_100ns;
-    (target_100ns - latency_100ns).max(0) - (latency_100ns - top).max(0)
-}
 
 /// The calm zone for a driver calling back every `callback_frames` at
-/// `rate_hz`: [`CALM_ZONE_MS`], or half the callback period when that is
-/// longer (512 frames at 96 kHz: 2.67 ms) — the block's reading saws by one
-/// period, and its window mean wanders by a fraction of it.
+/// `rate_hz`: dstack's `calm_zone_ms_for` — [`CALM_ZONE_MS`], or half the
+/// callback period when that is longer (512 frames at 96 kHz: 2.67 ms).
 pub fn calm_zone_ms(callback_frames: u32, rate_hz: f64) -> f64 {
-    (f64::from(callback_frames) / rate_hz * 1000.0 / 2.0).max(CALM_ZONE_MS)
+    calm_zone_ms_for(f64::from(callback_frames) / rate_hz)
 }
 
-/// What [`RateRegression::offer`] did with a point.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Offered {
-    Inserted,
-    /// A step once the fit has its points: the point stays out, and the next
-    /// one moves the line onto the step (the slope kept).
-    Rebased,
-    /// The point after a re-base: the line moves by its whole residual — a
-    /// step inside a 1 s window shows partly in that window's mean and fully
-    /// in the next one's.
-    Realigned,
-    /// A step before the fit has its points: the points start over.
-    Restarted,
-}
-
-/// The card's rate: ordinary least squares over up to [`REGRESSION_SPAN_S`].
+/// The card's rate: dstack's least squares over up to [`REGRESSION_SPAN_S`].
 #[derive(Debug, Default)]
-pub struct RateRegression {
-    points: VecDeque<(f64, f64)>,
-    offset_s: f64,
-    /// The last point was a step: the next one realigns.
-    realign_next: bool,
-}
+pub struct RateRegression(RateFit);
 
 impl RateRegression {
     pub fn point_count(&self) -> usize {
-        self.points.len()
-    }
-
-    fn span_s(&self) -> f64 {
-        match (self.points.front(), self.points.back()) {
-            (Some(a), Some(b)) => b.0 - a.0,
-            _ => 0.0,
-        }
-    }
-
-    /// (slope, intercept, x origin), the slope per second of x. The x values
-    /// are centred once, so the covariance needs no second centring.
-    fn fit(&self) -> Option<(f64, f64, f64)> {
-        let x0 = self.points.front()?.0;
-        let n = self.points.len() as f64;
-        let mx = self.points.iter().map(|p| p.0 - x0).sum::<f64>() / n;
-        let my = self.points.iter().map(|p| p.1).sum::<f64>() / n;
-        let (sxx, sxy) = self.points.iter().fold((0.0, 0.0), |(sxx, sxy), p| {
-            let dx = p.0 - x0 - mx;
-            (sxx + dx * dx, sxy + dx * p.1)
-        });
-        if sxx == 0.0 {
-            return None;
-        }
-        let slope = sxy / sxx;
-        Some((slope, my - slope * mx, x0))
+        self.0.points()
     }
 
     pub fn locked(&self) -> bool {
-        self.points.len() >= REGRESSION_MIN_POINTS && self.span_s() >= REGRESSION_LOCK_SPAN_S
+        self.0.locked()
     }
 
     /// The card's ppm against the wall once locked, else 0.
     pub fn rate_ppm(&self) -> f64 {
-        if !self.locked() {
-            return 0.0;
-        }
-        self.fit().map_or(0.0, |(slope, _, _)| slope * 1e6)
+        self.0.rate_ppm()
     }
 
     pub fn offer(&mut self, x_s: f64, y_raw_s: f64) -> Offered {
-        let y = y_raw_s - self.offset_s;
-        if self.points.len() >= REGRESSION_MIN_POINTS
-            && let Some((slope, intercept, x0)) = self.fit()
-        {
-            let residual = y - (intercept + slope * (x_s - x0));
-            // The point after a step moves the line by the whole step,
-            // whatever is left of it: one step re-bases once.
-            if self.realign_next {
-                self.offset_s += residual;
-                self.realign_next = false;
-                return Offered::Realigned;
-            }
-            if residual.abs() > STEP_RESIDUAL_S {
-                self.realign_next = true;
-                return Offered::Rebased;
-            }
-        } else if let Some(&(_, last)) = self.points.back()
-            && (y - last).abs() > STEP_RESIDUAL_S
-        {
-            self.flush();
-            self.points.push_back((x_s, y_raw_s));
-            return Offered::Restarted;
-        }
-        self.points.push_back((x_s, y));
-        let over_cap = self.points.len().saturating_sub(REGRESSION_CAP);
-        self.points.drain(..over_cap);
-        // Every pass pops a point, so it ends (a mutant can only empty it).
-        while let Some(&(oldest, _)) = self.points.front()
-            && x_s - oldest > REGRESSION_SPAN_S
-        {
-            self.points.pop_front();
-        }
-        Offered::Inserted
+        self.0.offer(x_s, y_raw_s)
     }
 
     pub fn flush(&mut self) {
-        self.points.clear();
-        self.offset_s = 0.0;
-        self.realign_next = false;
+        self.0.flush();
     }
-}
-
-/// The level loop's P + I (camera-box #1335 follow-up 5).
-#[derive(Debug, Default)]
-pub struct LevelLoop {
-    ema_ms: f64,
-    integral_ppm: f64,
-}
-
-impl LevelLoop {
-    /// P + I after one window of `dt_s` whose latency error is `err_ms`
-    /// (target − latency: positive = too little buffered = more output).
-    pub fn update(&mut self, err_ms: f64, dt_s: f64, rate_ppm: f64) -> f64 {
-        let alpha = dt_s / (LEVEL_EMA_TAU_S + dt_s);
-        self.ema_ms += alpha * (err_ms - self.ema_ms);
-        let p = (LEVEL_KP_PPM_PER_MS * self.ema_ms).clamp(-LEVEL_KP_MAX_PPM, LEVEL_KP_MAX_PPM);
-        if (rate_ppm + p + self.integral_ppm).abs() < MAX_PPM {
-            self.integral_ppm = (self.integral_ppm + LEVEL_KI_PPM_PER_MS_S * err_ms * dt_s)
-                .clamp(-LEVEL_INTEGRAL_MAX_PPM, LEVEL_INTEGRAL_MAX_PPM);
-        }
-        p + self.integral_ppm
-    }
-
-    /// After a re-centre: the error the EMA held is gone.
-    pub fn reset_error(&mut self) {
-        self.ema_ms = 0.0;
-    }
-
-    pub fn ema_ms(&self) -> f64 {
-        self.ema_ms
-    }
-
-    pub fn integral_ppm(&self) -> f64 {
-        self.integral_ppm
-    }
-}
-
-/// `applied` moved toward `target` by at most [`MAX_SLEW_PPM_PER_S`] × `dt_s`
-/// (a backward wall moves nothing).
-pub fn slew(applied: f64, target: f64, dt_s: f64) -> f64 {
-    let step = MAX_SLEW_PPM_PER_S * dt_s.max(0.0);
-    applied + (target - applied).clamp(-step, step)
-}
-
-/// The offset slew for a window-mean error `err_ms` (target − latency:
-/// positive = too little buffered = more output): beyond the calm zone
-/// (`calm_ms`), the fastest correction that still stops at its edge
-/// decelerating at the slew limit, `√(2 · 5 ppm/s · (|err| − calm))` (1 ms =
-/// 1000 ppm·s); 0 inside it.
-pub fn braking_ppm(err_ms: f64, calm_ms: f64) -> f64 {
-    let beyond_ms = (err_ms.abs() - calm_ms).max(0.0);
-    (2.0 * MAX_SLEW_PPM_PER_S * beyond_ms * 1000.0)
-        .sqrt()
-        .copysign(err_ms)
 }
 
 /// The seconds the offset slew still needs to bring a window-mean error
@@ -457,55 +237,37 @@ pub fn frames_from_100ns(v_100ns: i64, rate_hz: f64) -> i64 {
     (v_100ns as f64 * rate_hz / 1e7).round() as i64
 }
 
-/// One window's sums; it closes once it spans [`WINDOW_100NS`].
+/// `ms` on the observation's 100 ns grain (the status shows what the wall
+/// can tell apart; the controller computes in `f64` seconds).
+fn to_100ns_grain(ms: f64) -> f64 {
+    (ms * 10_000.0).round() / 10_000.0
+}
+
+/// The adapter's own copy of the controller's open window, for the status
+/// only (the window's mean latency, the time left): it opens, closes and
+/// starts over exactly where dstack's does.
 #[derive(Debug, Default)]
-struct Window {
-    n: i64,
-    first: Option<(i64, f64)>,
-    sum_x_s: f64,
-    sum_y_s: f64,
+struct Shadow {
+    start_s: Option<f64>,
     sum_latency_100ns: i64,
+    n: i64,
 }
 
-/// A closed window.
-struct Closed {
-    x_mean_s: f64,
-    y_mean_s: f64,
-    x_end_100ns: i64,
-    span_100ns: i64,
-    latency_mean_100ns: i64,
-    /// The card against the wall over this window alone (the starvation check).
-    ppm: f64,
-}
-
-impl Window {
-    /// Add one observation (`x` relative to the servo's origin); a window
-    /// spanning [`WINDOW_100NS`] closes and starts over.
-    fn add(&mut self, x_100ns: i64, y_s: f64, latency_100ns: i64) -> Option<Closed> {
-        if self.first.is_some_and(|(x0, _)| x_100ns < x0) {
-            // The wall went back before this window began: start it over.
+impl Shadow {
+    /// One observation at `now_s`; the window's mean latency once it closes.
+    fn add(&mut self, now_s: f64, latency_100ns: i64) -> Option<i64> {
+        if self.start_s.is_some_and(|start| now_s < start) {
             *self = Self::default();
         }
-        let (x0, y0) = *self.first.get_or_insert((x_100ns, y_s));
-        self.n += 1;
-        self.sum_x_s += x_100ns as f64 / 1e7;
-        self.sum_y_s += y_s;
+        let start = *self.start_s.get_or_insert(now_s);
         self.sum_latency_100ns += latency_100ns;
-        let span_100ns = x_100ns - x0;
-        if span_100ns < WINDOW_100NS {
+        self.n += 1;
+        if now_s - start < WINDOW_S {
             return None;
         }
-        let n = self.n as f64;
-        let closed = Closed {
-            x_mean_s: self.sum_x_s / n,
-            y_mean_s: self.sum_y_s / n,
-            x_end_100ns: x_100ns,
-            span_100ns,
-            latency_mean_100ns: self.sum_latency_100ns / self.n,
-            ppm: (y_s - y0) / (span_100ns as f64 / 1e7) * 1e6,
-        };
+        let mean = self.sum_latency_100ns / self.n;
         *self = Self::default();
-        Some(closed)
+        Some(mean)
     }
 }
 
@@ -514,49 +276,40 @@ pub struct Servo {
     rate_hz: f64,
     target_100ns: i64,
     origin_100ns: Option<i64>,
-    window: Window,
-    regression: RateRegression,
-    level: LevelLoop,
+    controller: Controller,
     /// [`calm_zone_ms`] of the driver (1 ms until told its callback size).
     calm_ms: f64,
-    applied_ppm: f64,
-    last_apply_100ns: Option<i64>,
+    shadow: Shadow,
     latency_ms: f64,
-    offset_ms: f64,
     slew_eta_s: Option<f64>,
-    hard_recentres: u64,
-    rebases: u64,
-    /// The excess the card's underruns left, kept over the target (Q1).
-    cushion_100ns: i64,
-    /// The card's underrun frames already folded (from the observation).
-    underruns_seen: u64,
-    /// The current window folded an underrun: its mean still holds the
-    /// blocks before it, so it does not cut the cushion.
-    folded: bool,
+    /// The controller's stalls already seen: a window that is one shows no
+    /// new figures.
+    stalls_seen: u64,
 }
 
 impl Servo {
     /// For a card at `device_rate_hz`, holding `target_latency_100ns`
     /// ([`BASE_LATENCY_100NS`] + the entry's delay).
     pub fn new(device_rate_hz: f64, target_latency_100ns: i64) -> Self {
+        let controller = Controller::new(
+            target_latency_100ns as f64 / 1e7,
+            HARD_FLOOR_100NS as f64 / 1e7,
+            HARD_EXCESS_100NS as f64 / 1e7,
+            Basis::Arrival,
+        )
+        .with_cushion_max_s(CUSHION_MAX_100NS as f64 / 1e7)
+        .with_calm_zone_ms(CALM_ZONE_MS)
+        .with_priming();
         Self {
             rate_hz: device_rate_hz,
             target_100ns: target_latency_100ns,
             origin_100ns: None,
-            window: Window::default(),
-            regression: RateRegression::default(),
-            level: LevelLoop::default(),
+            controller,
             calm_ms: CALM_ZONE_MS,
-            applied_ppm: 0.0,
-            last_apply_100ns: None,
+            shadow: Shadow::default(),
             latency_ms: 0.0,
-            offset_ms: 0.0,
             slew_eta_s: None,
-            hard_recentres: 0,
-            rebases: 0,
-            cushion_100ns: 0,
-            underruns_seen: 0,
-            folded: false,
+            stalls_seen: 0,
         }
     }
 
@@ -564,6 +317,7 @@ impl Servo {
     /// ([`calm_zone_ms`]).
     pub fn with_callback_frames(mut self, callback_frames: u32) -> Self {
         self.calm_ms = calm_zone_ms(callback_frames, self.rate_hz);
+        self.controller = self.controller.with_calm_zone_ms(self.calm_ms);
         self
     }
 
@@ -575,19 +329,20 @@ impl Servo {
         self.calm_ms
     }
 
-    /// The rate and the lock are read from the regression itself, so a flush
+    /// The rate and the lock are read from the controller itself, so a flush
     /// (a starved window) shows at once.
     pub fn status(&self) -> ServoStatus {
+        let c = &self.controller;
         ServoStatus {
-            correction_ppm: self.applied_ppm,
-            rate_ppm: self.regression.rate_ppm(),
-            locked: self.regression.locked(),
+            correction_ppm: c.ppm(),
+            rate_ppm: c.rate_ppm(),
+            locked: c.locked(),
             latency_ms: self.latency_ms,
-            offset_ms: self.offset_ms,
+            offset_ms: to_100ns_grain(c.offset_ms()),
             slew_eta_s: self.slew_eta_s,
-            cushion_ms: self.cushion_100ns as f64 / 10_000.0,
-            hard_recentres: self.hard_recentres,
-            rebases: self.rebases,
+            cushion_ms: to_100ns_grain(c.cushion_s() * 1000.0),
+            hard_recentres: c.recentres(),
+            rebases: c.rebases(),
         }
     }
 
@@ -596,56 +351,48 @@ impl Servo {
         let latency_100ns =
             frames_to_100ns(to_play, self.rate_hz) + (o.handled_100ns - o.stamp_100ns);
         let err_100ns = self.target_100ns - latency_100ns;
-        let Some(origin) = self.origin_100ns else {
-            self.origin_100ns = Some(o.handled_100ns);
-            self.underruns_seen = o.underrun_frames;
-            return self.recentre(err_100ns, Recentre::Prime);
+        let origin = *self.origin_100ns.get_or_insert(o.handled_100ns);
+        let now_s = (o.handled_100ns - origin) as f64 / 1e7;
+        self.controller
+            .played_silence(o.underrun_frames as f64 / self.rate_hz);
+        let step = self.controller.observe(
+            now_s,
+            latency_100ns as f64 / 1e7,
+            o.consumed_frames as f64 / self.rate_hz,
+        );
+        let (correction_ppm, recentre) = match step {
+            Step::Hold(ppm) => {
+                self.window_status(now_s, latency_100ns);
+                (ppm, None)
+            }
+            Step::Prime { ppm, .. } => (ppm, Some(Recentre::Prime)),
+            Step::Recentre { by_s, ppm } if by_s > 0.0 => (ppm, Some(Recentre::Deficit)),
+            Step::Recentre { ppm, .. } => (ppm, Some(Recentre::Excess)),
         };
-        self.fold_underruns(o.underrun_frames);
-        if let Some(hard) = hard_recentre(latency_100ns, self.target_100ns) {
-            return self.recentre(err_100ns, hard);
+        if recentre.is_some() {
+            self.shadow = Shadow::default();
         }
-        let x_100ns = o.handled_100ns - origin;
-        let y_s = o.consumed_frames as f64 / self.rate_hz - x_100ns as f64 / 1e7;
-        let Some(w) = self.window.add(x_100ns, y_s, latency_100ns) else {
-            return self.hold();
+        ServoAction {
+            correction_ppm,
+            recentre_100ns: if recentre.is_some() { err_100ns } else { 0 },
+            recentre,
+        }
+    }
+
+    /// The status's figures of a window the controller closed: its mean
+    /// latency and the slew's time left (none for a stall).
+    fn window_status(&mut self, now_s: f64, latency_100ns: i64) {
+        let Some(mean_100ns) = self.shadow.add(now_s, latency_100ns) else {
+            return;
         };
-        let folded = std::mem::take(&mut self.folded);
-        if w.ppm.abs() > MAX_SANE_WINDOW_PPM {
-            self.regression.flush();
-            return self.hold();
+        let stalls = self.controller.stalls();
+        if stalls != self.stalls_seen {
+            self.stalls_seen = stalls;
+            return;
         }
-        if self.regression.offer(w.x_mean_s, w.y_mean_s) == Offered::Rebased {
-            self.rebases += 1;
-        }
-        if !folded {
-            self.cushion_100ns =
-                kept_cushion(self.cushion_100ns, w.latency_mean_100ns, self.target_100ns);
-        }
-        self.latency_ms = w.latency_mean_100ns as f64 / 10_000.0;
-        // The level loop keeps the configured target (a kept cushion decays
-        // through it); the offset slew drains only what lies outside the
-        // cushion's band.
-        let err_ms = (self.target_100ns - w.latency_mean_100ns) as f64 / 10_000.0;
-        let slew_ms = slew_err_100ns(w.latency_mean_100ns, self.target_100ns, self.cushion_100ns)
-            as f64
-            / 10_000.0;
-        self.offset_ms = -slew_ms;
-        let dt_100ns = self
-            .last_apply_100ns
-            .map_or(w.span_100ns, |prev| w.x_end_100ns - prev);
-        self.last_apply_100ns = Some(w.x_end_100ns);
-        // A wall stepped back past the last window gives no time (the slew
-        // already moves nothing; the EMA and the integral must not either).
-        let dt_s = (dt_100ns as f64 / 1e7).max(0.0);
-        let rate = self.regression.rate_ppm();
-        // The card's rate plus the offset slew beyond the calm zone; the
-        // level loop's I freezes on the whole sum (its anti-windup counts the
-        // slew too).
-        let base = rate + braking_ppm(slew_ms, self.calm_ms);
-        let pi = self.level.update(err_ms, dt_s, base);
-        let target = (base + pi).clamp(-MAX_PPM, MAX_PPM);
-        self.applied_ppm = slew(self.applied_ppm, target, dt_s);
+        self.latency_ms = mean_100ns as f64 / 10_000.0;
+        let slew_ms = -self.controller.offset_ms();
+        let rate = self.controller.rate_ppm();
         // The room the card's rate leaves on the side the slew works: a
         // positive error asks for more output, up to +300 (review round 2).
         let room = if slew_ms.is_sign_positive() {
@@ -653,62 +400,7 @@ impl Servo {
         } else {
             MAX_PPM + rate
         };
-        self.slew_eta_s = slew_eta_s(slew_ms, self.applied_ppm - rate, room, self.calm_ms);
-        self.hold()
-    }
-
-    /// The card's underrun frames since the last block (`underrun_frames`
-    /// is cumulative) are folded into the cushion ([`fold_cushion`]); the
-    /// current window then keeps it.
-    fn fold_underruns(&mut self, underrun_frames: u64) {
-        let fresh = underrun_frames.saturating_sub(self.underruns_seen);
-        self.underruns_seen = self.underruns_seen.max(underrun_frames);
-        if fresh > 0 {
-            let fresh_100ns =
-                frames_to_100ns(i64::try_from(fresh).unwrap_or(i64::MAX), self.rate_hz);
-            self.cushion_100ns = fold_cushion(self.cushion_100ns, fresh_100ns);
-            self.folded = true;
-        }
-    }
-
-    fn hold(&self) -> ServoAction {
-        ServoAction {
-            correction_ppm: self.applied_ppm,
-            recentre_100ns: 0,
-            recentre: None,
-        }
-    }
-
-    /// Insert or skip `err_100ns` at once: the priming, or a hard re-centre
-    /// (counted). The window, the level loop's error and the cushion start
-    /// over (the latency is at the target again).
-    fn recentre(&mut self, err_100ns: i64, why: Recentre) -> ServoAction {
-        self.window = Window::default();
-        self.level.reset_error();
-        self.cushion_100ns = 0;
-        self.folded = false;
-        if why != Recentre::Prime {
-            self.hard_recentres += 1;
-        }
-        ServoAction {
-            correction_ppm: self.applied_ppm,
-            recentre_100ns: err_100ns,
-            recentre: Some(why),
-        }
-    }
-}
-
-/// A block's latency the slew cannot be left with: under
-/// [`HARD_FLOOR_100NS`], or more than [`HARD_EXCESS_100NS`] off `target`
-/// either way.
-pub fn hard_recentre(latency_100ns: i64, target_100ns: i64) -> Option<Recentre> {
-    let over = latency_100ns - target_100ns;
-    if latency_100ns < HARD_FLOOR_100NS || -over > HARD_EXCESS_100NS {
-        Some(Recentre::Deficit)
-    } else if over > HARD_EXCESS_100NS {
-        Some(Recentre::Excess)
-    } else {
-        None
+        self.slew_eta_s = slew_eta_s(slew_ms, self.controller.ppm() - rate, room, self.calm_ms);
     }
 }
 

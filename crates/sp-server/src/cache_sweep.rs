@@ -63,6 +63,8 @@ pub struct Swept {
     pub failed: u64,
     /// Entries due beyond the pass's bound, left for the next day.
     pub left: u64,
+    /// Entries the guard held back (`cache_sweep_plan::guarded`).
+    pub held: u64,
     /// How long the pass held `cache::SONG_FILES` (its log line's, the box
     /// check's).
     pub held_ms: u64,
@@ -181,8 +183,16 @@ fn path_of(cache_dir: &Path, place: Place, name: &str) -> PathBuf {
 pub fn execute(cache_dir: &Path, plan: &Plan) -> Swept {
     let mut swept = Swept {
         left: plan.left as u64,
+        held: plan.held as u64,
         ..Swept::default()
     };
+    if plan.held > 0 {
+        warn!(
+            entries = plan.held,
+            "cache sweep: videos no row has would take over a quarter of the cache - \
+             held back, check the database"
+        );
+    }
     for planned in &plan.delete {
         let path = path_of(cache_dir, planned.place, &planned.name);
         if !is_plain_name(&planned.name) {
@@ -266,6 +276,7 @@ pub async fn run(
                     parts = swept.count(Why::Part),
                     failed = swept.failed,
                     left = swept.left,
+                    held = swept.held,
                     held_ms = swept.held_ms,
                     "cache sweep: deleted what no row needs any more (#261)"
                 ),

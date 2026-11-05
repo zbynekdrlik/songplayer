@@ -145,7 +145,9 @@ pub async fn send_on_key(
 pub fn key_verdict(status: u16, body: &str) -> KeyVerdict {
     match status {
         429 => KeyVerdict::NextKey { rate_limited: true },
-        403 => KeyVerdict::NextKey {
+        // 402: this key's project has spent its prepaid credits; another
+        // key is another project.
+        402 | 403 => KeyVerdict::NextKey {
             rate_limited: false,
         },
         400 if body.contains("API_KEY") || body.contains("API key") => KeyVerdict::NextKey {

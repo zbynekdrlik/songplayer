@@ -98,6 +98,24 @@ def test_a_slip_still_reads_as_judder_at_the_spout_time_error():
     a, b = report["refreshes"]["uneven_samples"]
     assert b == a + 1
     assert report["verdict"] == "defects"
+    long, short = report["refreshes"]["uneven_boundaries"]
+    assert short["boundary"] == long["boundary"] + 1
+    assert (long["refreshes"], short["refreshes"]) == (3, 1)
+
+
+def test_the_list_holds_every_boundary_of_arena_s_budget():
+    # The gate counts slips from this list and fails a take whose list is
+    # shorter than `uneven`, so it must hold 20 slips of two boundaries each.
+    slip = [50.0, 16.67] + jitter(20)
+    report = spout_take(jitter(200) + slip * 21)
+    assert report["refreshes"]["uneven"] == 42
+    assert len(report["refreshes"]["uneven_boundaries"]) == 42
+
+
+def test_a_freeze_reports_its_length():
+    report = spout_take(jitter(200) + [5000.0] + jitter(200))
+    held = report["refreshes"]["uneven_boundaries"]
+    assert [b["refreshes"] >= 290 for b in held] == [True]
 
 
 def plain(*levels: int) -> list[np.ndarray]:
@@ -244,6 +262,15 @@ def test_a_spout_poll_that_finds_nothing_does_not_sleep_a_millisecond(monkeypatc
     monkeypatch.setattr(wf, "GlSender", lambda name: Closing(sender))
     wf.capture_spout("Arena", None, 0.01)
     assert slept and set(slept) == {0.0}
+
+
+def test_empty_spout_polls_keep_a_gap_that_a_timed_interval_allows(monkeypatch):
+    sender = FakeSender([frame(100, 30)])
+    monkeypatch.setattr(wf, "GlSender", lambda name: Closing(sender))
+    times, _sums, polls, _ended, _located = wf.capture_spout("Arena", None, 0.02)
+    gaps = [b - a for a, b in zip(polls, polls[1:]) if a not in times]
+    assert gaps and min(gaps) >= wf.SPOUT_POLL_GAP_S
+    assert wf.SPOUT_POLL_GAP_S + 0.00063 < 0.1 / 60
 
 
 def spout_run(monkeypatch, capsys, result, *extra) -> tuple[int, str, str]:

@@ -38,6 +38,10 @@ comment 6230045110.
   (`RowFacts::is_empty`, one WARN `cache sweep: the database has no row`):
   a fresh or replaced database would make every song a video no row has.
   The rules that need no row (stale names, parts, …) still run.
+- **The guard** (`guarded`): `no_row` entries of ≥ 10 GiB that are also over
+  a quarter of the listed cache are held back, the other rules run, one WARN
+  a pass, `held` on the INFO. Rows lost to a bad restore look like songs no
+  one needs. A real delete that large stays held until an operator looks.
 - **The rows:** every row's `youtube_id` and its five recording columns
   (`cache::RECORDING_COLUMNS`: `file_path`, `audio_file_path`,
   `vocals_file_path`, `instrumental_file_path`, `dub_file_path`; the same

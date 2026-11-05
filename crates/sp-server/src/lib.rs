@@ -195,6 +195,7 @@ pub async fn start(
     // kills the process (#156). Idempotent: the Tauri shell installs it earlier
     // when present, and the internal `Once` makes the double call safe.
     crate::install_panic_hook(config.data_dir().join("songplayer-panic.log"));
+    crate::playback::dante_device::set_data_dir(config.data_dir());
 
     // 1. Database
     let pool = db::startup_open::open(&config.db_path).await?; // #229: waits out a lock

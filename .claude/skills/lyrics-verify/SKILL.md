@@ -39,8 +39,10 @@ etc.) during a verify loop: that disrupts the user's wall state for nothing.
 ## Pre-flight probe before reprocess
 
 Always call `/api/v1/lyrics/probe-sources` before reprocessing a song. If
-`any_text_source=false` (no Demucs/Gemini candidate sources), skip the song
-silently — do not waste FFmpeg/Gemini cycles on a whisperx-only song.
+`any_text_source=false` (no yt_subs / description / Genius / LRCLIB /
+Spotify text), skip the song silently — such a song can only reach the base
+tier (the Gemini 3.5 Transcribe transcript grouped into lines), so a
+reprocess spends FFmpeg/Gemini cycles for no text-backed result.
 
 ## Song-by-song iteration — no batch, no rollback questions
 
@@ -59,19 +61,22 @@ regression is found. Never ask "should I rollback?" — fix the code.
 
 During verify sessions, every song outcome MUST report:
 - **lyrics_source** — where lyrics came from: `yt_subs` / `description` /
-  `genius` / `lrclib` / `spotify` / `ensemble:gemini` / `asr_gap`
+  `genius` / `lrclib` / `spotify`, each as its v22 provenance — ★ tier
+  `<text>+mtl@rev1/g35t-ok`, base tier `gemini-3-5-transcribe` (or
+  `…/fullmix`) — or `asr_gap`
 - **YouTube URL** — `https://youtube.com/watch?v=<id>`
 - **Provider page URL** — Genius/LRCLib/Spotify page if used
 - **First 6 lines sample** — so user can spot-check text
 - **Honest one-sentence assessment** — not "looks good"; state what was observed
 
-Bare source label (just "ensemble:gemini") is incomplete reporting.
+Bare source label (just "gemini-3-5-transcribe") is incomplete reporting.
 
 ## yt_subs is ground truth
 
 `yt_subs` lyrics (YouTube's synced subtitles) are GROUND TRUTH for what the
-singer says. WhisperX is a helper, never a judge. Never override yt_subs with
-ASR output, never score yt_subs against whisperx.
+singer says. The Gemini 3.5 Transcribe (g35t) transcript is the gate's
+witness for timing and coverage, never a judge of the words. Never override
+yt_subs with ASR output, never score yt_subs's wording against the transcript.
 
 ## No approval pressure
 
@@ -99,17 +104,19 @@ or `Get-Process Arena | Format-List Responding` shows `False`.
 When wall is dark: halt the verify loop, surface the issue to the user. Ask
 to restart Resolume (never force-kill — see win-resolume-ops skill).
 
-## WhisperX ASR miss → quarantine first
+## Unrecoverable ASR miss → quarantine first
 
-When whisperx shows `conf<0.05` ghost-cluster forced-alignment artefacts
-(multiple words collapsed to same timestamp), POST `/api/v1/lyrics/quarantine`
-IMMEDIATELY. Never propose another "skip ghosts" / "drop low-conf lines"
-heuristic — the `asr_gap` escape hatch was shipped specifically for this case.
+When a song with no usable text source serves a base-tier
+(`gemini-3-5-transcribe`) track the transcript got wrong — garbled or missing
+lines, only shouts — POST `/api/v1/lyrics/quarantine` IMMEDIATELY. Never
+propose another "skip bad lines" / "drop suspect lines" heuristic — the
+`asr_gap` escape hatch was shipped specifically for this case.
 
 ## Auto-play during reprocess sessions
 
 During catalog reprocess sessions where user says "monitor processing and play":
-- After EVERY new v18+ Gemini song completes (all chunks non-empty):
+- After EVERY song that completes at the current pipeline version with
+  non-empty lyrics:
   - Report: id, title, artist
   - Add to ytlive playlist (playlist 184) if not already there
   - `POST /api/v1/playlists/184/play-video` with `video_id`

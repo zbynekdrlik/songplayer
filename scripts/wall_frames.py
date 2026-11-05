@@ -43,7 +43,7 @@ capture grabs only their strip rows and columns
 than half a refresh after the one before is a blind span (a poll on time
 that finds no new picture is the wall holding one). A Spout sender
 (``--spout``, ``wall_spout``) is read the same way, from a picture that is
-off the desktop: only ``SPOUT_ROWS`` rows of the strips, polled with no sleep.
+off the desktop: only ``SPOUT_ROWS`` rows of the strips, polled ``SPOUT_POLL_GAP_S`` apart.
 
 Usage::
 
@@ -110,6 +110,11 @@ LOCATE_S = 10.0
 # The rows a Spout capture reads of each strip: 24 rows poll at ~0.6 ms on SNV,
 # the whole strip's 150 at ~1.75 ms, over a tenth of a 60 Hz refresh.
 SPOUT_ROWS = 24
+# What an empty Spout poll waits, spun: a sleep of 1 ms takes ~1.6 ms there, over
+# what a timed interval may have. With no wait the polls raised wall-bridge's
+# failed tries at Arena's output lock ~10x (#272, A/B/A x2). 8 takes at 0 read
+# 4-14 uneven boundaries and 1 was refused; 4 at 0.3 ms read 2-6, none refused.
+SPOUT_POLL_GAP_S = 0.0003
 # A Spout picture lands when Arena finishes it, not on a refresh: intervals of
 # 26-41 ms for 33.3 on SNV. At 0.5 and 1 ms the brackets contradict themselves
 # (2-41 boundaries a take), 2 and 3 ms read both clips clean, and at 4 ms and
@@ -372,7 +377,12 @@ def capture_spout(
     source = GlSender(sender)
     try:
         return capture_camera(
-            NewPictures(source), region, seconds, max_rows=SPOUT_ROWS, idle=0.0
+            NewPictures(source),
+            region,
+            seconds,
+            max_rows=SPOUT_ROWS,
+            idle=0.0,
+            spin=SPOUT_POLL_GAP_S,
         )
     finally:
         source.close()
@@ -384,9 +394,11 @@ def capture_camera(
     seconds: float,
     max_rows: int | None = None,
     idle: float = 0.001,
+    spin: float = 0.0,
 ) -> tuple[list[float], list[np.ndarray], list[float], list[float], Located | None]:
     """The timed polls of ``capture_dxcam`` on anything with its ``grab``.
-    ``idle``: what a poll that finds nothing sleeps; ``max_rows`` as
+    ``idle``: what a poll that finds nothing sleeps, then ``spin``: what it
+    spins (a sleep this short overshoots); ``max_rows`` as
     ``capture_region``'s."""
     acquired = time_acquire(camera)
     times: list[float] = []
@@ -405,6 +417,9 @@ def capture_camera(
         picture = camera.grab(region=located.region)
         if picture is None:
             time.sleep(idle)
+            until = time.perf_counter() + spin
+            while time.perf_counter() < until:
+                pass
             continue
         ended = acquired[0] if acquired[0] is not None else time.perf_counter()
         times.append(now)
@@ -450,6 +465,50 @@ def poll_blind(times: list[float], polls: list[float]) -> list[float]:
     return out
 
 
+def utc_anchor(
+    clock: Callable[[], float] = time.perf_counter,
+    wall: Callable[[], int] = time.time_ns,
+    tries: int = 5,
+) -> tuple[float, int]:
+    """One ``perf_counter`` instant and its UTC (ns), #289: the pair read
+    closest together of ``tries`` (the wall read between two counter reads,
+    the counter taken as their middle)."""
+    best: tuple[float, float, int] | None = None
+    for _ in range(tries):
+        before = clock()
+        ns = wall()
+        after = clock()
+        if best is None or after - before < best[0]:
+            best = (after - before, (before + after) / 2, ns)
+    assert best is not None
+    return best[1], best[2]
+
+
+def to_utc_ns(t: float, start: tuple[float, int], end: tuple[float, int]) -> int:
+    """``perf_counter`` instant ``t`` in UTC (ns), on the line through the
+    two anchors (the counter's rate against UTC measured over the capture)."""
+    (c0, n0), (c1, n1) = start, end
+    if c1 == c0:
+        return n0 + round((t - c0) * 1e9)
+    return n0 + round((t - c0) * (n1 - n0) / (c1 - c0))
+
+
+def first_seen_utc_ns(
+    readings: list[Reading],
+    times: list[float],
+    start: tuple[float, int],
+    end: tuple[float, int],
+) -> dict[str, int]:
+    """Each clip frame's first CLEAN picture (read ``ok``, no blend) in UTC
+    (ns), keyed by the frame index: when the output first showed it (#289,
+    the picture's lag behind its program boundary)."""
+    seen: dict[str, int] = {}
+    for r, t in zip(readings, times):
+        if r.ok and r.weight_q8 == 0 and r.index is not None:
+            seen.setdefault(str(r.index), to_utc_ns(t, start, end))
+    return seen
+
+
 def capture(args: argparse.Namespace) -> dict:
     """Capture or read the pictures ``args`` names, then the report."""
     late = None
@@ -468,6 +527,7 @@ def capture(args: argparse.Namespace) -> dict:
         blind = None  # since the picture before
         span = None  # the first picture's pts to the last one's
     else:
+        start = utc_anchor()
         if args.spout is not None:
             source = f"sender {args.spout!r}"
             times, sums, polls, ended, located = capture_spout(
@@ -489,6 +549,7 @@ def capture(args: argparse.Namespace) -> dict:
             report["located"] = None
             return report
         readings = [read_sums(s, list(located.copies)) for s in sums]
+        seen = first_seen_utc_ns(readings, times, start, utc_anchor())
         blind = poll_blind(times, polls)
         late = [max(0.0, e - t) for t, e in zip(times, ended)]
         spout = args.spout is not None
@@ -509,6 +570,8 @@ def capture(args: argparse.Namespace) -> dict:
         time_error=SPOUT_TIME_ERROR if spout else POLL_TIME_ERROR,
     )
     report["located"] = located.report() if located else None
+    if args.video is None:
+        report["first_seen_utc_ns"] = seen
     return report
 
 

@@ -25,6 +25,7 @@
 //!
 //! - #229 item C: `paid_ai_enabled` takes `true`, `false` or `""` only
 //!   (`paid_ai::checked`); anything else refuses the PATCH (400).
+//! - #289: `audio_low_latency` likewise (`sp_core::audio_latency::checked`).
 //!
 //! The workers read the settings from the database, never through this API,
 //! so they always see the secrets in clear.
@@ -93,6 +94,7 @@ pub async fn prepare(
     for key in keys {
         let value = crate::playback::audio_out_config::checked(key, &sent[key])?;
         let value = crate::paid_ai::checked(key, &value)?;
+        let value = sp_core::audio_latency::checked(key, &value)?;
         let value = crate::downloader::format::checked(key, &value)?;
         let value = crate::peer::config::checked(pool, key, &value, &sent).await?;
         writes.push((key.clone(), value));

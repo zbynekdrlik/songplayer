@@ -679,11 +679,6 @@ jobs:
             'Qwen3ForcedAligner'
             'align-chunks'
           )
-          # No banned CLI args at this time. `--write-auto-subs` was
-          # previously banned from the production pipeline but is now a
-          # legitimate arg in `fetch_autosub` (sp-server/src/lyrics/autosub_provider.rs)
-          # since the ensemble includes AutoSubProvider as a 2nd alignment source.
-          BANNED_CLI=()
           BANNED_PY=(
             "def cmd_align("
             "def cmd_transcribe("
@@ -711,20 +706,6 @@ jobs:
               --exclude-dir=dist 2>/dev/null || true)
             if [ -n "$HITS" ]; then
               echo "ERROR: retired literal $lit still present:"; echo "$HITS"; FAIL=1
-            fi
-          done
-          for cli in "${BANNED_CLI[@]}"; do
-            # Exclude scripts/experiments — Phase 2 validation work
-            # legitimately invokes --write-auto-subs to MEASURE auto-sub
-            # quality; the audit only catches regressions in the
-            # production lyrics pipeline. The exclude-dir flags MUST
-            # come before `--` or grep treats them as search paths.
-            HITS=$(grep -rn -F \
-              --exclude-dir=node_modules --exclude-dir=target \
-              --exclude-dir=dist --exclude-dir=experiments \
-              -- "$cli" "${SEARCH_PATHS[@]}" 2>/dev/null || true)
-            if [ -n "$HITS" ]; then
-              echo "ERROR: retired CLI arg '$cli' still present:"; echo "$HITS"; FAIL=1
             fi
           done
           for py in "${BANNED_PY[@]}"; do
@@ -2630,8 +2611,8 @@ jobs:
           # columns (a full 7680x1080 read is too slow to time each
           # refresh), so a change of Arena's wall mapping needs no new rows.
           # #233 lane 3: how many enabled ASIO outputs the box must run
-          # (e2e/post-deploy-audio-asio.spec.ts). SNV runs one since
-          # 8.10.2026: "DVS (Dante)", Dante Virtual Soundcard TX 1/2.
+          # (e2e/post-deploy-audio-asio.spec.ts). SNV runs one: since
+          # 31.10.2026 the native Dante output, on the same worker and gates.
           SP_ASIO_OUTPUTS_EXPECTED: "1"
         run: |
           # Runs the committed e2e/post-deploy*.spec.ts against the

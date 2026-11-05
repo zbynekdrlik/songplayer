@@ -48,7 +48,8 @@ pub const VBAN_FEED_SLOW_US: u64 = 10_000;
 /// [`VBAN_SEND_LATENCY_100NS`](crate::playback::vban_packet::VBAN_SEND_LATENCY_100NS)
 /// (a test pins the relation). A block handed over later than this reaches
 /// the VBAN thread after its first packet was due: counted in
-/// `vban_feed_late_over_budget` and WARNed (#210 part 2).
+/// `vban_feed_late_over_budget` and WARNed (#210 part 2). The default L: #289's
+/// low-latency switch does not move this figure.
 pub const VBAN_FEED_BUDGET_US: u64 = 66_666;
 
 /// At most one WARN per this much timeline (100 ns; 5 s): a bad minute

@@ -528,11 +528,22 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
     (`diag\wall-bridge\strip_probe.ps1`), and run `wall_locate.locate`
     on it (the copies found, their cell).
   - Only exit 0 with verdict `clean` passes, or a take whose ONE defect is
-    slips (owner, #272, 31.10.2026: at most 3 per 40 s take, `MAX_SLIPS`):
+    slips (owner, #285, 1.11.2026: Arena is closed software, so each take also
+    reads `SP-program-MAX` at the same time; that sender keeps `MAX_SLIPS`, and
+    Arena's output has `ARENA_MAX_SLIPS` = 20 (owner, #272, 5.11.2026: 21 push
+    runs read 2 to 19 with no trend, sender even in all 42 takes), a
+    contradictory boundary counted as a slip, `arenaOutputFailures`; a lost
+    frame, jump back or stall fails on either) (owner, #272, 31.10.2026:
+    at most 3 per 40 s take, `MAX_SLIPS`):
     one picture a refresh long and the next a refresh short, everything a
     clean verdict needs besides (`slipsOnly`). A run of neighbouring uneven
     boundaries counts one slip per two, rounded up, so a lone one is a slip
-    (`slipCount`). CI takes read 0-3, off-CI takes 0-1. Their cause is not
+    (`slipCount`), an unresolved boundary counts as a slip, and a boundary
+    held over one refresh more than the clip's longest even hold is a stall,
+    never a slip (`maxSlipRefreshes`: wall-30 3, wall-25 and wall-24 4;
+    `uneven_boundaries`: a 15 s freeze reads 1
+    uneven boundary, no loss; the reader keeps `UNEVEN_BOUNDARIES_MAX` = 64 of
+    them, more than the budget's 40). Their cause is not
     proven, and whether a slip shows on the wall is not verified.
   - `defects` names every counter: judder (`refreshes.uneven` of `judged`),
     jumps back, lost frames and boundaries, cadence, weights, frozen.
@@ -555,7 +566,13 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
   desktop (PP).
 - **Arena's sender keeps no frame count**, so every Spout read answers:
   `NewPictures` calls a poll with the same bytes as the last one a poll
-  with nothing new, as an empty dxcam grab. No sleep between polls.
+  with nothing new, as an empty dxcam grab.
+- **Polls stay `SPOUT_POLL_GAP_S` (0.3 ms, spun) apart** (#272, 2.11.2026).
+  wall-bridge reads the same sender: with no gap the polls raised its failed
+  tries at `Arena - Screen 2_SpoutAccessMutex` from 3-20k to 51-66k a minute
+  (A/B/A x2). Takes at 0: 4-14 uneven boundaries and one refused; at 0.3 ms:
+  2-6 (n = 4). A gap of 0.9 ms or a 1 ms sleep leaves too few timed intervals
+  (exit 5). That the polling caused the refusals is not proven.
 - **A copy cut by a seam is left out (`same_scale`, 30.10.2026):** SNV's
   output is slices of the composition, and a copy across one read 58.33 px
   cells beside 60. Its samples sat near the cell edges, each bit change read

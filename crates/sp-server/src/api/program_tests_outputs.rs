@@ -185,7 +185,7 @@ async fn get_program_names_a_stored_entry_it_could_not_read() {
     assert_eq!(json["outputs"][0]["id"], "out-1");
     assert_eq!(
         json["outputs_problems"],
-        serde_json::json!(["entry 2 (id out-2): type must be vban or asio"])
+        serde_json::json!(["entry 2 (id out-2): type must be vban, asio or dante"])
     );
 }
 
@@ -320,4 +320,26 @@ async fn an_asio_entry_off_windows_waits_and_says_why() {
     ] {
         assert!(a["loop"].get(key).is_some(), "asio.loop.{key}");
     }
+}
+
+/// #289: `audio_low_latency` at the top level — the switch the outputs were
+/// last applied with — and a VBAN output's `latency_ms` built with it.
+#[tokio::test]
+async fn get_program_shows_the_low_latency_switch() {
+    let state = test_state().await;
+    let json = get_program(&state).await;
+    assert_eq!(json["audio_low_latency"], false, "off by default");
+    let outputs = state.program_bus.outputs();
+    let entry = foh("out-1");
+    let out = Arc::new(VbanOut::for_entry_at(&entry, 48_000, true).unwrap());
+    outputs.replace(vec![RunningOutput {
+        entry,
+        built_rate: 48_000,
+        sink: Some(OutputSink::Vban(out)),
+        error: None,
+    }]);
+    outputs.set_low_latency(true);
+    let json = get_program(&state).await;
+    assert_eq!(json["audio_low_latency"], true);
+    assert_eq!(json["outputs"][0]["latency_ms"], 15.0);
 }

@@ -313,3 +313,24 @@ fn a_mac_reads_with_colons() {
         assert_eq!(mac_colons(as_is), as_is, "{as_is:?}");
     }
 }
+
+/// #255: PP ran on Balanced with core parking at 100 %, and no note said so.
+#[test]
+fn an_economy_power_scheme_is_a_note_by_name_and_any_other_scheme_is_not() {
+    let note = "aktívny plán napájania je úsporný: Balanced";
+    let mut p = quiet();
+    p.power.scheme_guid = Some("381B4222-F694-41F0-9685-FF5BB260DF2E".to_string());
+    p.power.scheme_name = Some("Balanced".to_string());
+    assert!(notes(&p).iter().any(|n| n == note), "{:?}", notes(&p));
+    p.power.scheme_name = None;
+    p.power.scheme_guid = Some("a1841308-3541-4fab-bc81-f71556f20b4a".to_string());
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.ends_with("a1841308-3541-4fab-bc81-f71556f20b4a")),
+        "{:?}",
+        notes(&p)
+    );
+    p.power.scheme_guid = Some("056ca3c1-0000-0000-0000-000000000000".to_string());
+    assert!(notes(&p).iter().all(|n| !n.contains("úsporný")));
+}

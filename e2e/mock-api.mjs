@@ -787,8 +787,9 @@ function outputsRefusal(body) {
     const at = `${first} (id ${shownId(e.id)})`;
     if (e.type === undefined) return `${at}: type is missing`;
     if (typeof e.type !== "string") return `${at}: type has the wrong type`;
-    if (e.type !== "vban" && e.type !== "asio") return `${at}: type must be vban or asio`;
-    const block = e.type === "vban" ? vbanBlockRefusal(e.vban, at) : asioBlockRefusal(e.asio, at);
+    if (!["vban", "asio", "dante"].includes(e.type)) return `${at}: type must be vban, asio or dante`;
+    const blocks = { vban: vbanBlockRefusal, asio: asioBlockRefusal, dante: danteBlockRefusal };
+    const block = blocks[e.type](e[e.type], at);
     if (block) return block;
     if (e.name === undefined) return `${at}: name is missing`;
   }
@@ -800,6 +801,7 @@ function outputsRefusal(body) {
   for (const [kind, max] of [
     ["vban", 8],
     ["asio", 4],
+    ["dante", 1],
   ]) {
     const count = list.filter((e) => e.type === kind).length;
     if (count > max) return `audio_outputs has ${count} ${kind} entries (at most ${max})`;
@@ -811,6 +813,10 @@ function outputsRefusal(body) {
     if (e.type === "vban") {
       if (!e.vban.host) return `${at}: vban.host is empty`;
       if (e.vban.port === 0) return `${at}: vban.port must be 1-65535`;
+    } else if (e.type === "dante") {
+      if (!/^\d+\.\d+\.\d+\.\d+$/.test(e.dante.ip)) {
+        return `${at}: dante.ip must be an IPv4 address of this PC`;
+      }
     } else {
       if (!e.asio.driver.trim()) return `${at}: asio.driver is empty`;
       if (e.asio.channels.some((c) => c > 511)) return `${at}: asio.channels must be 0-511`;
@@ -827,6 +833,14 @@ function outputsRefusal(body) {
       drivers.add(e.asio.driver);
     }
   }
+  return null;
+}
+// #285: as `audio_out_config::dante_dest`.
+function danteBlockRefusal(d, at) {
+  if (d === undefined) return `${at}: dante is missing`;
+  if (d === null || typeof d !== "object" || Array.isArray(d)) return `${at}: dante is not a JSON object`;
+  if (typeof d.device !== "string") return `${at}: dante.device is missing`;
+  if (typeof d.ip !== "string") return `${at}: dante.ip is missing`;
   return null;
 }
 function vbanBlockRefusal(v, at) {
@@ -1206,6 +1220,18 @@ function paidAiRefusal(body) {
   return ["", "true", "false"].includes(v) ? null : "paid_ai_enabled must be true or false";
 }
 
+// #289: as `sp_core::audio_latency::low_latency` — only "true" (trimmed,
+// any case) is on; unset, blank or anything else is off.
+function lowLatency(raw) {
+  return raw !== undefined && raw !== null && String(raw).trim().toLowerCase() === "true";
+}
+// As `sp_core::audio_latency::checked`: true / false / "" only, stored lowercase.
+function lowLatencyRefusal(body) {
+  if (body.audio_low_latency === undefined) return null;
+  const v = String(body.audio_low_latency).trim().toLowerCase();
+  return ["", "true", "false"].includes(v) ? null : "audio_low_latency must be true or false";
+}
+
 // #229: as the server — a value exactly the mask for a secret setting keeps
 // the stored one (nothing written), any other value replaces it (`""` clears
 // it), and the answer is 204 with NO body.
@@ -1253,7 +1279,10 @@ function maxResolutionRefusal(body) {
 
 app.patch("/api/v1/settings", (req, res) => {
   const refusal =
-    outputsRefusal(req.body) ?? paidAiRefusal(req.body) ?? maxResolutionRefusal(req.body);
+    outputsRefusal(req.body) ??
+    paidAiRefusal(req.body) ??
+    lowLatencyRefusal(req.body) ??
+    maxResolutionRefusal(req.body);
   if (refusal) {
     res.status(400).send(refusal);
     return;
@@ -1262,7 +1291,7 @@ app.patch("/api/v1/settings", (req, res) => {
     if (value === SECRET_MASK && isSecretSetting(key)) {
       continue;
     }
-    if (key === "paid_ai_enabled") {
+    if (key === "paid_ai_enabled" || key === "audio_low_latency") {
       settings[key] = String(value).trim().toLowerCase();
     } else if (key === "max_resolution") {
       settings[key] = String(value).trim(); // stored trimmed, as `format::checked` does
@@ -2068,6 +2097,7 @@ function programBody() {
     // stored list, like the server's outputs task; the mock "runs" every
     // enabled entry. #210's top-level `vban` block moved under each entry.
     audio_network_rate: Number(settings.audio_network_rate || 48000),
+    audio_low_latency: lowLatency(settings.audio_low_latency),
     outputs_problems: mockOutputsProblems(),
     outputs: mockOutputs(),
     // #223 S2: SP-program-MAX (mirrors `MaxStatus`). The setting is ON unless
@@ -2301,11 +2331,29 @@ function mockAsioOutput(e, network) {
       : {}),
   };
 }
+// #285: a Dante entry as the server lists it: the ASIO worker's line, its
+// `type`, and the stack's figures while it runs.
+function mockDanteOutput(e, network) {
+  const line = mockAsioOutput({ ...e, asio: { driver: e.dante.device, channels: [0, 1] } }, network);
+  const dante = {
+    clock_ready: true,
+    live_flows: 1,
+    late_bins: [900, 12, 0, 0, 0, 0],
+    late_max_us: 420,
+    send_max_us: 60,
+    pump_late: 0,
+    pump_missed: 0,
+    pump_overruns: 0,
+  };
+  return { ...line, type: "dante", ...(line.state === "running" ? { dante } : {}) };
+}
+
 function mockOutputs() {
   const list = mockStoredOutputs().filter((e) => !outputsSkipped.has(e.id));
   const network = Number(settings.audio_network_rate || 48000);
   return list.map((e) => {
     if (e.type === "asio") return mockAsioOutput(e, network);
+    if (e.type === "dante") return mockDanteOutput(e, network);
     const rate = e.rate === "network" || e.rate === undefined ? network : Number(e.rate);
     const enabled = e.enabled !== false;
     const held = enabled ? vbanHeld.get(e.id) : undefined;

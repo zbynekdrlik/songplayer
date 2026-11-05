@@ -240,3 +240,9 @@ test.describe("ASIO gate (#233)", () => {
     expect(asioGateFailures(dvs(100), delayed(0))).toEqual(["its latency is 0 ms"]);
   });
 });
+
+test("a native Dante output is gated like an ASIO one (#285)", () => {
+  const dante = { id: "out-4", type: "dante", enabled: true, state: "running" } as OutputStatus;
+  const off = { ...dante, id: "out-5", enabled: false } as OutputStatus;
+  expect(gatedAsioOutputs([dante, off]).map((o) => o.id)).toEqual(["out-4"]);
+});

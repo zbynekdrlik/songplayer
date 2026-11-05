@@ -101,6 +101,24 @@ pub const INT16_FULL_SCALE: i16 = 32_767;
 /// (26.9.2026 box capture).
 pub const VBAN_SEND_LATENCY_100NS: i64 = 2 * UNITS_PER_SECOND / GENLOCK_GRID_FPS;
 
+/// #289: the send latency L with `audio_low_latency` on (100 ns): 15 ms.
+/// The 4 h box read of 3.11.2026 put the program's hand-off to the outputs
+/// (`health.timing.vban_feed_late_us`) at ≤ 10 ms in steady state (window
+/// maxima p50 0.3 ms, p90 9.1 ms), 14.7–20.7 ms only right after a process
+/// start: a block handed over later than L sends its past-due packets back
+/// to back, counted in `late_sends`.
+pub const VBAN_SEND_LATENCY_LOW_100NS: i64 = 150_000;
+
+/// #289: the send latency L of an output: [`VBAN_SEND_LATENCY_100NS`] (two
+/// slots), or [`VBAN_SEND_LATENCY_LOW_100NS`] with `audio_low_latency` on.
+pub fn base_send_latency_100ns(low_latency: bool) -> i64 {
+    if low_latency {
+        VBAN_SEND_LATENCY_LOW_100NS
+    } else {
+        VBAN_SEND_LATENCY_100NS
+    }
+}
+
 // A 1600-frame block is exactly one grid slot, and a packet fits the spec.
 const _: () = assert!(VBAN_BLOCK_FRAMES as i64 * GENLOCK_GRID_FPS == VBAN_SAMPLE_RATE_HZ);
 const _: () = assert!(VBAN_PAYLOAD_LEN <= VBAN_DATA_MAX);

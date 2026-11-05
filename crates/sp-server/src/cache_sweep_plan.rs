@@ -58,6 +58,10 @@ pub const REPLACED_AFTER_MS: i64 = 2_592_000_000;
 pub const DUB_PREV_AFTER_MS: i64 = 1_209_600_000;
 /// The most entries one pass deletes.
 pub const MAX_PER_PASS: usize = 500;
+/// From this many bytes of videos no row has, a pass may take at most a
+/// quarter of the cache ([`guarded`]). Under this floor the daily pass stays free:
+/// a few lost rows cost little, and the 500-a-pass cap still limits a bad day.
+pub const GUARD_MIN_BYTES: u64 = 10_737_418_240;
 /// The cleanup cache version the code writes (`lyrics/gather.rs`,
 /// `lyrics/title_search.rs`: `_cleaned_v3.json`; a test reads both, so a
 /// bump there fails until this follows it).
@@ -314,11 +318,20 @@ pub struct Planned {
     pub why: Why,
 }
 
+/// Whether a pass holds back its videos no row has: over [`GUARD_MIN_BYTES`]
+/// and more than a quarter of the cache. Rows that went missing look exactly
+/// like songs nobody needs, and a song's files cannot be fetched back at will.
+pub fn guarded(no_row_bytes: u64, cache_bytes: u64) -> bool {
+    no_row_bytes >= GUARD_MIN_BYTES && no_row_bytes > cache_bytes / 4
+}
+
 /// A pass's deletes, the oldest first, and how many more were due.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Plan {
     pub delete: Vec<Planned>,
     pub left: usize,
+    /// Entries [`guarded`] held back.
+    pub held: usize,
 }
 
 /// What a pass deletes (module doc): every entry [`why`] names, the oldest
@@ -344,6 +357,22 @@ pub fn plan(entries: &[Entry], facts: &RowFacts, now_ms: i64) -> Plan {
             })
         })
         .collect();
+    let no_row = |p: &Planned| p.why == Why::NoRow;
+    let no_row_bytes: u64 = due
+        .iter()
+        .filter(|(_, p)| no_row(p))
+        .map(|(_, p)| p.bytes)
+        .sum();
+    let cache_bytes: u64 = entries
+        .iter()
+        .filter(|e| e.place == Place::Cache)
+        .map(|e| e.bytes)
+        .sum();
+    let before = due.len();
+    if guarded(no_row_bytes, cache_bytes) {
+        due.retain(|(_, p)| !no_row(p));
+    }
+    let held = before - due.len();
     due.sort_by(|(a, x), (b, y)| {
         a.cmp(b)
             .then_with(|| (x.place, &x.name).cmp(&(y.place, &y.name)))
@@ -353,6 +382,7 @@ pub fn plan(entries: &[Entry], facts: &RowFacts, now_ms: i64) -> Plan {
     Plan {
         delete: due.into_iter().map(|(_, planned)| planned).collect(),
         left,
+        held,
     }
 }
 

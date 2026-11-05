@@ -16,7 +16,7 @@ See:
 | `manifest.json` | Pinned fixture set (24 songs with line-synced gold, ~4 per category). Rebuild via `build_manifest.py`. |
 | `build_manifest.py` | One-shot helper to (re)build the manifest from the production SongPlayer HTTP API. |
 | `audio_prep.py` | yt-dlp + Mel-Roformer + anvuew dereverb on win-resolume. Shells out to `scripts/lyrics_worker.py preprocess-vocals`. |
-| `backends/` | One Python file per backend. Ships `whisperx_large_v3.py` (baseline / current champion), `gemini_3_1_flash_lite.py` (OpenRouter), and `assemblyai_universal_3_pro.py` (eval front-runner — 7.6 mean, 5/5 wall-pass on the 5-fixture pilot). |
+| `backends/` | One Python file per backend. Ships `gemini_3_5_transcribe.py` (Gemini 3.5 Transcribe — the ASR production uses since v22: the ★ tier's gate and the base tier's lines; `--wav`/`--out` CLI) and `gemini38_flash.py` (the #144 one-call Gemini 3.8 Flash eval, driven by `run_one_call.py`). The 2026-05-19 wrappers (`whisperx-large-v3`, `gemini-3-1-flash-lite`, `assemblyai-universal-3-pro`) are deleted; their reports stay in `reports/`. |
 | `judge_prompt.md` | Versioned judge prompt Claude follows when scoring fixtures. |
 | `schemas/` | JSONSchemas (`manifest`, `report`, `judgment`). |
 | `reports/` | Committed per-run reports + `CHAMPION.md` + `history.md`. |
@@ -25,7 +25,7 @@ See:
 ## Adding a new backend
 
 1. Drop `backends/<backend_id_with_hyphens_to_underscores>.py` (e.g.
-   `backends/whisperx_large_v3.py` exposes `BACKEND_ID = "whisperx-large-v3"`)
+   `backends/gemini_3_5_transcribe.py` exposes `BACKEND_ID = "gemini-3-5-transcribe"`)
    following the same CLI contract as the existing wrappers: `--wav` (input
    WAV path), `--out` (output JSON path), read API token from env. Emits the
    documented backend-output JSON shape (`{backend_id, backend_revision,
@@ -43,7 +43,8 @@ See:
 
 Dead-end backends are dropped (wrapper deleted) but their `history.md` row
 stays so future evals don't re-test them. Current dropped set:
-`nemotron-3-nano-omni`, `mimo-v2-5`, `mimo-v2-omni`, `assemblyai-universal-2`.
+`nemotron-3-nano-omni`, `mimo-v2-5`, `mimo-v2-omni`, `assemblyai-universal-2`,
+`whisperx-large-v3`, `gemini-3-1-flash-lite`, `assemblyai-universal-3-pro`.
 
 ## Local cache
 

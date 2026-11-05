@@ -46,7 +46,11 @@ fn send_patch(
     in_flight: RwSignal<bool>,
     status: RwSignal<String>,
 ) {
-    body["kind"] = serde_json::json!(if is_dub.get_untracked() { "dub" } else { "song" });
+    body["kind"] = serde_json::json!(if is_dub.get_untracked() {
+        "dub"
+    } else {
+        "song"
+    });
     in_flight.set(true);
     leptos::task::spawn_local(async move {
         match api::patch_mix(body).await {
@@ -109,7 +113,11 @@ pub fn LiveMixer(playlist_id: i64) -> impl IntoView {
                     // #184 round G2: read THIS strip's memory from the GET's per-kind
                     // object (`song` or `dub`) — there is no global active kind; the
                     // strip shows the memory of ITS item's kind.
-                    let key = if is_dub.get_untracked() { "dub" } else { "song" };
+                    let key = if is_dub.get_untracked() {
+                        "dub"
+                    } else {
+                        "song"
+                    };
                     if let Some(mem) = v.get(key) {
                         if let Some(x) = mem.get("vokaly").and_then(|x| x.as_f64()) {
                             vokaly.set(x as f32);

@@ -184,6 +184,22 @@ impl AsioOut {
         }))
     }
 
+    /// #285: a Dante entry's output: the ASIO worker over the device, which
+    /// names no driver and always takes both channels.
+    pub fn for_dante(entry: &OutputEntry) -> Result<Self, String> {
+        let d = entry
+            .dante
+            .as_ref()
+            .ok_or_else(|| "not a Dante entry".to_string())?;
+        Ok(Self::from_spec(&AsioSpec {
+            id: entry.id.clone(),
+            driver: d.device.clone(),
+            channels: [0, 1],
+            delay_ms: entry.delay_ms,
+            loop_check: false,
+        }))
+    }
+
     /// The output of `spec`: SongPlayer's side of an ASIO entry, or the
     /// ASIO host's (`audio_host`, `asio_out_remote.rs`).
     pub fn from_spec(spec: &AsioSpec) -> Self {

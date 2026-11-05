@@ -23,6 +23,7 @@ pub mod audio_out_task; // #233: the outputs' settings task (keep / build / stop
 pub mod band_pool; // #223: the SP-program sender's persistent row-band workers (no thread per picture)
 mod clear_lyrics;
 pub mod clock_health;
+pub mod dante_device; // #285: the native Dante output — the stack behind the ASIO worker's device seam
 pub mod dashboard_replay; // #225: the engine's last dashboard state per playlist, replayed on WS connect
 pub mod decode_thread; // #223 S0: the one way a decode thread starts (producer + decode bench)
 pub mod early_end; // #277: a video that ends long before its duration is a failure (pure)

@@ -16,9 +16,6 @@ sp-decoder = { path = "../sp-decoder" }
 # #223 S2: the SP-program-MAX GPU compositor + its Spout sender (Windows; the
 # off-Windows stub reports `Unsupported`), driven by `playback/program_max*.rs`.
 sp-gpu = { path = "../sp-gpu" }
-# #233: the ASIO output's rubato sinc stage, in its own crate so it is
-# compiled optimized in tests too (`playback/asrc.rs`).
-sp-asrc = { path = "../sp-asrc" }
 
 tokio = { workspace = true }
 axum = { workspace = true }
@@ -64,12 +61,11 @@ jpeg-encoder = "0.6"
 # if-addrs requirement so cargo unifies them into one build.
 mdns-sd = "0.21"
 if-addrs = "0.15"
-# #233: the program audio outputs' sample-rate conversion — rubato's `Async`
-# sinc (an ASIO output's drift-servo ratio, `playback/asrc.rs`: its filter
-# here, the stage itself in sp-asrc) and its
-# synchronous `Fft` (default `fft_resampler` feature: a VBAN destination's
-# fixed ratio, `playback/vban_rate.rs`). Pure Rust, MIT OR Apache-2.0 (its MIT notice
-# ships in THIRD-PARTY-NOTICES.txt), pinned exactly.
+# #285 step 3: every resampler (VBAN's and the ASIO output's) is
+# dstack-resample's sinc, built on this rubato. SongPlayer names only its
+# `SincInterpolationParameters` (`asrc_params`); the pin keeps one rubato in
+# the build and the installer's notice in step. Pure Rust, MIT OR
+# Apache-2.0 (its MIT notice ships in THIRD-PARTY-NOTICES.txt).
 rubato = "=5.0.1"
 # #233 lane 3: the lock-free single-producer / single-consumer ring between
 # an ASIO output's worker and its driver's buffer-switch callback (the
@@ -77,6 +73,14 @@ rubato = "=5.0.1"
 # MIT OR Apache-2.0 (its MIT notice ships in THIRD-PARTY-NOTICES.txt),
 # pinned exactly.
 rtrb = "=0.4.0"
+# #285: the native Dante output (dlink, dstack) and, since step 3, the ASIO
+# output's resampler and drift controller (dstack-resample: `playback/asrc.rs`
+# and `asrc_servo.rs` are adapters over it). dstack by tag, no Dante code in
+# this repo. MIT OR Apache-2.0 since v0.6.12 (its MIT notice ships in
+# THIRD-PARTY-NOTICES.txt).
+dlink = { git = "https://github.com/zbynekdrlik/dstack", tag = "v0.6.31" }
+dstack = { git = "https://github.com/zbynekdrlik/dstack", tag = "v0.6.31" }
+dstack-resample = { git = "https://github.com/zbynekdrlik/dstack", tag = "v0.6.31" }
 # #228: the SP-program burn-id QR (911014, #151's payload). Pure-Rust
 # encoder; `default-features = false` drops the optional image / svg / pic
 # renderers (the module matrix needs none). MIT OR Apache-2.0 (its MIT notice

@@ -14,7 +14,8 @@ use std::sync::Mutex;
 
 use crate::playback::audio_out_queue::lock;
 
-/// The drivers held in this process (production: `asio_win`'s static).
+/// The drivers held in this process (production: the statics of `asio_win` and
+/// `dante_device`).
 #[derive(Default)]
 pub struct DriverHolds {
     held: Mutex<Vec<String>>,

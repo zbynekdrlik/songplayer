@@ -87,7 +87,7 @@ fn the_names_of_the_types_and_formats() {
     assert_eq!(OutputType::Vban.as_str(), "vban");
     assert_eq!(OutputType::parse("vban"), Some(OutputType::Vban));
     assert_eq!(OutputType::parse("VBAN"), None);
-    assert_eq!(OutputType::NAMES, "vban or asio");
+    assert_eq!(OutputType::NAMES, "vban, asio or dante");
     for f in [
         VbanSampleFormat::Int16,
         VbanSampleFormat::Int24,

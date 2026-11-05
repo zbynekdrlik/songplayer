@@ -8,6 +8,7 @@ pub mod audio_faults_timeline; // #257: the panel's timeline (buckets, bars, axi
 pub mod audio_fx; // #242: a playlist's own volume + parametric EQ (model, filters, curve)
 pub mod audio_fx_send; // #278: the EQ panel's live sends (50 ms throttle, one in flight)
 pub mod audio_fx_view; // #278: the EQ panel's view maths (drag, sliders, labels, grid, order)
+pub mod audio_latency; // #289: the `audio_low_latency` switch (read, check, send, texts)
 pub mod audio_level;
 pub mod audio_outputs;
 pub mod audio_outputs_save; // #233 release review: the dashboard's save decisions
@@ -15,6 +16,7 @@ pub mod background_hold; // #230: a sp-90s press holds the background work 4 h /
 pub mod blend;
 pub mod clock_health;
 pub mod config;
+pub mod dante_status; // #285: a running Dante output's chips and reasons
 pub mod data_size; // #261: the data dir's size on the status, Nastavenia's line
 pub mod fit;
 pub mod genlock;

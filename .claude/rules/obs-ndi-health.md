@@ -247,9 +247,6 @@ there needs tests that kill its mutants.
 
 `post-deploy.spec.ts` "SP-program has a live NDI receiver — the program is not dark" polls `GET /api/v1/program` (≤ 60 s, no scene switch) until `programReceiverVerdict` says `ok`: a source on program, `health.connections > 0` and the server's `degraded_reason` `null`. `connections`: `>0` live, `0` dark (also right after a start, before the sender's first poll, when the server names no reason yet), `<0` no valid reading (the SDK's error value) — keep polling on both; `source: null` = nothing on program, a failure too. `post-deploy-dabing.spec.ts` asks the same of SP-program next to "the Dabing pipeline is up" (the dub takes the program). Pure decision logic lives in `e2e/ndi-health-gate.ts` (unit-tested by `ndi-health-gate.spec.ts` in the ubuntu **mock** suite — a `test()` that never touches `page` runs with no browser/box). Keep the baseline-scene discipline (CLAUDE.md "E2E must not switch to disruptive OBS scenes").
 
-## Gotcha: `e2e/post-deploy-report/index.html` is a TRACKED artifact
-
-Playwright runs regenerate it; it shows up as ` M` in `git status`. `git checkout -- e2e/post-deploy-report/index.html` before committing so it never lands in your diff.
 
 ## cg OBS's program is NOT read any more (#221 L6)
 
@@ -1008,3 +1005,11 @@ the output every consumer takes, through cg OBS's own probe scene (below).
   green.
 - **Do not "fix" a red gate** by raising 40 ms, lowering 0.9/0.95, or skipping
   on exit 2. Find what moved the audio or the picture.
+
+## The A/V gate's playlist (#285, 1.11.2026)
+
+The gate compares the program with the song's original sidecars, so it plays a
+scene whose playlist has no gain or enabled EQ band (`pickFlatAudioScene`,
+`e2e/obs-baseline-scene.ts`: `sp-slow`, `sp-worship`, `sp-presence`, then any
+other flat one). The operator's ytslow at -21 dB + high-pass read as
+`audio_corr` 0.669, `glitches` 396 of 400. The gate never changes his settings.

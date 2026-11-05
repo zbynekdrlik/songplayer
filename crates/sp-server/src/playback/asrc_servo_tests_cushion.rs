@@ -34,39 +34,6 @@ fn blocks(s: &mut Servo, from: i64, n: i64, buffered: u64, underruns: u64) -> Se
     last.expect("at least one block")
 }
 
-#[test]
-fn an_underruns_excess_is_added_up_to_one_slot() {
-    assert_eq!(fold_cushion(0, 133_333), 133_333);
-    assert_eq!(fold_cushion(133_333, 199_999), 333_332);
-    assert_eq!(fold_cushion(133_333, 200_000), 333_333, "one slot exactly");
-    assert_eq!(fold_cushion(133_333, 200_001), 333_333);
-    assert_eq!(fold_cushion(i64::MAX - 5, 10), 333_333, "saturating");
-}
-
-#[test]
-fn the_cushion_follows_the_window_mean_down_never_up() {
-    let t = BASE_LATENCY_100NS;
-    assert_eq!(kept_cushion(200_000, t + 150_000, t), 150_000);
-    assert_eq!(kept_cushion(200_000, t + 250_000, t), 200_000, "never up");
-    assert_eq!(kept_cushion(200_000, t, t), 0);
-    assert_eq!(kept_cushion(200_000, t - 5, t), 0, "never negative");
-}
-
-/// The slew's error is the latency's distance from the band [target,
-/// target + cushion]: a deficit from the target, an excess from the top,
-/// nothing inside.
-#[test]
-fn the_slew_drains_only_what_lies_outside_the_cushions_band() {
-    let t = BASE_LATENCY_100NS;
-    assert_eq!(slew_err_100ns(t - 50, t, 200_000), 50);
-    assert_eq!(slew_err_100ns(t, t, 200_000), 0);
-    assert_eq!(slew_err_100ns(t + 199_999, t, 200_000), 0);
-    assert_eq!(slew_err_100ns(t + 200_000, t, 200_000), 0);
-    assert_eq!(slew_err_100ns(t + 200_001, t, 200_000), -1);
-    assert_eq!(slew_err_100ns(t + 7, t, 0), -7, "no cushion: the target");
-    assert_eq!(slew_err_100ns(t - 7, t, 0), 7);
-}
-
 /// The card's underrun frames (cumulative) since the last block are folded
 /// in: 1 280 frames are 13.3 ms; a count that went back (a new count) folds
 /// nothing; more than a slot in all is capped at one slot; a hard re-centre
@@ -83,9 +50,11 @@ fn underrun_frames_fold_into_a_cushion_that_a_re_centre_drops() {
     s.observe(obs(3, 6_400, 9_600, 1_000));
     assert_eq!(s.status().cushion_ms, 13.3333, "a count that went back");
     s.observe(obs(4, 6_400, 12_800, 1_908));
+    // 1 408 frames at 96 kHz = 14.666667 ms, shown on the 100 ns grain
+    // (dstack-resample folds exactly; the old servo rounded each fold).
     assert_eq!(
         s.status().cushion_ms,
-        14.6666,
+        14.6667,
         "128 frames past the most seen"
     );
     s.observe(obs(5, 6_400, 16_000, 5_748));
