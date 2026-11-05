@@ -139,7 +139,7 @@ the answer to `Asrc::set_correction_ppm` and (through `frames_from_100ns`:
 positive = insert, negative = skip) `Splice::insert` / `skip`, and pushes
 `Splice::process(Asrc::process(block))` into the card's ring.
 
-**Since #285 step 3 the LAWS live in dstack-resample** (dstack tag v0.6.31,
+**Since #285 step 3 the LAWS live in dstack-resample** (dstack tag v0.6.43,
 MIT OR Apache-2.0, `crates/dstack-resample/src/asrc.rs` + `lib.rs` in the
 dstack checkout): `Servo` is a thin ADAPTER over
 `dstack_resample::asrc::Controller` (`Controller::new(target, floor 38.3 ms,
@@ -777,9 +777,9 @@ knobs: `/__mock/fail-mode {kind: "settings"}` and `/__mock/outputs-skip
 
 ## Live gates (`e2e/post-deploy-audio-outputs.spec.ts`)
 
-FOH (`fohabl.lan:6980`) at `FOH_RATE` 96 kHz INT24 (the owner's ruling of 11.10.2026, #233: one 96 kHz rule for the network; VB-Matrix takes the rate from the VBAN header, nothing changed on fohabl; 48 kHz before) `sp-program`, no delay, ≥ 25
+lv1 (`lv1.lan:6980`) at `LV1_RATE` 48 kHz INT24 (FOH left VBAN on 5.11.2026, the owner, #257: VB-Matrix is off on fohabl and FOH takes SongPlayer over Dante) `sp-program`, no delay, ≥ 25
 blocks between two reads, no send errors (`audio-outputs-gate.ts`, unit-
-tested in the mock suite), polled for first (after a restart FOH is listed
+tested in the mock suite), polled for first (after a restart lv1 is listed
 only once the outputs task's first pass ran); a temporary `e2e-96k` entry to a UDP receiver on
 127.0.0.1 reads index 4, 200-frame INT24 packets, a contiguous counter
 (480/s); `finally` restores the list stored NOW (an operator may have
@@ -1509,7 +1509,7 @@ difference with its UTC time.
   Since dstack v0.6.12 (dstack #102, 3.11.2026) every dstack crate is MIT OR
   Apache-2.0 (checked in the checkout's Cargo.toml files), so the license no
   longer keeps #285 off `main`. `THIRD-PARTY-NOTICES.txt` names dstack
-  0.6.31 (dlink, dstack, dstack-audio-io, dstack-resample) with its
+  0.6.43 (dlink, dstack, dstack-audio-io, dstack-resample) with its
   LICENSE-MIT verbatim (it named 0.5.11 under the GPL until step 3).
 - `type: dante` in `audio_outputs`, at most one, `DanteDest {device, ip}`: the
   device name by Dante's own rule, the `ip` one IPv4 of this PC (a second
@@ -1517,7 +1517,7 @@ difference with its UTC time.
 - `DanteDevice` (`dante_device.rs`) implements the `AsioDevice` seam **in this
   process**, on every platform, with no `sp-dante-host` (the owner's ruling):
   `asio_out`'s worker, ring, `asrc_servo` and status serve it, so a second servo
-  never appears. dstack by git tag (v0.6.31), no Dante protocol code here.
+  never appears. dstack by git tag (v0.6.43), no Dante protocol code here.
   #285 step 2 (the owner's ruling via dstack #90: one rate conversion, in
   dlink, for every app): `DanteParams.rate` is `PROGRAM_RATE` (48 kHz, what the
   worker writes) and `network_rate` the entry's effective rate; `config()` sets

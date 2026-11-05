@@ -43,7 +43,7 @@ interactive, playlist sync actually downloads videos.
 ## Canonical-source regression CI — required
 
 CI must include a job that pins a fixed song set (~5-10 songs, one per
-canonical source type: description, lrclib, genius, spotify, yt_subs) and
+canonical source type: description, lrclib, lyrics_ovh, spotify, yt_subs) and
 asserts each song's `lyrics_source` label stays the same after reprocessing.
 Without this gate, silent provider regressions ship and only surface when the
 user wall-verifies.

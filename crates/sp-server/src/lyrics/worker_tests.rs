@@ -174,7 +174,12 @@ fn new_provenance_source_literals_are_recognizable() {
     // The v22 (#159) pipeline produces exactly two output-source shapes:
     // the ★ mtl tier and the g35t base tier. Asserted as a spec so a format
     // change forces a deliberate update.
-    let tier1_sources = ["tier1:spotify", "tier1:lrclib", "tier1:yt_subs", "genius"];
+    let tier1_sources = [
+        "tier1:spotify",
+        "tier1:lrclib",
+        "tier1:yt_subs",
+        "lyrics_ovh",
+    ];
     // ★ tier: "<candidate.source>+mtl@rev1/g35t-ok".
     let mtl_source = "description+mtl@rev1/g35t-ok";
     // base tier: the Gemini 3.5 Transcribe transcript.
@@ -182,7 +187,7 @@ fn new_provenance_source_literals_are_recognizable() {
 
     for s in &tier1_sources {
         assert!(
-            s.starts_with("tier1:") || *s == "genius",
+            s.starts_with("tier1:") || *s == "lyrics_ovh",
             "tier1 source must be recognizable: {s}"
         );
     }
@@ -264,7 +269,6 @@ async fn gather_sources_pushes_description_candidate_when_claude_returns_lyrics(
         cache_dir.path(),
         &reqwest_client,
         &row,
-        "",
     )
     .await
     .unwrap();
@@ -365,7 +369,6 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
         cache_dir.path(),
         &reqwest_client,
         &row,
-        "",
     )
     .await;
 
@@ -422,7 +425,7 @@ async fn gather_emits_tier1_spotify_candidate_when_track_id_set() {
     let row = VideoLyricsRow {
         id: 1,
         youtube_id: "spotifyOK1".into(),
-        song: "".into(), // empty → LRCLIB+Genius branches skipped
+        song: "".into(), // empty → LRCLIB + lyrics.ovh branches skipped
         artist: "".into(),
         duration_ms: Some(180_000),
         audio_file_path: None,
@@ -439,7 +442,6 @@ async fn gather_emits_tier1_spotify_candidate_when_track_id_set() {
         cache_dir.path(),
         &reqwest::Client::new(),
         &row,
-        "",
     )
     .await
     .expect("gather succeeds with Spotify candidate");
@@ -489,7 +491,6 @@ async fn gather_omits_spotify_when_track_id_is_null() {
         cache_dir.path(),
         &reqwest::Client::new(),
         &row,
-        "",
     )
     .await
     .expect("gather succeeds via override candidate");
@@ -538,7 +539,6 @@ async fn gather_skips_spotify_on_404() {
         cache_dir.path(),
         &reqwest::Client::new(),
         &row,
-        "",
     )
     .await
     .expect("gather succeeds when Spotify returns 404");
@@ -596,7 +596,6 @@ async fn gather_skips_spotify_on_proxy_error_field() {
         cache_dir.path(),
         &reqwest::Client::new(),
         &row,
-        "",
     )
     .await
     .expect("gather succeeds when proxy returns error:true");
@@ -614,7 +613,7 @@ async fn gather_skips_spotify_on_proxy_error_field() {
 }
 
 // ---------------------------------------------------------------------------
-// Task B.1: lrclib_track_has_real_timing + genius/lrclib gather wiring (#B.1)
+// Task B.1: lrclib_track_has_real_timing + lyrics.ovh/lrclib gather wiring (#B.1)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -669,49 +668,26 @@ fn lrclib_track_has_real_timing_detects_synced_vs_plain() {
     );
 }
 
-/// Structural regression: gather.rs must call lyrics.ovh as the PRIMARY
-/// community-lyrics source and fall back to Genius (with the fixed nested-
-/// div parser) when lyrics.ovh returns no match. Both push CandidateText
-/// with `source: "genius"` so `priority_with_timing` keeps the same ranking
-/// slot regardless of which provider supplied the text.
-///
-/// Why both: lyrics.ovh has a smaller catalog than Genius. lyrics.ovh
-/// returns clean plain text (no parsing fragility) so it's preferred when
-/// available. Genius covers the long tail; its HTML parser now correctly
-/// counts nested div depth (`find_matching_div_close`) so multi-container
-/// pages no longer drop verses (planetboom Saints regression 2026-05-11).
+/// Structural regression: gather.rs calls lyrics.ovh as the community-lyrics
+/// source and pushes its text as a `lyrics_ovh` candidate, the label
+/// `priority_with_timing` ranks at that slot. Genius, the former fallback,
+/// was removed 5.11.2026 (#232: genius.com answers automated requests with a
+/// Cloudflare challenge), so gather.rs names it nowhere.
 #[test]
-fn gather_uses_lyrics_ovh_primary_with_genius_fallback() {
+fn gather_uses_lyrics_ovh_and_no_genius() {
     let src = include_str!("gather.rs");
 
-    // lyrics.ovh must be imported and called BEFORE genius.
     assert!(
         src.contains("lyrics_ovh::fetch_lyrics"),
         "gather.rs must call lyrics_ovh::fetch_lyrics for the community-lyrics tier"
     );
     assert!(
-        src.contains("genius::fetch_lyrics"),
-        "gather.rs must call genius::fetch_lyrics as fallback when lyrics.ovh misses"
+        src.contains("source: \"lyrics_ovh\""),
+        "the lyrics.ovh candidate must carry source: \"lyrics_ovh\""
     );
-    let lyrics_ovh_pos = src
-        .find("lyrics_ovh::fetch_lyrics")
-        .expect("lyrics_ovh call exists");
-    let genius_pos = src
-        .find("genius::fetch_lyrics")
-        .expect("genius call exists");
     assert!(
-        lyrics_ovh_pos < genius_pos,
-        "lyrics_ovh must be called BEFORE genius (primary/fallback order)"
-    );
-    // Genius branch must be gated on lyrics.ovh returning None.
-    assert!(
-        src.contains("lyrics_ovh_lines.is_none()"),
-        "genius fallback must be gated on lyrics.ovh returning None"
-    );
-    // Source label "genius" retained for priority_with_timing compat.
-    assert!(
-        src.contains("source: \"genius\""),
-        "community-lyrics candidate must keep source: \"genius\" for priority_with_timing compat"
+        !src.contains("genius::"),
+        "gather.rs must not call Genius (#232)"
     );
 
     // The lrclib-plain branch still uses the shared cleanup helper — since
@@ -744,10 +720,6 @@ fn gather_uses_lyrics_ovh_primary_with_genius_fallback() {
     assert!(
         src.contains("cleanup_candidate(answer, \"lrclib-plain\", &youtube_id)?"),
         "gather.rs must route the lrclib-plain cleanup's answer through cleanup_candidate"
-    );
-    assert!(
-        src.contains("cleanup_candidate(answer, \"genius fallback\", &youtube_id)?"),
-        "gather.rs must route the genius fallback cleanup's answer through cleanup_candidate"
     );
     assert!(
         helper.contains("cleanup returned no lyrics for {youtube_id}")

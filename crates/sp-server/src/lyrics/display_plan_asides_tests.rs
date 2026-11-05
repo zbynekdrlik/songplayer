@@ -1,5 +1,5 @@
 //! Tests for #280's asides rule. The pins are song 361's real lines
-//! ("Redeemed", Red Worship, Genius text), derived with a scratch Python
+//! ("Redeemed", Red Worship, a community-lyrics text), derived with a scratch Python
 //! model of `drop_asides`.
 
 use sp_core::lyrics::{LyricsLine, LyricsWord};

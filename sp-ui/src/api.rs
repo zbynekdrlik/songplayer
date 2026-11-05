@@ -58,23 +58,6 @@ pub async fn post_json_status<T: Serialize, R: DeserializeOwned>(
     resp.json::<R>().await.map_err(|e| (0, e.to_string()))
 }
 
-/// PUT JSON to `path` and deserialise the response.
-pub async fn put_json<T: Serialize, R: DeserializeOwned>(
-    path: &str,
-    body: &T,
-) -> Result<R, String> {
-    let resp = Request::put(path)
-        .json(body)
-        .map_err(|e| e.to_string())?
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !resp.ok() {
-        return Err(format!("PUT {} → {}", path, resp.status()));
-    }
-    resp.json::<R>().await.map_err(|e| e.to_string())
-}
-
 /// DELETE `path`.
 pub async fn delete(path: &str) -> Result<(), String> {
     let resp = Request::delete(path)

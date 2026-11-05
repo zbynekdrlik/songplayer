@@ -71,13 +71,13 @@ async fn a_scraped_text_is_cleaned_into_a_text_candidate() {
         (0, 0, "You never fail"),
         (0, 0, "You never will"),
     ]);
-    let cache = dir.path().join("yt1_title_genius_x_cleaned_v3.json");
+    let cache = dir.path().join("yt1_title_lrclib_x_cleaned_v3.json");
 
-    let c = cleaned_text_candidate(&ai, "Jesus Be the Name", "", "genius", &t, &cache)
+    let c = cleaned_text_candidate(&ai, "Jesus Be the Name", "", "lrclib", &t, &cache)
         .await
         .unwrap()
         .expect("Claude returned lyric lines");
-    assert_eq!(c.source, "genius");
+    assert_eq!(c.source, "lrclib");
     assert_eq!(c.lines, vec!["You never fail", "You never will"]);
     assert!(!c.has_timing);
     assert_eq!(c.line_timings, None);
@@ -121,7 +121,7 @@ async fn an_empty_cleanup_gives_no_candidate() {
 
 fn cleaned() -> CandidateText {
     CandidateText {
-        source: "genius".into(),
+        source: "lrclib".into(),
         lines: vec!["amazing grace".into()],
         has_timing: false,
         line_timings: None,
@@ -145,7 +145,7 @@ fn content_filtered() -> anyhow::Error {
 /// reprocess queue after 3 attempts without a pass (SNV, 10.10.2026).
 #[test]
 fn a_cleanup_the_content_filter_refuses_leaves_out_only_its_candidate() {
-    let fate = cleanup_candidate(Err(content_filtered()), "genius fallback", "yt1");
+    let fate = cleanup_candidate(Err(content_filtered()), "lrclib-plain", "yt1");
     assert!(matches!(fate, Ok(None)), "{fate:?}");
 }
 
@@ -157,13 +157,13 @@ fn a_failed_or_empty_cleanup_still_fails_the_pass() {
         Err(anyhow::anyhow!(
             "chat completion failed (HTTP 503): auth_unavailable"
         )),
-        "genius fallback",
+        "lrclib-plain",
         "yt1",
     )
     .unwrap_err()
     .to_string();
     assert!(
-        outage.contains("gather: genius fallback cleanup failed for yt1"),
+        outage.contains("gather: lrclib-plain cleanup failed for yt1"),
         "{outage}"
     );
     let empty = cleanup_candidate(Ok(None), "lrclib-plain", "yt2")
@@ -173,7 +173,7 @@ fn a_failed_or_empty_cleanup_still_fails_the_pass() {
         empty,
         "gather: lrclib-plain cleanup returned no lyrics for yt2"
     );
-    let kept = cleanup_candidate(Ok(Some(cleaned())), "genius fallback", "yt1").unwrap();
+    let kept = cleanup_candidate(Ok(Some(cleaned())), "lrclib-plain", "yt1").unwrap();
     assert_eq!(
         kept.map(|c| c.lines),
         Some(vec!["amazing grace".to_string()])

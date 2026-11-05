@@ -60,7 +60,7 @@ fn the_title_search_runs_only_when_no_lookup_found_the_song() {
     assert!(needs_title_search(&[]));
     assert!(needs_title_search(&[cand("description"), cand("yt_subs")]));
     assert!(!needs_title_search(&[cand("description"), cand("lrclib")]));
-    assert!(!needs_title_search(&[cand("genius")]));
+    assert!(!needs_title_search(&[cand("lyrics_ovh")]));
     assert!(!needs_title_search(&[cand("override")]));
     assert!(!needs_title_search(&[cand("tier1:spotify")]));
 }
@@ -217,19 +217,21 @@ fn the_cleanup_cache_is_keyed_by_the_candidate() {
         cleanup_cache_name("yt1", &lrclib),
         "yt1_title_lrclib_35094059_cleaned_v3.json"
     );
-    let genius = title_cand(
-        TitleProvider::Genius,
-        "https://genius.com/Elevation-worship-jesus-be-the-name-lyrics/",
+    // The key is the id's last non-empty path segment, cut to the
+    // characters a file name keeps.
+    let path = title_cand(
+        TitleProvider::Lrclib,
+        "x/Elevation-worship-jesus-be-the-name/",
         false,
     );
     assert_eq!(
-        cleanup_cache_name("yt1", &genius),
-        "yt1_title_genius_Elevation-worship-jesus-be-the-name-lyrics_cleaned_v3.json"
+        cleanup_cache_name("yt1", &path),
+        "yt1_title_lrclib_Elevation-worship-jesus-be-the-name_cleaned_v3.json"
     );
-    let odd = title_cand(TitleProvider::Genius, "https://x/a?b=c&d_e", false);
+    let odd = title_cand(TitleProvider::Lrclib, "https://x/a?b=c&d_e", false);
     assert_eq!(
         cleanup_cache_name("yt1", &odd),
-        "yt1_title_genius_abcde_cleaned_v3.json"
+        "yt1_title_lrclib_abcde_cleaned_v3.json"
     );
 }
 
@@ -237,7 +239,7 @@ fn the_cleanup_cache_is_keyed_by_the_candidate() {
 fn the_audit_lists_every_candidate_its_score_and_the_choice() {
     let cands = vec![
         title_cand(TitleProvider::Lrclib, "1", true),
-        title_cand(TitleProvider::Genius, "https://g/x", false),
+        title_cand(TitleProvider::Lrclib, "2", false),
     ];
     let a = audit_json(
         "Jesus Be the Name",
@@ -255,7 +257,7 @@ fn the_audit_lists_every_candidate_its_score_and_the_choice() {
             "candidates": [
                 {"provider": "lrclib", "id": "1", "artist": "A", "record_duration_s": 484.5,
                  "lines": 2, "synced": true, "score": 0.25},
-                {"provider": "genius", "id": "https://g/x", "artist": "A", "record_duration_s": 484.5,
+                {"provider": "lrclib", "id": "2", "artist": "A", "record_duration_s": 484.5,
                  "lines": 2, "synced": false, "score": 0.75}
             ],
             "chosen": 1
@@ -284,7 +286,6 @@ fn row(song: &str) -> VideoLyricsRow {
 fn endpoints(server: &MockServer) -> TitleSearchEndpoints {
     TitleSearchEndpoints {
         lrclib_search: format!("{}/api/search", server.uri()),
-        genius_search: format!("{}/search", server.uri()),
     }
 }
 
@@ -304,7 +305,7 @@ async fn mount_lrclib(server: &MockServer, body: serde_json::Value) {
 /// LRCLIB holds the song (484 s, synced) and a different song of the same
 /// title; a 539 s record of the song is outside ±15 s. The sung transcript
 /// picks the song (1.0 against 10/31), and its synced lyric becomes a timed
-/// `lrclib` candidate as is. No Genius token: Genius is not asked.
+/// `lrclib` candidate as is.
 #[tokio::test]
 async fn the_sung_words_choose_the_song_over_a_same_title_different_song() {
     let server = MockServer::start().await;
@@ -320,17 +321,11 @@ async fn the_sung_words_choose_the_song_over_a_same_title_different_song() {
         ]),
     )
     .await;
-    Mock::given(path("/search"))
-        .respond_with(ResponseTemplate::new(200))
-        .expect(0)
-        .mount(&server)
-        .await;
     let dir = tempfile::tempdir().unwrap();
     let client = reqwest::Client::new();
     let search = TitleSearch {
         client: &client,
         ai: None,
-        genius_token: "",
         cache_dir: dir.path(),
     };
 
@@ -382,34 +377,22 @@ async fn the_sung_words_choose_the_song_over_a_same_title_different_song() {
     assert_eq!(audit["videos_text"], serde_json::Value::Null);
 }
 
-/// Only Genius holds the song (the 158 case: LRCLIB's records are all 539 s).
-/// Its page is a plain scraped lyric, so Claude cleans it into a text-only
-/// `genius` candidate, cached under the candidate's own name.
+/// LRCLIB holds the song only as plain lyrics: Claude cleans the chosen
+/// lyric into a text-only `lrclib` candidate, cached under the candidate's
+/// own name (apart from the artist+title lookup's cleanup cache).
 #[tokio::test]
-async fn a_genius_page_is_cleaned_into_a_text_candidate() {
+async fn a_plain_lyric_is_cleaned_into_a_text_candidate() {
     let server = MockServer::start().await;
     let base = server.uri();
-    mount_lrclib(&server, serde_json::json!([])).await;
-    Mock::given(method("GET"))
-        .and(path("/search"))
-        .and(query_param("q", "Jesus Be the Name"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "response": {"hits": [
-                {"type": "song", "result": {"url": format!("{base}/elevation-lyrics"),
-                    "primary_artist": {"name": "Elevation Worship"}}}
-            ]}
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/elevation-lyrics"))
-        .respond_with(ResponseTemplate::new(200).set_body_string(
-            "<div data-lyrics-container=\"true\">[Chorus]<br/>You never fail<br/>You never will<br/>Jesus be the name</div>",
-        ))
-        .expect(1)
-        .mount(&server)
-        .await;
+    mount_lrclib(
+        &server,
+        serde_json::json!([
+            {"id": 9, "trackName": "Jesus Be the Name", "artistName": "Elevation Worship",
+             "duration": 490.0, "instrumental": false,
+             "plainLyrics": "[Chorus]\nYou never fail\nYou never will\nJesus be the name"}
+        ]),
+    )
+    .await;
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -430,7 +413,6 @@ async fn a_genius_page_is_cleaned_into_a_text_candidate() {
     let search = TitleSearch {
         client: &client,
         ai: Some(&ai),
-        genius_token: "tok",
         cache_dir: dir.path(),
     };
 
@@ -442,8 +424,8 @@ async fn a_genius_page_is_cleaned_into_a_text_candidate() {
             &[],
         )
         .await
-        .expect("the Genius page reaches the floor (20/24)");
-    assert_eq!(found.source, "genius");
+        .expect("the plain lyric reaches the floor");
+    assert_eq!(found.source, "lrclib");
     assert_eq!(
         found.lines,
         vec!["You never fail", "You never will", "Jesus be the name"]
@@ -451,7 +433,7 @@ async fn a_genius_page_is_cleaned_into_a_text_candidate() {
     assert!(!found.has_timing);
     assert!(
         dir.path()
-            .join("yt158_title_genius_elevation-lyrics_cleaned_v3.json")
+            .join("yt158_title_lrclib_9_cleaned_v3.json")
             .exists()
     );
 }
@@ -474,7 +456,6 @@ async fn a_different_song_of_the_same_title_is_never_chosen() {
     let search = TitleSearch {
         client: &client,
         ai: None,
-        genius_token: "",
         cache_dir: dir.path(),
     };
     let found = search
@@ -513,7 +494,6 @@ async fn a_plain_lyric_without_a_claude_client_is_not_used() {
     let search = TitleSearch {
         client: &client,
         ai: None,
-        genius_token: "",
         cache_dir: dir.path(),
     };
     let found = search
@@ -543,7 +523,6 @@ async fn a_row_without_a_title_searches_nothing() {
     let search = TitleSearch {
         client: &client,
         ai: None,
-        genius_token: "tok",
         cache_dir: dir.path(),
     };
     assert!(
@@ -585,7 +564,6 @@ async fn a_lyric_the_cleanup_cannot_use_passes_to_the_next_best() {
     let search = TitleSearch {
         client: &client,
         ai: None,
-        genius_token: "",
         cache_dir: dir.path(),
     };
     let found = search
@@ -627,7 +605,6 @@ async fn the_found_lyric_replaces_a_partial_description() {
     let search = TitleSearch {
         client: &client,
         ai: None,
-        genius_token: "",
         cache_dir: dir.path(),
     };
     let description = gathered("description", false, &["You never fail", "You never will"]);
@@ -676,7 +653,6 @@ async fn the_videos_own_complete_captions_stay_the_reference() {
     let search = TitleSearch {
         client: &client,
         ai: None,
-        genius_token: "",
         cache_dir: dir.path(),
     };
     let captions = gathered(
@@ -733,7 +709,6 @@ async fn the_found_lyric_competes_with_the_videos_priority_pick() {
     let search = TitleSearch {
         client: &client,
         ai: None,
-        genius_token: "",
         cache_dir: dir.path(),
     };
     let description = gathered(

@@ -16,9 +16,11 @@
 //!   named `HolySpirit1_…` would read as a video id.
 //! - [`Why::Stale`]: a name no code writes any more, whatever its video
 //!   (unchanged for [`STALE_AFTER_MS`], 7 d): a retired pipeline's output
-//!   ([`RETIRED_KINDS`]) or a cleanup cache older than the code's
-//!   `_cleaned_v`[`CLEANED_VERSION`] (or unversioned). A newer version is
-//!   kept (a rolled-back build must not eat a newer build's caches).
+//!   ([`RETIRED_KINDS`]), a retired provider's cleanup cache of any
+//!   version (Genius, removed by #232: [`RETIRED_CLEANED_RE`]) or a
+//!   cleanup cache older than the code's `_cleaned_v`[`CLEANED_VERSION`]
+//!   (or unversioned). A newer version is kept (a rolled-back build must
+//!   not eat a newer build's caches).
 //! - [`Why::Replaced`]: a set-aside `<name>.replaced` / `<name>.N.replaced`
 //!   (`cache::set_aside_name`) of a song file (`<name>` matches [`SONG_RE`])
 //!   unchanged for [`REPLACED_AFTER_MS`] (30 d),
@@ -103,7 +105,16 @@ pub static WORK_DIR_RE: LazyLock<Regex> =
 
 /// A cleanup cache and its version (none = the unversioned first one).
 static CLEANED_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[A-Za-z0-9_-]{11}_(?:lrclib|genius|title_.+)_cleaned(?:_v([0-9]+))?\.json$")
+    Regex::new(r"^[A-Za-z0-9_-]{11}_(?:lrclib|title_.+)_cleaned(?:_v([0-9]+))?\.json$").unwrap()
+});
+
+/// A retired provider's cleanup cache, any version: Genius's artist+title
+/// fallback (`{id}_genius_cleaned…`) and its title search hits
+/// (`{id}_title_genius_…_cleaned…`). Genius was removed 5.11.2026 (#232:
+/// genius.com answers automated requests with a Cloudflare challenge), so
+/// no code reads or writes them any more.
+pub static RETIRED_CLEANED_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^[A-Za-z0-9_-]{11}_(?:genius|title_genius_.+)_cleaned(?:_v[0-9]+)?\.json$")
         .unwrap()
 });
 
@@ -234,6 +245,7 @@ pub fn is_stale_name(name: &str) -> bool {
         .is_some_and(|kind| RETIRED_KINDS.contains(&kind))
         && ID_FILE_RE.is_match(name);
     retired
+        || RETIRED_CLEANED_RE.is_match(name)
         || CLEANED_RE.captures(name).is_some_and(|caps| {
             caps.get(1)
                 .map_or(Some(0), |v| v.as_str().parse::<u32>().ok())

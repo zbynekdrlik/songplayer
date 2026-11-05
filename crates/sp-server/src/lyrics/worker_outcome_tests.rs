@@ -275,7 +275,7 @@ async fn a_failing_run_of_an_unserved_queued_song_is_deferred() {
     let rig = rig().await;
     queued_song(&rig, 3, "yt_unserved3", 0, 1).await;
 
-    let error = anyhow::anyhow!("gather: genius fallback cleanup failed");
+    let error = anyhow::anyhow!("gather: lrclib-plain cleanup failed");
     rig.worker.fail_song(3, "yt_unserved3", &error).await;
 
     assert_eq!(
@@ -389,7 +389,7 @@ async fn an_error_never_re_parks_a_stale_sentinel_at_the_current_version() {
         "an older version's sentinel is due"
     );
 
-    let error = anyhow::anyhow!("gather: genius fallback cleanup failed: CLIProxy unreachable");
+    let error = anyhow::anyhow!("gather: lrclib-plain cleanup failed: CLIProxy unreachable");
     rig.worker.fail_song(11, "yt_stale011", &error).await;
 
     assert_eq!(
@@ -447,7 +447,7 @@ async fn an_unserved_songs_error_is_one_warn_naming_it() {
     unserved_song(&rig, 14, 1, "yt_unserv14", None, current).await;
     let cap = Captured::default();
     let _log = tracing::subscriber::set_default(capturing(&cap));
-    let error = anyhow::anyhow!("gather: genius fallback cleanup failed: 503");
+    let error = anyhow::anyhow!("gather: lrclib-plain cleanup failed: 503");
 
     rig.worker.fail_song(14, "yt_unserv14", &error).await;
     rig.worker.fail_song(14, "yt_unserv14", &error).await;
@@ -455,7 +455,7 @@ async fn an_unserved_songs_error_is_one_warn_naming_it() {
     let warns: Vec<String> = cap
         .lines_with(" WARN ")
         .into_iter()
-        .filter(|l| l.contains("process_error: gather: genius fallback cleanup failed: 503"))
+        .filter(|l| l.contains("process_error: gather: lrclib-plain cleanup failed: 503"))
         .collect();
     assert_eq!(warns.len(), 2, "one WARN per failed attempt: {warns:?}");
     assert!(
@@ -541,7 +541,7 @@ async fn a_failed_upgrade_of_a_served_full_mix_row_waits_a_day() {
             .unwrap();
     assert_eq!(picked.map(|r| r.id), Some(6));
 
-    let error = anyhow::anyhow!("gather: genius fallback cleanup failed");
+    let error = anyhow::anyhow!("gather: lrclib-plain cleanup failed");
     rig.worker.fail_song(6, "yt_fullmix6", &error).await;
 
     let (has_lyrics, source, _, attempts) = row(&rig.pool, 6).await;

@@ -2,9 +2,9 @@
 //!
 //! The metadata prompt shortens a person's first and middle names to
 //! initials for the wall's title (`metadata/gemini.rs`: "P. Wickham",
-//! "B. W. Hastings"; the parser does the same), and LRCLIB, lyrics.ovh and
-//! Genius, asked for "P. Wickham", miss the song (SNV, 19.10.2026: 112
-//! rows). [`full_artist`] takes each `X. Y. Surname` of the display artist
+//! "B. W. Hastings"; the parser does the same), and LRCLIB and lyrics.ovh
+//! (then also Genius, removed by #232), asked for "P. Wickham", miss the
+//! song (SNV, 19.10.2026: 112 rows). [`full_artist`] takes each `X. Y. Surname` of the display artist
 //! back to the name the video's own title gives ("Homesick For Heaven -
 //! Phil Wickham | …" → "Phil Wickham"); a name the title does not spell out
 //! stays as it is. [`expand_lookup_artist`] puts it on the row the lyrics

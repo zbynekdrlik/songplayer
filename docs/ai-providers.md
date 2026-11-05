@@ -20,14 +20,18 @@ key NAMES only.
 
 | Provider | Used for | Credential | Live gate |
 |---|---|---|---|
-| Genius | community lyrics (gather's fallback, the title search) | `genius_access_token` | `e2e/post-deploy-genius.spec.ts` (#232, through `POST /api/v1/lyrics/probe-sources`): fails on any error answer — a refused search (a dead token, a block, a limit), an unreadable answer, a refused song page, a matched page with no lyric |
-| LRCLIB | synced / plain lyrics | none | none (public; outages are common, a gate would block deploys on a third party) |
-| lyrics.ovh | plain lyrics | none | none (public) |
+| LRCLIB | synced / plain lyrics, the title search for covers | none | none (public; outages are common, a gate would block deploys on a third party) |
+| lyrics.ovh | plain lyrics (candidate label `lyrics_ovh`) | none | none (public) |
 | YouTube (yt-dlp) | captions, descriptions, downloads | the cookie file (`.claude/rules/youtube-cookies.md`) | `e2e/post-deploy-youtube.spec.ts` (`POST /api/v1/youtube/probe`: the box's yt-dlp resolves one fixed video with the cookies and the production selector, ≥ 720 rows, nothing downloaded; the deno check `tools.js_runtime_ok` alone passes on a bot check) |
 | Spotify lyrics proxy | line-synced lyrics: the worker resolves each song's track id through Claude by itself (above), then fetches the proxy | none | none (a public, unauthenticated third-party proxy; a gate would block deploys on its outages, like LRCLIB) |
 
+Genius removed 5.11.2026 (#232): genius.com answers automated requests with a Cloudflare challenge. It was the
+community-lyrics fallback after lyrics.ovh and the second title-search
+source; its code, its `genius_access_token` setting and its post-deploy
+gate are deleted.
+
 ## Stored but unused (delete with the key rotation, #232 / #229; not before 21.10.2026)
 
-`assemblyai_api_key`, `replicate_api_token`, `dashscope_api_key`,
+`genius_access_token`, `assemblyai_api_key`, `replicate_api_token`, `dashscope_api_key`,
 `elevenlabs_api_key`, `openrouter_api_key`, `soniox_api_key`: no code reads
 them. Their DB rows go with the owner's key revocation (one owner action).

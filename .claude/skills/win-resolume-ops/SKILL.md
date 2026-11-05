@@ -129,9 +129,9 @@ dev box — never echo or commit it.
 ## This box IS the local-model machine (not dev2)
 
 Local ML models run HERE, not on any other box. Established venvs under
-`C:\ProgramData\SongPlayer\cache\tools\`: `whisperx_venv`, `crisper_venv`,
-`parakeet_venv`, `vibevoice_venv`, `lyrics_venv`, plus an `hf_models` HuggingFace
-cache. When a task needs a local model, inspect those first and mirror a proven
+`C:\ProgramData\SongPlayer\cache\tools\`: `lyrics_venv`, `mtl_aligner_venv`, plus
+an `hf_models` HuggingFace cache (the old whisperx, parakeet, vibevoice, crisper and
+ctc venvs were deleted 5.11.2026, #286). When a task needs a local model, inspect those first and mirror a proven
 torch/CUDA build rather than starting from zero — and never propose moving this
 project's model work to another machine.
 
@@ -558,7 +558,7 @@ only IPv4 + QoS + Npcap bound, metric 900; `Ethernet` metric 10). Before
 250 µs latency → pops at FOH.
 
 - **Routing:** `10.77.7.0/24 via 10.77.8.1 on Ethernet` keeps every app's
-  FOH-subnet traffic (VBAN to fohabl / lv1) on the main NIC;
+  FOH-subnet traffic (VBAN to lv1) on the main NIC;
   `10.77.7.104/32 on-link on Dante` sends only the card's traffic over the
   Dante NIC. DVS's sockets bound to 10.77.7.107 use the Dante NIC (strong
   host model).

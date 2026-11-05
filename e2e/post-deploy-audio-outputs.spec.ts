@@ -1,16 +1,16 @@
 /**
  * #233 post-deploy gates on SNV:
- * 1. FOH's path is unchanged by the output list: the migrated VBAN output to
- *    fohabl.lan:6980 runs at 96 kHz INT24 (the owner's ruling of 11.10.2026,
- *    #233; 48 kHz before), stream `sp-program`, no delay,
- *    blocks going out, no send errors (two reads, `fohPathFailures`).
+ * 1. lv1's path: the VBAN output to lv1.lan:6980 runs at 48 kHz INT24, stream
+ *    `sp-program`, no delay, blocks going out, no send errors (two reads,
+ *    `lv1PathFailures`). FOH has no VBAN since 5.11.2026 (the owner, #257): it
+ *    takes SongPlayer over Dante, `post-deploy-audio-asio.spec.ts`.
  * 2. A VBAN destination at 96 kHz: a receiver ON THE BOX (a UDP socket on
  *    127.0.0.1) reads rate index 4, 200-frame INT24 packets, a contiguous
  *    counter, 480 a second. The test adds a temporary entry `e2e-96k` and
- *    restores the stored list in `finally`; the FOH entries are unchanged by
+ *    restores the stored list in `finally`; the other entries are unchanged by
  *    both PATCHes, so the outputs task keeps them running (Task 1.8).
  * 3. #257: no audio path records a `loss` in the audio fault ledger from
- *    one settle after FOH is listed to the file's end
+ *    one settle after lv1 is listed to the file's end
  *    (`audio-faults-read.ts`, the decision `audio-faults-gate.ts`); every
  *    path and its `risk` rows are logged first, also when the window never
  *    opened.
@@ -23,7 +23,7 @@
 
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import * as dgram from "node:dgram";
-import { FOH_TARGET, MIN_BLOCKS, fohPathFailures, receiverFailures, type OutputStatus } from "./audio-outputs-gate";
+import { LV1_TARGET, MIN_BLOCKS, lv1PathFailures, receiverFailures, type OutputStatus } from "./audio-outputs-gate";
 import { expectNoLossSince, fileStartOrNull, openFaultWindow } from "./audio-faults-read";
 
 async function outputs(request: APIRequestContext): Promise<OutputStatus[]> {
@@ -38,15 +38,15 @@ async function outputs(request: APIRequestContext): Promise<OutputStatus[]> {
 test.use({ trace: "off" });
 
 /** #257: where this file's audio window opened (the server's clock), one
- * settle after FOH is listed; `null` until then. */
+ * settle after lv1 is listed; `null` until then. */
 let faultWindowStart: number | null = null;
 
 /** #257: the server's clock when this worker began the file: the window's
  * fallback start when an earlier test failed before it opened. */
 let fileStart: number | null = null;
 
-function fohBlocks(list: OutputStatus[]): number {
-  return list.find((o) => o.vban?.targets[0]?.target === FOH_TARGET)?.blocks_sent ?? -1;
+function lv1Blocks(list: OutputStatus[]): number {
+  return list.find((o) => o.vban?.targets[0]?.target === LV1_TARGET)?.blocks_sent ?? -1;
 }
 
 test.describe("audio outputs (#233)", () => {
@@ -54,46 +54,46 @@ test.describe("audio outputs (#233)", () => {
     fileStart = await fileStartOrNull(request);
   });
 
-  test("FOH gets 96 kHz INT24 sp-program", async ({ request }) => {
-    // The FOH poll (20 s), the ledger's settle (11 s), the blocks (10 s).
+  test("lv1 gets 48 kHz INT24 sp-program", async ({ request }) => {
+    // The lv1 poll (20 s), the ledger's settle (11 s), the blocks (10 s).
     test.setTimeout(60_000);
-    // Right after a restart FOH is listed once the outputs task's first pass
+    // Right after a restart lv1 is listed once the outputs task's first pass
     // ran (the migration, every entry's DNS): poll for it. A read that throws
     // counts as "not yet" (expect.poll does not retry a throwing generator).
     await expect
       .poll(
         async () => {
           try {
-            return fohBlocks(await outputs(request));
+            return lv1Blocks(await outputs(request));
           } catch {
             return -1;
           }
         },
-        { message: `a VBAN output to ${FOH_TARGET}`, timeout: 20_000 },
+        { message: `a VBAN output to ${LV1_TARGET}`, timeout: 20_000 },
       )
       .toBeGreaterThanOrEqual(0);
-    // #257: the audio window opens one settle after FOH is listed (a fault
+    // #257: the audio window opens one settle after lv1 is listed (a fault
     // from before is stamped before it).
     faultWindowStart = await openFaultWindow(request);
     const first = await outputs(request);
     console.log(`[#233 outputs] first: ${JSON.stringify(first)}`);
-    const start = fohBlocks(first);
+    const start = lv1Blocks(first);
     await expect
-      .poll(async () => fohBlocks(await outputs(request)) - start, {
-        message: `${MIN_BLOCKS} FOH blocks go out`,
+      .poll(async () => lv1Blocks(await outputs(request)) - start, {
+        message: `${MIN_BLOCKS} lv1 blocks go out`,
         timeout: 10_000,
       })
       .toBeGreaterThanOrEqual(MIN_BLOCKS);
     const second = await outputs(request);
     console.log(`[#233 outputs] second: ${JSON.stringify(second)}`);
-    expect(fohPathFailures(first, second), "the FOH path").toEqual([]);
+    expect(lv1PathFailures(first, second), "the lv1 path").toEqual([]);
   });
 
   test("a 96 kHz VBAN destination reads index 4 and a contiguous counter", async ({ request }) => {
     test.setTimeout(60_000);
     // The box has a stored list (the migration ran). Without one the probe's
     // PATCH would store a list, and the migration then never runs (it acts
-    // only while no list is stored): FOH would stay off for good.
+    // only while no list is stored): the outputs would stay off for good.
     const stored = (await (await request.get("/api/v1/settings")).json()).audio_outputs as string | undefined;
     expect(stored?.trim(), "a stored output list").toBeTruthy();
     const kept = (JSON.parse(stored as string) as { id: string }[]).filter((e) => !e.id.startsWith("e2e-"));

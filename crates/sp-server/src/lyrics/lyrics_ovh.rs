@@ -1,7 +1,8 @@
 //! lyrics.ovh community lyrics provider.
 //!
-//! Why this exists: the previous Genius HTML scraper truncated multi-section
-//! lyrics. Genius song pages render lyrics across multiple
+//! Why this exists: the Genius HTML scraper of 2026-05 (Genius itself was
+//! removed 5.11.2026, #232) truncated multi-section lyrics. Genius song
+//! pages render lyrics across multiple
 //! `<div data-lyrics-container="true">` blocks, each containing nested decoration
 //! divs (contributor button, SVG icons). The naive scraper found the first
 //! `</div>` after a container open and stopped there — capturing only the

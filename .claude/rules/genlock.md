@@ -68,8 +68,8 @@ delivery to the program bus; `SP-program`'s own NDI submit is timed on
 - Pacing (#147) runs on the exact-rational 100 ns grid: sleep target from
   `strict_next_boundary_100ns`, stamp = the serviced boundary, never
   `floor(now)` at emission, never a stamp > the wall read before the send.
-  The ns gate `genlock_emit_gate` + its 43 vectors are a reference port of
-  camera-box's DECIMATOR — never use an epoch-multiple ns grid as a clock
+  camera-box's ns gate `genlock_emit_gate` is its DECIMATOR — never use an
+  epoch-multiple ns grid as a clock
   (it drifts 10 ns/s against the second-anchored stamp grid). Box test
   2026-09-13 01:43: idle/paused outputs held 30/s, but a PLAYING output ran
   ~27/s with every frame late (p99 15 s, max 40 s) — what the decode split

@@ -28,7 +28,7 @@ pub use receive::{NdiReceiveBackend, RealNdiReceiveBackend};
 pub use receiver::{CapturedAudio, CapturedVideo, NdiFrameSync};
 #[cfg(any(test, feature = "test-util"))]
 pub use sender::test_util;
-pub use sender::{AudioFrame, NdiBackend, NdiSender, RealNdiBackend, Tally, VideoFrame};
+pub use sender::{AudioFrame, NdiBackend, NdiSender, RealNdiBackend, VideoFrame};
 #[cfg(any(test, feature = "test-util"))]
 pub use sender_mock::MockNdiBackend;
 pub use types::{
@@ -57,12 +57,6 @@ mod tests {
     #[test]
     fn audio_frame_v3_t_is_non_zero_size() {
         assert!(mem::size_of::<types::NDIlib_audio_frame_v3_t>() > 0);
-    }
-
-    #[test]
-    fn tally_t_is_small() {
-        // Two bools — should be at most a few bytes.
-        assert!(mem::size_of::<types::NDIlib_tally_t>() <= 4);
     }
 
     #[test]

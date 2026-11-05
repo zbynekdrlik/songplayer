@@ -639,7 +639,7 @@ impl HostDriver {
         }
     }
 
-    /// Handle a single command: the forced refresh and the shutdown here, a
+    /// Handle a single command: the forced refresh here, a
     /// title or subtitle push through `run_push` (its own driver step, which
     /// acts on a 404, #217 addendum 2). Pure dispatch; the handlers and
     /// `run_push` have their own wiremock tests.
@@ -666,9 +666,6 @@ impl HostDriver {
                 ) {
                     self.run_full_refresh(reason, now).await;
                 }
-            }
-            ResolumeCommand::Shutdown => {
-                info!(host = %self.host, "received shutdown command");
             }
             push_cmd => self.run_push(&push_cmd, Instant::now()).await,
         }

@@ -219,8 +219,8 @@ impl LyricsWorker {
         // #144: a cover's text by title, chosen by what is sung
         // (`should_title_search`). Unlike the transcript it is not kept for
         // the pass: a no-penalty deferral re-pick searches again (the Claude
-        // cleanup of a chosen plain lyric is cached; the LRCLIB / Genius
-        // answers may differ, and the gate verifies whatever is chosen).
+        // cleanup of a chosen plain lyric is cached; LRCLIB's answers may
+        // differ, and the gate verifies whatever is chosen).
         let words = transcript.as_deref().unwrap_or_default();
         let title_reference =
             if should_title_search(words, &candidates, reference_backend.mtl_cfg.is_available()) {
@@ -314,24 +314,16 @@ impl LyricsWorker {
 
     /// #144: the title search for this song (`title_search::TitleSearch`), on
     /// the production endpoints: the reference text when it found a lyric.
-    /// The Genius token is read per song, like the artist+title Genius lookup
-    /// (`gather_sources`); empty = LRCLIB only.
-    #[cfg_attr(test, mutants::skip)] // settings read + wiring; `TitleSearch::find` is tested
+    #[cfg_attr(test, mutants::skip)] // wiring; `TitleSearch::find` is tested
     async fn title_search_reference(
         &self,
         row: &crate::db::models::VideoLyricsRow,
         words: &[AsrWord],
         gathered: &[crate::lyrics::tier1::CandidateText],
     ) -> Option<crate::lyrics::tier1::CandidateText> {
-        let genius_token = crate::db::models::get_setting(&self.pool, "genius_access_token")
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_default();
         let search = crate::lyrics::title_search::TitleSearch {
             client: &self.client,
             ai: self.ai_client.as_deref(),
-            genius_token: &genius_token,
             cache_dir: &self.cache_dir,
         };
         search

@@ -13,7 +13,8 @@ paths:
 # VBAN audio output of the program (#210, B2 of EPIC #174)
 
 SongPlayer sends the program audio (the samples `SP-program` carries) as VBAN
-to FOH (VB-Matrix on fohabl) and lv1. This replaces cg OBS's bursty obs-vban
+to lv1 (FOH left VBAN on 5.11.2026, #257: VB-Matrix is off on fohabl, FOH takes
+SongPlayer over Dante). This replaces cg OBS's bursty obs-vban
 (#148). Design record: #210 comment 5846308506 (Approach 1). #233: VBAN is
 one transport of the program's output LIST (`audio-outputs.md`): one
 `VbanOut` + thread per entry, each with its own rate, format, delay and ONE
@@ -436,15 +437,9 @@ If stalls remain under MMCSS, the next step is a WPR trace of one
 predicted grid instant (DPC / ISR attribution; `late_events` gives the
 instants), with a FINDING on the record before any further change.
 
-## FOH routing on fohabl (VB-Matrix over VBAN-TEXT)
+## FOH left VBAN (#257, the owner, 5.11.2026)
 
-On 28.9.2026 FOH "CG L/R" (`VASIO32.OUT[27..28]`) was switched back to the cg OBS VBAN (`VBAN2`). SongPlayer's `sp-program` (`VBAN6`) points stay present but muted (#210 comment 5864647147).
-
-- **Switch with `Mute` only.** VB-Matrix silently ignores `dBGain=-inf`: it sends no reply and applies no change. A revert that relied on it summed cg and SongPlayer on FOH for ~16 s.
-  - SongPlayer → FOH: `Point(VBAN2.IN[1],VASIO32.OUT[27]).Mute = 1;Point(VBAN2.IN[2],VASIO32.OUT[28]).Mute = 1;Point(VBAN6.IN[1],VASIO32.OUT[27]).Mute = 0;Point(VBAN6.IN[2],VASIO32.OUT[28]).Mute = 0;`
-  - cg → FOH: the same four points with the Mute values swapped.
-- **Read back every point after each write.** Record the prior values first (fohabl is critical production).
-- **FOH follows cg now.** Before a SongPlayer deploy or restart, or an Arena kill/relaunch, on win-resolume, message the camera-box session: it watches the cg audio path.
+VB-Matrix is off on fohabl and nothing there listens on UDP 6980. FOH takes SongPlayer over Dante: the master Ableton's card, rx 27/28. The VBAN-TEXT routing notes went with it; `git log` has them. A check of VBAN's receive side now means lv1 only.
 
 ## A fleet date step: SlewRemainder (#224 part 2)
 

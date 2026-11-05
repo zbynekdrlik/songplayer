@@ -93,7 +93,7 @@ async fn a_pass_deletes_what_no_row_needs_and_keeps_the_rest() {
         song("rowvideo001", "_dub.flac"),
         song("rowvideo001", "_dub_events.jsonl"),
         "rowvideo001_lyrics.json".to_string(),
-        "rowvideo001_genius_cleaned_v3.json".to_string(),
+        "rowvideo001_lrclib_cleaned_v3.json".to_string(),
         "cli-proxy-api-config.yaml".to_string(),
         "gone0000001_notes.txt".to_string(),
         "young000001_lyrics.json".to_string(),
@@ -107,7 +107,8 @@ async fn a_pass_deletes_what_no_row_needs_and_keeps_the_rest() {
         "gone0000001_lyrics.json".to_string(),
         "gone0000001_vocals16k.wav".to_string(),
         "rowvideo001_whisperx_track.json".to_string(),
-        "rowvideo001_genius_cleaned_v2.json".to_string(),
+        "rowvideo001_lrclib_cleaned_v2.json".to_string(),
+        "rowvideo001_genius_cleaned_v3.json".to_string(),
         song("rowvideo001", "_audio.flac.replaced"),
         song("rowvideo001", "_dub.flac.prev"),
     ];
@@ -170,11 +171,11 @@ async fn a_pass_deletes_what_no_row_needs_and_keeps_the_rest() {
         ["notes.txt", "rowvideo001_lyrics_0123456789abcdef.part"]
     );
     assert_eq!(names(&cache.join("tools")), ["yt-dlp.exe"]);
-    assert_eq!(swept.files, 11, "10 files + 1 part");
+    assert_eq!(swept.files, 12, "11 files + 1 part");
     assert_eq!(swept.dirs, 1);
-    assert_eq!(swept.bytes, 10 * 100 + 1_000 + 300);
+    assert_eq!(swept.bytes, 11 * 100 + 1_000 + 300);
     assert_eq!(swept.count(Why::NoRow), 7, "6 files + the isolation dir");
-    assert_eq!(swept.count(Why::Stale), 2);
+    assert_eq!(swept.count(Why::Stale), 3);
     assert_eq!(swept.count(Why::Replaced), 1);
     assert_eq!(swept.count(Why::DubPrev), 1);
     assert_eq!(swept.count(Why::Part), 1);

@@ -231,18 +231,3 @@ pub struct NDIlib_audio_frame_v3_t {
 
 unsafe impl Send for NDIlib_audio_frame_v3_t {}
 unsafe impl Sync for NDIlib_audio_frame_v3_t {}
-
-// ---------------------------------------------------------------------------
-// Tally
-// ---------------------------------------------------------------------------
-
-/// Tally state reported by `NDIlib_send_get_tally`.
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default)]
-#[allow(non_camel_case_types)]
-pub struct NDIlib_tally_t {
-    /// Source is on program (live) output.
-    pub on_program: bool,
-    /// Source is on preview output.
-    pub on_preview: bool,
-}

@@ -10,8 +10,8 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use sp_core::config::{
     SECRET_MASK, SECRET_SETTINGS, SETTING_CACHE_DIR, SETTING_GEMINI_API_KEY, SETTING_GEMINI_MODEL,
-    SETTING_GENIUS_ACCESS_TOKEN, SETTING_NODE_NAME, SETTING_OBS_WEBSOCKET_PASSWORD,
-    SETTING_PEER_API_KEY, SETTING_PEERS, SETTING_REMOTE_WS_PASSWORD,
+    SETTING_NODE_NAME, SETTING_OBS_WEBSOCKET_PASSWORD, SETTING_PEER_API_KEY, SETTING_PEERS,
+    SETTING_REMOTE_WS_PASSWORD,
 };
 use sqlx::SqlitePool;
 use tower::ServiceExt;
@@ -27,14 +27,13 @@ const CF_SECRET: &str = "cf-secret-example";
 /// A retired credential a node's database can still hold.
 const RETIRED: &str = "replicate_api_token";
 
-/// Every secret the tests seed, in clear: the five on `SECRET_SETTINGS` and a
+/// Every secret the tests seed, in clear: the four on `SECRET_SETTINGS` and a
 /// retired one.
 const SECRETS: &[(&str, &str)] = &[
     (
         SETTING_GEMINI_API_KEY,
         "example-gemini-one, example-gemini-two",
     ),
-    (SETTING_GENIUS_ACCESS_TOKEN, "example-genius-token"),
     (SETTING_OBS_WEBSOCKET_PASSWORD, "example-obs-pass"),
     (SETTING_PEER_API_KEY, KEY),
     (SETTING_REMOTE_WS_PASSWORD, "example-remote-pass"),

@@ -1,7 +1,7 @@
 //! The program's VBAN audio output (#210, B2 of EPIC #174). Design record:
 //! #210 comment 5846308506 (Approach 1).
 //!
-//! FOH (VB-Matrix on fohabl) and lv1 take the program audio as VBAN. The
+//! lv1 takes the program audio as VBAN (FOH over Dante since #257). The
 //! `SP-program` sender thread (`program_output.rs`) hands each submitted
 //! pair's audio block (a forwarded source block, a mixed block or the
 //! standby silence) to the outputs' fan-out (`audio_out.rs`, #233), which

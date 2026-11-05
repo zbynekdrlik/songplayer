@@ -251,7 +251,7 @@ reaches its private helpers through `super::`.
 ## Moving a string or a call: grep the source-scan tests first (#144, 10.10.2026)
 
 Some tests read a source file with `include_str!` and assert it CONTAINS a
-literal (`worker_tests.rs::gather_uses_lyrics_ovh_primary_with_genius_fallback`
+literal (`worker_tests.rs::gather_uses_lyrics_ovh_and_no_genius`
 pins gather.rs's calls and bail messages). A refactor that moves such a
 literal fails them with no behaviour change (CI 38048742066). Before moving a
 message or a call, `grep -rn '<the literal>' crates/*/src --include='*tests*'`
@@ -304,7 +304,7 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
 - **`clippy::collapsible_if` in edition 2024 wants a let-chain** (#147 r9):
   `if cond { if let Some(x) = f() { … } }` with no `else` fails `-D warnings`.
   Write `if cond && let Some(x) = f() { … }` (the tree already uses let-chains,
-  e.g. `lyrics/genius.rs`).
+  e.g. `playback/ndi_input_name.rs`).
 - **`clippy::manual_div_ceil`** (warn-by-default → `-D warnings`): a hand-rolled
   ceil-division `(a + b - 1) / b` (or the `(a * p + 99) / 100` form) must be
   `a.div_ceil(b)`. `u64::div_ceil` is **const-fn since 1.73**, so it works inside

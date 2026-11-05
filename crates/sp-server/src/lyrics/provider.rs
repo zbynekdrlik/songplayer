@@ -224,13 +224,13 @@ mod from_tier1_tests {
     #[test]
     fn preserves_no_timing_state() {
         let src = Tier1Candidate {
-            source: "genius".into(),
+            source: "lyrics_ovh".into(),
             lines: vec!["only text".into()],
             line_timings: None,
             has_timing: false,
         };
         let p: ProviderCandidate = src.into();
-        assert_eq!(p.source, "genius");
+        assert_eq!(p.source, "lyrics_ovh");
         assert!(p.line_timings.is_none());
         assert!(!p.has_timing);
     }

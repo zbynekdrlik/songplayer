@@ -20,8 +20,7 @@ use crate::ndi_sdk::NdiLib;
 use crate::sender::NdiBackend;
 use crate::types::{
     FRAME_FORMAT_PROGRESSIVE, FourCCAudioType, FourCCVideoType, NDI_SEND_TIMECODE_SYNTHESIZE,
-    NDIlib_audio_frame_v3_t, NDIlib_send_create_t, NDIlib_send_instance_t, NDIlib_tally_t,
-    NDIlib_video_frame_v2_t,
+    NDIlib_audio_frame_v3_t, NDIlib_send_create_t, NDIlib_send_instance_t, NDIlib_video_frame_v2_t,
 };
 
 /// Per-handle state kept by the real backend.
@@ -255,22 +254,6 @@ impl NdiBackend for RealNdiBackend {
                 (self.lib.send_send_audio_v3)(state.ptr, &frame);
             }
         });
-    }
-
-    #[cfg_attr(test, mutants::skip)]
-    fn send_get_tally(&self, handle: usize, timeout_ms: u32) -> Option<(bool, bool)> {
-        self.handles
-            .with(handle, |state| {
-                let mut tally = NDIlib_tally_t::default();
-                let changed =
-                    unsafe { (self.lib.send_get_tally)(state.ptr, &mut tally, timeout_ms) };
-                if changed {
-                    Some((tally.on_program, tally.on_preview))
-                } else {
-                    None
-                }
-            })
-            .flatten()
     }
 
     // mutants::skip — dereferences NDI SDK function pointer; only exercised on

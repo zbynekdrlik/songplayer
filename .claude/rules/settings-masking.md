@@ -20,8 +20,10 @@ never shows a secret; only the database holds it in clear.
 ## Which settings are secret
 
 - ONE list: `sp_core::config::SECRET_SETTINGS` = `gemini_api_key`,
-  `genius_access_token`, `obs_websocket_password`, `peer_api_key`,
-  `remote_ws_password`.
+  `obs_websocket_password`, `peer_api_key`, `remote_ws_password`.
+  `genius_access_token` left the list with Genius (removed 5.11.2026, #232:
+  genius.com answers automated requests with a Cloudflare challenge); a
+  stored row stays masked by the name rule below.
 - `is_secret_setting(key)` = on that list, OR named `*_key` / `*_token` /
   `*_password` / `*_secret` (`SECRET_SETTING_SUFFIXES`). Why the name rule:
   the table keeps every row ever written (a retired provider's
@@ -84,7 +86,7 @@ never shows a secret; only the database holds it in clear.
 
 ## Who reads the secrets in clear
 
-- The workers — lyrics (Gemini, Genius), metadata, dabing, the OBS client,
+- The workers — lyrics (Gemini), metadata, dabing, the OBS client,
   the Companion facade — read the database (`db::models::get_setting`), never
   the API, so the mask never reaches them.
 - A new reader of a secret reads the database the same way. Through the API

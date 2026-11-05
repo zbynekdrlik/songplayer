@@ -3,9 +3,7 @@
 //! `title_search.rs`), so both build a candidate the same way.
 //!
 //! A TIMED source (LRCLIB synced lyrics, YouTube captions) is used as is. A
-//! plain scraped text (LRCLIB plain lyrics, a Genius page — whose section
-//! labels and contributor banner `genius::extract_lyrics_from_html` already
-//! dropped) first goes through the Claude cleanup that drops ad-libs and
+//! plain scraped text (LRCLIB plain lyrics) first goes through the Claude cleanup that drops ad-libs and
 //! hype intros and keeps every sung repeat
 //! (`description_provider::clean_lyrics_via_claude`, `ScrapedLyrics` mode).
 
@@ -67,7 +65,7 @@ pub(crate) async fn cleaned_text_candidate(
 /// refused every time, so only THIS candidate is left out and the pass goes
 /// on with the other sources); else an error that fails the pass — the
 /// cleanup found no lyric, or it failed (an outage, which the backoff waits
-/// out). `what` names the candidate ("genius fallback", "lrclib-plain").
+/// out). `what` names the candidate ("lrclib-plain").
 pub(crate) fn cleanup_candidate(
     answer: anyhow::Result<Option<CandidateText>>,
     what: &str,

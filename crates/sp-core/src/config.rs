@@ -389,9 +389,6 @@ pub fn peer_serve_max_mbps(raw: Option<&str>) -> u32 {
         .unwrap_or(DEFAULT_PEER_SERVE_MAX_MBPS)
 }
 
-/// #229: the Genius lyrics token (read by the lyrics worker from the DB).
-pub const SETTING_GENIUS_ACCESS_TOKEN: &str = "genius_access_token";
-
 /// #229 item C (the owner's ruling, 8.10.2026): whether this node may call
 /// paid AI (Gemini, Claude) — the ONE switch sp-server's `paid_ai` gates
 /// every such call on. Not a secret.
@@ -427,7 +424,6 @@ pub const SECRET_MASK: &str = "********";
 /// its secrets INSIDE a JSON list; sp-server masks those fields.)
 pub const SECRET_SETTINGS: &[&str] = &[
     SETTING_GEMINI_API_KEY,
-    SETTING_GENIUS_ACCESS_TOKEN,
     SETTING_OBS_WEBSOCKET_PASSWORD,
     SETTING_PEER_API_KEY,
     SETTING_REMOTE_WS_PASSWORD,
@@ -436,7 +432,8 @@ pub const SECRET_SETTINGS: &[&str] = &[
 /// #229: a setting NAMED like a credential is secret too, listed or not: the
 /// settings table keeps every row ever written, e.g. a retired provider's
 /// `replicate_api_token` / `assemblyai_api_key` (#159 deleted their code, not
-/// the rows), or a key an operator PATCHed by hand.
+/// the rows) or `genius_access_token` (#232 deleted Genius, not its row), or
+/// a key an operator PATCHed by hand.
 pub const SECRET_SETTING_SUFFIXES: &[&str] = &["_key", "_token", "_password", "_secret"];
 
 /// #229: whether `key` is a secret setting: on [`SECRET_SETTINGS`], or named
@@ -931,12 +928,10 @@ mod tests {
     #[test]
     fn the_secret_settings_list() {
         assert_eq!(SECRET_MASK, "********");
-        assert_eq!(SETTING_GENIUS_ACCESS_TOKEN, "genius_access_token");
         assert_eq!(
             SECRET_SETTINGS,
             &[
                 "gemini_api_key",
-                "genius_access_token",
                 "obs_websocket_password",
                 "peer_api_key",
                 "remote_ws_password",
@@ -954,6 +949,7 @@ mod tests {
         for key in [
             "replicate_api_token",
             "assemblyai_api_key",
+            "genius_access_token",
             "some_secret",
             "x_password",
         ] {

@@ -39,7 +39,7 @@ pub(crate) fn priority_with_timing(source: &str, has_timing: bool) -> u32 {
     if source == "lrclib" || source.starts_with("tier1:lrclib") {
         return 2;
     }
-    if source == "genius" || source.starts_with("tier1:genius") {
+    if source == "lyrics_ovh" {
         return 1;
     }
     // text yt_subs / tier1:yt_subs / unknown sources all fall through

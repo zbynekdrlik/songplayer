@@ -1,7 +1,7 @@
 /**
  * #233 post-deploy gates (pure; unit-tested in the mock suite by
- * audio-outputs-gate.spec.ts): FOH gets SongPlayer's `FOH_RATE` INT24
- * `sp-program` through the output list (the migration kept it byte-identical),
+ * audio-outputs-gate.spec.ts): lv1 gets SongPlayer's `LV1_RATE` INT24
+ * `sp-program` through the output list,
  * a VBAN destination at another rate carries that rate's index with a
  * contiguous frame counter, and (lane 3) an ASIO output runs a minute at its
  * driver's rate with no underrun and no reopen.
@@ -118,33 +118,33 @@ export function asioGateFailures(first: OutputStatus, second: OutputStatus): str
   return f;
 }
 
-/** SNV's FOH destination (#210's first target, migrated as out-1). */
-export const FOH_TARGET = "fohabl.lan:6980";
-/** FOH's rate: 96 kHz since the owner's ruling of 11.10.2026 (#233: one
- * 96 kHz rule for the whole network; 48 kHz before). */
-export const FOH_RATE = 96000;
+/** SNV's lv1 destination. FOH has no VBAN since 5.11.2026 (the owner, #257): it
+ * takes SongPlayer over Dante, gated by `post-deploy-audio-asio.spec.ts`. */
+export const LV1_TARGET = "lv1.lan:6980";
+/** lv1's rate. */
+export const LV1_RATE = 48000;
 /** Blocks that must go out between the two reads (30 per second). */
 export const MIN_BLOCKS = 25;
 
-function fohOf(list: OutputStatus[]): OutputStatus | undefined {
-  return list.find((o) => o.type === "vban" && o.vban?.targets[0]?.target === FOH_TARGET);
+function lv1Of(list: OutputStatus[]): OutputStatus | undefined {
+  return list.find((o) => o.type === "vban" && o.vban?.targets[0]?.target === LV1_TARGET);
 }
 
-/** Why FOH's path is not #210's any more, between two reads of `outputs[]`. */
-export function fohPathFailures(first: OutputStatus[], second: OutputStatus[]): string[] {
-  const a = fohOf(first);
-  const b = fohOf(second);
-  if (!a || !b) return [`no VBAN output to ${FOH_TARGET}`];
+/** Why lv1's path is broken, between two reads of `outputs[]`. */
+export function lv1PathFailures(first: OutputStatus[], second: OutputStatus[]): string[] {
+  const a = lv1Of(first);
+  const b = lv1Of(second);
+  if (!a || !b) return [`no VBAN output to ${LV1_TARGET}`];
   const f: string[] = [];
-  if (b.state !== "running") f.push(`the FOH output is ${b.state}${b.reason ? ` (${b.reason})` : ""}`);
-  if (b.rate !== FOH_RATE) f.push(`the FOH output runs at ${b.rate} Hz, not ${FOH_RATE}`);
-  if (b.format !== "int24") f.push(`the FOH output sends ${b.format}, not int24`);
-  if (b.vban?.stream_name !== "sp-program") f.push(`the FOH stream is ${b.vban?.stream_name}, not sp-program`);
-  if (b.delay_ms !== 0) f.push(`the FOH output is delayed ${b.delay_ms} ms`);
+  if (b.state !== "running") f.push(`the lv1 output is ${b.state}${b.reason ? ` (${b.reason})` : ""}`);
+  if (b.rate !== LV1_RATE) f.push(`the lv1 output runs at ${b.rate} Hz, not ${LV1_RATE}`);
+  if (b.format !== "int24") f.push(`the lv1 output sends ${b.format}, not int24`);
+  if (b.vban?.stream_name !== "sp-program") f.push(`the lv1 stream is ${b.vban?.stream_name}, not sp-program`);
+  if (b.delay_ms !== 0) f.push(`the lv1 output is delayed ${b.delay_ms} ms`);
   const sent = b.blocks_sent - a.blocks_sent;
-  if (sent < MIN_BLOCKS) f.push(`only ${sent} FOH blocks went out between the reads`);
+  if (sent < MIN_BLOCKS) f.push(`only ${sent} lv1 blocks went out between the reads`);
   const errors = (b.vban?.send_errors ?? 0) - (a.vban?.send_errors ?? 0);
-  if (errors > 0) f.push(`${errors} FOH send errors between the reads`);
+  if (errors > 0) f.push(`${errors} lv1 send errors between the reads`);
   return f;
 }
 

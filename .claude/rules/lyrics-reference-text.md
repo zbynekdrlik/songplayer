@@ -18,7 +18,6 @@ paths:
   - "crates/sp-server/src/lyrics/audit_ctx.rs"
   - "crates/sp-server/src/lyrics/gather.rs"
   - "crates/sp-server/src/lyrics/youtube_subs.rs"
-  - "crates/sp-server/src/lyrics/genius*.rs"
   - "crates/sp-server/src/lyrics/description_provider*.rs"
   - "crates/sp-server/src/lyrics/reprocess*.rs"
   - "crates/sp-server/src/api/lyrics*.rs"
@@ -96,19 +95,19 @@ Before it, no post-deploy check sent a Gemini 3.5 Transcribe request: a dead or 
 - `should_title_search` runs the search only when all hold:
   - the transcript is non-empty;
   - the mtl tooling is present;
-  - no `lrclib` / `genius` / `override` / `tier1:spotify` candidate exists.
-- It searches LRCLIB `/api/search?track_name=` (records within ±15 s of the song, synced lyrics preferred) and Genius by the title alone (the first 3 song pages).
+  - no `lrclib` / `lyrics_ovh` / `override` / `tier1:spotify` candidate exists.
+- It searches LRCLIB `/api/search?track_name=` by the title alone (records within ±15 s of the song, synced lyrics preferred). LRCLIB is the only title source: Genius removed 5.11.2026 (#232): genius.com answers automated requests with a Cloudflare challenge.
 - Candidates are scored by multiset Dice against the transcript. The floor is 0.50: a song's own lyric scores 0.664–0.951, another song ≤ 0.379.
 - The best usable lyric becomes the reference text unless the video's own priority pick (`best_authoritative_candidate`) scores at least as high (`keeps_the_videos_text`).
-- A cover more than ±15 s off the original's length is reached only through Genius. Example: 158 is 484 s, and Elevation's LRCLIB records are 539 s.
+- A cover more than ±15 s off the original's length is not found by title any more (Genius alone reached it). Example: 158 is 484 s, and Elevation's LRCLIB records are 539 s.
 - The record is `{yt}_title_search_audit.json`: every candidate with its score, `chosen`, `videos_text`, and `reference.from`.
 
 ## Texts
 
-- **The lookups ask for the artist IN FULL (#283).** The metadata prompt shortens a person's first names to initials for the wall's title (`metadata/gemini.rs`, "P. Wickham"; the parser too), and LRCLIB / lyrics.ovh / Genius asked for that missed the song (112 SNV rows, 19.10.2026). `process_song` calls `full_artist::expand_lookup_artist` right after the duration cap: each `X. (Y. )Surname` the video's own title spells out (`\bX…\.?\s+Surname\b`, any case) replaces it on the WORKER'S row only, so the Spotify resolver, gather's three lookups, the title search and the cleanups get "Phil Wickham"; the dashboard's stage broadcasts keep the display artist (cloned before), and the database's artist is never written. A name the title does not spell (`@JohnWilds`) stays.
+- **The lookups ask for the artist IN FULL (#283).** The metadata prompt shortens a person's first names to initials for the wall's title (`metadata/gemini.rs`, "P. Wickham"; the parser too), and LRCLIB / lyrics.ovh (and Genius, then) asked for that missed the song (112 SNV rows, 19.10.2026). `process_song` calls `full_artist::expand_lookup_artist` right after the duration cap: each `X. (Y. )Surname` the video's own title spells out (`\bX…\.?\s+Surname\b`, any case) replaces it on the WORKER'S row only, so the Spotify resolver, gather's three lookups, the title search and the cleanups get "Phil Wickham"; the dashboard's stage broadcasts keep the display artist (cloned before), and the database's artist is never written. A name the title does not spell (`@JohnWilds`) stays.
 - `parse_json3` gives ONE line per sung caption line. Each line keeps its event's own span, never divided by hand. No production code reads `CandidateText::line_timings`: mtl re-times the text.
 - The scraped-lyrics Claude cleanup (`CleanupMode::ScrapedLyrics`) KEEPS every repeat, because mtl times exactly the lines it is given. When its prompt semantics change, bump the cleanup cache names (`_cleaned_v3.json` today), or the reprocess reuses stale decisions; bump `cache_sweep_plan::CLEANED_VERSION` with them (a test reads both writers), so the daily cache sweep deletes the older caches and keeps the new ones.
-- Turn a fetched timed track or a scraped plain lyric into a candidate only through `text_candidate::{timed_candidate, cleaned_text_candidate}`. `gather.rs` and the title search share them, and `gather_uses_lyrics_ovh_primary_with_genius_fallback` reads both files. The override, description, lyrics.ovh and Spotify candidates are built directly.
+- Turn a fetched timed track or a scraped plain lyric into a candidate only through `text_candidate::{timed_candidate, cleaned_text_candidate}`. `gather.rs` and the title search share them, and `the_cleaned_version_is_the_one_the_lyrics_code_writes` reads both files. The override, description, lyrics.ovh and Spotify candidates are built directly.
 
 ## Reprocess: ONE per-song path, and no route blanks what the wall serves
 
@@ -163,7 +162,7 @@ Before it, no post-deploy check sent a Gemini 3.5 Transcribe request: a dead or 
 - So the row's own bucket picks it again once due: the manual bucket for a song queued by hand (it stays manual: no 3-attempt cap, which exists for a SERVED song, whose leaving the queue ends nothing), the null bucket for a new song, and a sentinel parked at an OLDER version keeps that version (an error never re-parks it at the current one). A song that always fails is retried at 5, 10, 20 … min, then about daily, for good.
 - The deferrals count in `lyrics_attempts` like the served path's: after 3 failed passes `worker_g35t.rs`'s #171 full-mix fallback applies to a song whose isolation yields no vocal.
 - The served path is unchanged (`keep_served_lyrics`, the section above), and so is the empty-transcript exit (`asr_gap`).
-- No code writes `no_source` any more (`db::models::mark_video_lyrics` has no caller left). The queues still skip it at the current version, and the reprocess route still NULLs it, for any row an older build parked.
+- No code writes `no_source` any more (`db::models::mark_video_lyrics` is deleted, #286). The queues still skip it at the current version, and the reprocess route still NULLs it, for any row an older build parked.
 - **V41** (`db/mod.rs`, once on every node): `UPDATE videos SET lyrics_source = NULL, lyrics_attempts = 0, lyrics_next_attempt_at = NULL WHERE lyrics_source = 'no_source' AND COALESCE(has_lyrics, 0) = 0`. Every song an error parked gets one more pass under this rule; `unsupported_source` (the 30-min policy), `asr_gap`, `failed`, `empty` and every row with `has_lyrics = 1` are left alone, and so are a cleared row's version, manual flag and last pass.
 - Pinned by `lyrics/worker_outcome_tests.rs` (`a_failing_run_of_an_unserved_queued_song_is_deferred`, `an_unserved_songs_error_is_retried_after_its_backoff`, `an_error_never_re_parks_a_stale_sentinel_at_the_current_version`, `every_row_of_the_video_takes_the_deferral`, `an_unserved_songs_error_is_one_warn_naming_it`, `a_row_whose_lyrics_file_is_gone_is_not_served`) and `db/mod_tests_v41.rs` (which rows V41 clears, and a parked song back in the lyrics queue).
 - PP's sentinel rows while SNV serves the video's lyrics are #264's, not this rule's: the lyrics worker's follow look (`peer::follow`, `peer-exchange.md` "The lyrics follow the peer's copy") fills a parked video from its listed peer, into every row.

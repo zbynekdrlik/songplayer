@@ -245,7 +245,6 @@ fn labels(cmds: &[ResolumeCommand]) -> Vec<String> {
             ResolumeCommand::ShowSubtitles { en, .. } => format!("line {en}"),
             ResolumeCommand::HideSubtitles => "clear".to_string(),
             ResolumeCommand::RefreshMapping => "refresh".to_string(),
-            ResolumeCommand::Shutdown => "shutdown".to_string(),
         })
         .collect()
 }

@@ -35,13 +35,14 @@ is now **text gathering + two tiers**, one forced aligner (mtl), one ASR vendor
 
 0. **Text gathering** (`gather.rs::gather_sources_impl`) — all
    best-effort: manual **yt_subs** captions → **LRCLIB** → **lyrics.ovh**
-   (Genius is the fallback when lyrics.ovh misses, both labelled `"genius"`)
+   (labelled `"lyrics_ovh"`; Genius removed 5.11.2026 (#232): genius.com answers automated requests with a Cloudflare challenge. Stored
+   `genius+mtl@…` sources of older rows stay as they are)
    → **Spotify** (`spotify_track_id`, LINE_SYNCED) → operator
    **`lyrics_override_text`** → **YouTube description** (Claude-extracted,
    `description_provider.rs`). The best candidate is picked by
    `claude_merge::best_authoritative_candidate` /
    `priority_with_timing` (override=6; timed spotify/lrclib=5, timed
-   yt_subs=4; text description=3, text lrclib=2, text genius=1; else=0).
+   yt_subs=4; text description=3, text lrclib=2, text lyrics_ovh=1; else=0).
    - **Captions keep their sung lines (#144):** `youtube_subs::parse_json3`
      splits a caption event's `\n` lines into separate text lines (each with
      the event's own span — never divided by hand); every consumer is
@@ -74,10 +75,11 @@ is now **text gathering + two tiers**, one forced aligner (mtl), one ASR vendor
    (`POST /api/v1/lyrics/reprocess {"video_ids":[…]}`), no version bump.
 
 0c. **Title search for covers (#144, `title_search.rs`).** When no
-   artist+title lookup found the song (no `lrclib`/`genius`/`override`/
+   artist+title lookup found the song (no `lrclib`/`lyrics_ovh`/`override`/
    `tier1:spotify` candidate — a cover's metadata names the COVER artist),
-   LRCLIB `/api/search?track_name=` (±15 s of the song, `lrclib_search.rs`)
-   and Genius by the title alone (first 3 song pages) are scored against the
+   LRCLIB `/api/search?track_name=` by the title alone (±15 s of the song,
+   `lrclib_search.rs`; the only title source since Genius left, #232) are
+   scored against the
    transcript by multiset word overlap (Dice); the best usable one ≥ 0.50
    (`MIN_TITLE_MATCH_SCORE`, measured: own lyric 0.664–0.951, other songs
    ≤ 0.379; a plain lyric the cleanup rejects passes to the next) becomes the
@@ -87,8 +89,9 @@ is now **text gathering + two tiers**, one forced aligner (mtl), one ASR vendor
    only on a non-empty transcript and when the ★ tier can use it (mtl
    tooling present), `should_title_search`. Never an LLM guess of the original artist. Record:
    `{yt}_title_search_audit.json` (every candidate, its score, the choice).
-   A cover LONGER/SHORTER than the original by > 15 s is found only through
-   Genius (158: Elevation's LRCLIB records are 539 s, the cover 484 s).
+   A cover LONGER/SHORTER than the original by > 15 s is not found by title
+   any more: only Genius reached it (158: Elevation's LRCLIB records are
+   539 s, the cover 484 s).
 
 1. **★ tier — v21 reference stage** (`worker_reference::run_mtl_reference_stage`
    → `orchestrator::run_reference_stage`). For any song with vocals + a text

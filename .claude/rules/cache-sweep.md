@@ -87,7 +87,11 @@ comment 6230045110.
     `_descmerge_audit.json`, `_asr_path_audit.json`,
     `_gemini_chunks.json`, `_chunks.json`, `_asr_output.json`,
     `_align_output.json`, `_align_out.json`, `_vocals_dereverbed.wav`,
-    from git history) and the cleanup caches older than `_cleaned_v3`
+    from git history), a retired provider's cleanup caches of ANY version
+    (`RETIRED_CLEANED_RE`: Genius's `{id}_genius_cleaned…` and
+    `{id}_title_genius_…_cleaned…`; Genius removed 5.11.2026, #232:
+    genius.com answers automated requests with a Cloudflare challenge, so
+    nothing reads them) and the cleanup caches older than `_cleaned_v3`
     (`CLEANED_VERSION`; unversioned = older). A newer version is kept (a
     rollback must not eat a newer build's caches).
   - `replaced` — a `<name>.replaced` / `<name>.N.replaced` of a SONG file

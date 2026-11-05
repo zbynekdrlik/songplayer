@@ -60,8 +60,8 @@ directive: *"Hladame najlepsiu !!! nechcem to kazdy tyzden prerabat"* — a
 durable best-quality choice beats a cheap one that needs re-litigating.
 
 **Local/self-hosted is ALLOWED on win-resolume, which already runs local models.**
-Existing venvs at `C:\ProgramData\SongPlayer\cache\tools\`: `whisperx_venv`,
-`crisper_venv`, `parakeet_venv`, `vibevoice_venv`, `lyrics_venv`, plus an
+Existing venvs at `C:\ProgramData\SongPlayer\cache\tools\`: `lyrics_venv`,
+`mtl_aligner_venv`, plus an
 `hf_models` HuggingFace cache. Reuse a proven torch/CUDA stack from there rather
 than building one from scratch, and never propose a different box (dev2) for
 this project's model work. The real constraint is not "no local models" — it is
