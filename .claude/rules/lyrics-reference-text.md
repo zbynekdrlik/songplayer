@@ -18,7 +18,6 @@ paths:
   - "crates/sp-server/src/lyrics/audit_ctx.rs"
   - "crates/sp-server/src/lyrics/gather.rs"
   - "crates/sp-server/src/lyrics/youtube_subs.rs"
-  - "crates/sp-server/src/lyrics/genius*.rs"
   - "crates/sp-server/src/lyrics/description_provider*.rs"
   - "crates/sp-server/src/lyrics/reprocess*.rs"
   - "crates/sp-server/src/api/lyrics*.rs"
@@ -96,19 +95,19 @@ Before it, no post-deploy check sent a Gemini 3.5 Transcribe request: a dead or 
 - `should_title_search` runs the search only when all hold:
   - the transcript is non-empty;
   - the mtl tooling is present;
-  - no `lrclib` / `genius` / `override` / `tier1:spotify` candidate exists.
-- It searches LRCLIB `/api/search?track_name=` (records within ±15 s of the song, synced lyrics preferred) and Genius by the title alone (the first 3 song pages).
+  - no `lrclib` / `lyrics_ovh` / `override` / `tier1:spotify` candidate exists.
+- It searches LRCLIB `/api/search?track_name=` by the title alone (records within ±15 s of the song, synced lyrics preferred). LRCLIB is the only title source: Genius removed 5.11.2026 (#232): genius.com answers automated requests with a Cloudflare challenge.
 - Candidates are scored by multiset Dice against the transcript. The floor is 0.50: a song's own lyric scores 0.664–0.951, another song ≤ 0.379.
 - The best usable lyric becomes the reference text unless the video's own priority pick (`best_authoritative_candidate`) scores at least as high (`keeps_the_videos_text`).
-- A cover more than ±15 s off the original's length is reached only through Genius. Example: 158 is 484 s, and Elevation's LRCLIB records are 539 s.
+- A cover more than ±15 s off the original's length is not found by title any more (Genius alone reached it). Example: 158 is 484 s, and Elevation's LRCLIB records are 539 s.
 - The record is `{yt}_title_search_audit.json`: every candidate with its score, `chosen`, `videos_text`, and `reference.from`.
 
 ## Texts
 
-- **The lookups ask for the artist IN FULL (#283).** The metadata prompt shortens a person's first names to initials for the wall's title (`metadata/gemini.rs`, "P. Wickham"; the parser too), and LRCLIB / lyrics.ovh / Genius asked for that missed the song (112 SNV rows, 19.10.2026). `process_song` calls `full_artist::expand_lookup_artist` right after the duration cap: each `X. (Y. )Surname` the video's own title spells out (`\bX…\.?\s+Surname\b`, any case) replaces it on the WORKER'S row only, so the Spotify resolver, gather's three lookups, the title search and the cleanups get "Phil Wickham"; the dashboard's stage broadcasts keep the display artist (cloned before), and the database's artist is never written. A name the title does not spell (`@JohnWilds`) stays.
+- **The lookups ask for the artist IN FULL (#283).** The metadata prompt shortens a person's first names to initials for the wall's title (`metadata/gemini.rs`, "P. Wickham"; the parser too), and LRCLIB / lyrics.ovh (and Genius, then) asked for that missed the song (112 SNV rows, 19.10.2026). `process_song` calls `full_artist::expand_lookup_artist` right after the duration cap: each `X. (Y. )Surname` the video's own title spells out (`\bX…\.?\s+Surname\b`, any case) replaces it on the WORKER'S row only, so the Spotify resolver, gather's three lookups, the title search and the cleanups get "Phil Wickham"; the dashboard's stage broadcasts keep the display artist (cloned before), and the database's artist is never written. A name the title does not spell (`@JohnWilds`) stays.
 - `parse_json3` gives ONE line per sung caption line. Each line keeps its event's own span, never divided by hand. No production code reads `CandidateText::line_timings`: mtl re-times the text.
 - The scraped-lyrics Claude cleanup (`CleanupMode::ScrapedLyrics`) KEEPS every repeat, because mtl times exactly the lines it is given. When its prompt semantics change, bump the cleanup cache names (`_cleaned_v3.json` today), or the reprocess reuses stale decisions; bump `cache_sweep_plan::CLEANED_VERSION` with them (a test reads both writers), so the daily cache sweep deletes the older caches and keeps the new ones.
-- Turn a fetched timed track or a scraped plain lyric into a candidate only through `text_candidate::{timed_candidate, cleaned_text_candidate}`. `gather.rs` and the title search share them, and `gather_uses_lyrics_ovh_primary_with_genius_fallback` reads both files. The override, description, lyrics.ovh and Spotify candidates are built directly.
+- Turn a fetched timed track or a scraped plain lyric into a candidate only through `text_candidate::{timed_candidate, cleaned_text_candidate}`. `gather.rs` and the title search share them, and `the_cleaned_version_is_the_one_the_lyrics_code_writes` reads both files. The override, description, lyrics.ovh and Spotify candidates are built directly.
 
 ## Reprocess: ONE per-song path, and no route blanks what the wall serves
 

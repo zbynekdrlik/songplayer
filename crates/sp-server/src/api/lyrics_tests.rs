@@ -413,19 +413,12 @@ async fn probe_sources_returns_report_with_six_probes_for_known_video() {
     assert_eq!(json["video_id"], 5);
     assert_eq!(json["youtube_id"], "ytidX");
     let probes = json["probes"].as_array().expect("probes array");
-    assert_eq!(probes.len(), 6);
+    assert_eq!(probes.len(), 5);
     let provider_names: Vec<&str> = probes
         .iter()
         .map(|p| p["provider"].as_str().unwrap())
         .collect();
-    for expected in [
-        "yt_subs",
-        "description",
-        "lyrics_ovh",
-        "genius",
-        "lrclib",
-        "spotify",
-    ] {
+    for expected in ["yt_subs", "description", "lyrics_ovh", "lrclib", "spotify"] {
         assert!(provider_names.contains(&expected), "missing {expected}");
     }
 }

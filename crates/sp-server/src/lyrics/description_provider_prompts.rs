@@ -5,13 +5,13 @@
 //! - [`build_description_extraction_prompt`] for mixed-content YouTube
 //!   description blobs (filters out non-lyric noise).
 //! - [`build_scraped_lyrics_cleanup_prompt`] for already-scraped lyrics
-//!   from genius / lrclib-plain (keeps every repeat, drops ad-libs).
+//!   from lrclib-plain (keeps every repeat, drops ad-libs).
 
 /// Selects which Claude prompt `clean_lyrics_via_claude` uses.
 ///
 /// Description blobs contain mixed content (lyrics + tour dates + credits +
 /// links); the prompt filters non-lyric noise out. Scraped lyrics blobs
-/// (genius HTML, lrclib plain text) are already pure lyrics but commonly
+/// (lrclib plain text) are already pure lyrics but commonly
 /// carry ad-libs and hype intros; the prompt drops those and keeps every
 /// sung repeat (#144: mtl times exactly the lines it is given).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,13 +65,13 @@ pub fn build_description_extraction_prompt(
     (system, user)
 }
 
-/// Build the Claude cleanup prompt for already-scraped lyrics (genius, lrclib plain).
+/// Build the Claude cleanup prompt for already-scraped lyrics (lrclib plain).
 ///
 /// The input is already pure lyrics — no tour dates, no credits, no links to
 /// filter. The problems we need Claude to fix are different:
 ///
-/// 1. **Repeats are kept (#144).** Genius writes a chorus as many times as it
-///    is sung (e.g., 9 consecutive `"It's the power of Jesus"`). The prompt used
+/// 1. **Repeats are kept (#144).** A scraped lyric writes a chorus as many
+///    times as it is sung (e.g., 9 consecutive `"It's the power of Jesus"`). The prompt used
 ///    to dedupe them for the deleted v20 `text_reference_merge` chorus
 ///    projection; mtl times exactly the lines it is given, so a repeat written
 ///    once leaves the other sung repeats uncovered (the two-way reference gate

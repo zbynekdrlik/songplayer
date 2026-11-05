@@ -1,12 +1,12 @@
 //! #144 — a cover's reference text, found by TITLE and chosen by what is
 //! SUNG.
 //!
-//! Every artist+title lookup (`gather.rs`: LRCLIB `/api/get`, lyrics.ovh,
-//! Genius) searches the row's metadata artist, and for a cover that is the
-//! COVER artist: 158 "Jesus Be the Name" by CityHill Worship finds nothing,
-//! while LRCLIB and Genius hold the original under Elevation Worship. So
-//! when those lookups found nothing, the worker searches by the title alone
-//! (`lrclib_search`, `genius::search_by_title_at`), scores every candidate
+//! Every artist+title lookup (`gather.rs`: LRCLIB `/api/get`, lyrics.ovh)
+//! searches the row's metadata artist, and for a cover that is the COVER
+//! artist: 158 "Jesus Be the Name" by CityHill Worship finds nothing, while
+//! LRCLIB holds the original under Elevation Worship. So when those lookups
+//! found nothing, the worker searches LRCLIB by the title alone
+//! (`lrclib_search`, records within ±15 s of the song), scores every candidate
 //! against the song's one Gemini 3.5 transcript by word overlap, and takes
 //! the best above a measured floor. That lyric becomes the reference text
 //! unless the text the video itself would use without it (its captions or
@@ -16,6 +16,12 @@
 //! captions are not displaced by another recording's lyric. Then the normal
 //! mtl and two-way gate verify the reference against the audio again. No
 //! LLM guesses the original artist: the audio decides.
+//!
+//! LRCLIB is the only title source. Genius, the second one, was removed
+//! 5.11.2026 (#232): genius.com answers automated requests with a Cloudflare
+//! challenge. A cover whose length differs from the original's by more than
+//! 15 s (158: 484 s against Elevation's 539 s records) was found only through
+//! Genius, so such a cover is no longer found by title.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -31,8 +37,8 @@ use crate::lyrics::tier1::CandidateText as TierCandidate;
 /// A title candidate's word overlap with the transcript must reach this to
 /// become the reference text. Measured on #144 (issue comment 5899043518):
 /// a song's own lyric scores 0.664–0.951 against its transcript, the best
-/// OTHER song 0.379 at most (18 eval songs × 17 others); live, 158's Genius
-/// Elevation Worship page scores 0.657 and the other songs titled "I Will Go"
+/// OTHER song 0.379 at most (18 eval songs × 17 others); live, 158's
+/// Elevation Worship lyric scored 0.657 and the other songs titled "I Will Go"
 /// score 0.17–0.32 against 286.
 pub const MIN_TITLE_MATCH_SCORE: f64 = 0.50;
 
@@ -40,7 +46,6 @@ pub const MIN_TITLE_MATCH_SCORE: f64 = 0.50;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TitleProvider {
     Lrclib,
-    Genius,
 }
 
 impl TitleProvider {
@@ -49,7 +54,6 @@ impl TitleProvider {
     pub fn source(self) -> &'static str {
         match self {
             TitleProvider::Lrclib => "lrclib",
-            TitleProvider::Genius => "genius",
         }
     }
 }
@@ -58,10 +62,10 @@ impl TitleProvider {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TitleCandidate {
     pub provider: TitleProvider,
-    /// LRCLIB record id, or the Genius page URL.
+    /// The LRCLIB record id.
     pub id: String,
     pub artist: String,
-    /// The LRCLIB record's duration (Genius has none).
+    /// The LRCLIB record's duration.
     pub record_duration_s: Option<f32>,
     pub lyrics: LyricsTrack,
     /// LRCLIB synced lyrics (a timed candidate, used as is); otherwise the
@@ -82,27 +86,14 @@ impl From<crate::lyrics::lrclib_search::LrclibTitleHit> for TitleCandidate {
     }
 }
 
-impl From<crate::lyrics::genius::GeniusTitleHit> for TitleCandidate {
-    fn from(h: crate::lyrics::genius::GeniusTitleHit) -> Self {
-        Self {
-            provider: TitleProvider::Genius,
-            id: h.url,
-            artist: h.artist,
-            record_duration_s: None,
-            lyrics: h.lyrics,
-            synced: false,
-        }
-    }
-}
-
 /// True when the title search should run: none of the gathered candidates
-/// came from an artist+title lookup (LRCLIB, lyrics.ovh / Genius — both
-/// labelled `genius`) or from an exact-song source (the operator override,
+/// came from an artist+title lookup (LRCLIB, lyrics.ovh) or from an
+/// exact-song source (the operator override,
 /// a Spotify track id). YouTube captions and the description do not count:
 /// they can be partial (song 286's description held a third of the lyric).
 pub fn needs_title_search(candidates: &[crate::lyrics::tier1::CandidateText]) -> bool {
     !candidates.iter().any(|c| {
-        matches!(c.source.as_str(), "lrclib" | "genius" | "override")
+        matches!(c.source.as_str(), "lrclib" | "lyrics_ovh" | "override")
             || c.source.starts_with("tier1:spotify")
     })
 }
@@ -143,8 +134,8 @@ pub fn lines_overlap_score<'a>(lines: impl Iterator<Item = &'a str>, words: &[As
 }
 
 /// The indices of the scores at or above `MIN_TITLE_MATCH_SCORE`, best
-/// first; a tie keeps the earlier candidate first (LRCLIB before Genius,
-/// then the search's own order). The caller takes the first one whose lyric
+/// first; a tie keeps the earlier candidate first (the search's own
+/// order). The caller takes the first one whose lyric
 /// it can use (a plain lyric the Claude cleanup rejects passes to the next).
 pub fn rank_above_floor(scores: &[f64]) -> Vec<usize> {
     let mut ranked: Vec<usize> = (0..scores.len())
@@ -231,14 +222,12 @@ pub fn audit_json(
 /// The search endpoints (production, or a wiremock server in tests).
 pub struct TitleSearchEndpoints {
     pub lrclib_search: String,
-    pub genius_search: String,
 }
 
 impl TitleSearchEndpoints {
     pub fn production() -> Self {
         Self {
             lrclib_search: crate::lyrics::lrclib_search::LRCLIB_SEARCH_URL.to_string(),
-            genius_search: crate::lyrics::genius::GENIUS_SEARCH_URL.to_string(),
         }
     }
 }
@@ -249,12 +238,11 @@ pub struct TitleSearch<'a> {
     /// The Claude client for the cleanup of a plain lyric (`None`: only a
     /// synced LRCLIB lyric can be used).
     pub ai: Option<&'a crate::ai::client::AiClient>,
-    pub genius_token: &'a str,
     pub cache_dir: &'a Path,
 }
 
 impl TitleSearch<'_> {
-    /// Search both providers by `row.song`, score every candidate against
+    /// Search LRCLIB by `row.song`, score every candidate against
     /// `words`, take the best usable one at or above the floor, and return
     /// the REFERENCE text for mtl: that lyric, or the `gathered` text the
     /// video itself would use without it (its priority pick) when that
@@ -289,17 +277,6 @@ impl TitleSearch<'_> {
         {
             Ok(hits) => cands.extend(hits.into_iter().map(TitleCandidate::from)),
             Err(e) => warn!(%youtube_id, error = %e, "title search: LRCLIB failed"),
-        }
-        match crate::lyrics::genius::search_by_title_at(
-            self.client,
-            &endpoints.genius_search,
-            self.genius_token,
-            title,
-        )
-        .await
-        {
-            Ok(hits) => cands.extend(hits.into_iter().map(TitleCandidate::from)),
-            Err(e) => warn!(%youtube_id, error = %e, "title search: Genius failed"),
         }
 
         let scores: Vec<f64> = cands

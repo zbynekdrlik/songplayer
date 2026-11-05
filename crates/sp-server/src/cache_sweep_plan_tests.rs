@@ -230,16 +230,21 @@ fn a_stale_name_is_a_retired_output_or_an_older_cleanup_cache() {
         "abcdefghijk_genius_cleaned_v1.json",
         "ab_cdefghij_title_lrclib_35094059_cleaned_v2.json",
         "abcdefghijk_title_genius_x_cleaned.json",
+        // #232: Genius's caches are retired whatever their version
+        "abcdefghijk_genius_cleaned_v3.json",
+        "abcdefghijk_genius_cleaned_v4.json",
+        "abcdefghijk_genius_cleaned_v99999999999.json",
+        "abcdefghijk_title_genius_x-y_cleaned_v3.json",
     ];
     for name in stale {
         assert!(is_stale_name(name), "{name} is stale");
     }
     let current = [
         "abcdefghijk_lrclib_cleaned_v3.json",
-        "abcdefghijk_genius_cleaned_v3.json",
         "abcdefghijk_title_lrclib_35094059_cleaned_v3.json",
-        "abcdefghijk_genius_cleaned_v4.json",
-        "abcdefghijk_genius_cleaned_v99999999999.json",
+        "abcdefghijk_lrclib_cleaned_v4.json",
+        "abcdefghijk_title_lrclib_7_cleaned_v99999999999.json",
+        "abcdefghijk_title_lrclib_genius_cleaned_v3.json",
         "abcdefghijk_lyrics.json",
         "abcdefghijk_g35t_words.json",
         "Song_Artist_abcdefghijk_normalized_audio.flac",
@@ -377,10 +382,15 @@ fn a_stale_name_goes_after_seven_days_even_for_a_row_s_video() {
     assert_eq!(why_alone(&stale), Some(Why::Stale));
     let young = file("rowvideo001_whisperx_track.json", STALE_AFTER_MS - 1);
     assert_eq!(why_alone(&young), None);
-    let old_cache = file("rowvideo001_genius_cleaned_v2.json", STALE_AFTER_MS);
+    let old_cache = file("rowvideo001_lrclib_cleaned_v2.json", STALE_AFTER_MS);
     assert_eq!(why_alone(&old_cache), Some(Why::Stale));
-    let current = file("rowvideo001_genius_cleaned_v3.json", 400 * DAY_MS);
+    let current = file("rowvideo001_lrclib_cleaned_v3.json", 400 * DAY_MS);
     assert_eq!(why_alone(&current), None);
+    // #232: a retired provider's current-version cache goes after 7 days too
+    let genius = file("rowvideo001_genius_cleaned_v3.json", STALE_AFTER_MS);
+    assert_eq!(why_alone(&genius), Some(Why::Stale));
+    let young_genius = file("rowvideo001_genius_cleaned_v3.json", STALE_AFTER_MS - 1);
+    assert_eq!(why_alone(&young_genius), None);
     let stale_dir = dir("rowvideo001_whisperx_track.json", 400 * DAY_MS);
     assert_eq!(why_alone(&stale_dir), None, "a dir is never a stale file");
 }

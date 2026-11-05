@@ -1,7 +1,7 @@
 //! Lyrics worker — two-tier pipeline (v22, #159).
 //!
 //! Every song goes through:
-//!   1. gather_sources: YT manual subs + LRCLIB + Genius + description in parallel.
+//!   1. gather_sources: YT manual subs + LRCLIB + lyrics.ovh + Spotify + description.
 //!   2. Vocal isolation (Mel-Roformer + anvuew; best-effort via `preprocess_vocals`).
 //!   3. Tier 1 (★): v21 mtl forced-alignment reference stage
 //!      (`run_mtl_reference_stage`) — the two-way gate's PASS against the
@@ -518,22 +518,12 @@ impl LyricsWorker {
         &self,
         row: &crate::db::models::VideoLyricsRow,
     ) -> Result<crate::lyrics::provider::SongContext> {
-        // Read the Genius token fresh on every song so operators can add
-        // the setting without restarting the server. Empty string disables
-        // the Genius fallback. Genius is only consulted when lyrics.ovh
-        // returns no match (see gather.rs).
-        let genius_token = crate::db::models::get_setting(&self.pool, "genius_access_token")
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_default();
         gather_sources_impl(
             self.ai_client.as_deref(),
             &self.ytdlp_path,
             &self.cache_dir,
             &self.client,
             row,
-            &genius_token,
         )
         .await
     }

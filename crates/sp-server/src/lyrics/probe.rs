@@ -1,8 +1,8 @@
 //! Per-provider text-source availability probe.
 //!
 //! Returns a per-provider `available` bool + line-count estimate for the
-//! six text-source providers used by `gather_sources_impl`. Two cost tiers:
-//! cheap raw-fetch for yt_subs / lyrics.ovh / genius / lrclib / spotify, and
+//! five text-source providers used by `gather_sources_impl`. Two cost tiers:
+//! cheap raw-fetch for yt_subs / lyrics.ovh / lrclib / spotify, and
 //! a Claude-validated fetch for `description` (because the YouTube description
 //! field contains promo / social / sponsor text on most channels — a raw
 //! "non-empty after trim" check is not enough to know if it's actually
@@ -11,7 +11,7 @@
 //! probes are instant.
 //!
 //! Every `ProbeResult` includes `provider_url` so the operator can click
-//! through to the actual page Genius/LRCLIB/lyrics.ovh would have used,
+//! through to the actual page LRCLIB/lyrics.ovh would have used,
 //! catching wrong-artist-match cases by eye before reprocess.
 //!
 //! Wired into `POST /api/v1/lyrics/probe-sources` (see `api/lyrics.rs`).
@@ -22,7 +22,7 @@ use std::path::Path;
 use tracing::debug;
 
 use crate::lyrics::{
-    description_provider::fetch_description_lyrics, genius, lrclib, lyrics_ovh,
+    description_provider::fetch_description_lyrics, lrclib, lyrics_ovh,
     spotify_proxy::SpotifyLyricsFetcher, youtube_subs,
 };
 
@@ -50,7 +50,7 @@ pub struct ProbeReport {
     pub recommendation: String,
 }
 
-/// Probe all six text-source providers.
+/// Probe all five text-source providers.
 ///
 /// `description` provider validates the YouTube description through Claude
 /// when `ai_client` is `Some` (cached on disk so repeat probes are cheap);
@@ -64,11 +64,10 @@ pub async fn probe_sources_impl(
     cache_dir: &Path,
     client: &reqwest::Client,
     row: &crate::db::models::VideoLyricsRow,
-    genius_access_token: &str,
 ) -> ProbeReport {
     let youtube_id = row.youtube_id.clone();
     let yt_video_url = format!("https://youtube.com/watch?v={youtube_id}");
-    let mut probes: Vec<ProbeResult> = Vec::with_capacity(6);
+    let mut probes: Vec<ProbeResult> = Vec::with_capacity(5);
 
     // 1. yt_subs (manual only — autosub is banned)
     let yt_tmp = std::env::temp_dir().join("sp_yt_subs_probe");
@@ -201,59 +200,7 @@ pub async fn probe_sources_impl(
     };
     probes.push(lyrics_ovh_result);
 
-    // 4. genius — public search, https://genius.com/
-    let genius_search_url = if row.artist.is_empty() || row.song.is_empty() {
-        "https://genius.com/".to_string()
-    } else {
-        format!(
-            "https://genius.com/search?q={}",
-            urlencoding::encode(&format!("{} {}", row.artist, row.song))
-        )
-    };
-    let genius_result = if genius_access_token.is_empty() {
-        ProbeResult {
-            provider: "genius".into(),
-            provider_url: genius_search_url.clone(),
-            available: false,
-            line_count: 0,
-            note: "no genius token configured".into(),
-        }
-    } else if row.song.is_empty() || row.artist.is_empty() {
-        ProbeResult {
-            provider: "genius".into(),
-            provider_url: genius_search_url.clone(),
-            available: false,
-            line_count: 0,
-            note: "skipped (song or artist empty)".into(),
-        }
-    } else {
-        match genius::fetch_lyrics(client, genius_access_token, &row.artist, &row.song).await {
-            Ok(Some(track)) => ProbeResult {
-                provider: "genius".into(),
-                provider_url: genius_search_url.clone(),
-                available: true,
-                line_count: track.lines.len(),
-                note: format!("hit ({} lines, strict artist match)", track.lines.len()),
-            },
-            Ok(None) => ProbeResult {
-                provider: "genius".into(),
-                provider_url: genius_search_url.clone(),
-                available: false,
-                line_count: 0,
-                note: "no matching-artist song hit".into(),
-            },
-            Err(e) => ProbeResult {
-                provider: "genius".into(),
-                provider_url: genius_search_url.clone(),
-                available: false,
-                line_count: 0,
-                note: format!("error: {e}"),
-            },
-        }
-    };
-    probes.push(genius_result);
-
-    // 5. lrclib — https://lrclib.net/
+    // 4. lrclib — https://lrclib.net/
     let lrclib_url = if row.artist.is_empty() || row.song.is_empty() {
         "https://lrclib.net/".to_string()
     } else {
@@ -312,7 +259,7 @@ pub async fn probe_sources_impl(
     };
     probes.push(lrclib_result);
 
-    // 6. spotify (only if row has spotify_track_id)
+    // 5. spotify (only if row has spotify_track_id)
     let spotify_url = match row.spotify_track_id.as_deref() {
         Some(tid) => format!("https://open.spotify.com/track/{tid}"),
         None => "https://open.spotify.com/".to_string(),

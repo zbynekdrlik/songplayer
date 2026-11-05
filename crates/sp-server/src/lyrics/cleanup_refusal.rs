@@ -3,7 +3,7 @@
 //! text (its sha256): the same text is refused every time, and every refusal
 //! puts the proxy's one credential into its 60 s cooldown (every AI call
 //! refused meanwhile), so it is never sent again — until the text changes
-//! (a Genius page edited, a new description). The marker carries no
+//! (an LRCLIB record edited, a new description). The marker carries no
 //! `lines` key, so it never reads as a cleanup's answer.
 
 use std::path::Path;

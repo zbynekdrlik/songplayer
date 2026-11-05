@@ -26,8 +26,9 @@ mod priority_with_timing_tests {
             ("description", false, 3),
             ("lrclib", false, 2),
             ("tier1:lrclib", false, 2),
-            ("genius", false, 1),
-            ("tier1:genius", false, 1),
+            ("lyrics_ovh", false, 1),
+            // #232: Genius is gone; its old label ranks nowhere.
+            ("genius", false, 0),
             ("yt_subs", false, 0),
             ("tier1:yt_subs", false, 0),
             ("unknown_source", false, 0),
@@ -72,12 +73,13 @@ mod best_authoritative_tests {
         }
     }
 
-    /// id=21 "Good Shepherd" regression: description (26 lines) + genius (70 lines)
-    /// both present. Pre-fix: genius wins (priority 2 > description 0). Post-fix:
-    /// description wins (priority 3 > genius 1) by spec.
+    /// id=21 "Good Shepherd" regression: description (26 lines) + a community
+    /// lyrics text (70 lines, then Genius, now lyrics.ovh at the same slot) both
+    /// present. Pre-fix: the community text won (priority 2 > description 0).
+    /// Post-fix: description wins (priority 3 > lyrics_ovh 1) by spec.
     #[test]
-    fn description_beats_genius_when_both_present() {
-        let candidates = vec![text_cand("description", 26), text_cand("genius", 70)];
+    fn description_beats_lyrics_ovh_when_both_present() {
+        let candidates = vec![text_cand("description", 26), text_cand("lyrics_ovh", 70)];
         let best = best_authoritative_candidate(&candidates).unwrap();
         assert_eq!(best.source, "description");
     }
@@ -101,8 +103,8 @@ mod best_authoritative_tests {
     }
 
     #[test]
-    fn lrclib_text_beats_genius_text() {
-        let candidates = vec![text_cand("genius", 70), text_cand("lrclib", 26)];
+    fn lrclib_text_beats_lyrics_ovh_text() {
+        let candidates = vec![text_cand("lyrics_ovh", 70), text_cand("lrclib", 26)];
         let best = best_authoritative_candidate(&candidates).unwrap();
         assert_eq!(best.source, "lrclib");
     }
@@ -115,7 +117,7 @@ mod best_authoritative_tests {
 
     #[test]
     fn tie_break_prefers_longer_lines_at_same_priority() {
-        let candidates = vec![text_cand("genius", 30), text_cand("genius", 70)];
+        let candidates = vec![text_cand("lyrics_ovh", 30), text_cand("lyrics_ovh", 70)];
         let best = best_authoritative_candidate(&candidates).unwrap();
         assert_eq!(best.lines.len(), 70);
     }

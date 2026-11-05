@@ -129,7 +129,7 @@ mod tests {
     fn sample_track() -> LyricsTrack {
         LyricsTrack {
             version: 1,
-            source: "genius".into(),
+            source: "lyrics_ovh".into(),
             language_source: "en".into(),
             language_translation: "sk".into(),
             lines: vec![
