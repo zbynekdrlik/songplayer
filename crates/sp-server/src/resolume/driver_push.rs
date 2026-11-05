@@ -190,7 +190,7 @@ impl HostDriver {
             ResolumeCommand::HideSubtitles => {
                 ("subtitle clear", handlers::clear_subtitles(self).await)
             }
-            ResolumeCommand::RefreshMapping | ResolumeCommand::Shutdown => return false,
+            ResolumeCommand::RefreshMapping => return false,
         };
         self.finish_push(what, result)
     }

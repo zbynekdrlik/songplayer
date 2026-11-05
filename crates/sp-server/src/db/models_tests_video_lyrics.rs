@@ -81,14 +81,6 @@ async fn the_star_follows_the_completed_track_on_every_row() {
 #[tokio::test]
 async fn a_terminal_pass_parks_every_row_of_the_video() {
     let pool = siblings().await;
-    mark_video_lyrics(&pool, 1, false, Some("no_source"), 22)
-        .await
-        .unwrap();
-    assert_eq!(
-        state(&pool, 2).await,
-        (0, Some("no_source".to_string()), 22, 0, 0)
-    );
-    let pool = siblings().await;
     mark_unsupported_source(&pool, 2, 22).await.unwrap();
     assert_eq!(
         state(&pool, 1).await,
@@ -186,13 +178,6 @@ async fn the_translation_gender_and_version_reach_every_row_of_the_video() {
 #[tokio::test]
 async fn a_terminal_pass_clears_the_star_on_every_row_of_the_video() {
     let pool = siblings().await;
-    mark_video_lyrics_complete(&pool, 1, "lrclib+mtl@rev1/g35t-ok", 22, None, None)
-        .await
-        .unwrap();
-    mark_video_lyrics(&pool, 2, false, Some("no_source"), 22)
-        .await
-        .unwrap();
-    assert_eq!((state(&pool, 1).await.3, state(&pool, 2).await.3), (0, 0));
     mark_video_lyrics_complete(&pool, 1, "lrclib+mtl@rev1/g35t-ok", 22, None, None)
         .await
         .unwrap();

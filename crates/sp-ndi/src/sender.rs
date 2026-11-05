@@ -58,13 +58,6 @@ pub struct AudioFrame {
     pub timecode_100ns: Option<i64>,
 }
 
-/// Tally state — whether this source is on program / preview.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Tally {
-    pub on_program: bool,
-    pub on_preview: bool,
-}
-
 // ---------------------------------------------------------------------------
 // Backend trait (for mockability)
 // ---------------------------------------------------------------------------
@@ -295,16 +288,6 @@ impl<B: NdiBackend> NdiSender<B> {
             &frame.data,
             frame.timecode_100ns,
         );
-    }
-
-    /// Query the tally state (program / preview) with a timeout in milliseconds.
-    pub fn get_tally(&self, timeout_ms: u32) -> Option<Tally> {
-        self.backend
-            .send_get_tally(self.handle, timeout_ms)
-            .map(|(on_program, on_preview)| Tally {
-                on_program,
-                on_preview,
-            })
     }
 
     /// Return the current count of NDI receivers connected to this sender.
@@ -621,23 +604,6 @@ mod tests {
         // Only create + drop-flush + destroy — no send_audio recorded.
         let calls = backend.calls();
         assert!(calls.iter().all(|c| !c.starts_with("send_audio")));
-    }
-
-    #[test]
-    fn get_tally_returns_recorded_value() {
-        let backend = Arc::new(MockNdiBackend::new());
-        backend.set_tally(true, false);
-        let sender = NdiSender::new_with_clocking(backend.clone(), "T", false, false).unwrap();
-        let tally = sender.get_tally(100).unwrap();
-        assert!(tally.on_program);
-        assert!(!tally.on_preview);
-    }
-
-    #[test]
-    fn get_tally_returns_none_by_default() {
-        let backend = Arc::new(MockNdiBackend::new());
-        let sender = NdiSender::new_with_clocking(backend.clone(), "T", false, false).unwrap();
-        assert!(sender.get_tally(0).is_none());
     }
 
     #[test]

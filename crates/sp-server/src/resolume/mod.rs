@@ -77,8 +77,6 @@ pub enum ResolumeCommand {
     HideSubtitles,
     /// Force a refresh of the clip mapping cache.
     RefreshMapping,
-    /// Stop the worker.
-    Shutdown,
 }
 
 /// Per-host snapshot published by [`HostDriver`] after every refresh attempt.
@@ -171,15 +169,6 @@ impl ResolumeRegistry {
         self.health_rxs.insert(host, health_rx);
     }
 
-    /// Remove a host worker. Sends a shutdown command before dropping the
-    /// channel.
-    pub fn remove_host(&mut self, host_id: i64) {
-        if let Some(tx) = self.hosts.remove(&host_id) {
-            let _ = tx.try_send(ResolumeCommand::Shutdown);
-            info!(host_id, "removed Resolume host worker");
-        }
-    }
-
     /// Send a command to a specific host.
     pub async fn send(&self, host_id: i64, cmd: ResolumeCommand) -> Result<(), anyhow::Error> {
         let tx = self
@@ -229,7 +218,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn registry_add_remove() {
+    async fn registry_add_keeps_each_host() {
         let (shutdown_tx, _) = broadcast::channel::<()>(1);
         let mut registry = ResolumeRegistry::new();
 
@@ -239,15 +228,6 @@ mod tests {
         assert_eq!(registry.hosts.len(), 2);
         assert!(registry.hosts.contains_key(&1));
         assert!(registry.hosts.contains_key(&2));
-
-        registry.remove_host(1);
-        assert_eq!(registry.hosts.len(), 1);
-        assert!(!registry.hosts.contains_key(&1));
-        assert!(registry.hosts.contains_key(&2));
-
-        // Removing non-existent host is a no-op.
-        registry.remove_host(999);
-        assert_eq!(registry.hosts.len(), 1);
 
         // Clean up.
         let _ = shutdown_tx.send(());

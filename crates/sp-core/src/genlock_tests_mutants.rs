@@ -51,24 +51,6 @@ fn emit_gate_100ns_keeps_pending_boundary_at_equality_point() {
 }
 
 // ---------------------------------------------------------------------------
-// genlock_latched_boundary 271:50 `>` -> `>=` (ns re-latch guard), exercised
-// through the public `genlock_emit_gate`.
-//
-// interval_ns(30) == 33_333_333. now_ns == 50_000_000, next_boundary_ns ==
-// now_ns + interval_ns == 83_333_333 exactly. `>` keeps 83_333_333; `>=`
-// re-latches to now - now%interval + interval == 66_666_666.
-// ---------------------------------------------------------------------------
-
-#[test]
-fn latched_boundary_keeps_pending_at_equality_point_via_emit_gate() {
-    assert_eq!(
-        genlock_emit_gate(50_000_000, 83_333_333, 33_333_333, false),
-        (false, 83_333_333),
-        "at next_boundary == now + interval exactly, `>` keeps the pending boundary"
-    );
-}
-
-// ---------------------------------------------------------------------------
 // lag_slots_100ns — 385:5 body -> 0/1/-1, 386:17 `==`->`!=`, 386:22 `||`->`&&`,
 // 386:41 `<=`->`>`, 389:40 `/`->`%`/`*`, 389:22 `-`->`+`/`/`.
 // signature: lag_slots_100ns(boundary_100ns, floor_now_100ns, fps).

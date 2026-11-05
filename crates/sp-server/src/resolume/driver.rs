@@ -667,9 +667,6 @@ impl HostDriver {
                     self.run_full_refresh(reason, now).await;
                 }
             }
-            ResolumeCommand::Shutdown => {
-                info!(host = %self.host, "received shutdown command");
-            }
             push_cmd => self.run_push(&push_cmd, Instant::now()).await,
         }
     }

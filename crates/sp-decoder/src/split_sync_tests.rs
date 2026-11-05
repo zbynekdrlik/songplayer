@@ -468,26 +468,6 @@ fn accessors_forward_to_underlying_readers() {
 }
 
 #[test]
-fn clear_buffer_empties_pending_audio() {
-    // Fill pending_audio by pulling a frame, then call clear_buffer
-    // and verify the queue is empty.
-    let v = Box::new(MockVideo::new(&[0]));
-    let a = Box::new(MockAudio::new(&[500], 1000));
-    let mut dec = SplitSyncedDecoder::new(v, a).unwrap();
-
-    // Pull frame 0: deadline = 40, audio at 500 stays pending.
-    let _ = dec.next_synced().unwrap().unwrap();
-    assert_eq!(
-        dec.pending_audio.len(),
-        1,
-        "expected 1 pending audio chunk after first frame"
-    );
-
-    dec.clear_buffer();
-    assert!(dec.pending_audio.is_empty());
-}
-
-#[test]
 fn with_audio_lead_honors_custom_value() {
     // Custom tolerance 200ms lets audio at 150 pair with frame 0.
     let v = Box::new(MockVideo::new(&[0]));

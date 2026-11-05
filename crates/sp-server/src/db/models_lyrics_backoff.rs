@@ -9,7 +9,7 @@
 //! worker could not process this pass is deferred with an exponential backoff
 //! (`downloader::retry_backoff`) so the selector skips it until due instead of
 //! re-picking it every 5 s tick. Success / terminal stamps
-//! (`mark_video_lyrics{,_complete}`, `mark_unsupported_source`) reset the
+//! (`mark_video_lyrics_complete`, `mark_unsupported_source`) reset the
 //! columns back to (0, NULL).
 
 use sqlx::SqlitePool;

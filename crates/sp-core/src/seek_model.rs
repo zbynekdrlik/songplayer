@@ -16,15 +16,6 @@ pub fn seek_target_ms(current_ms: u64, delta_ms: i64, duration_ms: u64) -> u64 {
     current_ms.saturating_add_signed(delta_ms).min(duration_ms)
 }
 
-/// Progress fraction `pos_ms / dur_ms`, clamped to `0.0..=1.0`. Returns `0.0`
-/// for a zero duration (no divide-by-zero, no `NaN`).
-pub fn seek_fraction(pos_ms: u64, dur_ms: u64) -> f64 {
-    if dur_ms == 0 {
-        return 0.0;
-    }
-    (pos_ms as f64 / dur_ms as f64).clamp(0.0, 1.0)
-}
-
 /// A committed-but-not-yet-honoured seek. On release the operator's thumb landed
 /// at `target_ms` (a `POST …/seek` fired) at wall time `committed_at_ms`, but the
 /// pipeline's post-seek fast-forward has not yet delivered a frame near the
@@ -155,33 +146,6 @@ mod tests {
     #[test]
     fn seek_target_zero_duration_yields_zero() {
         assert_eq!(seek_target_ms(50_000, 10_000, 0), 0);
-    }
-
-    // ---- seek_fraction: pos/dur clamped to 0.0..=1.0, 0.0 on zero duration --
-
-    #[test]
-    fn seek_fraction_quarter() {
-        assert!((seek_fraction(50_000, 200_000) - 0.25).abs() < 1e-9);
-    }
-
-    #[test]
-    fn seek_fraction_zero_position() {
-        assert_eq!(seek_fraction(0, 200_000), 0.0);
-    }
-
-    #[test]
-    fn seek_fraction_full() {
-        assert_eq!(seek_fraction(200_000, 200_000), 1.0);
-    }
-
-    #[test]
-    fn seek_fraction_zero_duration_is_zero_not_nan() {
-        assert_eq!(seek_fraction(50_000, 0), 0.0);
-    }
-
-    #[test]
-    fn seek_fraction_past_end_clamps_to_one() {
-        assert_eq!(seek_fraction(250_000, 200_000), 1.0);
     }
 
     // ---- seek_display_ms: dragged value while dragging, else live, with a

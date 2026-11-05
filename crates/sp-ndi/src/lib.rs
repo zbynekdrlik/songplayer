@@ -28,7 +28,7 @@ pub use receive::{NdiReceiveBackend, RealNdiReceiveBackend};
 pub use receiver::{CapturedAudio, CapturedVideo, NdiFrameSync};
 #[cfg(any(test, feature = "test-util"))]
 pub use sender::test_util;
-pub use sender::{AudioFrame, NdiBackend, NdiSender, RealNdiBackend, Tally, VideoFrame};
+pub use sender::{AudioFrame, NdiBackend, NdiSender, RealNdiBackend, VideoFrame};
 #[cfg(any(test, feature = "test-util"))]
 pub use sender_mock::MockNdiBackend;
 pub use types::{

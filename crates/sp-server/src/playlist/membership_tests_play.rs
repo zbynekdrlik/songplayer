@@ -86,10 +86,10 @@ async fn a_rotation_starts_over_rather_than_pick_a_song_that_left() {
     assert_ne!(pick, ids[2]);
     // The pick is recorded only once it starts: the history started over.
     assert_eq!(
-        models::get_unplayed_video_ids(&pool, playlist)
+        models::get_unplayed_normalized_video_ids(&pool, playlist)
             .await
             .unwrap(),
-        vec!["yt_0".to_string(), "yt_1".to_string()]
+        vec![ids[0], ids[1]]
     );
 }
 
@@ -98,12 +98,6 @@ async fn the_unplayed_and_the_downloaded_lists_leave_a_marked_row_out() {
     let pool = memory_pool().await;
     let (playlist, ids) = songs(&pool, 3).await;
     mark(&pool, ids[1]).await;
-    assert_eq!(
-        models::get_unplayed_video_ids(&pool, playlist)
-            .await
-            .unwrap(),
-        vec!["yt_0".to_string(), "yt_2".to_string()]
-    );
     assert_eq!(
         models::get_unplayed_normalized_video_ids(&pool, playlist)
             .await

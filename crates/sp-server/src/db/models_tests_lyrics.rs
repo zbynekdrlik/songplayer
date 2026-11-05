@@ -1,4 +1,4 @@
-//! Lyrics-state tests for `db::models` — `mark_video_lyrics`/`_complete`
+//! Lyrics-state tests for `db::models` — `mark_video_lyrics_complete`
 //! writes, quarantine sentinel handling, and `mark_unsupported_source`.
 //! Split out of the former monolithic `models_tests.rs` (#137) to keep
 //! every file under the 1000-line airuleset cap. Included as a sibling file via
@@ -84,46 +84,6 @@ async fn mark_complete_with_none_quality_writes_null_not_zero() {
 }
 
 #[tokio::test]
-async fn mark_video_lyrics_stamps_pipeline_version_on_failure() {
-    // Regression guard for the infinite-loop production bug: a song that fails
-    // processing must record the current pipeline version, otherwise the null
-    // bucket's `OR lyrics_pipeline_version < current` retry clause brings it
-    // back every poll because the default version (0) is always < current.
-    let pool = db::create_memory_pool().await.unwrap();
-    db::run_migrations(&pool).await.unwrap();
-    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (99, 'p', 'u')")
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query(
-        "INSERT INTO videos (id, playlist_id, youtube_id, normalized) \
-                 VALUES (1, 99, 'loop_me', 1)",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-
-    mark_video_lyrics(&pool, 1, false, Some("no_source"), 5)
-        .await
-        .unwrap();
-
-    let row = sqlx::query(
-        "SELECT has_lyrics, lyrics_source, lyrics_pipeline_version FROM videos WHERE id = 1",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!(row.get::<i64, _>("has_lyrics"), 0);
-    assert_eq!(row.get::<String, _>("lyrics_source"), "no_source");
-    assert_eq!(
-        row.get::<i64, _>("lyrics_pipeline_version"),
-        5,
-        "failure write MUST stamp current pipeline version or the retry \
-         filter will loop the song forever (0 < current is always true)"
-    );
-}
-
-#[tokio::test]
 async fn quarantine_video_lyrics_sets_sentinel_and_deletes_cache_file() {
     let (pool, id) = setup_with_video().await;
     sqlx::query(
@@ -200,44 +160,6 @@ async fn quarantine_video_lyrics_returns_not_found_for_missing_id() {
     assert!(
         matches!(err, sqlx::Error::RowNotFound),
         "must surface RowNotFound so the handler can return 404; got {err:?}"
-    );
-}
-
-#[tokio::test]
-async fn mark_video_lyrics_writes_processed_at_and_null_model_on_failure() {
-    let (pool, video_id) = setup_with_video().await;
-    // Seed manual_priority=1 so the assertion below proves the failure path
-    // clears it (regression for the 2026-05-16 10-row dangling-flag bug).
-    sqlx::query("UPDATE videos SET lyrics_manual_priority = 1 WHERE id = ?")
-        .bind(video_id)
-        .execute(&pool)
-        .await
-        .unwrap();
-    mark_video_lyrics(&pool, video_id, false, Some("failed"), 20)
-        .await
-        .unwrap();
-    let row = sqlx::query(
-        "SELECT lyrics_processed_at, lyrics_alignment_model, lyrics_manual_priority \
-         FROM videos WHERE id = ?",
-    )
-    .bind(video_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    let processed_at: Option<String> = row.try_get("lyrics_processed_at").ok().flatten();
-    let model: Option<String> = row.try_get("lyrics_alignment_model").ok().flatten();
-    let priority: i64 = row.get("lyrics_manual_priority");
-    assert!(
-        processed_at.is_some(),
-        "processed_at must be set on failure path"
-    );
-    assert!(
-        model.is_none(),
-        "alignment_model must be NULL on failure path"
-    );
-    assert_eq!(
-        priority, 0,
-        "manual_priority must be cleared on failure path (regression for dangling flag bug)"
     );
 }
 

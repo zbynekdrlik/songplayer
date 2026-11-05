@@ -7,7 +7,7 @@
 //!      stamped higher than the constant the worker actually produces).
 //!   2. Clears stuck `lyrics_manual_priority = 1` on terminal-sentinel rows
 //!      (`no_source` / `failed` / `empty`). Pre-fix versions of
-//!      `db::models::mark_video_lyrics` left the flag dangling when gather
+//!      `db::models::mark_video_lyrics` (deleted, #286) left the flag dangling when gather
 //!      returned zero candidates; the cleanup pass purges those.
 //!   3. Sets `lyrics_manual_priority = 1` on every row whose
 //!      `pipeline_version < current` AND `lyrics_source` is not a parked
@@ -69,7 +69,7 @@ pub async fn reprocess_catalog_with_new_gate(State(state): State<AppState>) -> i
     };
 
     // Step 2: clear dangling manual_priority on terminal-sentinel rows.
-    // Pre-fix `mark_video_lyrics` (`db/models.rs`) did not clear the manual flag
+    // Pre-fix `mark_video_lyrics` (deleted, #286) did not clear the manual flag
     // on the failure path, so 10 production rows ended up `lyrics_source =
     // 'no_source' AND lyrics_manual_priority = 1` after the initial reprocess.
     // They're parked by the skip-list either way, but the dangling flag confuses
@@ -327,7 +327,7 @@ mod tests {
     #[tokio::test]
     async fn endpoint_clears_dangling_manual_priority_on_terminal_sentinels() {
         // Regression for the production bug observed 2026-05-16: pre-fix
-        // `db::models::mark_video_lyrics` left manual_priority=1 on rows that
+        // `db::models::mark_video_lyrics` (deleted, #286) left manual_priority=1 on rows that
         // gather failed for. 10 production rows ended up `lyrics_source =
         // 'no_source' AND lyrics_manual_priority = 1`. The admin endpoint
         // cleans those up.

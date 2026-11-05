@@ -491,10 +491,6 @@ mod tests {
                 .unwrap(),
             ids
         );
-        assert_eq!(
-            models::get_unplayed_video_ids(&pool, home).await.unwrap(),
-            ["yt_0", "yt_1", "yt_2"]
-        );
         db::models::record_play(&pool, home, ids[1]).await.unwrap();
         db::models::record_play(&pool, home, ids[2]).await.unwrap();
         for _ in 0..10 {
