@@ -308,24 +308,15 @@ Tier-1 visibility today: `GET /api/v1/program` names `degraded_reason` `"no NDI 
 
 ## Legacy OBS YouTube Player (obsytplayer)
 
-SongPlayer is the Rust replacement for the legacy Python OBS YouTube Player at `/home/newlevel/devel/obsytplayer/`. **Always reference the legacy code when implementing features** — it contains battle-tested logic for:
+SongPlayer replaced the legacy Python OBS YouTube Player (obsytplayer). Its design facts that SongPlayer keeps:
 
-- **Metadata extraction:** `yt-player-main/metadata.py` + `yt-player-main/gemini_metadata.py` — title parsing regexes, Gemini prompt, featuring cleanup
-- **Download/normalize pipeline:** `yt-player-main/playlist_manager.py` — yt-dlp format selection, FFmpeg 2-pass loudnorm, file naming conventions
-- **Playback engine:** `yt-player-main/player.py` — scene detection, play/pause/skip logic, title display timing (show 1.5s after start, hide 3.5s before end)
-- **Playlist sync:** `yt-player-main/playlist_manager.py` — YouTube playlist flat-download, video dedup, unplayed tracking
-- **OBS integration:** `yt-player-main/obs_controller.py` — text source updates, media source path changes
-- **Resolume title delivery:** `yt-player-main/resolume_controller.py` — A/B lane crossfade, clip mapping via #token tags
-- **Configuration:** Each instance had its own `config.json` with playlist URL, OBS source names, Gemini API key
-
-**Key design decisions from legacy code to preserve:**
 - Loudness normalization target: -14 LUFS (FFmpeg loudnorm filter)
 - yt-dlp format: `bestvideo[height<=1440]+bestaudio/best[height<=1440]`
 - Title display: show artist + song 1.5s after video starts, hide 3.5s before end
 - Gemini prompt asks for `{song, artist, source}` JSON; falls back to regex parser
 - File naming: `{song}_{artist}_{youtube_id}_normalized.mp4` (with `_gf` suffix if Gemini failed)
 
-**6 playlist instances being migrated:**
+**The 6 playlists it ran:**
 | Name | YouTube Playlist | OBS Scene | NDI Output |
 |------|-----------------|-----------|------------|
 | ytwarmup | PLFdHTR758BvcHRX3nVKMEPHuBdU75dBVE | ytwarmup | SP-warmup |
@@ -334,8 +325,6 @@ SongPlayer is the Rust replacement for the legacy Python OBS YouTube Player at `
 | yt90s | PLFdHTR758BvfM0XYF6Q2nEDnW0CqHXI17 | yt90s | SP-90s |
 | ytworship | PLFdHTR758BveEaqE5BWIQI7ukkijjdbbG | ytworship | SP-worship |
 | ytfast | PLFdHTR758BvdEXF1tZ_3g8glRuev6EC6U | ytfast | SP-fast |
-
-**Coexistence strategy:** Create NEW `sp-*` scenes in OBS with NDI sources from SongPlayer. Do NOT modify existing `yt*` scenes — legacy scripts remain active until SongPlayer is verified working identically.
 
 (#221: since lane 3 the "NDI Output" names are each playlist's scene label only — SongPlayer's one NDI output is `SP-program`, and cg OBS's `sp-*` inputs no longer have a sender.)
 
