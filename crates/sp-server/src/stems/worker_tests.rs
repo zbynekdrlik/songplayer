@@ -90,55 +90,10 @@ fn stem_job(video_id: i64) -> crate::db::models_stems::StemJob {
     }
 }
 
-/// A wall abort re-queues with NO penalty: partial stems deleted, DB row
-/// left pending (stem_status NULL, stem_attempts unchanged), and the
-/// selector re-picks it immediately.
-#[tokio::test]
-async fn wall_abort_re_queues_with_no_penalty() {
-    let pool = crate::db::create_memory_pool().await.unwrap();
-    crate::db::run_migrations(&pool).await.unwrap();
-    seed_pending_stem_row(&pool, 1).await;
-    let dir = tempfile::tempdir().unwrap();
-    // Partial stem outputs the abort must delete.
-    let vocals = dir.path().join("v.flac");
-    let instr = dir.path().join("i.flac");
-    std::fs::write(&vocals, b"partial").unwrap();
-    std::fs::write(&instr, b"partial").unwrap();
-    let worker = test_worker(pool.clone(), dir.path().to_path_buf());
-
-    worker
-        .record_stem_result(
-            &stem_job(1),
-            &vocals,
-            &instr,
-            StemStepResult::WallAborted("output playing".into()),
-        )
-        .await;
-
-    let (status, attempts): (Option<String>, i64) =
-        sqlx::query_as("SELECT stem_status, stem_attempts FROM videos WHERE id = 1")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert!(status.is_none(), "wall-abort must leave stem_status NULL");
-    assert_eq!(attempts, 0, "wall-abort must not increment stem_attempts");
-    assert!(!vocals.exists(), "partial vocals stem must be deleted");
-    assert!(!instr.exists(), "partial instrumental stem must be deleted");
-
-    let next = crate::db::models_stems::get_next_video_for_stems(&pool)
-        .await
-        .unwrap();
-    assert_eq!(
-        next.map(|j| j.video_id),
-        Some(1),
-        "the aborted row must be re-picked immediately"
-    );
-}
-
 /// #184 G0.1: a dub-yield leaves the RESUME STATE intact — partial stems +
 /// the #171 work dir are KEPT, and the DB row stays pending (stem_status
 /// NULL, stem_attempts unchanged, no stem_next_attempt_at) so the selector
-/// re-picks it. Distinct from WallAborted, which DELETES the partial stems.
+/// re-picks it.
 #[tokio::test]
 async fn yield_to_dub_keeps_resume_state_and_leaves_row_pending() {
     let pool = crate::db::create_memory_pool().await.unwrap();

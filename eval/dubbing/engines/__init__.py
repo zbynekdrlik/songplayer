@@ -1,1 +1,1 @@
-"""Dubbing engines behind the DubEngine protocol."""
+"""Dubbing eval engines (audio-to-audio)."""

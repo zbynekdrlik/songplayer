@@ -529,7 +529,7 @@ fn a_scaled_open_lists_the_video_processor_in_its_chain() {
     let reader = open_scaled(60, (80, 60), &plain_reader);
     let facts = reader.scaled_open_facts().expect("scaled facts");
     assert!(
-        facts.has_video_processor(),
+        facts.chain.contains(&ChainStage::VideoProcessor),
         "a video processor in the chain: {:?}",
         facts.chain
     );

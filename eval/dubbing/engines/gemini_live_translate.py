@@ -8,8 +8,7 @@ boundaries — the property per-sentence TTS cannot reproduce (the owner's core
 complaint was that per-sentence dubs read "ako rozprávanie príbehu", losing the
 preacher's intensity and chopping his phrasing).
 
-Unlike the TTS engines this is NOT a `DubEngine` (there is no text or voice
-clone): its interface is audio-in → audio-out. `translate_pcm16k(pcm)` streams
+Its interface is audio-in → audio-out (no text, no voice clone). `translate_pcm16k(pcm)` streams
 16 kHz mono s16le PCM in and returns the concatenated 24 kHz PCM output plus the
 output transcript; `trim_af()` is the pure ffmpeg trailing-silence filter (the
 Live session streams silence until closed, so the tail must be trimmed).

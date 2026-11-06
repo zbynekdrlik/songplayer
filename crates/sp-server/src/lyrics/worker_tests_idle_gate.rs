@@ -1,16 +1,13 @@
-//! Worker-loop tests for the #154 idle gate (no heavy processing while the
-//! wall is in use). Included as a sibling of `worker.rs` so it can reach the
-//! private `process_next` + the gate seam. The pure decision core is tested in
-//! `idle_gate_tests.rs`; here we prove the loop-level behaviour: a busy wall
-//! defers heavy work with no backoff penalty and surfaces a waiting state,
-//! while an idle wall / a disabled gate proceed.
+//! Worker-loop tests for the wall-activity seam (#162: heavy work never waits
+//! for an idle wall, it runs CPU-idle while the wall is in use). Included as a
+//! sibling of `worker.rs` so it can reach the private `process_next` + the
+//! seam. The pure decision core is tested in `idle_gate_tests.rs`.
 
 use super::*;
-use crate::lyrics::idle_gate::{GateLog, IdleSettle, WALL_IDLE_SETTLE, WallActivity};
 use crate::obs::ObsState;
 use crate::playback::ndi_health::{NdiHealthRegistry, PipelineHealthSnapshot, PlaybackStateLabel};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::RwLock;
 
 /// Minimal `Playing` health snapshot for a given `ndi_name` label. Mirrors the
@@ -80,17 +77,15 @@ async fn gate_worker(
     (worker, pool)
 }
 
-/// The core #154 guarantee, now scoped to IDLE-ONLY mode (#162): with
-/// `lyrics_processing_mode=idle-only` and a Playing snapshot the worker loop
-/// defers the heavy pick — the eligible song is left UNTOUCHED (not marked
-/// failed, no backoff penalty) and the dashboard shows "waiting — wall in use".
-/// In the default low-priority mode the loop does NOT defer (proven by
-/// `low_priority_mode_does_not_defer_while_playing`).
+/// #286: the idle-only mode is gone. A box that still stores
+/// `lyrics_processing_mode = idle-only` runs exactly like every other: the
+/// loop never parks on a playing wall (no "waiting — wall in use" badge) and a
+/// heavy step takes the CPU-idle plan while the wall plays.
 #[tokio::test]
-async fn idle_only_mode_defers_heavy_work_while_playing() {
+async fn a_stored_idle_only_setting_runs_low_priority() {
     // Calls `process_next`, which reads the process-global #184 G0.1 dub flag at
     // the top; serialize + clear it so a parallel flag test can't make this tick
-    // defer for a (phantom) dub instead of the wall.
+    // defer for a (phantom) dub instead.
     let _lk = crate::lyrics::heavy_slot::DUB_FLAG_SERIAL.lock().await;
     crate::lyrics::heavy_slot::set_dub_slot_wanted(false);
     let registry = registry_with(vec![playing_snapshot(7, "SP-fast")]);
@@ -99,194 +94,36 @@ async fn idle_only_mode_defers_heavy_work_while_playing() {
         .await
         .unwrap();
 
-    // An eligible song sits in the queue (bucket 1: never processed).
-    sqlx::query(
-        "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
-         lyrics_pipeline_version, lyrics_manual_priority) \
-         VALUES (1, 1, 'yt_busy', 1, 0, 0, 0)",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-
     worker.process_next().await;
-
-    // Heavy stage NOT spawned and the row is not marked failed: still bucket 1.
-    let (has_lyrics, source, attempts): (i64, Option<String>, i64) = sqlx::query_as(
-        "SELECT has_lyrics, lyrics_source, COALESCE(lyrics_attempts, 0) FROM videos WHERE id = 1",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!(has_lyrics, 0, "song must not be marked processed");
-    assert!(source.is_none(), "song must not be marked failed/no_source");
-    assert_eq!(attempts, 0, "no backoff penalty — attempts must stay 0");
-
-    // The worker surfaces WHY nothing is happening.
-    let proc = worker.current_processing().read().await.clone();
-    let proc = proc.expect("waiting state should be set");
     assert!(
-        proc.stage.contains("waiting — wall in use"),
-        "stage was: {}",
-        proc.stage
+        worker.current_processing().read().await.is_none(),
+        "the loop must not park on a playing wall"
     );
-    assert!(
-        proc.stage.contains("SP-fast"),
-        "waiting detail should name the playing output; stage was: {}",
-        proc.stage
-    );
-}
 
-/// #162 core: in `low-priority` (the DEFAULT) the loop-level gate NEVER defers,
-/// even while the wall is Playing — the queue drains continuously at reduced
-/// priority instead of stopping. `idle-only` still defers (below).
-#[tokio::test]
-async fn low_priority_mode_does_not_defer_while_playing() {
-    let registry = registry_with(vec![playing_snapshot(7, "SP-fast")]);
-    let (worker, _pool) = gate_worker(registry, ObsState::default()).await;
-
-    let (defer, activity) = worker
-        .loop_should_defer(crate::lyrics::heavy_plan::ProcessingMode::LowPriority)
-        .await;
-    assert!(!defer, "low-priority must not defer even while playing");
-    assert!(
-        activity.any_playing,
-        "the wall is still detected as playing"
-    );
-}
-
-/// #162: `idle-only` mode still defers the loop-level pick while the wall plays.
-#[tokio::test]
-async fn idle_only_mode_defers_at_loop_level_while_playing() {
-    let registry = registry_with(vec![playing_snapshot(7, "SP-fast")]);
-    let (worker, _pool) = gate_worker(registry, ObsState::default()).await;
-
-    let (defer, activity) = worker
-        .loop_should_defer(crate::lyrics::heavy_plan::ProcessingMode::IdleOnly)
-        .await;
-    assert!(defer, "idle-only must defer while playing");
-    assert!(activity.any_playing);
-}
-
-/// #162: `processing_mode` reads the `lyrics_processing_mode` setting, defaulting
-/// to low-priority when unset and parsing idle-only when the operator sets it.
-#[tokio::test]
-async fn processing_mode_reads_setting_with_low_priority_default() {
-    use crate::lyrics::heavy_plan::ProcessingMode;
-    let (worker, pool) = gate_worker(registry_with(vec![]), ObsState::default()).await;
-
+    let activity = worker.wall_activity().await;
+    assert!(activity.any_playing, "the wall is detected as playing");
+    let plan = crate::lyrics::heavy_plan::HeavyStepPlan::for_activity(activity);
+    assert_eq!(plan, crate::lyrics::heavy_plan::HeavyStepPlan::cpu_idle());
     assert_eq!(
-        worker.processing_mode().await,
-        ProcessingMode::LowPriority,
-        "unset setting defaults to low-priority"
-    );
-
-    crate::db::models::set_setting(&pool, "lyrics_processing_mode", "idle-only")
-        .await
-        .unwrap();
-    assert_eq!(
-        worker.processing_mode().await,
-        ProcessingMode::IdleOnly,
-        "operator can select idle-only"
+        LyricsWorker::stage_regime_suffix(activity),
+        " (cpu, wall in use)"
     );
 }
 
-/// OBS streaming (with nothing Playing) also gates heavy work — the defence the
-/// owner asked for beyond the Playing signal.
+/// OBS streaming (with nothing Playing) reads as a wall in use — the defence
+/// the owner asked for beyond the Playing signal.
 #[tokio::test]
-async fn gate_defers_when_obs_streaming() {
+async fn obs_streaming_reads_as_wall_in_use() {
     let obs = ObsState {
         streaming: true,
         ..Default::default()
     };
     let (worker, _pool) = gate_worker(registry_with(vec![]), obs).await;
 
-    let (defer, activity) = worker.wall_gate_should_defer().await;
-    assert!(defer, "OBS streaming must defer heavy work");
+    let activity = worker.wall_activity().await;
+    assert!(activity.in_use(), "OBS streaming must read as in use");
     assert!(activity.obs_streaming);
     assert!(!activity.any_playing);
-}
-
-/// After the idle-settle fix (2026-09-14 incident) a FRESHLY idle wall no longer
-/// resumes on the first sample: it must first read idle continuously for
-/// `WALL_IDLE_SETTLE`. The elapsed-settle → proceed path is proven by the pure
-/// `idle_settle_*` tests (they inject time); the worker seam reads the real
-/// clock, so here we only assert the freshly-idle sample still defers.
-#[tokio::test]
-async fn gate_freshly_idle_wall_defers_until_settled() {
-    // A KNOWN-idle wall: a created + reported pipeline in the Idle state (not an
-    // empty registry, which is #167-UNKNOWN and would read as in-use). The point
-    // of this test is the idle-settle hysteresis on a genuinely-idle wall.
-    let mut idle = playing_snapshot(7, "SP-fast");
-    idle.state = PlaybackStateLabel::Idle;
-    let (worker, _pool) = gate_worker(registry_with(vec![idle]), ObsState::default()).await;
-    let (defer, activity) = worker.wall_gate_should_defer().await;
-    assert!(
-        defer,
-        "a freshly-idle wall must defer during the settle window"
-    );
-    assert!(!activity.in_use());
-    let detail = worker.wall_busy_detail(activity).await;
-    assert!(
-        detail.contains("settling"),
-        "idle-but-settling detail should mention settling; was: {detail}"
-    );
-}
-
-// ---- IdleSettle pure hysteresis ------------------------------------------
-
-/// The core guarantee: a single idle sample is not enough — heavy work resumes
-/// only after `WALL_IDLE_SETTLE` of CONTINUOUS idle.
-#[test]
-fn idle_settle_defers_until_thirty_seconds_of_continuous_idle() {
-    let mut s = IdleSettle::default();
-    let t0 = Instant::now();
-    assert!(s.defer(true, t0), "in use → defer");
-    assert!(s.defer(false, t0), "just went idle → still defer");
-    assert!(
-        s.defer(false, t0 + Duration::from_secs(29)),
-        "29s idle → still defer"
-    );
-    assert!(
-        !s.defer(false, t0 + Duration::from_secs(30)),
-        "30s continuous idle → resume"
-    );
-    assert_eq!(
-        s.idle_for(t0 + Duration::from_secs(30)),
-        Some(Duration::from_secs(30))
-    );
-    assert_eq!(WALL_IDLE_SETTLE, Duration::from_secs(30));
-}
-
-/// A busy sample mid-settle resets the clock — the wall must read idle for a
-/// FRESH full window after any interruption.
-#[test]
-fn idle_settle_busy_sample_resets_the_clock() {
-    let mut s = IdleSettle::default();
-    let t0 = Instant::now();
-    assert!(s.defer(false, t0), "idle t0 → defer (settling)");
-    assert!(
-        s.defer(false, t0 + Duration::from_secs(20)),
-        "20s idle → defer"
-    );
-    assert!(s.defer(true, t0 + Duration::from_secs(25)), "busy → defer");
-    assert_eq!(
-        s.idle_for(t0 + Duration::from_secs(25)),
-        None,
-        "busy → idle_for None"
-    );
-    assert!(
-        s.defer(false, t0 + Duration::from_secs(26)),
-        "idle again → settle restarts"
-    );
-    assert!(
-        s.defer(false, t0 + Duration::from_secs(55)),
-        "29s since restart → still defer"
-    );
-    assert!(
-        !s.defer(false, t0 + Duration::from_secs(56)),
-        "30s since restart → resume"
-    );
 }
 
 // ---- #161 mid-job wall-abort (worker seam) --------------------------------
@@ -328,75 +165,4 @@ async fn wall_abort_kills_running_step_when_wall_playing() {
             e.detail
         );
     }
-}
-
-/// A mid-job abort surfaces the same song-less "waiting — wall in use" badge the
-/// pre-flight gate uses, carrying the cause detail — so the dashboard keeps a
-/// stable waiting state through the abort.
-#[tokio::test]
-async fn enter_wall_abort_sets_waiting_badge() {
-    let (worker, _pool) = gate_worker(registry_with(vec![]), ObsState::default()).await;
-    worker.enter_wall_abort("output playing").await;
-    let proc = worker.current_processing().read().await.clone();
-    let proc = proc.expect("waiting badge should be set");
-    assert!(
-        proc.stage.contains("waiting — wall in use"),
-        "stage was: {}",
-        proc.stage
-    );
-    assert!(
-        proc.stage.contains("output playing"),
-        "waiting detail should name the cause; stage was: {}",
-        proc.stage
-    );
-}
-
-/// The gate seam both workers share: a disabled gate never defers, regardless of
-/// the settle clock (unchanged behaviour).
-#[test]
-fn gate_log_defer_settled_never_defers_when_gate_disabled() {
-    let mut log = GateLog::default();
-    let in_use = WallActivity {
-        any_playing: true,
-        obs_streaming: false,
-        obs_recording: false,
-        known: true,
-    };
-    assert!(
-        !log.defer_settled(false, in_use, Instant::now()),
-        "gate OFF must never defer even while busy"
-    );
-}
-
-/// Regression (2026-09-14, LyricsWorker level): the wall goes idle for ONE
-/// sample right after Playing — the pre-fix code resumed a heavy job in exactly
-/// this gap. The settle window must keep deferring. This assertion returns
-/// `false` (proceeds) on the pre-fix code and `true` after the fix.
-#[tokio::test]
-async fn single_idle_sample_after_busy_still_defers() {
-    let registry = registry_with(vec![playing_snapshot(7, "SP-fast")]);
-    let (worker, _pool) = gate_worker(Arc::clone(&registry), ObsState::default()).await;
-
-    // Busy wall defers, and primes the settle clock as "in use".
-    let (defer, activity) = worker.wall_gate_should_defer().await;
-    assert!(defer, "playing wall must defer");
-    assert!(activity.any_playing);
-
-    // Flip the same output to Idle — a single idle sample.
-    let mut idle = playing_snapshot(7, "SP-fast");
-    idle.state = PlaybackStateLabel::Idle;
-    registry.update(idle);
-
-    let (defer, activity) = worker.wall_gate_should_defer().await;
-    assert!(
-        defer,
-        "a single idle sample right after busy must STILL defer (settle not elapsed)"
-    );
-    assert!(!activity.in_use(), "the wall reads idle now");
-
-    let detail = worker.wall_busy_detail(activity).await;
-    assert!(
-        detail.contains("settling"),
-        "idle-but-settling detail should mention settling; was: {detail}"
-    );
 }

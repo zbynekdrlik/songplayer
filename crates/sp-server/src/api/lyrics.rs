@@ -435,8 +435,7 @@ pub async fn post_clear_manual(State(state): State<AppState>) -> impl IntoRespon
 ///
 /// `reason` is optional free-text; it is logged via `tracing::warn` for an
 /// audit trail but never persisted to the DB. Keeping it out of the schema
-/// avoids a migration. See
-/// `docs/superpowers/specs/2026-05-12-asr-gap-quarantine-design.md`.
+/// avoids a migration.
 #[derive(Debug, Deserialize)]
 pub struct QuarantineRequest {
     pub video_id: i64,

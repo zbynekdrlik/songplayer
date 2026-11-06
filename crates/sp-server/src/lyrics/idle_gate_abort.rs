@@ -2,17 +2,17 @@
 //! becomes busy, so a job started while the wall was idle does not keep
 //! starving the live LED-wall decoder/NDI path for its 2–5 min GPU run.
 //!
-//! Companion to `idle_gate.rs` (the #154 PRE-flight gate): that decides whether
-//! to START a heavy step; this watches one already RUNNING. The pure
-//! [`AbortPolicy`] (consecutive-busy debounce) is unit-tested directly;
+//! Companion to `idle_gate.rs` (the wall-activity reading); this watches a GPU
+//! step already RUNNING. The pure [`AbortPolicy`] (consecutive-busy debounce)
+//! is unit-tested directly;
 //! [`run_with_wall_abort`] races the heavy future against a 1 s wall poll and
 //! DROPS it on abort — every heavy child (`preprocess_vocals`, `mtl_aligner`,
 //! `separate_stems`) sets `kill_on_drop(true)`, so dropping the future SIGKILLs
 //! the subprocess. Split into its own module so `worker.rs` / `stems/worker.rs`
 //! stay under the 1000-line cap.
 //!
-//! It only changes WHEN a heavy stage runs, never its output (the aborted step
-//! re-runs to identical bytes on the next idle pick), so it is NOT a
+//! It only changes WHERE a heavy stage runs, never its output (the aborted GPU
+//! step re-runs on CPU to identical bytes), so it is NOT a
 //! `LYRICS_PIPELINE_VERSION` bump.
 
 use std::path::PathBuf;
@@ -23,9 +23,8 @@ use super::idle_gate::WallActivity;
 /// Consecutive ~1 s busy samples before a running heavy step is aborted. Two
 /// samples ≈ 2 s debounce: a transient scene switch / song change that flips a
 /// pipeline off (or momentarily onto) Playing for a beat must not kill a
-/// legitimate in-flight job. Deliberately NOT the 30 s `WALL_IDLE_SETTLE` — that
-/// guards RESUME (don't restart during a flicker); this guards RUN and must
-/// react in ~2 s or the wall keeps stuttering.
+/// legitimate in-flight job; it must still react in ~2 s or the wall keeps
+/// stuttering.
 pub(crate) const ABORT_CONSECUTIVE_BUSY: u32 = 2;
 
 /// How often the abort watcher samples the wall while a heavy step runs.
@@ -68,8 +67,6 @@ impl std::fmt::Display for WallAbort {
         write!(f, "aborted heavy step — wall became busy ({})", self.detail)
     }
 }
-
-impl std::error::Error for WallAbort {}
 
 /// Race `fut` (a heavy GPU-subprocess future whose child sets `kill_on_drop`)
 /// against a 1 s wall-activity poll. Returns `Ok(fut's output)` if it finishes
@@ -203,16 +200,6 @@ impl crate::lyrics::worker::LyricsWorker {
         run_with_wall_abort(fut, gate_enabled, || self.wall_activity()).await
     }
 
-    /// Surface a mid-job wall-abort to the dashboard: log the once-per-transition
-    /// "waiting — wall in use" line and set the same song-less waiting badge the
-    /// pre-flight gate uses (`enter_wall_wait`), so a mid-song abort does not
-    /// flicker the dashboard between a song-named stage and the generic badge.
-    #[cfg_attr(test, mutants::skip)]
-    pub(crate) async fn enter_wall_abort(&self, detail: &str) {
-        self.note_wall_gate(true, detail);
-        self.enter_wall_wait(detail).await;
-    }
-
     /// #144: resolve what the ★ isolation step should do for `row` from the
     /// stems worker's state. The mtl aligner's vocals now come from the stems
     /// worker's vocals sidecar (`stems::stem_paths(audio).0`, #184 G0) instead
@@ -270,8 +257,8 @@ impl crate::lyrics::worker::LyricsWorker {
     /// `Ok(Some(wav))` on success, `Ok(None)` when it is not applicable (no venv
     /// python / the vocals sidecar vanished) or the subprocess failed normally
     /// (best-effort, same as before #161), and `Err(WallAbort)` when the wall
-    /// went busy mid-run — in which case the partial WAV is deleted so the next
-    /// idle pick re-runs from scratch to identical bytes. Extracted from
+    /// went busy mid-run — in which case the partial WAV is deleted and the
+    /// caller re-runs it on CPU. Extracted from
     /// `process_song` (worker.rs 1000-line cap).
     #[cfg_attr(test, mutants::skip)]
     pub(crate) async fn isolate_vocals(
@@ -330,6 +317,26 @@ impl crate::lyrics::worker::LyricsWorker {
                 );
                 Err(abort)
             }
+        }
+    }
+
+    /// [`isolate_vocals`](Self::isolate_vocals) with the abort watcher off —
+    /// the CPU plan, which cannot disturb the wall and runs to completion.
+    #[cfg_attr(test, mutants::skip)]
+    pub(crate) async fn isolate_vocals_unwatched(
+        &self,
+        row: &crate::db::models::VideoLyricsRow,
+        vocals_in: &std::path::Path,
+        gpu_mem: Option<&str>,
+        plan: &crate::lyrics::heavy_plan::HeavyStepPlan,
+    ) -> Option<PathBuf> {
+        match self
+            .isolate_vocals(row, vocals_in, gpu_mem, plan, false)
+            .await
+        {
+            Ok(v) => v,
+            // `run_with_wall_abort` with the gate off awaits the step itself.
+            Err(abort) => unreachable!("an unwatched step is never aborted: {abort}"),
         }
     }
 }

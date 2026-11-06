@@ -58,17 +58,14 @@ pub struct LyricsWorker {
     /// idle-gate seam (`idle_gate.rs`) can surface the "waiting — wall in use"
     /// state through the same field.
     pub(crate) current_processing: Arc<RwLock<Option<LyricsProcessingState>>>,
-    /// #154 idle gate: engine health registry, read for the per-pipeline
-    /// `Playing` state (the same snapshots `/api/v1/ndi/health` serves) so heavy
-    /// GPU/CPU work is deferred while an output is on the wall. `None` in unit
-    /// tests that don't exercise the gate.
+    /// #162: engine health registry, read for the per-pipeline `Playing` state
+    /// (the same snapshots `/api/v1/ndi/health` serves) so heavy work runs
+    /// CPU-idle while an output is on the wall. `None` in unit tests that don't
+    /// exercise it.
     pub(crate) ndi_health_registry: Option<Arc<crate::playback::ndi_health::NdiHealthRegistry>>,
-    /// #154 idle gate: shared OBS state, read for `streaming`/`recording` so
-    /// heavy work is also deferred while OBS is live. `None` in unit tests.
+    /// #162: shared OBS state, read for `streaming`/`recording` so heavy work
+    /// also runs CPU-idle while OBS is live. `None` in unit tests.
     pub(crate) obs_state: Option<Arc<RwLock<crate::obs::ObsState>>>,
-    /// #154 idle gate: once-per-transition log tracker so the "waiting — wall
-    /// in use" INFO logs on each state change, not every 5-s tick.
-    pub(crate) wall_gate_log: std::sync::Mutex<crate::lyrics::idle_gate::GateLog>,
     /// #229: this node in the exchange, asked before each song (`None` in
     /// tests that do not need it).
     pub(crate) peer: Option<Arc<crate::peer::Exchange>>,
@@ -147,7 +144,6 @@ impl LyricsWorker {
             current_processing: Arc::new(RwLock::new(None)),
             ndi_health_registry: Some(ndi_health_registry),
             obs_state: Some(obs_state),
-            wall_gate_log: std::sync::Mutex::new(crate::lyrics::idle_gate::GateLog::default()),
             peer: None,
         }
     }
@@ -179,7 +175,6 @@ impl LyricsWorker {
             current_processing: Arc::new(RwLock::new(None)),
             ndi_health_registry: None,
             obs_state: None,
-            wall_gate_log: std::sync::Mutex::new(crate::lyrics::idle_gate::GateLog::default()),
             peer: None,
         }
     }
@@ -414,28 +409,6 @@ impl LyricsWorker {
             return;
         }
 
-        // #162 loop-level gate: only `idle-only` defers here (pre-#162 gate +
-        // idle-settle); `low-priority` (default) never defers — heavy steps run
-        // at reduced priority instead, so the queue drains continuously. On an
-        // idle-only defer, surface "waiting — wall in use" and keep the cheap
-        // non-gated translation moving; no DB deferral (row stays at the head).
-        let mode = self.processing_mode().await;
-        let (defer, activity) = self.loop_should_defer(mode).await;
-        if defer {
-            let detail = self.wall_busy_detail(activity).await;
-            self.note_wall_gate(true, &detail);
-            self.enter_wall_wait(&detail).await;
-            // Translation is a cheap Claude HTTP call, explicitly NOT gated —
-            // it keeps the SK backfill moving while the wall is in use.
-            self.retry_missing_translations().await;
-            self.retranslate_next_stale().await;
-            self.recheck_next_stale_register().await;
-            return;
-        }
-        // Not deferring (low-priority always; idle-only when the wall is idle) —
-        // log the resume transition (once) before picking work.
-        self.note_wall_gate(false, "");
-
         let row = match get_next_video_for_lyrics(&self.pool, LYRICS_PIPELINE_VERSION).await {
             Ok(Some(r)) => r,
             Ok(None) => {
@@ -477,12 +450,9 @@ impl LyricsWorker {
             Ok(SongOutcome::Deferred(reason)) => {
                 self.defer_song(video_id, &youtube_id, reason).await
             }
-            // #154: the wall went busy mid-song (after isolation, before mtl).
-            // No backoff penalty — the isolated vocal WAV is preserved on disk,
-            // so the next idle pick is a cache-hit isolation + mtl with
-            // identical output. The waiting stage is already broadcast; leave
-            // current_processing as-is so the dashboard keeps showing it until
-            // the next tick re-evaluates.
+            // #167: the engine just started — no heavy step yet. No backoff
+            // penalty; the waiting stage is already broadcast, so leave
+            // current_processing as-is until the next tick re-evaluates.
             Ok(SongOutcome::WaitingForWall) => {
                 debug!("worker: {youtube_id} deferred — wall in use (no backoff)");
             }
@@ -635,18 +605,15 @@ impl LyricsWorker {
         // (≥4 lines) tries the v21 mtl reference stage below; songs it does
         // not ship take the g35t base tier.
         //
-        // #162: read the processing mode ONCE per song. `low-priority` (default)
-        // runs every heavy step at reduced priority (CPU-idle while the wall is
-        // in use, GPU when idle); `idle-only` keeps the pre-#162 defer/settle/
-        // abort gate. The badge suffix ` (cpu, wall in use)` surfaces the CPU
-        // regime; the idle-only "waiting" badge is separate.
+        // #162: every heavy step runs at reduced priority (CPU-idle while the
+        // wall is in use, GPU when idle). The badge suffix ` (cpu, wall in use)`
+        // surfaces the CPU regime.
         let gpu_mem = self.gpu_mem_setting().await;
-        let mode = self.processing_mode().await;
         // #203: publish the live containment for this song's heavy steps
         // (isolation + mtl), so the Job Object seam caps + pins each child.
         crate::lyrics::heavy_slot::refresh_containment(&self.pool).await;
         let regime_activity = self.wall_activity().await;
-        let stage_suffix = Self::stage_regime_suffix(mode, regime_activity);
+        let stage_suffix = Self::stage_regime_suffix(regime_activity);
 
         self.broadcast_stage(
             video_id,
@@ -661,16 +628,14 @@ impl LyricsWorker {
 
         // #162: vocal isolation under the priority regime (details in
         // `isolate_with_regime`). `Err(HeavyDefer)` → the song defers with NO
-        // backoff: idle-only wall-abort (WaitingForWall) or low memory
-        // (WaitingForMemory); low-priority otherwise never Errs (it re-runs on
-        // CPU internally). `defer_heavy` maps it to the right no-penalty outcome.
-        let clean_vocal: Option<PathBuf> = match self
-            .isolate_with_regime(&row, gpu_mem.as_deref(), mode)
-            .await
-        {
-            Ok(v) => v,
-            Err(d) => return Ok(self.defer_heavy(d).await),
-        };
+        // backoff: the startup grace (WaitingForWall), low memory
+        // (WaitingForMemory) or stems not ready (WaitingForStems); a GPU abort
+        // re-runs on CPU internally. `defer_heavy` maps it to the outcome.
+        let clean_vocal: Option<PathBuf> =
+            match self.isolate_with_regime(&row, gpu_mem.as_deref()).await {
+                Ok(v) => v,
+                Err(d) => return Ok(self.defer_heavy(d).await),
+            };
 
         self.broadcast_stage(
             video_id,
@@ -692,7 +657,6 @@ impl LyricsWorker {
                 ctx.candidate_texts,
                 clean_vocal.as_deref(),
                 gpu_mem,
-                mode,
                 started_at_unix_ms,
             )
             .await?;

@@ -39,10 +39,9 @@ pub(crate) enum SongOutcome {
     /// Could not be processed now; retry after a durable backoff. The `&str`
     /// is a short machine reason surfaced in the WARN log.
     Deferred(&'static str),
-    /// #154: the wall went busy after isolation but before the mtl spawn.
-    /// Deferred with NO backoff penalty — the row stays at the head of the
-    /// queue and is re-picked the instant the wall goes idle (the isolated
-    /// vocal WAV is preserved on disk for a cache-hit re-run). Distinct from
+    /// #167: the engine started less than the startup floor ago, so no heavy
+    /// step ran. Deferred with NO backoff penalty — the row stays at the head
+    /// of the queue and is re-picked once the floor has passed. Distinct from
     /// `Deferred` precisely so `process_next` skips the exponential backoff.
     WaitingForWall,
     /// #162: free RAM / commit fell below `HEAVY_STEP_MIN_FREE_BYTES` before a

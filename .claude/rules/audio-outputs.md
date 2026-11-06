@@ -31,10 +31,9 @@ paths:
 
 # Program audio outputs (#233)
 
-Spec `docs/superpowers/specs/2026-10-07-audio-outputs-asio-design.md`, plan
-`docs/superpowers/plans/2026-10-07-audio-outputs-asio.md` (three lanes; lane
-1: the output list + VBAN per destination; lane 3: the ASIO output over
-`azo`). Lane 2's section (the drift servo, the ASRC) comes first, then lane
+Spec `docs/superpowers/specs/2026-10-07-audio-outputs-asio-design.md`, shipped
+in three lanes (lane 1: the output list + VBAN per destination; lane 3: the
+ASIO output over `azo`). Lane 2's section (the drift servo, the ASRC) comes first, then lane
 1's, then lane 3's (the ASIO output).
 
 ## The low-latency switch `audio_low_latency` (#289 step 1)
@@ -58,11 +57,12 @@ start):
   list with it (`plan_at`, `built_at`): a VBAN output built with the other
   value is a changed entry — rebuilt (`discard` + a new output, its frame
   counter from 0), never a restart. OFF is byte for byte today's: `plan`,
-  `VbanOut::for_entry`, `VbanRateConverter::new` and `max_wait_100ns`
-  are the OFF forms of the new `*_at` / `*_in` / `for_latency` functions
-  (#286 deleted the test-only OFF forms `send_latency_100ns` and
-  `vban_latency_ms`: their tests call `send_latency_in` /
-  `vban_latency_ms_at` with `false`), and every #233 assertion holds.
+  `VbanOut::for_entry` and `VbanRateConverter::new` are the OFF forms of
+  the new `*_at` / `*_in` / `for_latency` functions (#286 deleted the
+  test-only OFF forms `send_latency_100ns`, `vban_latency_ms` and
+  `max_wait_100ns`: their tests call `send_latency_in` /
+  `vban_latency_ms_at` / `max_wait_in` with `false`; the wait cap OFF =
+  `VBAN_MAX_WAIT_100NS` + the delay), and every #233 assertion holds.
 - ON, every VBAN output (`vban-out.md`, "The low-latency switch"): L =
   15 ms (`VBAN_SEND_LATENCY_LOW_100NS` 150 000), the wait cap 4 × L =
   60 ms + the delay (`max_wait_in`); a converting destination is NOT

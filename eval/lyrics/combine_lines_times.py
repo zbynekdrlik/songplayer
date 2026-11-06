@@ -62,7 +62,7 @@ Method — word-sequence alignment (per `reports/2026-08-05-combine-experiment.m
 
 Usage (single fixture):
     python3 eval/lyrics/combine_lines_times.py \\
-        --raw-dir eval/lyrics/reports/2026-08-05-raw \\
+        --raw-dir <per-backend raw outputs> \\
         --line-backend qwen35-omni --time-backend soniox-v5 \\
         --video-id 5JW87KKDTcU \\
         --out /tmp/combined.json
@@ -94,8 +94,6 @@ _WORD_PUNCT_RE = re.compile(r"[^\w]", re.UNICODE)
 # "gonna" vs "going" -> 0.6) while rejecting genuine word substitutions
 # ("'cos" vs "because" -> 0.4).
 FUZZY_MATCH_RATIO_THRESHOLD = 0.5
-
-DEFAULT_RAW_DIR = Path(__file__).resolve().parent / "reports" / "2026-08-05-raw"
 
 
 def normalize_word(word: str) -> str:
@@ -440,7 +438,7 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
     )
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--raw-dir", type=Path, default=DEFAULT_RAW_DIR)
+    p.add_argument("--raw-dir", type=Path, required=True)
     p.add_argument("--line-backend", required=True, help="e.g. qwen35-omni")
     p.add_argument("--time-backend", required=True, help="e.g. soniox-v5")
     p.add_argument("--video-id", required=True)
