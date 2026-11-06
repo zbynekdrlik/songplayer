@@ -1510,7 +1510,7 @@ difference with its UTC time.
   Since dstack v0.6.12 (dstack #102, 3.11.2026) every dstack crate is MIT OR
   Apache-2.0 (checked in the checkout's Cargo.toml files), so the license no
   longer keeps #285 off `main`. `THIRD-PARTY-NOTICES.txt` names dstack
-  0.6.51 (dlink, dstack, dstack-audio-io, dstack-resample) with its
+  0.6.52 (dlink, dstack, dstack-audio-io, dstack-resample) with its
   LICENSE-MIT verbatim (it named 0.5.11 under the GPL until step 3).
 - `type: dante` in `audio_outputs`, at most one, `DanteDest {device, ip}`: the
   device name by Dante's own rule, the `ip` one IPv4 of this PC (a second
