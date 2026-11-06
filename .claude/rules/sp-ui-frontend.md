@@ -341,7 +341,7 @@ it. Never re-implement a row, a status marker, or an import field per page.
   via `stems_chip` / `text_chip` / `dub_chip` / `file_chip` and renders whatever
   they return. NEVER write a second glyph/word table in sp-ui (the old
   `video_list_stems::stems_glyph` + `karaoke_mixer::state_label` did, and diverged
-  — both now defer to the shared model).
+  — both are deleted).
 
   | Chip | Wire field(s) | States → Slovak label |
   |---|---|---|
