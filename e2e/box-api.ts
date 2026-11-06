@@ -38,8 +38,7 @@ export async function healthRow(
 }
 
 /**
- * A ready dub on the box: `preferVideoId` when that dub is ready, else the
- * first ready one. Fails loudly when no dub is ready — that is the Dabing
+ * A ready dub on the Dabing playlist (`pickReadyDub`). Fails loudly when no dub is ready — that is the Dabing
  * specs' precondition.
  */
 export async function readyDub(
@@ -50,19 +49,26 @@ export async function readyDub(
   expect(dab.status()).toBe(200);
   const body = (await dab.json()) as DabingList;
   const videoId = pickReadyDub(body, preferVideoId);
-  expect(videoId, "at least one dub must be ready on the box").toBeGreaterThan(0);
+  expect(videoId, "at least one dub must be ready on the Dabing playlist").toBeGreaterThan(0);
   return { pid: body.playlist_id, videoId: videoId as number };
 }
 
 /** `GET /api/v1/dabing` (the fields the specs read). */
 export interface DabingList {
   playlist_id: number;
-  videos: Array<{ video_id?: number; id?: number; dub_status: string; playlist_id?: number }>;
+  videos: Array<{ video_id?: number; id?: number; dub_status: string; playlist_id: number }>;
 }
 
-/** The ready dub to play: `preferVideoId` when it is ready, else the first ready one. */
+/**
+ * The ready dub to play, on the Dabing playlist only: `/api/v1/dabing` also lists
+ * a dub asked for on another playlist's song, and ▶ on that row plays it THERE, so
+ * the Dabing output would never decode. `preferVideoId` when it is ready here, else
+ * the first ready one.
+ */
 export function pickReadyDub(body: DabingList, preferVideoId?: number): number | undefined {
-  const ready = body.videos.filter((v) => v.dub_status === "ready");
+  const ready = body.videos.filter(
+    (v) => v.dub_status === "ready" && v.playlist_id === body.playlist_id,
+  );
   // DubRow carries the id as `video_id` (the row is keyed by the video).
   const ids = ready.map((v) => Number(v.video_id ?? v.id));
   return preferVideoId !== undefined && ids.includes(preferVideoId) ? preferVideoId : ids[0];
