@@ -138,7 +138,7 @@ jobs:
         run: pytest eval/lyrics/tests -v
       - name: Run scripts pytest (#171 segment stitch / additivity, #156 minidump helpers)
         run: pytest scripts/tests -v
-      - name: Run dubbing eval pytest (#175 fit policy)
+      - name: Run dubbing eval pytest (#184 Live Translate probe, wavutil, voice-band key)
         run: pytest eval/dubbing/tests -v
 
   # #255 lane 2: scripts/setup-prod-pc.ps1 (the production PC profile the
