@@ -164,10 +164,10 @@ fn the_vban_state_table() {
 
 #[test]
 fn a_vban_outputs_latency_is_the_send_budget_the_delay_and_the_converter() {
-    assert!((vban_latency_ms(0, 48_000) - 66.6666).abs() < 1e-3);
-    assert!((vban_latency_ms(40, 48_000) - 106.6666).abs() < 1e-3);
-    assert!((vban_latency_ms(0, 96_000) - (66.6666 + 16.6667)).abs() < 1e-3);
-    assert!((vban_latency_ms(10, 44_100) - (66.6666 + 10.0 + 16.6667)).abs() < 1e-3);
+    assert!((vban_latency_ms_at(0, 48_000, false) - 66.6666).abs() < 1e-3);
+    assert!((vban_latency_ms_at(40, 48_000, false) - 106.6666).abs() < 1e-3);
+    assert!((vban_latency_ms_at(0, 96_000, false) - (66.6666 + 16.6667)).abs() < 1e-3);
+    assert!((vban_latency_ms_at(10, 44_100, false) - (66.6666 + 10.0 + 16.6667)).abs() < 1e-3);
 }
 
 #[test]

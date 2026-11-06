@@ -655,14 +655,9 @@ pub fn plan_wait_up_to(now_100ns: i64, at_100ns: i64, max_100ns: i64) -> i64 {
     (at_100ns - now_100ns).clamp(0, max_100ns)
 }
 
-/// #233: an output's send latency, L + its delay (100 ns). Its own fn, not
+/// #233: an output's send latency, L + its delay (100 ns); #289: L with
+/// `audio_low_latency` as built (`base_send_latency_100ns`). Its own fn, not
 /// inside `VbanSender::new`: cargo-mutants never mutates a fn named `new`.
-pub fn send_latency_100ns(delay_100ns: i64) -> i64 {
-    send_latency_in(delay_100ns, false)
-}
-
-/// #289: an output's send latency with `audio_low_latency` as built: its L
-/// (`base_send_latency_100ns`) + its delay (100 ns).
 pub fn send_latency_in(delay_100ns: i64, low_latency: bool) -> i64 {
     base_send_latency_100ns(low_latency) + delay_100ns
 }

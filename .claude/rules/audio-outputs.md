@@ -58,10 +58,11 @@ start):
   list with it (`plan_at`, `built_at`): a VBAN output built with the other
   value is a changed entry — rebuilt (`discard` + a new output, its frame
   counter from 0), never a restart. OFF is byte for byte today's: `plan`,
-  `VbanOut::for_entry`, `VbanRateConverter::new`, `send_latency_100ns`,
-  `max_wait_100ns` and `vban_latency_ms` are the OFF forms of the new
-  `*_at` / `*_in` / `for_latency` functions, and every #233 test is
-  unchanged.
+  `VbanOut::for_entry`, `VbanRateConverter::new` and `max_wait_100ns`
+  are the OFF forms of the new `*_at` / `*_in` / `for_latency` functions
+  (#286 deleted the test-only OFF forms `send_latency_100ns` and
+  `vban_latency_ms`: their tests call `send_latency_in` /
+  `vban_latency_ms_at` with `false`), and every #233 assertion holds.
 - ON, every VBAN output (`vban-out.md`, "The low-latency switch"): L =
   15 ms (`VBAN_SEND_LATENCY_LOW_100NS` 150 000), the wait cap 4 × L =
   60 ms + the delay (`max_wait_in`); a converting destination is NOT
@@ -690,7 +691,7 @@ start — Windows: the UDP bind or the spawn failed — is "waiting" with
 `VbanOut::start_error` as its reason, never "opening" for good, and is
 rebuilt — retried — on the outputs task's next pass, `RunningOutput::start_failed`), reason, rate, format,
 channels, delay_ms, latency_ms (L + delay + the converter,
-`vban_latency_ms`), blocks_sent, blocks_dropped, vban: {#210's VbanStatus +
+`vban_latency_ms_at`), blocks_sent, blocks_dropped, vban: {#210's VbanStatus +
 blocks_sent}}`, `audio_network_rate`, `outputs_problems`; the cut answer
 carries them too. A waiting VBAN output also carries `reason_code`
 (`vban_reason_code`, release review): its cause — `not_built`,

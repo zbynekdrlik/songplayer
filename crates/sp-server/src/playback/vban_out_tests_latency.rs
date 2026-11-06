@@ -52,7 +52,7 @@ const OFFSETS_48K: [i64; 8] = [
 fn the_send_latency_is_two_slots_off_and_15_ms_on() {
     assert_eq!(base_send_latency_100ns(false), 666_666);
     assert_eq!(base_send_latency_100ns(true), 150_000);
-    assert_eq!(send_latency_in(0, false), send_latency_100ns(0));
+    assert_eq!(send_latency_in(0, false), 666_666);
     assert_eq!(send_latency_in(70_000, true), 220_000);
     assert_eq!(send_latency_in(70_000, false), 736_666);
     // The wait cap keeps its 4 × L relation (plus the delay).
@@ -210,11 +210,7 @@ fn an_impulse_leaves_the_converter_after_its_reported_delay() {
 
 #[test]
 fn the_status_latency_follows_the_switch() {
-    use crate::playback::audio_out::{vban_latency_ms, vban_latency_ms_at};
-    assert_eq!(
-        vban_latency_ms_at(0, 48_000, false),
-        vban_latency_ms(0, 48_000)
-    );
+    use crate::playback::audio_out::vban_latency_ms_at;
     assert_eq!(vban_latency_ms_at(0, 48_000, false), 66.6666);
     assert_eq!(vban_latency_ms_at(0, 48_000, true), 15.0);
     assert_eq!(
