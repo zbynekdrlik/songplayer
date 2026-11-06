@@ -87,8 +87,8 @@ async fn fetch_bucket_null(
     // `lyrics_source NOT IN ('failed','empty','no_source','asr_gap','unsupported_source')`
     // skips rows the worker has parked: terminal failure modes (`failed`,
     // `empty`, `no_source`), the ASR-gap quarantine sentinel (`asr_gap`,
-    // per #86), and the new source-gating sentinel (`unsupported_source`,
-    // per docs/superpowers/specs/2026-05-16-lyrics-source-gating-design.md).
+    // per #86), and the unsupported-source sentinel (`unsupported_source`:
+    // a > 30-min live set / mix, `worker_outcome::mark_over_cap`).
     // Without this filter a song with zero usable text sources gets picked
     // every 10s forever, blocking every other null-lyric song behind it.
     // Matches the pre-refactor guard in get_next_video_without_lyrics.

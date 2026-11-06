@@ -318,7 +318,6 @@ UPDATE videos SET spotify_resolved_at = datetime('now') WHERE spotify_track_id I
 // V19: Add lyrics_processed_at + lyrics_alignment_model columns for audit
 // and reprocess-decision SQL queries. Both NULLABLE. Existing rows stay
 // NULL — honest signal that we do not know when/how they were processed.
-// See docs/superpowers/specs/2026-05-16-lyrics-source-gating-design.md.
 const MIGRATION_V19: &str = "
 ALTER TABLE videos ADD COLUMN lyrics_processed_at TEXT;
 ALTER TABLE videos ADD COLUMN lyrics_alignment_model TEXT;
