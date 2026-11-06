@@ -31,7 +31,7 @@
 //!   `ProgramBus::max()`; `GET /api/v1/program` serves [`NdiStatus`] as
 //!   `ndi`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Mutex, MutexGuard};
 
 use serde::Serialize;
@@ -57,6 +57,9 @@ pub const NDI_SWITCH_LOG_EVERY_100NS: i64 = 50_000_000;
 /// canvas, NDI goes back to the GPU only after this many on-time readbacks
 /// in a row (1 s of the grid).
 pub const NDI_RETURN_ON_TIME: u32 = 30;
+
+/// How many late readbacks `ndi.readback_late_events` keeps (the newest).
+pub const NDI_LATE_EVENTS: usize = 32;
 
 /// The constant UYVY black: one pixel pair `U Y0 V Y1` of BT.709
 /// limited-range black, what the GPU's pass makes of the cleared target.
@@ -107,13 +110,20 @@ pub struct FeedCore {
     newest: Option<i64>,
     coalesced: u64,
     late: u64,
+    /// The last [`NDI_LATE_EVENTS`] late pictures: (their stamp, the stamp
+    /// served before they came).
+    late_events: VecDeque<(i64, i64)>,
 }
 
 impl FeedCore {
     /// The `program-max` thread read boundary `stamp_100ns` back.
     pub fn push(&mut self, stamp_100ns: i64, picture: SharedFrame) -> Pushed {
-        if self.served.is_some_and(|served| stamp_100ns <= served) {
+        if let Some(served) = self.served.filter(|&served| stamp_100ns <= served) {
             self.late += 1;
+            if self.late_events.len() == NDI_LATE_EVENTS {
+                self.late_events.pop_front();
+            }
+            self.late_events.push_back((stamp_100ns, served));
             return Pushed::Late;
         }
         self.newest = Some(stamp_100ns);
@@ -147,6 +157,35 @@ impl FeedCore {
     /// back to the canvas instead of repeating one picture for good.
     pub fn newest(&self) -> Option<i64> {
         self.newest
+    }
+
+    /// The late pictures kept, oldest first, as `ndi.readback_late_events`.
+    pub fn late_events(&self) -> Vec<LateEvent> {
+        self.late_events
+            .iter()
+            .map(|&(stamp, served)| LateEvent::of(stamp, served))
+            .collect()
+    }
+}
+
+/// One picture read back after its boundary was sent (`ndi.readback_late_events`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct LateEvent {
+    /// The late boundary on the fleet line, ms (its stamp / 10 000: the
+    /// line `program/trace`'s `wire_100ns` is on).
+    pub utc_ms: i64,
+    /// Grid slots from it to the boundary served before it came (0: it
+    /// lost the race to its own boundary's take).
+    pub behind_slots: i64,
+}
+
+impl LateEvent {
+    fn of(stamp_100ns: i64, served_100ns: i64) -> Self {
+        Self {
+            utc_ms: stamp_100ns / 10_000,
+            behind_slots: grid_index_100ns(served_100ns, GENLOCK_GRID_FPS)
+                - grid_index_100ns(stamp_100ns, GENLOCK_GRID_FPS),
+        }
     }
 }
 
@@ -300,6 +339,8 @@ pub struct NdiStatus {
     pub repeats: u64,
     /// Pictures read back after their boundary was sent: dropped.
     pub readback_late: u64,
+    /// The last [`NDI_LATE_EVENTS`] of them, oldest first.
+    pub readback_late_events: Vec<LateEvent>,
     /// Pictures dropped because [`NDI_FEED_DEPTH`] newer ones waited.
     pub feed_coalesced: u64,
     /// Changes of the source, either way.
@@ -384,7 +425,7 @@ impl NdiFeed {
     /// The `ndi` block, with `setting` as last applied. The windows are
     /// copied under the lock and sorted after it.
     pub fn status(&self, setting: NdiSource) -> NdiStatus {
-        let (source, counts, windows) = {
+        let (source, counts, windows, late_events) = {
             let state = self.lock();
             (
                 state.source.unwrap_or(NdiSource::Cpu),
@@ -395,6 +436,7 @@ impl NdiFeed {
                     state.switches,
                 ],
                 (state.readback.clone(), state.uyvy.clone()),
+                state.core.late_events(),
             )
         };
         let [repeats, readback_late, feed_coalesced, switches] = counts;
@@ -405,6 +447,7 @@ impl NdiFeed {
             fourcc: fourcc(source),
             repeats,
             readback_late,
+            readback_late_events: late_events,
             feed_coalesced,
             switches,
             readback_us_p99: windows.0.p99(),

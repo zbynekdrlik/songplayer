@@ -2154,6 +2154,7 @@ function programBody() {
       fourcc: "NV12",
       repeats: 0,
       readback_late: 0,
+      readback_late_events: [],
       feed_coalesced: 0,
       switches: 0,
       readback_us_p99: 0,

@@ -9,9 +9,9 @@ use sp_core::config::NdiSource;
 use sp_core::genlock::{GENLOCK_GRID_FPS, grid_boundary_100ns};
 
 use super::{
-    BlackUyvy, CpuWhy, FeedCore, NDI_FEED_DEPTH, NDI_FEED_STALE_SLOTS, NDI_RETURN_ON_TIME,
-    NDI_SWITCH_LOG_EVERY_100NS, NdiFeed, NdiPick, Pushed, ReturnGate, UYVY_BLACK_PAIR, black_uyvy,
-    delay_slots, fourcc, ndi_source_for, uyvy_len,
+    BlackUyvy, CpuWhy, FeedCore, LateEvent, NDI_FEED_DEPTH, NDI_FEED_STALE_SLOTS, NDI_LATE_EVENTS,
+    NDI_RETURN_ON_TIME, NDI_SWITCH_LOG_EVERY_100NS, NdiFeed, NdiPick, Pushed, ReturnGate,
+    UYVY_BLACK_PAIR, black_uyvy, delay_slots, fourcc, ndi_source_for, uyvy_len,
 };
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_max::MAX_STAT_WINDOW;
@@ -410,5 +410,75 @@ fn the_readback_window_keeps_the_last_900() {
         (status.readback_us_p99, status.uyvy_us_p99),
         (3, 3),
         "30 newer ones pushed them out"
+    );
+}
+
+/// #279 gate 2: each late picture is kept as an event on the boundary line,
+/// its stamp in ms and how many slots it trailed the boundary served.
+#[test]
+fn a_late_picture_is_kept_as_an_event_with_its_stamp_and_lag() {
+    let mut feed = FeedCore::default();
+    feed.push(b(1), pic(1));
+    assert!(
+        feed.take(b(3)).is_none(),
+        "boundary 3 sent with no picture of its own"
+    );
+    assert_eq!(feed.push(b(2), pic(2)), Pushed::Late);
+    assert_eq!(feed.push(b(3), pic(3)), Pushed::Late);
+    assert_eq!(
+        feed.late_events(),
+        vec![
+            LateEvent {
+                utc_ms: b(2) / 10_000,
+                behind_slots: 1
+            },
+            LateEvent {
+                utc_ms: b(3) / 10_000,
+                behind_slots: 0
+            },
+        ],
+        "oldest first: 2 trailed the served 3 by one slot, 3 lost its own race"
+    );
+    assert_eq!(
+        b(2) / 10_000,
+        (K0 + 2) * 1000 / 30,
+        "the stamp in ms on the line"
+    );
+    assert!(
+        feed.push(b(4), pic(4)) == Pushed::Kept,
+        "an on-time picture adds no event"
+    );
+    assert_eq!(feed.late_events().len(), 2);
+}
+
+/// The ring keeps the newest `NDI_LATE_EVENTS`, oldest first.
+#[test]
+fn the_late_events_keep_the_newest_ones() {
+    let mut feed = FeedCore::default();
+    feed.take(b(100));
+    let extra = 8;
+    for k in 0..(NDI_LATE_EVENTS as i64 + extra) {
+        assert_eq!(feed.push(b(k), pic(1)), Pushed::Late, "{k}");
+    }
+    let events = feed.late_events();
+    assert_eq!(events.len(), NDI_LATE_EVENTS);
+    assert_eq!(events[0].behind_slots, 100 - extra, "the first 8 went");
+    assert_eq!(
+        events[NDI_LATE_EVENTS - 1].behind_slots,
+        100 - (NDI_LATE_EVENTS as i64 + extra - 1)
+    );
+    let status = {
+        let shared = NdiFeed::default();
+        shared.take(b(5));
+        shared.push(b(4), pic(4));
+        shared.status(NdiSource::Gpu)
+    };
+    assert_eq!(
+        status.readback_late_events,
+        vec![LateEvent {
+            utc_ms: b(4) / 10_000,
+            behind_slots: 1
+        }],
+        "the status serves them"
     );
 }
