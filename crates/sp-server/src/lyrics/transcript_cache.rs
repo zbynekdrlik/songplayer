@@ -2,8 +2,8 @@
 //! `{youtube_id}_g35t_words.json`.
 //!
 //! The transcript is taken right after isolation, before mtl. A no-penalty
-//! deferral after it — the idle-only wall gate before mtl, the heavy-slot
-//! memory floor, the startup grace, an mtl wall-abort — re-picks the song;
+//! deferral after it — the heavy-slot memory floor, the startup grace —
+//! re-picks the song;
 //! the kept transcript spares that re-pick a second g35t call. It serves
 //! ONE processing pass: when the pass ends (a track, or a quarantine) the
 //! file is retired to `{youtube_id}_g35t_words_used.json` (`retire`), so the

@@ -404,8 +404,8 @@ ALTER TABLE videos ADD COLUMN stem_next_attempt_at TEXT;
 // pre-#162 mitigation, and an old `true` row was the idle-only gate the owner
 // never approved as the default — BOTH become `low-priority` (i.e. no
 // `lyrics_processing_mode` row → the code default). So this migration only
-// deletes the stale key; an operator who wants the old behaviour sets
-// `lyrics_processing_mode = idle-only` explicitly.
+// deletes the stale key. (#286 deleted the idle-only mode itself: nothing
+// reads `lyrics_processing_mode` any more, a stored row is ignored.)
 const MIGRATION_V25: &str = "
 DELETE FROM settings WHERE key = 'lyrics_gate_when_playing';
 ";

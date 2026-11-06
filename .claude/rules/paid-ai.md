@@ -57,9 +57,8 @@ dochadzat k ziadnemu platenemu ai spracovaniu dokial to nepovolim".
     (`HELD_SHOWN`: held work is held again within `HELD_RECHECK`, a dub at
     its worker's next tick; finished work drops out). A translation is
     held again at the next translation pass of the lyrics tick, which runs
-    when the lyrics queue is empty or the tick defers for the wall
-    (`idle-only`), never while `lyrics_worker_enabled` is off or a dub
-    wants the heavy slot. With more held lyrics songs than one per tick
+    when the lyrics queue is empty, never while `lyrics_worker_enabled` is
+    off or a dub wants the heavy slot. With more held lyrics songs than one per tick
     clears in 30 min (~360) the queue stays busy, and with the lyrics
     worker off no pass runs at all: "preklad" can then be missing from the
     list while the translation still waits (review rounds 15-16, display

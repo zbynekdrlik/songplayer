@@ -258,38 +258,37 @@ owner's call on #144, asked separately.
   the reprocess endpoint) — never re-picked on the next 5-s tick. Monitors
   on the box: `lyrics_progress.py` (buckets, ★, gate tally) and
   `lyrics_recent.py <min>` (per-song lines/sk/source + Claude failures).
-- **GPU discipline — the PRIORITY REGIME is PRIMARY (#162, replaces the #154
+- **GPU discipline — the PRIORITY REGIME is PRIMARY (#162, replaced the #154
   idle-only gate); VRAM cap is SECONDARY (defence in depth).** The 2026-09-14 box
   crash (`LiveKernelEvent` 141 ×5, hard reset) proved priority/cap alone are
   insufficient, and the idle-only gate that followed STARVED the queue (3/341
   v22, 0/341 stems/day) because SongPlayer/CG-OBS always play something. Owner
   ruling (2026-09-15): processing must KEEP running during playback at a priority
   that cannot disturb the wall — stopping is not the solution. So:
-  - **The priority regime (`crates/sp-server/src/lyrics/heavy_plan.rs`).** ONE
-    operator switch **`lyrics_processing_mode`** (DB setting, read live each tick):
-    - **`low-priority` (DEFAULT)** — every heavy stage (vocal isolation, dereverb,
-      mtl, stem separation) ALWAYS RUNS. While the wall is in use (`Playing` on
-      program via `NdiHealthRegistry`, or OBS streaming/recording via `ObsState`)
-      it runs **CPU-only** (the script gets `--force-cpu` from
-      `HeavyStepPlan::script_cpu_args`, which forces in-process CPU inference via
-      `_force_cpu()` — the GPU is left untouched but CUDA stays initialized. It is
-      NOT hidden via `CUDA_VISIBLE_DEVICES="-1"`: that crashed the box —
-      torch/onnxruntime probe the driver, find no devices, the NVIDIA user-mode
-      DLL unloads, and a later stray call kills the process
-      `nvdxgdmal64.dll_unloaded` 0xc0000005, win-resolume 2026-09-15) **+ IDLE_PRIORITY_CLASS + thread cap
-      `OMP/MKL/TORCH_NUM_THREADS = max(1, cores/2)`** — the GPU is never touched,
-      so no fps drop / TDR. When the wall is idle it runs **GPU + BELOW_NORMAL**
-      (fast). The mid-job abort watcher (#161) is armed ONLY for a GPU job; a GPU
-      job aborted by playback re-runs IMMEDIATELY on CPU (no defer); a CPU-idle
-      job is never aborted. Dashboard shows the stage suffixed ` (cpu, wall in
-      use)`.
-    - **`idle-only`** — the pre-#162 behaviour (operator option only): defer heavy
-      work while the wall is in use (loop-level + a pre-mtl gate,
-      `SongOutcome::WaitingForWall`, no backoff, isolated WAV preserved) with the
-      30 s idle-settle hysteresis + the #161 abort watcher. Surfaces the song-less
-      `waiting — wall in use` badge.
-    - The removed `lyrics_gate_when_playing` boolean folds to `low-priority`
-      (`MIGRATION_V25`). Cheap HTTP work (g35t/Claude/translation) is never gated.
+  - **The priority regime (`crates/sp-server/src/lyrics/heavy_plan.rs`).** No
+    switch, no idle-only mode (#286 deleted it: the owner never approved it; a
+    stored `lyrics_processing_mode` row is ignored). Every heavy stage (vocal
+    isolation, dereverb, mtl, stem separation, dub) ALWAYS RUNS. While the wall
+    is in use (`Playing` on program via `NdiHealthRegistry`, or OBS
+    streaming/recording via `ObsState`, or the #167 startup reading still
+    unknown) it runs **CPU-only** (the script gets `--force-cpu` from
+    `HeavyStepPlan::script_cpu_args`, which forces in-process CPU inference via
+    `_force_cpu()` — the GPU is left untouched but CUDA stays initialized. It is
+    NOT hidden via `CUDA_VISIBLE_DEVICES="-1"`: that crashed the box —
+    torch/onnxruntime probe the driver, find no devices, the NVIDIA user-mode
+    DLL unloads, and a later stray call kills the process
+    `nvdxgdmal64.dll_unloaded` 0xc0000005, win-resolume 2026-09-15) **+
+    BELOW_NORMAL + a thread cap `OMP/MKL/TORCH_NUM_THREADS` = a quarter of the
+    cores, bounded by the affinity block** — the GPU is never touched, so no
+    fps drop / TDR. When the wall is idle it runs **GPU + BELOW_NORMAL** (fast).
+    The mid-job abort watcher (#161, `idle_gate_abort.rs`) is armed ONLY for a
+    GPU job; a GPU job aborted by playback re-runs IMMEDIATELY on CPU (no
+    defer); a CPU-idle job is never aborted. Dashboard shows the stage suffixed
+    ` (cpu, wall in use)`. The only wait is the #167 startup floor (no heavy
+    step in the first 60 s, `SongOutcome::WaitingForWall`, the song-less
+    `waiting — wall in use` badge). The removed `lyrics_gate_when_playing`
+    boolean was dropped by `MIGRATION_V25`. Cheap HTTP work
+    (g35t/Claude/translation) is never gated.
   - **Box-overload guard (#162 07:40 crash, `lyrics/heavy_slot.rs`).** Background
     processing is ALWAYS sequential: a process-global `Semaphore(1)`
     (`acquire_slot`) means at most ONE heavy child (isolation / mtl / separation)

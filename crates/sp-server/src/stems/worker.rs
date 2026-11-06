@@ -1,41 +1,36 @@
 //! Background karaoke stem-separation worker (#14).
 //!
-//! Mirrors the lyrics worker: a periodic tick that, ONLY while the wall is idle
-//! (#154 gate — reused verbatim), separates the next normalized song into its
-//! vocals + instrumental sidecars via `scripts/stem_worker.py`. Runs at lowest
-//! priority (after lyrics), backoff-gated so a broken row never hot-loops.
+//! Mirrors the lyrics worker: a periodic tick that separates the next normalized
+//! song into its vocals + instrumental sidecars via `scripts/stem_worker.py`,
+//! at reduced priority (#162: CPU-idle while the wall is in use, GPU while it
+//! is idle), backoff-gated so a broken row never hot-loops.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use sqlx::SqlitePool;
 use tokio::sync::{RwLock, broadcast};
 use tracing::{error, info, warn};
 
 use crate::lyrics::aligner::isolation_timeout;
-use crate::lyrics::heavy_plan::{HeavyStepPlan, ProcessingMode};
-use crate::lyrics::idle_gate::{
-    GateLog, WallActivity, should_defer, startup_floor_defers, wall_activity_from,
-};
+use crate::lyrics::heavy_plan::HeavyStepPlan;
+use crate::lyrics::idle_gate::{startup_floor_defers, wall_activity_from};
 use crate::stems::worker_yield::{SepResult, Yield, run_separation_watched};
 
 /// #161: outcome of one stem-separation attempt run under the wall-abort
-/// watcher. Distinguishes a genuine failure (backoff-deferred) from a wall
-/// abort (re-queued with no penalty) at the `separate_stems` return boundary.
+/// watcher. Distinguishes a genuine failure (backoff-deferred) from a dub
+/// yield (resumed with no penalty) at the `separate_stems` return boundary.
 enum StemStepResult {
     /// Separation completed — record the two stems.
     Done,
     /// A genuine separation failure — record the backoff deferral.
     Failed(anyhow::Error),
-    /// The wall became busy mid-run and the separator was killed — delete any
-    /// partial stems and leave the DB row pending (no penalty).
-    WallAborted(String),
     /// A dub job needed the heavy slot and this separation yielded it (#184
     /// G0.1) — the child was killed, but the #171 resumable work dir + any
     /// partial stems are LEFT INTACT (the resume state), and the DB row is left
     /// pending (no backoff), so it resumes from its segments the next tick no dub
-    /// is queued. Distinct from `WallAborted`, which DELETES the partial stems.
+    /// is queued.
     YieldedToDub(String),
 }
 
@@ -63,7 +58,6 @@ pub struct StemWorker {
     models_dir: PathBuf,
     ndi_health_registry: Option<Arc<crate::playback::ndi_health::NdiHealthRegistry>>,
     obs_state: Option<Arc<RwLock<crate::obs::ObsState>>>,
-    wall_gate_log: std::sync::Mutex<GateLog>,
     /// Logged once when python is unavailable so the operator sees why nothing
     /// is separating, without spamming every tick.
     warned_no_python: std::sync::atomic::AtomicBool,
@@ -73,7 +67,7 @@ pub struct StemWorker {
 }
 
 /// Parse the `stem_worker_enabled` setting. Default ON so a fresh deploy starts
-/// separating (idle-gated); `false`/`0`/`off`/`no` disable it. Mirrors
+/// separating; `false`/`0`/`off`/`no` disable it. Mirrors
 /// `lyrics_worker_enabled`.
 pub(crate) fn worker_enabled(raw: Option<&str>) -> bool {
     match raw {
@@ -81,50 +75,6 @@ pub(crate) fn worker_enabled(raw: Option<&str>) -> bool {
         Some(v) => {
             let v = v.trim().to_ascii_lowercase();
             !(v == "false" || v == "0" || v == "off" || v == "no")
-        }
-    }
-}
-
-/// #162 stem-worker per-tick defer decision. Pure w.r.t. `now`, so it is
-/// unit-tested on BOTH mode arms (replacing the inline `mode == IdleOnly` branch,
-/// whose `==` was a surviving mutant).
-///
-/// - [`LowPriority`](ProcessingMode::LowPriority) NEVER defers — it runs every
-///   heavy separation at reduced priority instead.
-/// - [`IdleOnly`](ProcessingMode::IdleOnly) defers on a busy wall using the
-///   shared idle-settle hysteresis ([`GateLog::defer_settled`]) and emits the
-///   once-per-transition INFO log via [`GateLog::note`].
-///
-/// Returns `Some(detail)` when this tick must defer (the caller returns early),
-/// `None` to proceed to a job.
-pub(crate) fn stem_defer_decision(
-    mode: ProcessingMode,
-    gate_enabled: bool,
-    activity: WallActivity,
-    gate_log: &mut GateLog,
-    now: Instant,
-) -> Option<&'static str> {
-    match mode {
-        ProcessingMode::LowPriority => None,
-        ProcessingMode::IdleOnly => {
-            if gate_log.defer_settled(gate_enabled, activity, now) {
-                // When deferring only because the settle window has not elapsed
-                // (the wall is idle right now), say so instead of "wall in use".
-                let detail = if activity.in_use() {
-                    activity.reason().unwrap_or("wall in use")
-                } else {
-                    "wall just went idle — settling"
-                };
-                if let Some(line) = gate_log.note(true, detail) {
-                    info!("stem_worker: {line}");
-                }
-                Some(detail)
-            } else {
-                if let Some(line) = gate_log.note(false, "") {
-                    info!("stem_worker: {line}");
-                }
-                None
-            }
         }
     }
 }
@@ -137,14 +87,6 @@ pub(crate) fn stem_defer_decision(
 /// through this, from the plan it actually runs under.
 pub(crate) fn separation_timeout(plan: &HeavyStepPlan, duration_ms: Option<i64>) -> Duration {
     crate::lyrics::heavy_plan::heavy_step_timeout(plan, isolation_timeout(duration_ms))
-}
-
-/// #162: the settle-free defer decision used when the gate-log mutex is
-/// poisoned — only `idle-only` can defer, and only while the wall is in use.
-/// Pure so both arms are unit-tested (`worker_plan_tests.rs`); the inline
-/// expression let two mutants survive.
-pub(crate) fn stem_defer_fallback(mode: ProcessingMode, activity: WallActivity) -> bool {
-    mode == ProcessingMode::IdleOnly && should_defer(true, activity)
 }
 
 /// Whether stem separation is supported for a song of this duration. `None`
@@ -183,7 +125,6 @@ impl StemWorker {
             models_dir,
             ndi_health_registry: Some(ndi_health_registry),
             obs_state: Some(obs_state),
-            wall_gate_log: std::sync::Mutex::new(GateLog::default()),
             warned_no_python: std::sync::atomic::AtomicBool::new(false),
             peer: None,
         }
@@ -280,35 +221,11 @@ impl StemWorker {
             return;
         }
 
-        // #162 priority regime (same `lyrics_processing_mode` switch as the
-        // lyrics worker). `idle-only` defers heavy separation while the wall is
-        // in use (with idle-settle hysteresis); `low-priority` (default) NEVER
-        // defers — it runs the separator at reduced priority instead (CPU-idle
-        // while the wall plays), so the stem queue drains continuously.
-        let mode = ProcessingMode::from_setting(
-            crate::db::models::get_setting(&self.pool, "lyrics_processing_mode")
-                .await
-                .ok()
-                .flatten()
-                .as_deref(),
-        );
+        // #162 priority regime: the separator never waits for an idle wall —
+        // it runs at reduced priority (CPU-idle while the wall plays), so the
+        // stem queue drains continuously.
         let activity =
             wall_activity_from(self.ndi_health_registry.as_ref(), self.obs_state.as_ref()).await;
-        // #162: only `idle-only` mode can defer (idle-settle hysteresis +
-        // once-per-transition log); `low-priority` NEVER defers. The mode branch
-        // and the settle/log logic live in the pure `stem_defer_decision` so BOTH
-        // arms are unit-tested. Held under one lock — no `.await` inside.
-        let now = Instant::now();
-        let defer = match self.wall_gate_log.lock() {
-            Ok(mut g) => stem_defer_decision(mode, true, activity, &mut g, now).is_some(),
-            // Poisoned lock: fall back to the settle-free decision (idle-only
-            // only), no transition logging — unchanged from the pre-#162 path.
-            Err(_) => stem_defer_fallback(mode, activity),
-        };
-        if defer {
-            return;
-        }
-
         // #195: serve the stems of what is actually IN USE first — the on-program
         // playlist (tier 1), then playlists played in the last `stems_recent_days`
         // days (tier 2), then today's unrestricted oldest-first query (tier 3);
@@ -449,7 +366,7 @@ impl StemWorker {
         // "spracúvam" state; the guard clears it when this scope ends (success,
         // failure, wall-abort, or dub-yield).
         let _in_flight = crate::stems::progress::begin(job.video_id);
-        let plan = HeavyStepPlan::for_activity(mode, activity);
+        let plan = HeavyStepPlan::for_activity(activity);
         // #162: the timeout for THIS plan — a cpu-idle plan gets the ×4 base so a
         // slow CPU separation is not killed mid-run and retried forever.
         let timeout = separation_timeout(&plan, job.duration_ms);
@@ -495,54 +412,51 @@ impl StemWorker {
                 detail,
             } => StemStepResult::YieldedToDub(detail),
             // A GPU separation aborted because the wall went busy (only a GPU plan
-            // yields Wall). Low-priority re-runs on CPU (also watched, so a dub can
-            // still preempt); idle-only re-queues with NO penalty (#161).
+            // yields Wall): re-run on CPU (also watched, so a dub can still
+            // preempt).
             SepResult::Yielded {
                 reason: Yield::Wall,
                 detail,
-            } => match mode {
-                ProcessingMode::LowPriority => {
-                    let cpu_plan = HeavyStepPlan::cpu_idle();
-                    let cpu_timeout = separation_timeout(&cpu_plan, job.duration_ms);
-                    info!(
-                        video_id = job.video_id,
-                        "stem worker: heavy step separation re-run mode=cpu-idle \
+            } => {
+                let cpu_plan = HeavyStepPlan::cpu_idle();
+                let cpu_timeout = separation_timeout(&cpu_plan, job.duration_ms);
+                info!(
+                    video_id = job.video_id,
+                    "stem worker: heavy step separation re-run mode=cpu-idle \
                          timeout={}s after GPU abort ({})",
-                        cpu_timeout.as_secs(),
-                        detail
-                    );
-                    match run_separation_watched(
-                        crate::stems::separator::separate_stems(
-                            &python,
-                            &script_path,
-                            &self.models_dir,
-                            &audio_path,
-                            &vocals_out,
-                            &instrumental_out,
-                            &stem_work_dir,
-                            cpu_timeout,
-                            gpu_mem.as_deref(),
-                            &cpu_plan,
-                        ),
-                        cpu_plan,
-                        || {
-                            wall_activity_from(
-                                self.ndi_health_registry.as_ref(),
-                                self.obs_state.as_ref(),
-                            )
-                        },
-                    )
-                    .await
-                    {
-                        SepResult::Done => StemStepResult::Done,
-                        SepResult::Failed(e) => StemStepResult::Failed(e),
-                        // A cpu-idle re-run can only yield to a dub (`yield_reason`
-                        // never returns Wall for a CPU plan); resume no-penalty.
-                        SepResult::Yielded { detail, .. } => StemStepResult::YieldedToDub(detail),
-                    }
+                    cpu_timeout.as_secs(),
+                    detail
+                );
+                match run_separation_watched(
+                    crate::stems::separator::separate_stems(
+                        &python,
+                        &script_path,
+                        &self.models_dir,
+                        &audio_path,
+                        &vocals_out,
+                        &instrumental_out,
+                        &stem_work_dir,
+                        cpu_timeout,
+                        gpu_mem.as_deref(),
+                        &cpu_plan,
+                    ),
+                    cpu_plan,
+                    || {
+                        wall_activity_from(
+                            self.ndi_health_registry.as_ref(),
+                            self.obs_state.as_ref(),
+                        )
+                    },
+                )
+                .await
+                {
+                    SepResult::Done => StemStepResult::Done,
+                    SepResult::Failed(e) => StemStepResult::Failed(e),
+                    // A cpu-idle re-run can only yield to a dub (`yield_reason`
+                    // never returns Wall for a CPU plan); resume no-penalty.
+                    SepResult::Yielded { detail, .. } => StemStepResult::YieldedToDub(detail),
                 }
-                ProcessingMode::IdleOnly => StemStepResult::WallAborted(detail),
-            },
+            }
         };
         self.record_stem_result(&job, &vocals_out, &instrumental_out, step)
             .await;
@@ -550,9 +464,8 @@ impl StemWorker {
 
     /// #161: apply the outcome of one separation attempt. `Done` records the
     /// stems; `Failed` records the backoff deferral (the unchanged pre-#161
-    /// behaviour); `WallAborted` deletes any partial stems and writes NOTHING to
-    /// the DB, so `stem_status` stays NULL and `stem_attempts` is unchanged —
-    /// `get_next_video_for_stems` re-picks the row the instant the wall idles.
+    /// behaviour); `YieldedToDub` leaves the row and its resume state as they
+    /// are.
     async fn record_stem_result(
         &self,
         job: &crate::db::models_stems::StemJob,
@@ -618,26 +531,12 @@ impl StemWorker {
                 )
                 .await;
             }
-            StemStepResult::WallAborted(detail) => {
-                // Delete the aborted step's partial stem outputs; do NOT touch
-                // the DB — no backoff, no 'failed' status. The row stays pending
-                // (stem_status NULL, stem_attempts unchanged) and is re-picked
-                // the moment the wall goes idle again.
-                let _ = tokio::fs::remove_file(vocals_out).await;
-                let _ = tokio::fs::remove_file(instrumental_out).await;
-                info!(
-                    video_id = job.video_id,
-                    detail = %detail,
-                    "stem worker: aborted heavy step — wall became busy — re-queued no-penalty (#161)"
-                );
-            }
             StemStepResult::YieldedToDub(detail) => {
                 // #184 G0.1: leave EVERYTHING as-is — the #171 resumable segments
                 // in the work dir are the resume state, and the DB row stays
                 // pending (stem_status NULL, stem_attempts unchanged, no
                 // stem_next_attempt_at), so the selector re-picks it the moment no
-                // dub is queued. Distinct from WallAborted, which DELETES the
-                // partial stems.
+                // dub is queued.
                 info!(
                     video_id = job.video_id,
                     detail = %detail,

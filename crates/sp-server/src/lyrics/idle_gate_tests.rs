@@ -1,4 +1,4 @@
-//! Unit tests for the #154 idle gate pure decision core.
+//! Unit tests for the wall-activity pure decision core (#154, #167).
 //!
 //! RED-first: these assert the intended behaviour against the stubbed module
 //! (which returns the wrong constants), so they FAIL until the GREEN commit
@@ -93,70 +93,22 @@ fn reason_prefers_playing_over_obs() {
     assert_eq!(a.reason(), Some("output playing"));
 }
 
-// ---- should_defer --------------------------------------------------------
+// ---- in_use ----------------------------------------------------------------
 
 #[test]
-fn should_defer_true_when_enabled_and_busy() {
+fn in_use_when_a_known_wall_is_playing() {
     let busy = WallActivity {
         any_playing: true,
         obs_streaming: false,
         obs_recording: false,
         known: true,
     };
-    assert!(should_defer(true, busy));
+    assert!(busy.in_use());
 }
 
 #[test]
-fn should_defer_false_when_gate_off_even_if_busy() {
-    // Operator override (setting OFF) = today's behaviour: never defer.
-    let busy = WallActivity {
-        any_playing: true,
-        obs_streaming: true,
-        obs_recording: true,
-        known: true,
-    };
-    assert!(!should_defer(false, busy));
-}
-
-#[test]
-fn should_defer_false_when_enabled_and_idle() {
-    assert!(!should_defer(true, WallActivity::default()));
-}
-
-// ---- GateLog transition logging ------------------------------------------
-
-#[test]
-fn gate_log_emits_only_on_transition() {
-    let mut log = GateLog::default();
-    // First observation of "busy" emits.
-    assert!(log.note(true, "SP-fast Playing").is_some());
-    // Repeated "busy" with no change is silent.
-    assert!(log.note(true, "SP-fast Playing").is_none());
-    assert!(log.note(true, "SP-slow Playing").is_none());
-    // Flip to idle emits.
-    assert!(log.note(false, "").is_some());
-    // Repeated idle is silent.
-    assert!(log.note(false, "").is_none());
-    // Flip back to busy emits again.
-    assert!(log.note(true, "OBS recording").is_some());
-}
-
-#[test]
-fn gate_log_busy_line_carries_detail() {
-    let mut log = GateLog::default();
-    let line = log.note(true, "SP-fast Playing").expect("transition line");
-    assert!(line.contains("waiting"), "line was: {line}");
-    assert!(line.contains("SP-fast Playing"), "line was: {line}");
-}
-
-#[test]
-fn gate_log_first_idle_observation_is_silent() {
-    let mut log = GateLog::default();
-    // Never was busy → the first idle tick must NOT emit a spurious "resuming".
-    assert!(log.note(false, "").is_none());
-    // The first busy still emits, and the following idle then reports the resume.
-    assert!(log.note(true, "SP-fast Playing").is_some());
-    assert!(log.note(false, "").is_some());
+fn a_known_idle_wall_is_not_in_use() {
+    assert!(!WallActivity::default().in_use());
 }
 
 // ---- #167 startup grace: WallActivity.known + the two pure gates ----------

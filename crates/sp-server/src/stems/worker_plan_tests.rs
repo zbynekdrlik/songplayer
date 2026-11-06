@@ -1,96 +1,8 @@
-//! #162 pure tests for the stem-worker decision seams.
-//!
-//! These cover both `stem_defer_decision` mode arms (killing the surviving
-//! `process_next` mutants — `==`/`!=` on the mode branch) by testing the
-//! extracted decisions directly. Pure — no DB, no worker instance, no async.
-//! (The mid-job wall-abort arming is now folded into the #184 G0.1
-//! `worker_yield::yield_reason`, unit-tested there.)
+//! #162 pure tests for the stem-worker decision seams. Pure — no DB, no
+//! worker instance, no async. (The mid-job wall-abort arming is folded into
+//! the #184 G0.1 `worker_yield::yield_reason`, unit-tested there.)
 
 use super::*;
-use crate::lyrics::idle_gate::WALL_IDLE_SETTLE;
-
-fn playing() -> WallActivity {
-    WallActivity {
-        any_playing: true,
-        obs_streaming: false,
-        obs_recording: false,
-        known: true,
-    }
-}
-
-fn idle() -> WallActivity {
-    WallActivity::default()
-}
-
-// ---- stem_defer_decision — both mode arms --------------------------------
-
-#[test]
-fn low_priority_never_defers_even_while_playing() {
-    let mut log = GateLog::default();
-    assert_eq!(
-        stem_defer_decision(
-            ProcessingMode::LowPriority,
-            true,
-            playing(),
-            &mut log,
-            Instant::now(),
-        ),
-        None,
-        "low-priority runs at reduced priority — it never defers"
-    );
-}
-
-#[test]
-fn idle_only_playing_defers_with_busy_detail() {
-    let mut log = GateLog::default();
-    assert_eq!(
-        stem_defer_decision(
-            ProcessingMode::IdleOnly,
-            true,
-            playing(),
-            &mut log,
-            Instant::now(),
-        ),
-        Some("output playing"),
-        "idle-only defers on a busy wall with the busy reason as detail"
-    );
-}
-
-#[test]
-fn idle_only_idle_but_unsettled_defers_with_settling_detail() {
-    let mut log = GateLog::default();
-    // First idle sample starts the settle clock → still deferring.
-    assert_eq!(
-        stem_defer_decision(
-            ProcessingMode::IdleOnly,
-            true,
-            idle(),
-            &mut log,
-            Instant::now(),
-        ),
-        Some("wall just went idle — settling"),
-        "a wall that just went idle keeps deferring until the settle window elapses"
-    );
-}
-
-#[test]
-fn idle_only_idle_past_settle_window_proceeds() {
-    let mut log = GateLog::default();
-    let t0 = Instant::now();
-    // Seed the settle clock with the first idle sample (still deferring).
-    assert!(
-        stem_defer_decision(ProcessingMode::IdleOnly, true, idle(), &mut log, t0).is_some(),
-        "first idle sample must still defer"
-    );
-    // Once the wall has read idle continuously for the full settle window, the
-    // worker proceeds.
-    let later = t0 + WALL_IDLE_SETTLE + Duration::from_secs(1);
-    assert_eq!(
-        stem_defer_decision(ProcessingMode::IdleOnly, true, idle(), &mut log, later),
-        None,
-        "after WALL_IDLE_SETTLE of continuous idle, idle-only stops deferring"
-    );
-}
 
 // ---- separation_timeout — the CPU ×4 scaling reaches the spawn seam -------
 
@@ -111,8 +23,6 @@ fn separation_timeout_scales_only_the_cpu_plan() {
         "a CPU separation gets ×4 the base so it is not killed mid-run"
     );
 }
-
-// ---- stem_defer_fallback — the poisoned-lock path, all four cases ---------
 
 // ---- stem_duration_supported / stem_duration_too_long — the 120-min cap ---
 
@@ -148,21 +58,4 @@ fn duration_over_the_cap_is_unsupported() {
     // 121 min is past the 120-min ceiling → still skipped.
     assert!(!stem_duration_supported(Some(121 * 60_000)));
     assert!(stem_duration_too_long(Some(121 * 60_000)));
-}
-
-#[test]
-fn defer_fallback_defers_only_idle_only_while_in_use() {
-    assert!(
-        stem_defer_fallback(ProcessingMode::IdleOnly, playing()),
-        "idle-only + wall in use defers even without the settle clock"
-    );
-    assert!(
-        !stem_defer_fallback(ProcessingMode::IdleOnly, idle()),
-        "idle-only + idle wall proceeds"
-    );
-    assert!(
-        !stem_defer_fallback(ProcessingMode::LowPriority, playing()),
-        "low-priority never defers, in use or not"
-    );
-    assert!(!stem_defer_fallback(ProcessingMode::LowPriority, idle()));
 }
