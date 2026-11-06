@@ -404,7 +404,7 @@ Each step reads only the facts it needs; a needed fact that failed =
   `EnumWindows` reads, the DPI context switched and given back, no Arena on
   the runner).
 
-## The wall's live source: Spout, never SongPlayer's NDI as a "fallback" (#251, measured 18.10.2026)
+## The wall's live source: Spout, never SongPlayer's NDI as a "fallback" (#251, measured 18.10.2026, re-measured 30.10.2026)
 
 - **Never switch SNV's wall clips to SongPlayer's NDI `SP-program` to "help" judder.** Measured on SNV's own two wall layers (a blurred backdrop + the sharp picture, Add) with `wall-30` through the CI gate's reader, in long blocks, 18.10.2026 (#251 comment 6231413198):
   - NDI `SP-program`: 61–252 jumps back and 400–660 uneven holds per 40 s;
@@ -413,3 +413,4 @@ Each step reads only the facts it needs; a needed fact that failed =
   Doing it during the 16.10 event made the wall worse.
 - **The two layers are the operator's design and stay** (owner, ROZHODNUTÉ 6229662077). They ran on cg OBS's NDI before Spout (Arena's own backups, comment 6231237165). Any fix of the two-read effect is SongPlayer's.
 - **The levels come in waves lasting hours:** 436 jumps back with an independent Spout sender and no load on 16.10 morning, 2–6 with MAX on 18.10 morning. Compare arms only interleaved, never across hours.
+- **Re-measured 30.10.2026 behind the wall-bridge (#272 comment 6528349890):** since 29.10 the wall is driven by wall-bridge outside the Windows desktop, so the 18.10 desktop (dxcam) numbers are history; the reference is now Arena's own output read over Spout (`wall_frames.py --spout "Arena - Screen 2"`, what the post-deploy gate reads, the picture after the bridge is not verified). Interleaved, 3 rounds × 40 s per arm: Spout `SP-program-MAX` 16 uneven boundaries in total, NDI `SP-program` 709 (wall-25: 2/2/0 vs 27/455/169), 0 jumps back on both. Same direction as 18.10: Spout stays. SNV's NewLevel deck clips are on Spout `SP-program-MAX` again since 30.10 ~18:26 (owner, comment 6529038315).
