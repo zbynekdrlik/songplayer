@@ -566,6 +566,13 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
   Windows desktop, so dxcam lists only the 3840×2160 primary and cannot see
   it. `scripts/wall_spout.py` reads `Arena - Screen 2`, the picture
   wall-bridge takes, next to it (measured: 0 missed vblanks, 0 drops).
+- **A reboot with the wall TVs off leaves it unable to measure (6.11.2026).**
+  The TVs are normally off (TELKY, Companion 22/0/2). Off after the grid
+  formed disturbs nothing (31.10), but a boot with them off leaves panels B
+  and C undetected, no grid, and Arena presenting at 59.1-59.5 Hz: the reader
+  exits 5 ("not in whole 60 Hz refreshes"). After such a boot press TELKY on,
+  wait for wall-bridge's acquire (~1 min), then the gate measures; TELKY off
+  afterwards is fine.
 - **What it does not see.** The bridge, Surround and the LED processor: a
   clean take says nothing about the screens. A clean take covers only its
   40 s, and the judder comes in waves. `--dxcam` stays for a wall on the
