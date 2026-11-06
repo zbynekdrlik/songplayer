@@ -172,8 +172,8 @@ pub fn vban_reason_code(
     }))
 }
 
-/// A VBAN output's latency from the boundary, ms (#289: with
-/// `audio_low_latency` as built) with `audio_low_latency` as built: its L
+/// A VBAN output's latency from the boundary, ms, with
+/// `audio_low_latency` as built (#289): its L
 /// (15 ms when on), the delay, and the converter's delay — `rate / 60`
 /// padded when off, the converter's own when on.
 pub fn vban_latency_ms_at(delay_ms: u32, rate_hz: u32, low_latency: bool) -> f64 {
