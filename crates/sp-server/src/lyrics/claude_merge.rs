@@ -10,8 +10,7 @@ use crate::lyrics::tier1::CandidateText;
 
 /// Priority for the `best_authoritative_candidate` selector.
 ///
-/// Spec: docs/superpowers/specs/2026-05-07-text-reference-merge-unification-design.md
-/// — text-canonical (description) outranks every other text-only source;
+/// The text-canonical (description) outranks every other text-only source;
 /// timed sources outrank text-only of the same name; override is highest.
 ///
 /// `has_timing` matters because the same source label (`lrclib`, `yt_subs`,

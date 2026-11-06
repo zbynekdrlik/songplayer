@@ -377,10 +377,6 @@ genuine release optimization of sp-server's dependency graph.
   reference data, or human-perceptible behaviour exercised end-to-end
   via Playwright on the deployed target).
 
-- **`measure_lyrics_quality.py`** stays installed on win-resolume at
-  `C:\ProgramData\SongPlayer\cache\tools\measure_lyrics_quality.py` as
-  an ad-hoc trend tool. It is no longer wired into CI.
-
 - **E2E must not switch to disruptive OBS scenes.** The post-deploy
   Playwright suite shares win-resolume's OBS with the LED wall and live
   audio. The "off-program baseline" picker (`pickBaselineScene` in

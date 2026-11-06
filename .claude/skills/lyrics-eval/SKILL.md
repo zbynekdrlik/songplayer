@@ -108,8 +108,9 @@ Ask the user (one `AskUserQuestion`):
 
   The 2026-05-19 wrappers (`whisperx-large-v3`, `gemini-3-1-flash-lite`,
   `assemblyai-universal-3-pro`) are deleted; production's v22 regime is one
-  forced aligner (mtl) + one ASR (Gemini 3.5 Transcribe). CHAMPION.md still
-  records the 2026-05-19 baseline — a new run diffs against it as history,
+  forced aligner (mtl) + one ASR (Gemini 3.5 Transcribe). Their reports are
+  deleted too; CHAMPION.md and `reports/history.md` still record the
+  2026-05-19 baseline's scores — a new run diffs against them as history,
   not as the production route.
 - **Fixtures** subset: `all`, a category name, or a comma-separated list of
   `video_id`s.
