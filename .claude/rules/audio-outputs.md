@@ -31,10 +31,9 @@ paths:
 
 # Program audio outputs (#233)
 
-Spec `docs/superpowers/specs/2026-10-07-audio-outputs-asio-design.md`, plan
-`docs/superpowers/plans/2026-10-07-audio-outputs-asio.md` (three lanes; lane
-1: the output list + VBAN per destination; lane 3: the ASIO output over
-`azo`). Lane 2's section (the drift servo, the ASRC) comes first, then lane
+Spec `docs/superpowers/specs/2026-10-07-audio-outputs-asio-design.md`, shipped
+in three lanes (lane 1: the output list + VBAN per destination; lane 3: the
+ASIO output over `azo`). Lane 2's section (the drift servo, the ASRC) comes first, then lane
 1's, then lane 3's (the ASIO output).
 
 ## The low-latency switch `audio_low_latency` (#289 step 1)
