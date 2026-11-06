@@ -15,7 +15,6 @@
 //! catching wrong-artist-match cases by eye before reprocess.
 //!
 //! Wired into `POST /api/v1/lyrics/probe-sources` (see `api/lyrics.rs`).
-//! Design spec: `docs/superpowers/specs/2026-05-13-probe-sources-reprocess-fix-design.md`.
 
 use serde::Serialize;
 use std::path::Path;
