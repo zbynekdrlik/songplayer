@@ -198,14 +198,6 @@ pub struct ScaledOpenFacts {
     pub first_picture_padding_in_reach: Option<bool>,
 }
 
-impl ScaledOpenFacts {
-    /// Whether the chain holds a video processor (the transform that
-    /// scales).
-    pub fn has_video_processor(&self) -> bool {
-        self.chain.contains(&ChainStage::VideoProcessor)
-    }
-}
-
 /// The source reader's transform chain after the output type was set.
 pub(super) struct Chain {
     /// Each transform's category, in order.

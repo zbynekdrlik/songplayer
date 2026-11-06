@@ -57,7 +57,7 @@ fn the_send_latency_is_two_slots_off_and_15_ms_on() {
     assert_eq!(send_latency_in(70_000, false), 736_666);
     // The wait cap keeps its 4 × L relation (plus the delay).
     assert_eq!(max_wait_in(0, false), VBAN_MAX_WAIT_100NS);
-    assert_eq!(max_wait_in(30_000, false), max_wait_100ns(30_000));
+    assert_eq!(max_wait_in(30_000, false), VBAN_MAX_WAIT_100NS + 30_000);
     assert_eq!(max_wait_in(0, true), 600_000);
     assert_eq!(max_wait_in(30_000, true), 630_000);
     // The planned wait of the last packet of a block taken at its boundary

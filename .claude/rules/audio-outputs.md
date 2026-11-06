@@ -57,10 +57,10 @@ start):
   list with it (`plan_at`, `built_at`): a VBAN output built with the other
   value is a changed entry — rebuilt (`discard` + a new output, its frame
   counter from 0), never a restart. OFF is byte for byte today's: `plan`,
-  `VbanOut::for_entry`, `VbanRateConverter::new`, `send_latency_100ns`,
-  `max_wait_100ns` and `vban_latency_ms` are the OFF forms of the new
-  `*_at` / `*_in` / `for_latency` functions, and every #233 test is
-  unchanged.
+  `VbanOut::for_entry`, `VbanRateConverter::new`, `send_latency_100ns` and
+  `vban_latency_ms` are the OFF forms of the new `*_at` / `*_in` /
+  `for_latency` functions (the wait cap is `max_wait_in` alone, OFF =
+  `VBAN_MAX_WAIT_100NS` + the delay).
 - ON, every VBAN output (`vban-out.md`, "The low-latency switch"): L =
   15 ms (`VBAN_SEND_LATENCY_LOW_100NS` 150 000), the wait cap 4 × L =
   60 ms + the delay (`max_wait_in`); a converting destination is NOT
