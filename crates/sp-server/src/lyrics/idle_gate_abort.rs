@@ -335,8 +335,16 @@ impl crate::lyrics::worker::LyricsWorker {
             .await
         {
             Ok(v) => v,
-            // `run_with_wall_abort` with the gate off awaits the step itself.
-            Err(abort) => unreachable!("an unwatched step is never aborted: {abort}"),
+            // `run_with_wall_abort` with the gate off awaits the step itself,
+            // so an abort here would be a bug: it is logged and the song
+            // goes on without an isolated vocal, never a worker panic.
+            Err(abort) => {
+                tracing::error!(
+                    "worker: unwatched vocal isolation reported an abort for {}: {abort}",
+                    row.youtube_id
+                );
+                None
+            }
         }
     }
 }
