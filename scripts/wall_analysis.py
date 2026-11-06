@@ -100,6 +100,9 @@ LIST_MAX = 20
 UNEVEN_BOUNDARIES_MAX = 64
 # check_present_rate() needs this many timed intervals.
 MIN_TIMED = 10
+# A median distance from whole refreshes at or over this is no noise (0.5 =
+# every interval on a half refresh, uniform jitter about whole ones = 0.25).
+HALF_REFRESH_SHARE = 0.4
 
 
 @dataclass(frozen=True)
@@ -957,6 +960,24 @@ def check_locked(times: list[float], refresh_hz: float) -> None:
         )
 
 
+def rate_noise(timed: list[float], whole: list[int], refresh_hz: float) -> float:
+    """How far (a share of the rate) rounding noisy intervals to whole refreshes
+    can move the measured rate: three standard errors of what the rounding
+    took off each one. A Spout picture lands when Arena finishes it, so an
+    interval near a half refresh rounds to either side (#272: a healthy Arena
+    read 60.130 Hz). Instants on the refreshes round to nothing, and a constant
+    offset, a wrong rate, has no spread: both leave ``RATE_TOLERANCE``. Known
+    limit: under heavy jitter a far wrong rate (50 read as 60) can pass here,
+    and then reads as judder, never as clean."""
+    rounded_off = [d * refresh_hz - w for d, w in zip(timed, whole)]
+    # Intervals that mostly sit on half refreshes (80 Hz read as 120) are a
+    # wrong rate rounding both ways, not noise.
+    if statistics.median(abs(r) for r in rounded_off) >= HALF_REFRESH_SHARE:
+        return 0.0
+    spread = statistics.pstdev(rounded_off) / math.sqrt(len(rounded_off))
+    return 3 * spread / statistics.fmean(whole)
+
+
 def check_present_rate(
     times: list[float],
     refresh_hz: float,
@@ -968,7 +989,7 @@ def check_present_rate(
     of a refresh: its poll before plus its acquire window ``late``) are
     whole numbers of refreshes at the given rate: their refreshes over
     their sum, the rate measured over the whole capture, matches it to
-    ``RATE_TOLERANCE``. Else ``--refresh-hz`` is not the wall's
+    ``RATE_TOLERANCE``, or to its own noise (``rate_noise``). Else ``--refresh-hz`` is not the wall's
     (``ValueError``). Fewer than ``MIN_TIMED`` such intervals: the rate
     cannot be checked, and an unchecked rate would read as judder or losses
     (review round 7), so that is a ``ValueError`` too."""
@@ -984,7 +1005,9 @@ def check_present_rate(
         )
     whole = [max(1, round(d * refresh_hz)) for d in timed]
     measured = sum(whole) / sum(timed)
-    if abs(measured / refresh_hz - 1) > RATE_TOLERANCE:
+    if abs(measured / refresh_hz - 1) > max(
+        RATE_TOLERANCE, rate_noise(timed, whole, refresh_hz)
+    ):
         raise ValueError(
             f"the wall presents at {measured:.3f} Hz, not in whole {refresh_hz:g} Hz"
             " refreshes: give the wall's own --refresh-hz"

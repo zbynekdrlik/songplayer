@@ -597,6 +597,13 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
   `inconsistent` boundaries, so no take could be `clean`; 2 and 3 ms read
   both clips clean, 4 ms and more leave `unresolved`. A slip (50 + 16.7 ms)
   still reads uneven (`test_wall_spout.py`).
+- **The rate check allows for its own noise** (#272, 6.11.2026, `rate_noise`):
+  rounding Spout's jittered intervals to whole refreshes flips those near a half
+  refresh, and over a take that moved the sum past `RATE_TOLERANCE` (a healthy
+  Arena read 60.13-60.54 Hz, exit 5). The tolerance is now the larger of it and
+  three standard errors of what the rounding took off; a constant offset or
+  intervals on half refreshes (`HALF_REFRESH_SHARE`) get none. Under heavy
+  jitter a far wrong rate can pass here and then reads as judder, never clean.
 - **A picture's acquire window ends at `receive`** (`NewPictures.update_frame`,
   the shape `time_acquire` stamps): the read-back of each new picture waits
   ~4 ms on the GPU copy.
