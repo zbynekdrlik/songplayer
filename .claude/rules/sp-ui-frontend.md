@@ -262,28 +262,18 @@ mixer was "hrozne škaredý"; he wants ONE modern mixer everywhere).
 - **The pure preset/fader math lives in `sp_core::mixer_model`, NOT in sp-ui.**
   sp-ui has **no unit-test job** (CI `Test` = `cargo test --workspace`, and sp-ui
   is OUTSIDE the workspace; `test-wasm` is only `cargo check -p sp-core`). So the
-  mappings (`song_gains_for_preset`/`song_preset_for_gains`, dub
-  `ratio_to_faders`/`faders_to_ratio`/`dub_ratio_for_preset`/`dub_preset_for_ratio`,
-  `presets`)
+  mappings (`MixFaders`, `stream_gains_*`, `presets`, `apply_preset`,
+  `preset_for_faders`, `fader_availability`, `fader_display_pct`)
   live in `crates/sp-core/src/mixer_model.rs` (WASM-safe, covered by the workspace
   Test job + the diff-scoped mutation gate) and sp-ui imports them. Preset matching
-  quantises to integer permille so it tolerates the UI's integer-percent fader
+  allows `PRESET_TOL` (0.01) so it tolerates the UI's integer-percent fader
   rounding.
-- **Adapters** (thin, own the API wiring): `components/karaoke_mixer.rs` (songs →
-  `POST /api/v1/karaoke`; keeps the #177 state contract — the `karaoke-now-playing`
-  "Stemy — …" line the post-deploy spec reads, the `karaoke-mode` presets group,
-  the `karaoke-vocal-gain` fader, the "Zaradiť do fronty" enqueue) replaces the
-  deleted `karaoke_control.rs` on the dashboard; `components/dub_mixer.rs` (dub
-  videos → `PATCH /api/v1/videos/{id}/dub-mix`; the `dabing` fader is the live ratio
-  `r`, `originál hlas` is a read-only bed display `= ratio_to_faders(r,has_stems)[0]`
-  synced by an `Effect`, `ambient` is fixed) renders per row in `dabing_list.rs`.
-- **Deferred (needs a server change, out of this lane's scope — returned as a
-  #181 follow-up candidate for the supervisor to file):** the design also wants the
-  dub mixer on a normal playlist card whose now-playing video has
-  `dub_status = ready`. The dashboard `now_playing` WS payload (`NowPlayingInfo`)
-  does NOT carry `dub_status`, so that placement needs the server to add it to the
-  now-playing message first (a `ServerMsg::NowPlaying` + `NowPlayingInfo.dub_status`
-  change). The dub mixer ships on the Dabing page only until that follow-up lands.
+- **The adapter** (thin, owns the API wiring) is ONE:
+  `components/live_mixer.rs::LiveMixer`, rendered by `player.rs` on every page
+  (the #184 round G section above). This round's two adapters,
+  `karaoke_mixer.rs` (songs) and `dub_mixer.rs` (dub videos), are deleted, and
+  so is the dub mixer's Dabing-page-only placement: `LiveMixer` reads the
+  playing item's `dub_status` itself.
 
 ## One capability = one component on every page (#194)
 
