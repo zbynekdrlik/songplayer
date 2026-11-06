@@ -28,6 +28,8 @@ export interface WallFramesReport {
   boundaries: number;
   lost_frames: number;
   lost_boundaries: number;
+  /** #272: where each loss is; a Spout / dxcam take adds the picture's UTC. */
+  lost_boundary_list?: { boundary: number; sample: number; lost: number; utc_ms?: number | null }[];
   jumps_back: number;
   cadence_errors: number;
   frozen: boolean;

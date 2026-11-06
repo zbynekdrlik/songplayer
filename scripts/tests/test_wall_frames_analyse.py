@@ -126,6 +126,9 @@ def test_a_lost_boundary_is_counted():
     del readings[10:12]  # that boundary never shown
     report = wa.analyse(readings, 25)
     assert report["lost_boundaries"] == 1
+    assert report["lost_boundary_list"] == [
+        {"boundary": 5, "sample": 10, "lost": 1}
+    ], "the boundary and picture after the skip"
     assert report["lost_frames"] == 0, "its frames show in its neighbours"
     assert report["verdict"] == "defects"
 

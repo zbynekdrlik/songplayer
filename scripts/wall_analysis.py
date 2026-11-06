@@ -533,6 +533,14 @@ def analyse(
         "lost_frames": len(losses["lost"]),
         "lost_frame_list": losses["lost"][:LIST_MAX],
         "lost_boundaries": sum(s.lost for s in steps),
+        # Where each loss is (#272, 6.11.2026): the boundary (its run's
+        # number from 0) and picture (sample) after the skip, so a gate can
+        # name its instant.
+        "lost_boundary_list": [
+            {"boundary": i + 1, "sample": s.sample, "lost": s.lost}
+            for i, s in enumerate(steps)
+            if s.lost
+        ][:LIST_MAX],
         "jumps_back": len(jumps),
         "jump_back_samples": jumps[:LIST_MAX],
         "cadence_errors": sum(s.kind == "cadence" for s in steps),

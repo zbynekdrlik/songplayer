@@ -39,3 +39,18 @@ def test_each_frame_keeps_its_first_clean_picture_only():
     times = [1.0, 1.01, 1.02, 1.03, 1.05, 1.06]
     seen = wf.first_seen_utc_ns(readings, times, (1.0, 0), (2.0, 1_000_000_000))
     assert seen == {"7": 20_000_000, "8": 50_000_000}
+
+
+def test_a_lost_boundary_gets_the_utc_of_the_picture_after_it():
+    lost = [
+        {"boundary": 5, "sample": 2, "lost": 1},
+        {"boundary": 9, "sample": 9, "lost": 2},
+    ]
+    times = [10.0, 10.5, 11.0]
+    out = wf.lost_boundary_utc(
+        lost, times, (10.0, 1_000_000_000), (11.0, 2_000_000_000)
+    )
+    assert out == [
+        {"boundary": 5, "sample": 2, "lost": 1, "utc_ms": 2000},
+        {"boundary": 9, "sample": 9, "lost": 2, "utc_ms": None},
+    ], "ms on the anchors' line; a sample past the capture has no time"

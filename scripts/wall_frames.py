@@ -509,6 +509,23 @@ def first_seen_utc_ns(
     return seen
 
 
+def lost_boundary_utc(
+    lost: list[dict],
+    times: list[float],
+    start: tuple[float, int],
+    end: tuple[float, int],
+) -> list[dict]:
+    """``lost_boundary_list`` with each entry's ``utc_ms``: when the picture
+    after the skip was seen (#272: a lost boundary put on the time line the
+    bridge and SongPlayer's trace read)."""
+    out = []
+    for entry in lost:
+        k = entry["sample"]
+        utc = to_utc_ns(times[k], start, end) // 1_000_000 if k < len(times) else None
+        out.append({**entry, "utc_ms": utc})
+    return out
+
+
 def capture(args: argparse.Namespace) -> dict:
     """Capture or read the pictures ``args`` names, then the report."""
     late = None
@@ -549,7 +566,8 @@ def capture(args: argparse.Namespace) -> dict:
             report["located"] = None
             return report
         readings = [read_sums(s, list(located.copies)) for s in sums]
-        seen = first_seen_utc_ns(readings, times, start, utc_anchor())
+        end = utc_anchor()
+        seen = first_seen_utc_ns(readings, times, start, end)
         blind = poll_blind(times, polls)
         late = [max(0.0, e - t) for t, e in zip(times, ended)]
         spout = args.spout is not None
@@ -572,6 +590,9 @@ def capture(args: argparse.Namespace) -> dict:
     report["located"] = located.report() if located else None
     if args.video is None:
         report["first_seen_utc_ns"] = seen
+        report["lost_boundary_list"] = lost_boundary_utc(
+            report["lost_boundary_list"], times, start, end
+        )
     return report
 
 

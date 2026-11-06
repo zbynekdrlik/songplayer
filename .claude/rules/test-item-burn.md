@@ -547,6 +547,12 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
     proven, and whether a slip shows on the wall is not verified.
   - `defects` names every counter: judder (`refreshes.uneven` of `judged`),
     jumps back, lost frames and boundaries, cadence, weights, frozen.
+  - Each lost boundary is located (#272, 6.11.2026): the report's
+    `lost_boundary_list` names the boundary (its run, from 0), the picture
+    after the skip (`sample`) and how many were lost, and a Spout / dxcam
+    take adds that picture's `utc_ms` on the capture's UTC anchors
+    (`wall_frames.lost_boundary_utc`); the take's log line prints it, so a
+    loss can be put on the bridge's 10 s windows and SongPlayer's trace.
   - `incomplete` (exit 3) fails as INCOMPLETE, never as judder or clean.
   - Exit 4 = the wall does not show SongPlayer's program (Arena's clip on
     another source, MAX off with the clip on MAX, the clip not on air), or

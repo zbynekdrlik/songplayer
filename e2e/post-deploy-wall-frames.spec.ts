@@ -164,7 +164,8 @@ function logTake(label: string, result: Take): void {
       `unresolved ${r?.refreshes?.unresolved ?? "-"}, inconsistent ${r?.refreshes?.inconsistent ?? "-"}, ` +
       `unverified steps ${r?.unverified?.steps ?? "-"}, ` +
       `jumps back ${r?.jumps_back ?? "-"}, ` +
-      `lost ${r?.lost_frames ?? "-"}, decoded ${r?.decoded ?? "-"}/${r?.samples ?? "-"}, ` +
+      `lost ${r?.lost_frames ?? "-"}, lost boundaries ${r?.lost_boundaries ?? "-"} ` +
+      `${JSON.stringify(r?.lost_boundary_list ?? [])}, decoded ${r?.decoded ?? "-"}/${r?.samples ?? "-"}, ` +
       `located ${JSON.stringify(r?.located ?? null)}`,
   );
   if (result.stderr.trim()) {
