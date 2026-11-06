@@ -26,17 +26,18 @@ Also re-scores each backend's own untouched `lines[]` as a baseline
 each ingredient perform alone".
 
 Outputs:
-  - `reports/2026-08-05-combine-raw/<combo-id>_<video_id>.json` — the
-    per-fixture combined lines + combine_lines_times' own stats, for every
-    combo (NOT for baselines — baselines are scored straight from the
-    already-committed `reports/2026-08-05-raw/` files, untouched).
+  - `<combine-raw-dir>/<combo-id>_<video_id>.json` — the per-fixture
+    combined lines + combine_lines_times' own stats, for every combo (NOT
+    for baselines — baselines are scored straight from the `--raw-dir`
+    files, untouched).
   - `reports/2026-08-05-combine-scores.json` — full detail: baselines +
     combos, each with the score_one_call.py aggregate, the conservative
     aggregate, word-alignment stats, and a sample of mismatch examples.
   - stdout: compact summary.
 
 Usage:
-    python3 eval/lyrics/run_combine_experiment.py
+    python3 eval/lyrics/run_combine_experiment.py \\
+        --raw-dir <per-backend raw outputs> --combine-raw-dir <out dir>
 """
 
 from __future__ import annotations
@@ -526,12 +527,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--raw-dir",
         type=Path,
-        default=root / "eval" / "lyrics" / "reports" / "2026-08-05-raw",
+        required=True,
+        help="per-backend raw outputs, <backend>_<video_id>.json",
     )
     p.add_argument(
         "--combine-raw-dir",
         type=Path,
-        default=root / "eval" / "lyrics" / "reports" / "2026-08-05-combine-raw",
+        required=True,
+        help="where the per-fixture combined lines are written",
     )
     p.add_argument(
         "--out",
