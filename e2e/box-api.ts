@@ -48,16 +48,22 @@ export async function readyDub(
 ): Promise<{ pid: number; videoId: number }> {
   const dab = await request.get("/api/v1/dabing");
   expect(dab.status()).toBe(200);
-  const body = (await dab.json()) as {
-    playlist_id: number;
-    videos: Array<{ video_id?: number; id?: number; dub_status: string }>;
-  };
+  const body = (await dab.json()) as DabingList;
+  const videoId = pickReadyDub(body, preferVideoId);
+  expect(videoId, "at least one dub must be ready on the box").toBeGreaterThan(0);
+  return { pid: body.playlist_id, videoId: videoId as number };
+}
+
+/** `GET /api/v1/dabing` (the fields the specs read). */
+export interface DabingList {
+  playlist_id: number;
+  videos: Array<{ video_id?: number; id?: number; dub_status: string; playlist_id?: number }>;
+}
+
+/** The ready dub to play: `preferVideoId` when it is ready, else the first ready one. */
+export function pickReadyDub(body: DabingList, preferVideoId?: number): number | undefined {
   const ready = body.videos.filter((v) => v.dub_status === "ready");
-  expect(ready.length, "at least one dub must be ready on the box").toBeGreaterThan(0);
   // DubRow carries the id as `video_id` (the row is keyed by the video).
   const ids = ready.map((v) => Number(v.video_id ?? v.id));
-  const videoId =
-    preferVideoId !== undefined && ids.includes(preferVideoId) ? preferVideoId : ids[0];
-  expect(videoId, "the ready dub must carry a numeric video id").toBeGreaterThan(0);
-  return { pid: body.playlist_id, videoId };
+  return preferVideoId !== undefined && ids.includes(preferVideoId) ? preferVideoId : ids[0];
 }
