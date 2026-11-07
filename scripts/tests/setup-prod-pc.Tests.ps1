@@ -58,6 +58,10 @@ BeforeAll {
                     $adapter = @($Facts.soundgrid.adapters | Where-Object { $_.guid -eq $action.AdapterGuid })[0]
                     $adapter.settings | Add-Member -NotePropertyName $action.Name -NotePropertyValue ([string]$action.Wanted) -Force
                 }
+                'nic_value' {
+                    $adapter = @($Facts.adapters | Where-Object { $_.guid -eq $action.AdapterGuid })[0]
+                    $adapter.settings | Add-Member -NotePropertyName $action.Name -NotePropertyValue ([string]$action.Wanted) -Force
+                }
                 'power' { $Facts.power.cpmincores_ac = $action.Wanted }
                 'defender' { $Facts.defender.preferences.($action.Name) = $action.Wanted }
                 'firewall' { $Facts.firewall.($action.Name) = $false }
@@ -425,6 +429,102 @@ Describe 'Get-ProdPcPlan: the SoundGrid adapter' {
         $plan[0].Kind | Should -BeExactly 'nic_pnp'
         $plan[0].Current | Should -BeExactly '256'
         $plan[0].Wanted | Should -Be 264
+    }
+}
+
+Describe 'Get-ProdPcPlan: every wired adapter (issue 285, the owner''s rule)' {
+    BeforeAll {
+        function New-Adapter {
+            param([string]$Name, [string]$Guid, [string]$Media = '802.3', [string]$Status = 'Up', $Settings = $null)
+            if ($null -eq $Settings) { $Settings = [pscustomobject]@{} }
+            return [pscustomobject]@{
+                name = $Name; guid = $Guid; description = $Name; mac = ''; permanent_mac = ''; media = $Media; status = $Status
+                class_key = "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e972-e325-11ce-bfc1-08002be10318}\$Guid"
+                settings = $Settings
+            }
+        }
+        function Get-NicActions {
+            param($Facts)
+            return @(Get-ProdPcPlan -Facts $Facts | Where-Object { $_.Area -eq 'nic' })
+        }
+        $script:Always = @('*FlowControl', '*EEE', 'EEE', 'EnableGreenEthernet', 'AdvancedEEE', 'EnableExtraPowerSaving', 'GigaLite', '*SelectiveSuspend')
+    }
+
+    It 'turns off the values a USB driver hides, on a PC with no SoundGrid, and stops Windows turning it off' {
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(New-Adapter 'Dante' '0014') -Force
+        $actions = Get-NicActions $facts
+        $values = @($actions | Where-Object { $_.Kind -eq 'nic_value' })
+        @($values | ForEach-Object { $_.Name }) | Should -Be $script:Always
+        @($values | Where-Object { $_.Wanted -ne '0' }) | Should -HaveCount 0
+        $values[0].Adapter | Should -BeExactly 'Dante'
+        $values[0].Path | Should -BeLike '*\0014'
+        @($actions | Where-Object { $_.Kind -eq 'nic_pnp' -and $_.Name -eq 'PnPCapabilities' -and $_.Wanted -eq 24 }) | Should -HaveCount 1
+    }
+
+    It 'sets a value that is on, and leaves one already off' {
+        $settings = [pscustomobject]@{ '*EEE' = '1'; '*FlowControl' = '0'; PnPCapabilities = '24' }
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(New-Adapter 'Dante' '0014' -Settings $settings) -Force
+        $actions = Get-NicActions $facts
+        @($actions | Where-Object { $_.Name -eq '*EEE' })[0].Current | Should -BeExactly '1'
+        @($actions | Where-Object { $_.Name -eq '*FlowControl' }) | Should -HaveCount 0
+        @($actions | Where-Object { $_.Name -eq 'PnPCapabilities' }) | Should -HaveCount 0
+    }
+
+    It 'turns off the where-present values only where the driver has them' {
+        $settings = [pscustomobject]@{ '*InterruptModeration' = '1' }
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(
+            (New-Adapter 'Ethernet' '0001' -Settings $settings),
+            (New-Adapter 'Dante' '0014')
+        ) -Force
+        $moderation = @(Get-NicActions $facts | Where-Object { $_.Name -eq '*InterruptModeration' })
+        $moderation | Should -HaveCount 1
+        $moderation[0].Adapter | Should -BeExactly 'Ethernet'
+        @(Get-NicActions $facts | Where-Object { $_.Name -in @('GreenEthernet', 'PowerSavingMode', '*PowerSavingMode') }) | Should -HaveCount 0
+    }
+
+    It 'leaves a radio and a disabled adapter alone' {
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(
+            (New-Adapter 'Wi-Fi' '0002' -Media 'Native 802.11'),
+            (New-Adapter 'Off' '0003' -Status 'Disabled')
+        ) -Force
+        Get-NicActions $facts | Should -HaveCount 0
+    }
+
+    It 'blocks on a wired adapter with no key in the network class' {
+        $adapter = New-Adapter 'Dante' '0014'
+        $adapter.class_key = $null
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @($adapter) -Force
+        @(Get-ProdPcBlockers -Facts $facts | ForEach-Object { $_.Code }) | Should -Contain 'unreadable:nic'
+    }
+
+    It 'plans nothing on the second run' {
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(New-Adapter 'Dante' '0014') -Force
+        $facts = Copy-Facts $facts
+        foreach ($action in @(Get-NicActions $facts)) {
+            $adapter = @($facts.adapters | Where-Object { $_.guid -eq $action.AdapterGuid })[0]
+            $adapter.settings | Add-Member -NotePropertyName $action.Name -NotePropertyValue ([string]$action.Wanted) -Force
+        }
+        Get-NicActions $facts | Should -HaveCount 0
+    }
+
+    It 'does not act twice on what the SoundGrid review already acts on' {
+        $facts = Read-Fixture 'pp'
+        $port = @($facts.soundgrid.adapters | Where-Object { $_.mac -match '6[Cc].24.08.[Ee]5.9[Cc].91' })[0]
+        $copy = $port | ConvertTo-Json -Depth 5 | ConvertFrom-Json
+        $copy | Add-Member -NotePropertyName media -NotePropertyValue '802.3' -Force
+        $copy | Add-Member -NotePropertyName status -NotePropertyValue 'Up' -Force
+        $copy.settings | Add-Member -NotePropertyName '*EEE' -NotePropertyValue '1' -Force
+        $port.settings | Add-Member -NotePropertyName '*EEE' -NotePropertyValue '1' -Force
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @($copy) -Force
+        $eee = @(Get-ProdPcPlan -Facts $facts | Where-Object { $_.Name -eq '*EEE' })
+        $eee | Should -HaveCount 1
+        $eee[0].Area | Should -BeExactly 'soundgrid_nic'
     }
 }
 
