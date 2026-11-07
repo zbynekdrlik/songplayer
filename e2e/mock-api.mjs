@@ -3385,7 +3385,7 @@ wss.on("connection", (ws) => {
     }
   }, wsReplay.delay_ms);
 
-  // #154: one-shot LyricsQueueUpdate carrying the "waiting — wall in use"
+  // #167: one-shot LyricsQueueUpdate carrying the "startup grace — wall unknown"
   // worker state (a song-less processing entry). Delayed so it lands after the
   // card's initial HTTP fetch; buckets match /api/v1/lyrics/queue so the
   // bucket-count test is unaffected. Drives the idle-gate badge render.
@@ -3405,7 +3405,7 @@ wss.on("connection", (ws) => {
               youtube_id: "",
               song: "",
               artist: "",
-              stage: "waiting — wall in use (SP-fast Playing)",
+              stage: "startup grace — wall unknown",
               provider: null,
               started_at_unix_ms: 0,
             },

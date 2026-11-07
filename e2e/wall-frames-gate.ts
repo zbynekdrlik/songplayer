@@ -294,6 +294,26 @@ export function coveringLayers(layers: ArenaLayer[]): string[] {
   return above;
 }
 
-export function refreshRateFailures(_refreshHz: number, _periodNs: number | null | undefined): string[] {
-  return [];
+/** How far the reader's rate may be from the measured one (the reader's `RATE_TOLERANCE`). */
+const REFRESH_TOLERANCE = 0.0015;
+
+/**
+ * The reader cannot prove its `--refresh-hz` under Spout's jitter (`rate_noise`,
+ * measured), so the gate compares it with the primary display's refresh SongPlayer
+ * measures (`max.vblank_period_ns` on `GET /api/v1/program`), the clock Arena renders
+ * in. A wrong rate would read as slips, inside the gate's allowance.
+ */
+export function refreshRateFailures(
+  refreshHz: number,
+  periodNs: number | null | undefined,
+): string[] {
+  if (!periodNs) {
+    return [
+      `the primary display's refresh is not measured (max.vblank_period_ns ${periodNs}): the reader's ${refreshHz} Hz cannot be checked`,
+    ];
+  }
+  const measured = 1e9 / periodNs;
+  return Math.abs(measured / refreshHz - 1) > REFRESH_TOLERANCE
+    ? [`the primary display refreshes at ${measured.toFixed(3)} Hz, the reader is told ${refreshHz} Hz`]
+    : [];
 }

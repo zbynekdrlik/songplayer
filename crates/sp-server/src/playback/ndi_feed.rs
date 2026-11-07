@@ -171,8 +171,9 @@ impl FeedCore {
 /// One picture read back after its boundary was sent (`ndi.readback_late_events`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct LateEvent {
-    /// The late boundary on the fleet line, ms (its stamp / 10 000: the
-    /// line `program/trace`'s `wire_100ns` is on).
+    /// The late boundary, ms: its internal stamp / 10 000. `program/trace`'s
+    /// `wire_100ns` is on this line until a fleet date step (#224); after one
+    /// the trace is N slots away from it.
     pub utc_ms: i64,
     /// Grid slots from it to the boundary served before it came (0: it
     /// lost the race to its own boundary's take).

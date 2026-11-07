@@ -367,6 +367,9 @@ the pacer's rule, the capture's timing). Run it from the repo checkout's
   to the last one's position, counted from the blend it follows, in the
   clip's own step) are `unverified`; the rest is lost; a cadence error is
   never excused.
+- **The gate's rate:** it checks its `--refresh-hz` against the primary display's refresh
+  SongPlayer measures (`refreshRateFailures`, `max.vblank_period_ns`): under Spout's jitter
+  the reader's own rate check (`rate_noise`) cannot catch a wrong rate, measured.
 - **Judder**: every boundary must be on screen for the refreshes the
   WALL's rate gives on the grid (`refreshes`: 60 Hz on 30 = 2; a rate the
   grid does not divide allows the two around it). `--refresh-hz` = the

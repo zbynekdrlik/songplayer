@@ -478,6 +478,12 @@ def test_a_noisy_capture_updating_every_refresh_is_not_refused():
         wa.check_present_rate(times, 60, [0.0005] * len(times))
 
 
+def test_pictures_far_faster_than_the_refresh_are_a_wrong_rate_not_a_crash():
+    times = [n / 1000 for n in range(1200)]
+    with pytest.raises(ValueError, match="not in whole 60 Hz"):
+        wa.check_present_rate(times, 60, [0.0] * len(times))
+
+
 def test_a_noisy_capture_still_catches_a_wrong_rate():
     for seed in range(6):
         times = noisy_presents(seed, 57, 0.003)

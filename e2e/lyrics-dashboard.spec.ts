@@ -73,17 +73,16 @@ test.describe("Lyrics dashboard — queue visibility", () => {
     await expect(page.locator(".lyrics-pipeline-version")).toContainText("2");
   });
 
-  test("#154 idle gate: a song-less processing state renders a 'waiting — wall in use' badge", async ({
+  test("a song-less processing state renders the start-up grace as a status badge (#167)", async ({
     page,
   }) => {
     await navigateToLyrics(page);
     // The mock pushes a LyricsQueueUpdate whose processing entry has empty
-    // song/artist and the gate stage — the card must render it as a status
+    // song/artist and the grace stage — the card must render it as a status
     // badge (just the stage), not "Currently processing:  — ".
-    await expect(page.locator(".lyrics-processing")).toContainText("wall in use", {
+    await expect(page.locator(".lyrics-processing")).toContainText("startup grace — wall unknown", {
       timeout: 10000,
     });
-    await expect(page.locator(".lyrics-processing")).toContainText("SP-fast Playing");
     // The song-less badge must NOT show the "Currently processing:" prefix.
     await expect(page.locator(".lyrics-processing")).not.toContainText("Currently processing");
   });
