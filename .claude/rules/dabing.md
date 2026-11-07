@@ -22,8 +22,8 @@ paths:
 The dubbing feature ("Dabing" — the word "sermon" appears NOWHERE in code/UI,
 owner ruling #174) makes any video dubbable and adds an optimized **Dabing**
 section for fast priority adds. Binding spec:
-`docs/superpowers/specs/2026-09-17-dubbing-feature-design.md` (v2); plan:
-`docs/superpowers/plans/2026-09-17-dubbing-feature.md` (lanes D1–D6).
+`docs/superpowers/specs/2026-09-17-dubbing-feature-design.md` (v2), shipped in
+lanes D1–D6.
 
 ## Data model (main decision: columns on `videos`, NOT a `dub_tracks` table)
 

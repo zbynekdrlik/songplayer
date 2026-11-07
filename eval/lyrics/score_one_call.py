@@ -598,7 +598,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--raw-dir",
         type=Path,
-        default=root / "eval" / "lyrics" / "reports" / "2026-08-05-raw",
+        required=True,
+        help="raw dir written by run_one_call.py",
     )
     p.add_argument("--backends", nargs="+", default=DEFAULT_BACKENDS)
     p.add_argument(

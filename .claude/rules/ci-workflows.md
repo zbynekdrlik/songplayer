@@ -521,7 +521,7 @@ run keeps showing `queued` for a minute, and then NO run is left for the
 commit. Leave a duplicate alone. If both end cancelled, re-run the survivor
 in full (`gh run rerun <id>`, not `--failed`).
 
-## Post-deploy E2E: OBS is in Studio Mode with a 2000ms Fade — never blind-sleep after a scene switch (#170)
+## Post-deploy E2E scene switches: wait for the transition, never blind-sleep (#170, #221 L3)
 
 **#221 L3 (read this first).** The E2E scene driver no longer talks to cg
 OBS: `ObsDriver` connects to SongPlayer's obs-websocket facade
@@ -534,82 +534,20 @@ and the driver's own doc:
   `SceneTransitionEnded`, not cg OBS's 2 s fade; the driver raises its
   transition flag BEFORE the trigger;
 - a switch to the scene already on program is ALWAYS sent (the facade's
-  re-kick); the round-3 skip below is gone (review round 1 of the L3 lane);
+  re-kick); never skip it;
+- the driver confirms the preview applied before the trigger
+  (`waitForPreviewApplied`), then waits until the program IS the target AND
+  the transition ended (`waitForSceneSwitchApplied`, `e2e/obs-scene-wait.ts`,
+  mock-tested in `obs-scene-wait.spec.ts`), failing loudly — never a timeout
+  bump (`no-timeout-band-aids.md`);
 - since L4b `active_scene` / `active_playlist_ids` are SongPlayer's own
   program (the resolver + the on-air set, SP-program's playlist alone since
   B4 step 6); the playback authority applies a switch a moment AFTER the
   driver returns: wait for the engine (`waitEngineActiveScene`), never read
   once. Since B4 step 6 a playlist press never switches cg OBS (no mirror).
 
-The rest of this section is the #170 history of the cg OBS driver.
-
-The `E2E Tests (win-resolume)` job restarts SongPlayer (`taskkill` + `schtasks
-/run /tn SongPlayer` + `Wait-SongPlayerUp`), then the Playwright post-deploy
-suite drives OBS scene switches via `e2e/obs-driver.ts`. **OBS on win-resolume
-runs Studio Mode with a `Fade` transition of `2000ms`** (verify:
-`obs-get-studio-mode`, `obs-get-current-transition`). In studio mode
-`SetCurrentProgramScene` only *starts* the fade; obs-websocket updates
-`GetCurrentProgramScene` and emits `CurrentProgramSceneChanged` — the event
-SongPlayer's OBS client reacts to (in <1 ms) — **only when the fade completes,
-~2 s later** (both come from OBS's `OBS_FRONTEND_EVENT_SCENE_CHANGED`, which
-fires at transition end).
-
-So a blind `sleep(300)` after `SetCurrentProgramScene` **races the 2 s fade**:
-`/api/v1/status.active_playlist_ids` still shows the old scene's playlist for
-~2 s, which fails a single-read assertion (test 15's baseline "ytfast NOT
-active" read) and, with back-to-back scene tests, re-triggers `SelectAndPlay`
-from position 0 so the position never advances (test 17's 0→0). This was the
-"post-restart window flake" in #170 — NOT an engine/scene-detection bug (the
-box log showed SongPlayer receiving and reacting to every switch, each ~2 s
-after the OBS switch).
-
-### Round 3 (#170): a name-only wait is NOT enough — same-scene switches DROP the next event
-
-The round-2 fix polled `GetCurrentProgramScene == target` only. Two studio-mode
-behaviours defeat that (reproduced live 3×, 17.9 02:06–02:09 UTC):
-
-1. **A SAME-scene `SetCurrentProgramScene` still runs a real 2 s transition**,
-   leaving `preview == program == that scene`. Test 17 opened with
-   `switchScene(baseline)` while OBS was already on `sp-slow` → an
-   `sp-slow→sp-slow` fade.
-2. **From that `preview==program` state OBS DROPS the next
-   `SetCurrentProgramScene`'s `CurrentProgramSceneChanged`** — `GetCurrentProgramScene`
-   reports the target but no event fires, so SongPlayer (event stream alive)
-   never learns of the switch; ytfast stays paused and the wall sits on a paused
-   source. A real transition to another scene first (so preview becomes the
-   *previous* program) restores normal behaviour.
-
-**Contract (round 3, superseded by #221 L3 above for (1)):** `ObsDriver.switchScene`
-(1) skipped when `program == target` (removed: on the facade a same-scene
-switch is the designed re-kick); (2) in Studio Mode drives the transition the studio way —
-`SetCurrentPreviewScene(target)` + `TriggerStudioModeTransition` (which DOES emit
-the program-scene-changed event), else `SetCurrentProgramScene` (read
-`GetStudioModeEnabled` once); (3) waits until `GetCurrentProgramScene == target`
-**AND the transition has ENDED** (tracked via `SceneTransition{Started,Ended}`),
-then settles — `sceneSwitchSettled` / `waitForSceneSwitchApplied` in
-`e2e/obs-scene-wait.ts`, unit-tested in the mock suite `obs-scene-wait.spec.ts`.
-Throws loudly if the switch never settles. Transition-duration-agnostic (0 ms cut
-or 2 s fade). Do NOT "fix" scene-switch flake by bumping test timeouts
-(`no-timeout-band-aids.md`) or by mutating the shared live-wall OBS config.
-
-### Round 4 (19.9.2026): wait for the PREVIEW to apply before `TriggerStudioModeTransition`
-Three red post-deploy runs in one day, all `OBS scene switch to "sp-fast" did not
-settle … (last program "sp-alex", transitionActive=false)`, with OBS left at
-`preview = sp-fast, program = sp-alex`. Cause: `SetCurrentPreviewScene` returns
-before OBS's UI thread applies it; a `TriggerStudioModeTransition` sent right
-behind it can still see the OLD preview, and when that equals the program scene
-OBS fades the scene to ITSELF (`SceneTransitionEnded` fires, the program never
-changes). `ObsDriver.switchScene` therefore polls `GetCurrentPreviewScene ==
-target` (`waitForPreviewApplied`, 3 s bound, throws "stale preview") BEFORE the
-trigger. Same rule for any future studio-mode automation (Companion-style
-control in the app): set preview → confirm preview → trigger.
-
-**Engine self-heal (history):** a dropped `CurrentProgramSceneChanged` in daily
-studio-mode use was a dark wall for the operator while playback followed cg
-OBS's program, so the OBS client polled `GetCurrentProgramScene` every ~2 s
-(`obs/scene_poll.rs`). #221 L4b moved the playback authority to SongPlayer's own
-program and L6 deleted that poll with the rest of cg OBS's scene detection
-(`obs-ndi-health.md`): nothing depends on cg OBS's program events any more.
+History (#170): before #221 the driver talked to cg OBS's studio mode (2 s
+fade, dropped same-scene events, stale preview) — none of it applies to the facade.
 
 **afterAll read-back + afterEach restore:** the post-deploy suite restores the
 scene it started on and asserts `/api/v1/status.active_scene` (the engine's view)

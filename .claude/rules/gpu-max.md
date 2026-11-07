@@ -1831,11 +1831,20 @@ nothing on air (default `cpu`).
   settings every 5 s (`program_max_phase.rs`, `load_ndi_source`), no
   restart. Temporary: deleted in P5.
 - `GET /api/v1/program` (and the cut answer) → `ndi {setting, source,
-  delay_slots, fourcc, repeats, readback_late, feed_coalesced, switches,
-  readback_us_p99, uyvy_us_p99}` (`NdiStatus`; `source` = the last
+  delay_slots, fourcc, repeats, readback_late, readback_late_events,
+  feed_coalesced, switches, readback_us_p99, uyvy_us_p99}` (`NdiStatus`; `source` = the last
   boundary's, `delay_slots` 1 from the GPU, `fourcc` `UYVY` / `NV12`; the
   p99s over the last 900 readbacks). The mock serves `setting` from its
   store and `source: "cpu"` (no GPU).
+- `readback_late_events` (#279 gate 2, 6.11.2026): the last
+  `NDI_LATE_EVENTS` (32) late pictures, oldest first, `{utc_ms,
+  behind_slots}` — the late boundary's stamp on the fleet line in ms (the
+  line `program/trace`'s `wire_100ns` is on) and how many slots it trailed
+  the boundary served (0 = it lost the race to its own boundary's take).
+  Kept by `FeedCore::push`'s `Late` branch under the feed's one lock. It
+  times each miss to its boundary so a gpu run can match it against
+  `program/trace` and `max.compose_*` (the 10 s samples only bracketed
+  them). The mock serves `[]`.
 - The burn on UYVY: `program_burn::burned_uyvy` (`test-item-burn.md`).
 
 ### Tests

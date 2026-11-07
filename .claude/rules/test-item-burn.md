@@ -367,6 +367,9 @@ the pacer's rule, the capture's timing). Run it from the repo checkout's
   to the last one's position, counted from the blend it follows, in the
   clip's own step) are `unverified`; the rest is lost; a cadence error is
   never excused.
+- **The gate's rate:** it checks its `--refresh-hz` against the primary display's refresh
+  SongPlayer measures (`refreshRateFailures`, `max.vblank_period_ns`): under Spout's jitter
+  the reader's own rate check (`rate_noise`) cannot catch a wrong rate, measured.
 - **Judder**: every boundary must be on screen for the refreshes the
   WALL's rate gives on the grid (`refreshes`: 60 Hz on 30 = 2; a rate the
   grid does not divide allows the two around it). `--refresh-hz` = the
@@ -547,6 +550,12 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
     proven, and whether a slip shows on the wall is not verified.
   - `defects` names every counter: judder (`refreshes.uneven` of `judged`),
     jumps back, lost frames and boundaries, cadence, weights, frozen.
+  - Each lost boundary is located (#272, 6.11.2026): the report's
+    `lost_boundary_list` names the boundary (its run, from 0), the picture
+    after the skip (`sample`) and how many were lost, and a Spout / dxcam
+    take adds that picture's `utc_ms` on the capture's UTC anchors
+    (`wall_frames.lost_boundary_utc`); the take's log line prints it, so a
+    loss can be put on the bridge's 10 s windows and SongPlayer's trace.
   - `incomplete` (exit 3) fails as INCOMPLETE, never as judder or clean.
   - Exit 4 = the wall does not show SongPlayer's program (Arena's clip on
     another source, MAX off with the clip on MAX, the clip not on air), or
@@ -560,6 +569,13 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
   Windows desktop, so dxcam lists only the 3840×2160 primary and cannot see
   it. `scripts/wall_spout.py` reads `Arena - Screen 2`, the picture
   wall-bridge takes, next to it (measured: 0 missed vblanks, 0 drops).
+- **A reboot with the wall TVs off leaves it unable to measure (6.11.2026).**
+  The TVs are normally off (TELKY, Companion 22/0/2). Off after the grid
+  formed disturbs nothing (31.10), but a boot with them off leaves panels B
+  and C undetected, no grid, and Arena presenting at 59.1-59.5 Hz: the reader
+  exits 5 ("not in whole 60 Hz refreshes"). After such a boot press TELKY on,
+  wait for wall-bridge's acquire (~1 min), then the gate measures; TELKY off
+  afterwards is fine.
 - **What it does not see.** The bridge, Surround and the LED processor: a
   clean take says nothing about the screens. A clean take covers only its
   40 s, and the judder comes in waves. `--dxcam` stays for a wall on the
@@ -584,6 +600,13 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
   `inconsistent` boundaries, so no take could be `clean`; 2 and 3 ms read
   both clips clean, 4 ms and more leave `unresolved`. A slip (50 + 16.7 ms)
   still reads uneven (`test_wall_spout.py`).
+- **The rate check allows for its own noise** (#272, 6.11.2026, `rate_noise`):
+  rounding Spout's jittered intervals to whole refreshes flips those near a half
+  refresh, and over a take that moved the sum past `RATE_TOLERANCE` (a healthy
+  Arena read 60.13-60.54 Hz, exit 5). The tolerance is now the larger of it and
+  three standard errors of what the rounding took off; a constant offset or
+  intervals on half refreshes (`HALF_REFRESH_SHARE`) get none. Under heavy
+  jitter a far wrong rate can pass here and then reads as judder, never clean.
 - **A picture's acquire window ends at `receive`** (`NewPictures.update_frame`,
   the shape `time_acquire` stamps): the read-back of each new picture waits
   ~4 ms on the GPU copy.

@@ -37,6 +37,7 @@ import {
   WallFramesReport,
   arenaOutputFailures,
   coveringLayers,
+  refreshRateFailures,
   wallFramesFailures,
 } from "./wall-frames-gate";
 
@@ -73,6 +74,7 @@ interface OnAirItem {
 }
 
 interface ProgramRead {
+  max?: { vblank_period_ns?: number | null };
   source: number | null;
   on_air_item: OnAirItem | null;
 }
@@ -164,7 +166,8 @@ function logTake(label: string, result: Take): void {
       `unresolved ${r?.refreshes?.unresolved ?? "-"}, inconsistent ${r?.refreshes?.inconsistent ?? "-"}, ` +
       `unverified steps ${r?.unverified?.steps ?? "-"}, ` +
       `jumps back ${r?.jumps_back ?? "-"}, ` +
-      `lost ${r?.lost_frames ?? "-"}, decoded ${r?.decoded ?? "-"}/${r?.samples ?? "-"}, ` +
+      `lost ${r?.lost_frames ?? "-"}, lost boundaries ${r?.lost_boundaries ?? "-"} ` +
+      `${JSON.stringify(r?.lost_boundary_list ?? [])}, decoded ${r?.decoded ?? "-"}/${r?.samples ?? "-"}, ` +
       `located ${JSON.stringify(r?.located ?? null)}`,
   );
   if (result.stderr.trim()) {
@@ -226,9 +229,10 @@ test.describe("the LED wall shows every frame, in order, on its cadence (#272)",
       const listed = state.clips.find((c) => c.name === clip.name);
       expect(listed?.imported, `the wall clip ${clip.name} is imported on the box`).toBe(true);
     }
-    startSource = (await program(request)).source;
+    const on = await program(request);
+    startSource = on.source;
 
-    const failures: string[] = [];
+    const failures: string[] = refreshRateFailures(Number(REFRESH_HZ), on.max?.vblank_period_ns);
     for (const clip of CLIPS) {
       const start = await request.post("/api/v1/test-item/start", { data: { clip: clip.name } });
       // The route answers 204 No Content (`api/test_item.rs::post_start`).

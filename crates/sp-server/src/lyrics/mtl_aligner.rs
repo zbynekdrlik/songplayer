@@ -28,8 +28,8 @@ const TIMEOUT_SECS: u64 = 15 * 60;
 const STDERR_TAIL_BYTES: usize = 2048;
 
 /// Where the three mtl-alignment artifacts live under the shared tools dir
-/// — the same dir `LyricsWorker::ensure_script` writes `lyrics_worker.py` /
-/// `measure_lyrics_quality.py` into.
+/// — the same dir `LyricsWorker::ensure_script` writes `lyrics_worker.py`
+/// into.
 #[derive(Debug, Clone)]
 pub struct MtlConfig {
     pub python: PathBuf,

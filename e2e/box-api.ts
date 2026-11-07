@@ -7,7 +7,7 @@
  * copies of them. They live here once, with the fields the specs actually read.
  */
 
-import { expect, APIRequestContext } from "@playwright/test";
+import { expect, APIRequestContext, Locator } from "@playwright/test";
 
 /** One `/api/v1/ndi/health` row (the fields the post-deploy specs read). */
 export interface HealthRow {
@@ -38,8 +38,7 @@ export async function healthRow(
 }
 
 /**
- * A ready dub on the box: `preferVideoId` when that dub is ready, else the
- * first ready one. Fails loudly when no dub is ready — that is the Dabing
+ * A ready dub on the Dabing playlist (`pickReadyDub`). Fails loudly when no dub is ready — that is the Dabing
  * specs' precondition.
  */
 export async function readyDub(
@@ -48,16 +47,46 @@ export async function readyDub(
 ): Promise<{ pid: number; videoId: number }> {
   const dab = await request.get("/api/v1/dabing");
   expect(dab.status()).toBe(200);
-  const body = (await dab.json()) as {
-    playlist_id: number;
-    videos: Array<{ video_id?: number; id?: number; dub_status: string }>;
-  };
-  const ready = body.videos.filter((v) => v.dub_status === "ready");
-  expect(ready.length, "at least one dub must be ready on the box").toBeGreaterThan(0);
+  const body = (await dab.json()) as DabingList;
+  const videoId = pickReadyDub(body, preferVideoId);
+  expect(videoId, "at least one dub must be ready on the Dabing playlist").toBeGreaterThan(0);
+  return { pid: body.playlist_id, videoId: videoId as number };
+}
+
+/** `GET /api/v1/dabing` (the fields the specs read). */
+export interface DabingList {
+  playlist_id: number;
+  videos: Array<{ video_id?: number; id?: number; dub_status: string; playlist_id: number }>;
+}
+
+/**
+ * The ready dub to play, on the Dabing playlist only: `/api/v1/dabing` also lists
+ * a dub asked for on another playlist's song, and ▶ on that row plays it THERE, so
+ * the Dabing output would never decode. `preferVideoId` when it is ready here, else
+ * the first ready one.
+ */
+export function pickReadyDub(body: DabingList, preferVideoId?: number): number | undefined {
+  const ready = body.videos.filter(
+    (v) => v.dub_status === "ready" && v.playlist_id === body.playlist_id,
+  );
   // DubRow carries the id as `video_id` (the row is keyed by the video).
   const ids = ready.map((v) => Number(v.video_id ?? v.id));
-  const videoId =
-    preferVideoId !== undefined && ids.includes(preferVideoId) ? preferVideoId : ids[0];
-  expect(videoId, "the ready dub must carry a numeric video id").toBeGreaterThan(0);
-  return { pid: body.playlist_id, videoId };
+  return preferVideoId !== undefined && ids.includes(preferVideoId) ? preferVideoId : ids[0];
+}
+
+/**
+ * Puts a control in the middle of the viewport before a real-mouse drag. Measured
+ * on the box (#184, A/B/A/B): a fader 0.23 px over the top edge is scrolled 128 px
+ * by Chrome when the press focuses it, so the drag lands on a control that moved
+ * (released at 94 % instead of 0 %), and one fully in view stays put. An explicit
+ * scroll, because `scrollIntoView({ block: "center" })` left that fader at the edge.
+ */
+export async function centreForDrag(control: Locator): Promise<void> {
+  await control.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    window.scrollBy({
+      top: r.top - (window.innerHeight - r.height) / 2,
+      behavior: "instant",
+    });
+  });
 }

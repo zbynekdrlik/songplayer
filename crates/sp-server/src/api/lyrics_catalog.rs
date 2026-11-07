@@ -19,8 +19,6 @@
 //!
 //! Idempotent — calling twice produces zeros on the second call (the WHERE
 //! clauses no longer match after the first call).
-//!
-//! See `docs/superpowers/specs/2026-05-16-lyrics-source-gating-design.md`.
 
 use crate::AppState;
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};

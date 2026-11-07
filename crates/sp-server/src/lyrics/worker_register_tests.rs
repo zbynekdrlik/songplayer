@@ -366,7 +366,8 @@ fn a_peer_check_scan_is_due_first_and_then_every_ten_minutes() {
 
 /// The fresh path (`process_song` needs the whole pipeline): the check runs
 /// after the translation and before the persist, the stamp after it, and
-/// both translation passes run the stale pass.
+/// the empty-queue tick runs the stale pass (#286: the idle-only wall-wait
+/// tick that also ran it is gone).
 #[test]
 fn the_worker_checks_a_fresh_track_between_its_translation_and_its_persist() {
     let src = include_str!("worker.rs");
@@ -384,8 +385,8 @@ fn the_worker_checks_a_fresh_track_between_its_translation_and_its_persist() {
     assert_eq!(
         src.matches("self.recheck_next_stale_register().await;")
             .count(),
-        2,
-        "the wall-wait tick and the empty-queue tick both run the stale pass"
+        1,
+        "the empty-queue tick runs the stale pass"
     );
 }
 

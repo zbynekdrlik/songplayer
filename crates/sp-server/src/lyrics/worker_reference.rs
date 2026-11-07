@@ -35,11 +35,11 @@ impl LyricsWorker {
     /// Returns `Ok(Some(LyricsTrack))` on gate PASS — the caller ships it
     /// directly (★). Returns `Ok(None)` on skip/FAIL/ERROR — the caller falls
     /// through to the v22 g35t base tier (`worker_g35t`). Returns
-    /// `Err(HeavyDefer)` (#161/#162) when the whole song must defer with NO
-    /// backoff: `WallAbort` (the mtl subprocess was killed mid-align because the
-    /// wall became busy → WaitingForWall) or `Memory` (free RAM/commit below the
-    /// floor before the mtl spawn → WaitingForMemory). Either way the caller
-    /// NEVER degrades to the base tier — the next pick re-runs mtl to identical ★.
+    /// `Err(HeavyDefer)` (#162) when the whole song must defer with NO
+    /// backoff: `StartupGrace` (the engine just started → WaitingForWall) or
+    /// `Memory` (free RAM/commit below the floor before the mtl spawn →
+    /// WaitingForMemory). The caller NEVER degrades to the base tier — the
+    /// next pick re-runs mtl to identical ★.
     pub(crate) async fn run_mtl_reference_stage(
         &self,
         youtube_id: &str,
@@ -242,21 +242,6 @@ impl LyricsWorker {
                 )
                 .await;
                 Ok(None)
-            }
-            crate::lyrics::orchestrator::ReferenceStageResult::WallAborted { detail } => {
-                // #161: mtl was killed because the wall became busy — this is
-                // NOT an alignment failure, so no audit sidecar and
-                // `lyrics_reference` is left untouched. Bubble the abort up so
-                // the caller defers the whole song (WaitingForWall) and re-runs
-                // mtl to identical output on the next idle pick.
-                info!(
-                    youtube_id = %youtube_id,
-                    detail = %detail,
-                    "reference_stage: mtl aborted — wall became busy (#161)"
-                );
-                Err(crate::lyrics::heavy_plan::HeavyDefer::WallAbort(
-                    crate::lyrics::idle_gate_abort::WallAbort { detail },
-                ))
             }
         }
     }

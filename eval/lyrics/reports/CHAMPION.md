@@ -5,7 +5,7 @@
 **Promoted:** 2026-05-19 (initial baseline measured)
 **Mean score:** 4.4 / 10 (5-fixture first-pass baseline)
 **Wall-acceptable:** 1 / 5 fixtures
-**Detail report:** `reports/2026-05-19-whisperx-large-v3.md` / `.json`
+**Detail report:** deleted with the retired backend (#286, 6.11.2026); its scores stay in `reports/history.md`
 
 ## Promotion log
 

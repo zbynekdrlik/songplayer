@@ -10,7 +10,7 @@ use super::*;
 mod priority_with_timing_tests {
     use super::*;
 
-    /// Spec table from docs/superpowers/specs/2026-05-07-text-reference-merge-unification-design.md.
+    /// The full source × timing priority table.
     /// Tier-break: timed sources outrank text-only of the same name; description outranks
     /// every other text source.
     #[test]

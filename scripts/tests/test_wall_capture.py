@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import random
 import sys
 import time
 import types
@@ -428,6 +429,7 @@ def test_a_dxcam_present_rate_must_be_whole_refreshes():
     with pytest.raises(ValueError, match="59.880 Hz"):
         wa.check_present_rate([n / 59.88 for n in range(300)], 60, [0.0005] * 300)
     wa.check_present_rate([n / 59.94 for n in range(300)], 60, [0.0005] * 300)
+
     # Only pictures timed within TIMED_SHARE of a refresh count (successive
     # ones, untimed between), the acquire window included; too few cannot
     # check the rate, and an unchecked rate is refused too (review round 7).
@@ -443,6 +445,50 @@ def test_a_dxcam_present_rate_must_be_whole_refreshes():
     with pytest.raises(ValueError, match="cannot be checked"):
         wa.check_present_rate(every[: wa.MIN_TIMED], 45, timed[: wa.MIN_TIMED])
     wa.check_present_rate(every[: wa.MIN_TIMED + 2], 60, timed[: wa.MIN_TIMED + 2])
+
+
+def noisy_presents(seed: int, rate: float, jitter: float) -> list[float]:
+    """Pictures on a ``rate`` Hz grid, mostly every second refresh, some one
+    refresh early or late, each instant off by up to ``jitter`` s: what a Spout
+    reader sees of Arena (a picture lands when Arena finishes it)."""
+    rng = random.Random(seed)
+    at = 0.0
+    times = [0.0]
+    for _ in range(1200):
+        at += rng.choices([1, 2, 3], [0.05, 0.9, 0.05])[0] / rate
+        times.append(at + rng.uniform(-jitter, jitter))
+    return times
+
+
+def test_a_noisy_capture_of_the_right_rate_is_not_refused():
+    """#272, CI 42240163120: "the wall presents at 60.130 Hz" for a healthy
+    Arena. Intervals near a half refresh round to either side, and the flips
+    move the sum past RATE_TOLERANCE, so the check allows for its own noise."""
+    for seed in range(20):
+        times = noisy_presents(seed, 60, 0.009)
+        wa.check_present_rate(times, 60, [0.0005] * len(times))
+
+
+def test_a_noisy_capture_updating_every_refresh_is_not_refused():
+    """Release review: rounding an interval under half a refresh up to one
+    refresh pushed the measured rate up, one-sidedly, past the check's noise."""
+    for seed in range(6):
+        rng = random.Random(seed)
+        times = sorted(n / 60 + rng.uniform(-0.009, 0.009) for n in range(1200))
+        wa.check_present_rate(times, 60, [0.0005] * len(times))
+
+
+def test_pictures_far_faster_than_the_refresh_are_a_wrong_rate_not_a_crash():
+    times = [n / 1000 for n in range(1200)]
+    with pytest.raises(ValueError, match="not in whole 60 Hz"):
+        wa.check_present_rate(times, 60, [0.0] * len(times))
+
+
+def test_a_noisy_capture_still_catches_a_wrong_rate():
+    for seed in range(6):
+        times = noisy_presents(seed, 57, 0.003)
+        with pytest.raises(ValueError, match="not in whole 60 Hz"):
+            wa.check_present_rate(times, 60, [0.0005] * len(times))
 
 
 def test_a_locked_recording_must_be_the_wall_s_own_refreshes():

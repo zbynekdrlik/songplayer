@@ -429,10 +429,7 @@ impl DubWorker {
         }
         let activity =
             wall_activity_from(self.ndi_health_registry.as_ref(), self.obs_state.as_ref()).await;
-        let plan = HeavyStepPlan::for_activity(
-            crate::lyrics::heavy_plan::ProcessingMode::LowPriority,
-            activity,
-        );
+        let plan = HeavyStepPlan::for_activity(activity);
         // #203: publish the live containment for the dub child (CPU cap +
         // affinity + memory priority), applied by the shared Job Object seam.
         crate::lyrics::heavy_slot::refresh_containment(&self.pool).await;

@@ -32,7 +32,6 @@ Every SongPlayer node (SNV, PP) is to serve what it has processed and ask its
 peers before a heavy job, so no node redoes what another already did.
 
 Spec: `docs/superpowers/specs/2026-10-06-pp-site-node-exchange-design.md`.
-Plan: `docs/superpowers/plans/2026-10-06-pp-node-exchange.md`.
 
 Lane 1 ships the settings, their validation and the status route below.
 Lane 2 ships the exchange's vocabulary: kinds, versions, wire types, the job

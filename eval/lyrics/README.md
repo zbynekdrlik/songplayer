@@ -6,7 +6,6 @@ Claude-orchestrated scoring rig for lyrics-alignment backends. Invoke via the
 See:
 
 - `docs/superpowers/specs/2026-05-18-lyrics-eval-harness-design.md` — design
-- `docs/superpowers/plans/2026-05-18-lyrics-eval-harness.md` — implementation plan
 - `.claude/skills/lyrics-eval/SKILL.md` — slash-command instructions
 
 ## Directory contents
@@ -16,7 +15,7 @@ See:
 | `manifest.json` | Pinned fixture set (24 songs with line-synced gold, ~4 per category). Rebuild via `build_manifest.py`. |
 | `build_manifest.py` | One-shot helper to (re)build the manifest from the production SongPlayer HTTP API. |
 | `audio_prep.py` | yt-dlp + Mel-Roformer + anvuew dereverb on win-resolume. Shells out to `scripts/lyrics_worker.py preprocess-vocals`. |
-| `backends/` | One Python file per backend. Ships `gemini_3_5_transcribe.py` (Gemini 3.5 Transcribe — the ASR production uses since v22: the ★ tier's gate and the base tier's lines; `--wav`/`--out` CLI) and `gemini38_flash.py` (the #144 one-call Gemini 3.8 Flash eval, driven by `run_one_call.py`). The 2026-05-19 wrappers (`whisperx-large-v3`, `gemini-3-1-flash-lite`, `assemblyai-universal-3-pro`) are deleted; their reports stay in `reports/`. |
+| `backends/` | One Python file per backend. Ships `gemini_3_5_transcribe.py` (Gemini 3.5 Transcribe — the ASR production uses since v22: the ★ tier's gate and the base tier's lines; `--wav`/`--out` CLI) and `gemini38_flash.py` (the #144 one-call Gemini 3.8 Flash eval, driven by `run_one_call.py`). The 2026-05-19 wrappers (`whisperx-large-v3`, `gemini-3-1-flash-lite`, `assemblyai-universal-3-pro`) are deleted, and so are their reports; `reports/history.md` keeps their scores. |
 | `judge_prompt.md` | Versioned judge prompt Claude follows when scoring fixtures. |
 | `schemas/` | JSONSchemas (`manifest`, `report`, `judgment`). |
 | `reports/` | Committed per-run reports + `CHAMPION.md` + `history.md`. |

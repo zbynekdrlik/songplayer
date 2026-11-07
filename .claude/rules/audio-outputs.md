@@ -31,10 +31,9 @@ paths:
 
 # Program audio outputs (#233)
 
-Spec `docs/superpowers/specs/2026-10-07-audio-outputs-asio-design.md`, plan
-`docs/superpowers/plans/2026-10-07-audio-outputs-asio.md` (three lanes; lane
-1: the output list + VBAN per destination; lane 3: the ASIO output over
-`azo`). Lane 2's section (the drift servo, the ASRC) comes first, then lane
+Spec `docs/superpowers/specs/2026-10-07-audio-outputs-asio-design.md`, shipped
+in three lanes (lane 1: the output list + VBAN per destination; lane 3: the
+ASIO output over `azo`). Lane 2's section (the drift servo, the ASRC) comes first, then lane
 1's, then lane 3's (the ASIO output).
 
 ## The low-latency switch `audio_low_latency` (#289 step 1)
@@ -58,10 +57,12 @@ start):
   list with it (`plan_at`, `built_at`): a VBAN output built with the other
   value is a changed entry — rebuilt (`discard` + a new output, its frame
   counter from 0), never a restart. OFF is byte for byte today's: `plan`,
-  `VbanOut::for_entry`, `VbanRateConverter::new`, `send_latency_100ns`,
-  `max_wait_100ns` and `vban_latency_ms` are the OFF forms of the new
-  `*_at` / `*_in` / `for_latency` functions, and every #233 test is
-  unchanged.
+  `VbanOut::for_entry` and `VbanRateConverter::new` are the OFF forms of
+  the new `*_at` / `*_in` / `for_latency` functions (#286 deleted the
+  test-only OFF forms `send_latency_100ns`, `vban_latency_ms` and
+  `max_wait_100ns`: their tests call `send_latency_in` /
+  `vban_latency_ms_at` / `max_wait_in` with `false`; the wait cap OFF =
+  `VBAN_MAX_WAIT_100NS` + the delay), and every #233 assertion holds.
 - ON, every VBAN output (`vban-out.md`, "The low-latency switch"): L =
   15 ms (`VBAN_SEND_LATENCY_LOW_100NS` 150 000), the wait cap 4 × L =
   60 ms + the delay (`max_wait_in`); a converting destination is NOT
@@ -139,7 +140,7 @@ the answer to `Asrc::set_correction_ppm` and (through `frames_from_100ns`:
 positive = insert, negative = skip) `Splice::insert` / `skip`, and pushes
 `Splice::process(Asrc::process(block))` into the card's ring.
 
-**Since #285 step 3 the LAWS live in dstack-resample** (dstack tag v0.6.43,
+**Since #285 step 3 the LAWS live in dstack-resample** (dstack tag v0.6.52,
 MIT OR Apache-2.0, `crates/dstack-resample/src/asrc.rs` + `lib.rs` in the
 dstack checkout): `Servo` is a thin ADAPTER over
 `dstack_resample::asrc::Controller` (`Controller::new(target, floor 38.3 ms,
@@ -690,7 +691,7 @@ start — Windows: the UDP bind or the spawn failed — is "waiting" with
 `VbanOut::start_error` as its reason, never "opening" for good, and is
 rebuilt — retried — on the outputs task's next pass, `RunningOutput::start_failed`), reason, rate, format,
 channels, delay_ms, latency_ms (L + delay + the converter,
-`vban_latency_ms`), blocks_sent, blocks_dropped, vban: {#210's VbanStatus +
+`vban_latency_ms_at`), blocks_sent, blocks_dropped, vban: {#210's VbanStatus +
 blocks_sent}}`, `audio_network_rate`, `outputs_problems`; the cut answer
 carries them too. A waiting VBAN output also carries `reason_code`
 (`vban_reason_code`, release review): its cause — `not_built`,
@@ -1509,7 +1510,7 @@ difference with its UTC time.
   Since dstack v0.6.12 (dstack #102, 3.11.2026) every dstack crate is MIT OR
   Apache-2.0 (checked in the checkout's Cargo.toml files), so the license no
   longer keeps #285 off `main`. `THIRD-PARTY-NOTICES.txt` names dstack
-  0.6.43 (dlink, dstack, dstack-audio-io, dstack-resample) with its
+  0.6.52 (dlink, dstack, dstack-audio-io, dstack-resample) with its
   LICENSE-MIT verbatim (it named 0.5.11 under the GPL until step 3).
 - `type: dante` in `audio_outputs`, at most one, `DanteDest {device, ip}`: the
   device name by Dante's own rule, the `ip` one IPv4 of this PC (a second
@@ -1517,7 +1518,7 @@ difference with its UTC time.
 - `DanteDevice` (`dante_device.rs`) implements the `AsioDevice` seam **in this
   process**, on every platform, with no `sp-dante-host` (the owner's ruling):
   `asio_out`'s worker, ring, `asrc_servo` and status serve it, so a second servo
-  never appears. dstack by git tag (v0.6.43), no Dante protocol code here.
+  never appears. dstack by git tag (v0.6.52), no Dante protocol code here.
   #285 step 2 (the owner's ruling via dstack #90: one rate conversion, in
   dlink, for every app): `DanteParams.rate` is `PROGRAM_RATE` (48 kHz, what the
   worker writes) and `network_rate` the entry's effective rate; `config()` sets

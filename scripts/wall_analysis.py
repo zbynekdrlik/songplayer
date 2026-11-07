@@ -100,6 +100,9 @@ LIST_MAX = 20
 UNEVEN_BOUNDARIES_MAX = 64
 # check_present_rate() needs this many timed intervals.
 MIN_TIMED = 10
+# A median distance from whole refreshes at or over this is no noise (0.5 =
+# every interval on a half refresh, uniform jitter about whole ones = 0.25).
+HALF_REFRESH_SHARE = 0.4
 
 
 @dataclass(frozen=True)
@@ -533,6 +536,14 @@ def analyse(
         "lost_frames": len(losses["lost"]),
         "lost_frame_list": losses["lost"][:LIST_MAX],
         "lost_boundaries": sum(s.lost for s in steps),
+        # Where each loss is (#272, 6.11.2026): the boundary (its run's
+        # number from 0) and picture (sample) after the skip, so a gate can
+        # name its instant.
+        "lost_boundary_list": [
+            {"boundary": i + 1, "sample": s.sample, "lost": s.lost}
+            for i, s in enumerate(steps)
+            if s.lost
+        ][:LIST_MAX],
         "jumps_back": len(jumps),
         "jump_back_samples": jumps[:LIST_MAX],
         "cadence_errors": sum(s.kind == "cadence" for s in steps),
@@ -949,6 +960,28 @@ def check_locked(times: list[float], refresh_hz: float) -> None:
         )
 
 
+def rate_noise(timed: list[float], whole: list[int], refresh_hz: float) -> float:
+    """How far (a share of the rate) rounding noisy intervals to whole refreshes
+    can move the measured rate: three standard errors of what the rounding
+    took off each one. A Spout picture lands when Arena finishes it, so an
+    interval near a half refresh rounds to either side (#272: a healthy Arena
+    read 60.130 Hz). Instants on the refreshes round to nothing, and a constant
+    offset, a wrong rate, has no spread: both leave ``RATE_TOLERANCE``. Known
+    limit, measured: with jitter near a refresh a wrong rate, far or near, can
+    pass here, because the residuals wrap evenly whatever the rate. The wall
+    gate therefore checks ``--refresh-hz`` against the box's own measured
+    refresh (``refreshRateFailures``, ``e2e/wall-frames-gate.ts``)."""
+    rounded_off = [d * refresh_hz - w for d, w in zip(timed, whole)]
+    # Intervals that mostly sit on half refreshes (80 Hz read as 120) are a
+    # wrong rate rounding both ways, not noise.
+    if statistics.median(abs(r) for r in rounded_off) >= HALF_REFRESH_SHARE:
+        return 0.0
+    if not any(whole):
+        return 0.0
+    spread = statistics.pstdev(rounded_off) / math.sqrt(len(rounded_off))
+    return 3 * spread / statistics.fmean(whole)
+
+
 def check_present_rate(
     times: list[float],
     refresh_hz: float,
@@ -960,7 +993,7 @@ def check_present_rate(
     of a refresh: its poll before plus its acquire window ``late``) are
     whole numbers of refreshes at the given rate: their refreshes over
     their sum, the rate measured over the whole capture, matches it to
-    ``RATE_TOLERANCE``. Else ``--refresh-hz`` is not the wall's
+    ``RATE_TOLERANCE``, or to its own noise (``rate_noise``). Else ``--refresh-hz`` is not the wall's
     (``ValueError``). Fewer than ``MIN_TIMED`` such intervals: the rate
     cannot be checked, and an unchecked rate would read as judder or losses
     (review round 7), so that is a ``ValueError`` too."""
@@ -974,9 +1007,13 @@ def check_present_rate(
             f" {refresh_hz:g} Hz refresh rate cannot be checked (a faster capture,"
             " or a smaller --region)"
         )
-    whole = [max(1, round(d * refresh_hz)) for d in timed]
+    # Never clamped up to one refresh: over the whole capture that pushes the
+    # measured rate up, one-sidedly, when a sender updates on every refresh.
+    whole = [round(d * refresh_hz) for d in timed]
     measured = sum(whole) / sum(timed)
-    if abs(measured / refresh_hz - 1) > RATE_TOLERANCE:
+    if abs(measured / refresh_hz - 1) > max(
+        RATE_TOLERANCE, rate_noise(timed, whole, refresh_hz)
+    ):
         raise ValueError(
             f"the wall presents at {measured:.3f} Hz, not in whole {refresh_hz:g} Hz"
             " refreshes: give the wall's own --refresh-hz"

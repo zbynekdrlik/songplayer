@@ -1,13 +1,13 @@
 //! #162 — CPU/GPU **priority regime** for the heavy lyrics/stem subprocesses.
 //!
-//! Replaces the #154 idle-ONLY gate (which STOPPED all heavy work while the
+//! Replaces the #154 idle-only gate (which STOPPED all heavy work while the
 //! wall played) with a per-heavy-step PLAN. Owner ruling (2026-09-15):
 //! processing must keep running during playback, at a priority that cannot
-//! disturb the wall — *stopping is not the solution*.
+//! disturb the wall — *stopping is not the solution*. There is no idle-only
+//! mode (#286: it was never approved).
 //!
-//! Pure decision core: [`ProcessingMode`] + [`HeavyStepPlan::for_activity`]
-//! decide device / priority / thread-cap from the mode and the live
-//! [`WallActivity`]; the thin [`HeavyStepPlan::apply`] seam stamps the resulting
+//! Pure decision core: [`HeavyStepPlan::for_activity`] decides device /
+//! priority / thread-cap from the live [`WallActivity`]; the thin [`HeavyStepPlan::apply`] seam stamps the resulting
 //! env (`CUDA_VISIBLE_DEVICES` / `OMP|MKL|TORCH_NUM_THREADS`) + Windows
 //! priority-class creation flags onto a subprocess `Command`. The worker-side
 //! regime orchestration (`impl LyricsWorker`) is added alongside the wiring.
@@ -25,33 +25,6 @@ use tokio::process::Command;
 /// (≈85 min), enough for ~6× realtime plus model load. Applied by
 /// [`heavy_step_timeout`].
 pub(crate) const CPU_TIMEOUT_MULTIPLIER: u32 = 4;
-
-/// The single operator switch — replaces the removed `lyrics_gate_when_playing`
-/// boolean (#162, `MIGRATION_V25`). DEFAULT [`LowPriority`](ProcessingMode::LowPriority):
-/// keep processing during playback at reduced priority. [`IdleOnly`](ProcessingMode::IdleOnly)
-/// is the pre-#162 behaviour, kept ONLY as an operator option — never the
-/// default (the owner never approved idle-only as the default).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ProcessingMode {
-    #[default]
-    LowPriority,
-    IdleOnly,
-}
-
-impl ProcessingMode {
-    /// Parse the `lyrics_processing_mode` setting. Unset / unrecognised →
-    /// `LowPriority` (the default). The migration of the removed
-    /// `lyrics_gate_when_playing` boolean is a no-op at READ time: BOTH old
-    /// values fold to `LowPriority` (see `MIGRATION_V25`), so an absent
-    /// `lyrics_processing_mode` correctly yields the low-priority default
-    /// whatever the stale boolean once was.
-    pub(crate) fn from_setting(raw: Option<&str>) -> Self {
-        match raw.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
-            Some("idle-only") | Some("idle_only") | Some("idle") => Self::IdleOnly,
-            _ => Self::LowPriority,
-        }
-    }
-}
 
 /// Which processor a heavy step runs on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,8 +71,8 @@ impl HeavyStepPlan {
         }
     }
 
-    /// gpu: `BELOW_NORMAL_PRIORITY_CLASS`, no thread cap — the pre-#162 idle
-    /// behaviour, used when the wall is idle (fast) or in idle-only mode.
+    /// gpu: `BELOW_NORMAL_PRIORITY_CLASS`, no thread cap — used while the wall
+    /// is idle (fast).
     pub(crate) fn gpu_below_normal() -> Self {
         Self {
             device: Device::Gpu,
@@ -108,17 +81,14 @@ impl HeavyStepPlan {
         }
     }
 
-    /// The plan for running ONE heavy step under `mode` with the wall in
-    /// `activity`.
-    ///
-    /// - `LowPriority` + wall in use → **cpu-idle** (GPU untouched, so the wall
-    ///   never stutters — the whole point of #162).
-    /// - everything else — `LowPriority` while the wall is idle, or `IdleOnly`
-    ///   (which only ever RUNS when idle, deferring otherwise) → **gpu**.
-    pub(crate) fn for_activity(mode: ProcessingMode, activity: WallActivity) -> Self {
-        match mode {
-            ProcessingMode::LowPriority if activity.in_use() => Self::cpu_idle(),
-            _ => Self::gpu_below_normal(),
+    /// The plan for running ONE heavy step with the wall in `activity`:
+    /// wall in use → **cpu-idle** (GPU untouched, so the wall never stutters —
+    /// the whole point of #162); wall idle → **gpu**.
+    pub(crate) fn for_activity(activity: WallActivity) -> Self {
+        if activity.in_use() {
+            Self::cpu_idle()
+        } else {
+            Self::gpu_below_normal()
         }
     }
 
@@ -390,12 +360,11 @@ fn cpu_idle_threads_for(cores: usize, block: usize) -> usize {
 }
 
 // ---------------------------------------------------------------------------
-// Worker-side regime orchestration (thin I/O seam — reads the live setting +
-// wall handles, drives the isolation step under the chosen plan). Kept here so
+// Worker-side regime orchestration (thin I/O seam — reads the live wall
+// handles, drives the isolation step under the chosen plan). Kept here so
 // worker.rs stays under the 1000-line CI cap (#162).
 // ---------------------------------------------------------------------------
 
-use crate::lyrics::idle_gate_abort::WallAbort;
 use crate::lyrics::worker_outcome::SongOutcome;
 use std::path::PathBuf;
 
@@ -403,8 +372,6 @@ use std::path::PathBuf;
 /// per-row backoff — both map to a no-penalty `SongOutcome` in `defer_heavy`.
 #[derive(Debug)]
 pub(crate) enum HeavyDefer {
-    /// #161: the wall went busy mid-GPU-step (idle-only mode) → `WaitingForWall`.
-    WallAbort(WallAbort),
     /// #162: free RAM/commit below `HEAVY_STEP_MIN_FREE_BYTES` before the step
     /// (the WARN is already logged where the headroom was read) → `WaitingForMemory`.
     Memory,
@@ -420,29 +387,6 @@ pub(crate) enum HeavyDefer {
 }
 
 impl crate::lyrics::worker::LyricsWorker {
-    /// The live `lyrics_processing_mode` operator setting (default low-priority),
-    /// read each tick so a dashboard flip takes effect within one worker poll.
-    #[cfg_attr(test, mutants::skip)]
-    pub(crate) async fn processing_mode(&self) -> ProcessingMode {
-        let raw = crate::db::models::get_setting(&self.pool, "lyrics_processing_mode")
-            .await
-            .ok()
-            .flatten();
-        ProcessingMode::from_setting(raw.as_deref())
-    }
-
-    /// Loop-level defer decision. Only `IdleOnly` mode defers on a busy wall
-    /// (the pre-#162 gate + idle-settle hysteresis); `LowPriority` NEVER defers
-    /// — it runs every heavy step at reduced priority instead. Returns the
-    /// activity snapshot for the log/badge either way.
-    #[cfg_attr(test, mutants::skip)]
-    pub(crate) async fn loop_should_defer(&self, mode: ProcessingMode) -> (bool, WallActivity) {
-        match mode {
-            ProcessingMode::IdleOnly => self.wall_gate_should_defer().await,
-            ProcessingMode::LowPriority => (false, self.wall_activity().await),
-        }
-    }
-
     /// Human detail for the per-step regime log: the playing playlist's
     /// `ndi_output_name` label when the wall is in use, else the generic reason
     /// or `idle`.
@@ -469,16 +413,11 @@ impl crate::lyrics::worker::LyricsWorker {
         activity.reason().unwrap_or("wall in use").to_string()
     }
 
-    /// The dashboard worker-state suffix for a heavy step under this mode +
-    /// activity. `LowPriority` while the wall is in use → ` (cpu, wall in use)`
-    /// (surfaced through the existing stage string); otherwise empty. The
-    /// idle-only "waiting — wall in use" badge is unchanged and lives on its own
-    /// deferral path (`enter_wall_wait`).
-    pub(crate) fn stage_regime_suffix(
-        mode: ProcessingMode,
-        activity: WallActivity,
-    ) -> &'static str {
-        if mode == ProcessingMode::LowPriority && activity.in_use() {
+    /// The dashboard worker-state suffix for a heavy step under this
+    /// activity: wall in use → ` (cpu, wall in use)` (surfaced through the
+    /// existing stage string); otherwise empty.
+    pub(crate) fn stage_regime_suffix(activity: WallActivity) -> &'static str {
+        if activity.in_use() {
             " (cpu, wall in use)"
         } else {
             ""
@@ -494,15 +433,13 @@ impl crate::lyrics::worker::LyricsWorker {
     /// → `Err(HeavyDefer::WaitForStems)` (no-penalty defer); ready → feed the
     /// sidecar into the dereverb step below.
     ///
-    /// - `LowPriority` + wall idle → GPU with the abort watcher armed; if the
-    ///   wall goes busy mid-isolation the GPU child is killed and isolation
-    ///   re-runs IMMEDIATELY on CPU (no defer, no idle wait).
-    /// - `LowPriority` + wall in use → CPU-idle, abort watcher OFF (a CPU/IDLE
-    ///   job cannot disturb the wall, so it is never aborted).
-    /// - `IdleOnly` → GPU with the abort watcher armed; an abort surfaces as
-    ///   `Err(HeavyDefer::WallAbort)` so the caller defers the whole song.
+    /// - wall idle → GPU with the abort watcher armed; if the wall goes busy
+    ///   mid-isolation the GPU child is killed and isolation re-runs
+    ///   IMMEDIATELY on CPU (no defer, no idle wait).
+    /// - wall in use → CPU-idle, abort watcher OFF (a CPU/IDLE job cannot
+    ///   disturb the wall, so it is never aborted).
     ///
-    /// A pre-step low-memory reading (either mode) returns
+    /// A pre-step low-memory reading returns
     /// `Err(HeavyDefer::Memory)` BEFORE the slot — the song defers with no
     /// backoff and re-runs when memory frees (#162).
     #[cfg_attr(test, mutants::skip)]
@@ -510,7 +447,6 @@ impl crate::lyrics::worker::LyricsWorker {
         &self,
         row: &crate::db::models::VideoLyricsRow,
         gpu_mem: Option<&str>,
-        mode: ProcessingMode,
     ) -> Result<Option<PathBuf>, HeavyDefer> {
         // #167: no heavy step for the first 60 s after engine start — the wall
         // pipelines must come up on a quiet box. No backoff; the song is re-picked
@@ -550,7 +486,7 @@ impl crate::lyrics::worker::LyricsWorker {
             Err(crate::lyrics::heavy_slot::HeadroomLow) => return Err(HeavyDefer::Memory),
         };
         let activity = self.wall_activity().await;
-        let plan = HeavyStepPlan::for_activity(mode, activity);
+        let plan = HeavyStepPlan::for_activity(activity);
         let detail = self.wall_regime_detail(activity).await;
         let timeout =
             crate::lyrics::idle_gate_abort::isolation_step_timeout(&plan, row.duration_ms);
@@ -559,54 +495,40 @@ impl crate::lyrics::worker::LyricsWorker {
             plan.label(),
             timeout.as_secs()
         );
-        let result = match (mode, plan.is_gpu()) {
-            (ProcessingMode::LowPriority, true) => {
-                match self
-                    .isolate_vocals(row, &vocals_in, gpu_mem, &plan, true)
-                    .await
-                {
-                    Ok(v) => Ok(v),
-                    Err(abort) => {
-                        let cpu = HeavyStepPlan::cpu_idle();
-                        let cpu_timeout = crate::lyrics::idle_gate_abort::isolation_step_timeout(
-                            &cpu,
-                            row.duration_ms,
-                        );
-                        tracing::info!(
-                            "lyrics_worker: heavy step isolation re-run mode=cpu-idle \
-                             timeout={}s after GPU abort ({})",
-                            cpu_timeout.as_secs(),
-                            abort.detail
-                        );
-                        // abort_enabled=false → runs to completion, never Err.
-                        self.isolate_vocals(row, &vocals_in, gpu_mem, &cpu, false)
-                            .await
-                    }
-                }
+        if !plan.is_gpu() {
+            return Ok(self
+                .isolate_vocals_unwatched(row, &vocals_in, gpu_mem, &plan)
+                .await);
+        }
+        match self
+            .isolate_vocals(row, &vocals_in, gpu_mem, &plan, true)
+            .await
+        {
+            Ok(v) => Ok(v),
+            Err(abort) => {
+                let cpu = HeavyStepPlan::cpu_idle();
+                let cpu_timeout =
+                    crate::lyrics::idle_gate_abort::isolation_step_timeout(&cpu, row.duration_ms);
+                tracing::info!(
+                    "lyrics_worker: heavy step isolation re-run mode=cpu-idle \
+                     timeout={}s after GPU abort ({})",
+                    cpu_timeout.as_secs(),
+                    abort.detail
+                );
+                Ok(self
+                    .isolate_vocals_unwatched(row, &vocals_in, gpu_mem, &cpu)
+                    .await)
             }
-            (ProcessingMode::LowPriority, false) => {
-                self.isolate_vocals(row, &vocals_in, gpu_mem, &plan, false)
-                    .await
-            }
-            (ProcessingMode::IdleOnly, _) => {
-                self.isolate_vocals(row, &vocals_in, gpu_mem, &plan, true)
-                    .await
-            }
-        };
-        result.map_err(HeavyDefer::WallAbort)
+        }
     }
 
-    /// Map a [`HeavyDefer`] to its no-penalty `SongOutcome`: a `WallAbort`
-    /// surfaces the "waiting — wall in use" badge (`WaitingForWall`); a `Memory`
-    /// defer clears the in-flight marker so the selector re-picks next tick
-    /// (`WaitingForMemory`). Neither touches the per-row backoff.
+    /// Map a [`HeavyDefer`] to its no-penalty `SongOutcome`: a `Memory` defer
+    /// clears the in-flight marker so the selector re-picks next tick
+    /// (`WaitingForMemory`); the startup grace surfaces the "waiting — wall in
+    /// use" badge (`WaitingForWall`). None touches the per-row backoff.
     #[cfg_attr(test, mutants::skip)]
     pub(crate) async fn defer_heavy(&self, d: HeavyDefer) -> SongOutcome {
         match d {
-            HeavyDefer::WallAbort(abort) => {
-                self.enter_wall_abort(&abort.detail).await;
-                SongOutcome::WaitingForWall
-            }
             HeavyDefer::Memory => {
                 self.clear_processing().await;
                 SongOutcome::WaitingForMemory

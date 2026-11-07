@@ -141,7 +141,6 @@ impl LyricsWorker {
         candidate_texts: Vec<crate::lyrics::provider::CandidateText>,
         clean_vocal: Option<&Path>,
         gpu_mem: Option<String>,
-        mode: crate::lyrics::heavy_plan::ProcessingMode,
         started_at_unix_ms: i64,
     ) -> anyhow::Result<TierOutcome> {
         let outcome = self
@@ -150,7 +149,6 @@ impl LyricsWorker {
                 candidate_texts,
                 clean_vocal,
                 gpu_mem,
-                mode,
                 started_at_unix_ms,
             )
             .await?;
@@ -168,7 +166,6 @@ impl LyricsWorker {
         candidate_texts: Vec<crate::lyrics::provider::CandidateText>,
         clean_vocal: Option<&Path>,
         gpu_mem: Option<String>,
-        mode: crate::lyrics::heavy_plan::ProcessingMode,
         started_at_unix_ms: i64,
     ) -> anyhow::Result<TierOutcome> {
         let video_id = row.id;
@@ -192,11 +189,10 @@ impl LyricsWorker {
             gemini_keys: gemini_keys.clone(),
             gpu_mem_setting: gpu_mem,
             // #161/#162: the backend wraps ONLY the mtl subprocess (never the
-            // g35t HTTP transcription), using these handles + the once-read
-            // processing mode (which selects the mtl plan + abort arming).
+            // g35t HTTP transcription), using these handles to pick the mtl
+            // plan and arm the abort watcher.
             ndi_health_registry: self.ndi_health_registry.clone(),
             obs_state: self.obs_state.clone(),
-            mode,
         };
 
         let transcript = match transcribe_vocal(
@@ -239,27 +235,6 @@ impl LyricsWorker {
             crate::lyrics::claude_merge::best_authoritative_candidate(&candidates).cloned()
         });
 
-        // #154 gate #2 (idle-only mode only, #162). Isolation above may have
-        // started while the wall was idle and finished after it went busy — a
-        // running subprocess is never killed (that would waste ~4 min of GPU
-        // work), so the check goes here, BEFORE the next heavy spawn (mtl). If
-        // the wall is busy now, defer the WHOLE song (WaitingForWall): the
-        // isolated vocal WAV and the transcript are kept on disk, so the next
-        // idle pick is a cache-hit isolation + mtl (only the title search, if
-        // it runs, asks again). No mtl runs on an empty transcript, nor on a
-        // text that fails the gate's Coverage verdict (#144 F3, failed before
-        // mtl), so nothing defers for either (`mtl_would_run`). We do NOT fall
-        // through to the g35t base tier — that would degrade the ★ mtl tier
-        // (owner's quality-first rule). In LOW-PRIORITY mode there is no gate #2:
-        // mtl runs at reduced priority instead (the backend picks the plan and
-        // re-runs on CPU if a GPU job is aborted).
-        if mode == crate::lyrics::heavy_plan::ProcessingMode::IdleOnly
-            && mtl_would_run(best_candidate.as_ref(), clean_vocal.is_some(), words)
-            && self.defer_before_mtl().await
-        {
-            return Ok(TierOutcome::Return(SongOutcome::WaitingForWall));
-        }
-
         let mtl_track = match self
             .run_mtl_reference_stage(
                 youtube_id,
@@ -271,7 +246,7 @@ impl LyricsWorker {
             .await
         {
             Ok(t) => t,
-            // #161 wall-abort / #162 low memory during/before mtl → defer the
+            // #167 startup grace / #162 low memory before mtl → defer the
             // whole song with NO penalty (defer_heavy). Never fall through to the
             // g35t base tier (that would degrade the ★ mtl tier, owner's
             // quality-first rule); the next pick re-runs mtl to byte-identical ★.
@@ -335,23 +310,6 @@ impl LyricsWorker {
             )
             .await
     }
-}
-
-/// #144 F3: whether the reference stage would spend an mtl run on `best`:
-/// an isolated vocal, a transcript, and a text that passes the gate's
-/// Coverage verdict (a text that fails it is failed before mtl,
-/// `reference_gate::coverage_fail_before_timing`). The idle-only mode defers
-/// a song for the wall only then.
-pub(crate) fn mtl_would_run(
-    best: Option<&crate::lyrics::tier1::CandidateText>,
-    has_vocal: bool,
-    words: &[crate::lyrics::g35t_client::AsrWord],
-) -> bool {
-    has_vocal
-        && !words.is_empty()
-        && best.is_some_and(|c| {
-            crate::lyrics::reference_gate::coverage_fail_before_timing(&c.lines, words).is_none()
-        })
 }
 
 #[cfg(test)]

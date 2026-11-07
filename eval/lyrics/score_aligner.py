@@ -40,7 +40,7 @@ Usage:
     python3 eval/lyrics/score_aligner.py \\
         --manifest eval/lyrics/manifest.json \\
         --raw-dir eval/lyrics/reports/2026-08-05-aligner-raw \\
-        --backends ctc-forced-aligner ctc-forced-aligner-star lyrics-alignment-mtl \\
+        --backends lyrics-alignment-mtl \\
         --out eval/lyrics/reports/2026-08-05-aligner-scores.json
 """
 

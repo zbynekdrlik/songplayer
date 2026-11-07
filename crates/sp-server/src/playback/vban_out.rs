@@ -655,28 +655,18 @@ pub fn plan_wait_up_to(now_100ns: i64, at_100ns: i64, max_100ns: i64) -> i64 {
     (at_100ns - now_100ns).clamp(0, max_100ns)
 }
 
-/// #233: an output's send latency, L + its delay (100 ns). Its own fn, not
+/// #233: an output's send latency, L + its delay (100 ns); #289: L with
+/// `audio_low_latency` as built (`base_send_latency_100ns`). Its own fn, not
 /// inside `VbanSender::new`: cargo-mutants never mutates a fn named `new`.
-pub fn send_latency_100ns(delay_100ns: i64) -> i64 {
-    send_latency_in(delay_100ns, false)
-}
-
-/// #289: an output's send latency with `audio_low_latency` as built: its L
-/// (`base_send_latency_100ns`) + its delay (100 ns).
 pub fn send_latency_in(delay_100ns: i64, low_latency: bool) -> i64 {
     base_send_latency_100ns(low_latency) + delay_100ns
 }
 
-/// #233: an output's longest wait for a packet, [`VBAN_MAX_WAIT_100NS`] + its
-/// delay (100 ns): a due time further ahead is a clock mismatch.
-pub fn max_wait_100ns(delay_100ns: i64) -> i64 {
-    max_wait_in(delay_100ns, false)
-}
-
-/// #289: the longest wait with `audio_low_latency` as built: 4 × its L
-/// (the relation of [`VBAN_MAX_WAIT_100NS`]) + its delay. At 15 ms that is
-/// 60 ms, still past every packet's planned wait (L + the delay + under a
-/// slot of packet offset).
+/// #233 + #289: an output's longest wait for a packet, with
+/// `audio_low_latency` as built: 4 × its L (the relation of
+/// [`VBAN_MAX_WAIT_100NS`], which it is OFF) + its delay (100 ns); a due time
+/// further ahead is a clock mismatch. At 15 ms that is 60 ms, still past every
+/// packet's planned wait (L + the delay + under a slot of packet offset).
 pub fn max_wait_in(delay_100ns: i64, low_latency: bool) -> i64 {
     4 * base_send_latency_100ns(low_latency) + delay_100ns
 }

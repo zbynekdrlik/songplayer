@@ -24,7 +24,7 @@
 
 import { test, expect, Locator, Page } from "@playwright/test";
 import { audibleStreak } from "./audio-helpers.mjs";
-import { healthRow, readyDub } from "./box-api";
+import { centreForDrag, healthRow, readyDub } from "./box-api";
 import { describeProgram, PlaylistRow, readProgramState } from "./program-state";
 
 const ALLOWED_CONSOLE = [
@@ -104,7 +104,7 @@ async function currentTime(video: Locator): Promise<number> {
 
 /** Real mouse drag along a horizontal range input from `from` to `to` (fractions). */
 async function mouseDragRange(page: Page, selector: string, from: number, to: number): Promise<void> {
-  await page.locator(selector).scrollIntoViewIfNeeded();
+  await centreForDrag(page.locator(selector));
   const box = await page.locator(selector).boundingBox();
   if (!box) throw new Error(`no bounding box for ${selector}`);
   const pt = (f: number) => ({ x: box.x + box.width * f, y: box.y + box.height / 2 });

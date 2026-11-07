@@ -30,7 +30,7 @@ community-lyrics fallback after lyrics.ovh and the second title-search
 source; its code, its `genius_access_token` setting and its post-deploy
 gate are deleted.
 
-## Stored but unused (delete with the key rotation, #232 / #229; not before 21.10.2026)
+## Stored but unused (kept on the owner's word of 4.11.2026 until the next market review, #232; deleted with the key revocation, #229)
 
 `genius_access_token`, `assemblyai_api_key`, `replicate_api_token`, `dashscope_api_key`,
 `elevenlabs_api_key`, `openrouter_api_key`, `soniox_api_key`: no code reads

@@ -45,7 +45,6 @@ impl LyricsWorker {
             current_processing: Arc::new(RwLock::new(None)),
             ndi_health_registry: None,
             obs_state: None,
-            wall_gate_log: std::sync::Mutex::new(crate::lyrics::idle_gate::GateLog::default()),
             peer: None,
         }
     }

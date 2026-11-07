@@ -1,5 +1,5 @@
 """Pure unit tests for eval/dubbing/wavutil.py — the stdlib-only PCM/WAV helpers
-used by the round-2 Gemini + XTTS engines. No audio libs, no network."""
+used by the Gemini Live Translate engine. No audio libs, no network."""
 
 from __future__ import annotations
 
@@ -53,25 +53,8 @@ def test_empty_pcm_is_a_valid_zero_frame_wav():
     assert wavutil.wav_num_frames(wav) == 0
 
 
-@pytest.mark.parametrize(
-    "mime,expected",
-    [
-        ("audio/L16;rate=24000", 24000),
-        ("audio/L16; rate=16000", 16000),
-        ("audio/L16;codec=pcm;rate=48000", 48000),
-        ("audio/L16", 24000),  # no rate -> default
-        (None, 24000),
-        ("audio/L16;rate=notanumber", 24000),  # unparseable -> default
-        ("audio/L16;rate=0", 24000),  # non-positive -> default
-    ],
-)
-def test_parse_l16_mime_rate(mime, expected):
-    assert wavutil.parse_l16_mime_rate(mime, default=24000) == expected
-
-
-def test_silence_pcm_length_matches_duration():
-    pcm = wavutil.silence_pcm_l16(50, sample_rate=24000, channels=1)
-    # 50 ms @ 24 kHz = 1200 frames = 2400 bytes.
-    assert len(pcm) == 2400
+def test_silence_frame_count_matches_duration():
+    # 50 ms of silence @ 24 kHz = 1200 frames = 2400 bytes.
+    pcm = struct.pack("<h", 0) * 1200
     wav = wavutil.pcm_l16_to_wav(pcm, sample_rate=24000, channels=1)
     assert wavutil.wav_num_frames(wav) == 1200

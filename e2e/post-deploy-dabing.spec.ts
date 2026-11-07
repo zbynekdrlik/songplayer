@@ -1,6 +1,6 @@
 import { test, expect, Page, APIRequestContext, Locator } from "@playwright/test";
 import { averageDb } from "./audio-helpers.mjs";
-import { healthRow, readyDub } from "./box-api";
+import { centreForDrag, healthRow, readyDub } from "./box-api";
 import { programReceiverVerdict, type ProgramReceiverView } from "./ndi-health-gate";
 import { describeProgram, readProgramState } from "./program-state";
 
@@ -37,7 +37,7 @@ let foundDub: { vokaly: number; podklad: number; dabing: number } | null = null;
 
 async function mouseDrag(page: Page, selector: string, from: number, to: number) {
   // page.mouse has no auto-scroll: a control below the fold receives nothing.
-  await page.locator(selector).scrollIntoViewIfNeeded();
+  await centreForDrag(page.locator(selector));
   const box = await page.locator(selector).boundingBox();
   if (!box) throw new Error(`no bounding box for ${selector}`);
   const vertical = box.height > box.width;

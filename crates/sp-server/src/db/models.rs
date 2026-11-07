@@ -799,8 +799,7 @@ pub async fn quarantine_video_lyrics(
 /// exclude this sentinel so the worker does not loop on it.
 ///
 /// A future-model PR retires the sentinel via a dedicated admin endpoint
-/// (parallel to whatever asr_gap-retire endpoint ships next). See
-/// `docs/superpowers/specs/2026-05-16-lyrics-source-gating-design.md`.
+/// (parallel to whatever asr_gap-retire endpoint ships next).
 #[cfg_attr(test, mutants::skip)] // Single UPDATE — observable side effects
 // are all covered by `mark_unsupported_source_writes_all_fields` and
 // `mark_unsupported_source_clears_manual_priority` in models_tests.rs;
