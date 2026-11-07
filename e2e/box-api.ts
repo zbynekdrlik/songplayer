@@ -7,7 +7,7 @@
  * copies of them. They live here once, with the fields the specs actually read.
  */
 
-import { expect, APIRequestContext } from "@playwright/test";
+import { expect, APIRequestContext, Locator } from "@playwright/test";
 
 /** One `/api/v1/ndi/health` row (the fields the post-deploy specs read). */
 export interface HealthRow {
@@ -72,4 +72,21 @@ export function pickReadyDub(body: DabingList, preferVideoId?: number): number |
   // DubRow carries the id as `video_id` (the row is keyed by the video).
   const ids = ready.map((v) => Number(v.video_id ?? v.id));
   return preferVideoId !== undefined && ids.includes(preferVideoId) ? preferVideoId : ids[0];
+}
+
+/**
+ * Puts a control in the middle of the viewport before a real-mouse drag. Measured
+ * on the box (#184, A/B/A/B): a fader 0.23 px over the top edge is scrolled 128 px
+ * by Chrome when the press focuses it, so the drag lands on a control that moved
+ * (released at 94 % instead of 0 %), and one fully in view stays put. An explicit
+ * scroll, because `scrollIntoView({ block: "center" })` left that fader at the edge.
+ */
+export async function centreForDrag(control: Locator): Promise<void> {
+  await control.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    window.scrollBy({
+      top: r.top - (window.innerHeight - r.height) / 2,
+      behavior: "instant",
+    });
+  });
 }

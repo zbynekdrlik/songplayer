@@ -50,7 +50,7 @@ import {
   quietStreak,
   rmsToDbfs,
 } from "./audio-helpers.mjs";
-import { healthRow, readyDub } from "./box-api";
+import { centreForDrag, healthRow, readyDub } from "./box-api";
 
 const ALLOWED_CONSOLE = [
   /WebSocket connection/,
@@ -135,8 +135,7 @@ async function sample(page: Page): Promise<{ db: number; lyrInside: boolean | nu
  *  slider HEIGHT measured from its TOP (value 0 is at the BOTTOM). */
 async function dragFader(page: Page, testid: string, from: number, to: number): Promise<void> {
   const fader = page.getByTestId(testid);
-  // Centred: a fader at the viewport's edge moves when the press focuses it.
-  await fader.evaluate((el) => el.scrollIntoView({ block: "center" }));
+  await centreForDrag(fader);
   const box = await fader.boundingBox();
   if (!box) throw new Error(`no bounding box for ${testid}`);
   const x = box.x + box.width / 2;

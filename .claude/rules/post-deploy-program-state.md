@@ -47,10 +47,11 @@ Rules for every post-deploy spec:
   for on another playlist's song comes with its own `playlist_id`, and ▶ on its row
   plays it on THAT playlist (the program's, possibly). `readyDub` picks only the
   Dabing playlist's rows (`pickReadyDub`, #184).
-- **A real-mouse drag centres its control first** (`el.scrollIntoView({block:"center"})`,
-  never `scrollIntoViewIfNeeded`): a control left with its edge at the viewport's is
-  scrolled by Chrome when the press focuses it, and the drag lands on a control that
-  moved. It depends on the live page's height: one more row on /dabing set it off.
+- **A real-mouse drag centres its control first** (`centreForDrag`, `box-api.ts`).
+  Measured A/B/A/B on the box: a fader 0.23 px over the viewport's top edge is scrolled
+  128 px by Chrome when the press focuses it, so the release lands on a control that
+  moved (94 % instead of 0 %); in the middle or fully in view it reaches 0 %.
+  `scrollIntoViewIfNeeded` and `scrollIntoView({block:"center"})` both left it at the edge.
 - **`frames_submitted_last_5s > 0` is NOT proof of decoding.** Genlock pacing
   submits ~150 frames per 5 s on idle outputs too (live read, 26.9.2026). The
   honest "it decodes" signal is health `transport == "Playing"`, or the Player
