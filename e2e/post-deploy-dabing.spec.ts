@@ -37,7 +37,11 @@ let foundDub: { vokaly: number; podklad: number; dabing: number } | null = null;
 
 async function mouseDrag(page: Page, selector: string, from: number, to: number) {
   // page.mouse has no auto-scroll: a control below the fold receives nothing.
-  await page.locator(selector).scrollIntoViewIfNeeded();
+  // Centred, never merely "in view": a fader left with its top edge at the
+  // viewport's is scrolled by Chrome when the press focuses it, so the rest of
+  // the drag lands on a control that moved (a press at 98 % released at 94 %
+  // instead of 0 %, CI 42312270660).
+  await page.locator(selector).evaluate((el) => el.scrollIntoView({ block: "center" }));
   const box = await page.locator(selector).boundingBox();
   if (!box) throw new Error(`no bounding box for ${selector}`);
   const vertical = box.height > box.width;

@@ -135,7 +135,8 @@ async function sample(page: Page): Promise<{ db: number; lyrInside: boolean | nu
  *  slider HEIGHT measured from its TOP (value 0 is at the BOTTOM). */
 async function dragFader(page: Page, testid: string, from: number, to: number): Promise<void> {
   const fader = page.getByTestId(testid);
-  await fader.scrollIntoViewIfNeeded();
+  // Centred: a fader at the viewport's edge moves when the press focuses it.
+  await fader.evaluate((el) => el.scrollIntoView({ block: "center" }));
   const box = await fader.boundingBox();
   if (!box) throw new Error(`no bounding box for ${testid}`);
   const x = box.x + box.width / 2;
