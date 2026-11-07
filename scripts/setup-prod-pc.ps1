@@ -41,7 +41,14 @@
 #      (Set-NetFirewallProfile). Tamper Protection blocks the Defender
 #      changes: it is turned off by hand in Windows Security (Virus & threat
 #      protection > Manage settings), and this script says so and fails.
-# Not here: the NIC driver swap (lane 3), the Dante adapter (report only),
+#   6. Every wired adapter, USB ones included (issue 285, the owner's rule of
+#      7.11.2026), not disabled: the power-saving values written as REG_SZ "0"
+#      in its class key whether its driver offers them or not (a USB driver
+#      hides them, and its INF deletes them at every install), the
+#      where-present ones 0 where they exist, PnPCapabilities with 0x08, then
+#      ONE restart. The effect of a value a driver hides is not provable from
+#      Windows.
+# Not here: the NIC driver swap (lane 3), a radio (a PC may use it on purpose),
 # CPU reservation (unmeasured), the Windows edition.
 #
 # How it works: READ the facts into one plain object, PLAN (Get-ProdPcPlan,
@@ -275,6 +282,16 @@ function Get-ProdPcNicGroups {
     [pscustomobject]@{ Setting = 'gigalite'; Keywords = @('GigaLite'); Required = $false; Reason = $why }
 }
 
+# Every wired adapter's values (issue 285): always written, offered or not.
+function Get-ProdPcEveryNicValues {
+    return @('*FlowControl', '*EEE', 'EEE', 'EnableGreenEthernet', 'AdvancedEEE', 'EnableExtraPowerSaving', 'GigaLite', '*SelectiveSuspend')
+}
+
+# ...and those turned off only where the adapter has them.
+function Get-ProdPcEveryNicValuesWherePresent {
+    return @('*InterruptModeration', 'GreenEthernet', 'PowerSavingMode', '*PowerSavingMode')
+}
+
 # Whether a registry fact holds what a want sets: a DWORD of that value (a
 # value of another type does not), or a string that reads the same with
 # case and padding ignored (lane 1's rule for Scheduling Category).
@@ -419,6 +436,49 @@ function Add-ProdPcSoundGridReview {
     }
 }
 
+# Every wired adapter's actions and blockers (issue 285). What the SoundGrid
+# review already acts on is not acted on twice.
+function Add-ProdPcEveryNicReview {
+    param($Facts, $Actions, $Blockers)
+    $why = 'every network adapter is configured: no power saving (the owner, issue 285)'
+    foreach ($adapter in @(Get-ProdPcList $Facts 'adapters')) {
+        if ([string](Get-ProdPcField $adapter 'media') -ne '802.3') { continue }
+        if ([string](Get-ProdPcField $adapter 'status') -eq 'Disabled') { continue }
+        $name = [string](Get-ProdPcField $adapter 'name')
+        $guid = [string](Get-ProdPcField $adapter 'guid')
+        $settings = Get-ProdPcField $adapter 'settings'
+        $classKey = Get-ProdPcField $adapter 'class_key'
+        if ($null -eq $settings -or $null -eq $classKey) {
+            $Blockers.Add((New-ProdPcBlocker 'unreadable:nic' "the adapter '$name' ($guid) has no instance in the network class"))
+            continue
+        }
+        $target = @{ Adapter = $name; AdapterGuid = $guid; Path = $classKey; Type = 'String' }
+        $taken = @{}
+        foreach ($action in $Actions) {
+            if ($action.AdapterGuid -eq $guid) { $taken[$action.Name] = $true }
+        }
+        $names = @(Get-ProdPcEveryNicValues)
+        foreach ($keyword in @(Get-ProdPcEveryNicValuesWherePresent)) {
+            if ($null -ne (Find-ProdPcMember -Object $settings -Name $keyword)) { $names += $keyword }
+        }
+        foreach ($keyword in $names) {
+            if ($taken.ContainsKey($keyword)) { continue }
+            $present = $null -ne (Find-ProdPcMember -Object $settings -Name $keyword)
+            $value = if ($present) { ([string](Get-ProdPcField $settings $keyword)).Trim() } else { '(none)' }
+            $number = if ($present) { ConvertTo-ProdPcUInt32 $value } else { $null }
+            if ($null -ne $number -and $number -eq 0) { continue }
+            $Actions.Add((New-ProdPcAction -Area 'nic' -Name $keyword -Current $value -Wanted '0' -Reason $why -Kind 'nic_value' -Target $target))
+        }
+        if ($taken.ContainsKey('PnPCapabilities')) { continue }
+        $pnp = Get-ProdPcField $settings 'PnPCapabilities'
+        $pnpWanted = Get-PnPCapabilitiesWanted $pnp
+        if ($null -ne $pnpWanted) {
+            $current = if ($null -eq $pnp) { '(none)' } else { ([string]$pnp).Trim() }
+            $Actions.Add((New-ProdPcAction -Area 'nic' -Name 'PnPCapabilities' -Current $current -Wanted $pnpWanted -Reason $why -Kind 'nic_pnp' -Target $target))
+        }
+    }
+}
+
 # Every action the profile needs on this PC (only what differs, in the
 # order of the header) and every blocker.
 function Get-ProdPcReview {
@@ -483,6 +543,7 @@ function Get-ProdPcReview {
         $current = if ($enabled -is [bool]) { 'on' } elseif ($null -eq $enabled) { '(unread)' } else { "$enabled" }
         $actions.Add((New-ProdPcAction -Area 'firewall' -Name $profileName -Current $current -Wanted 'off' -Reason 'the production rule: firewall off (issue 233, the owner, 11.10.2026)' -Kind 'firewall'))
     }
+    Add-ProdPcEveryNicReview -Facts $Facts -Actions $actions -Blockers $blockers
     return [pscustomobject]@{ Actions = $actions.ToArray(); Blockers = $blockers.ToArray() }
 }
 
@@ -573,6 +634,9 @@ function Read-ProdPcNicSettings {
     $names = @($key.GetValueNames())
     $keywords = New-Object System.Collections.Generic.List[string]
     foreach ($group in @(Get-ProdPcNicGroups)) { foreach ($keyword in $group.Keywords) { $keywords.Add($keyword) } }
+    foreach ($keyword in @(Get-ProdPcEveryNicValues) + @(Get-ProdPcEveryNicValuesWherePresent)) {
+        if (-not $keywords.Contains($keyword)) { $keywords.Add($keyword) }
+    }
     $keywords.Add('PnPCapabilities')
     $settings = [ordered]@{}
     foreach ($keyword in $keywords) {
@@ -618,6 +682,8 @@ function Read-ProdPcAdapters {
             name = [string]$adapter.Name
             guid = $guid
             description = [string]$adapter.InterfaceDescription
+            media = [string]$adapter.PhysicalMediaType
+            status = [string]$adapter.Status
             mac = [string]$adapter.MacAddress
             permanent_mac = [string]$adapter.PermanentAddress
             class_key = $keyPath
@@ -764,6 +830,7 @@ function Read-ProdPcFacts {
     $facts = [ordered]@{
         registry = $registry.ToArray()
         soundgrid = Read-ProdPcSoundGrid
+        adapters = @(Read-ProdPcAdapters)
         power = Read-ProdPcPower
         defender = Read-ProdPcDefender
         firewall = Read-ProdPcFirewall
@@ -774,6 +841,10 @@ function Read-ProdPcFacts {
     $registryBack = @(Get-ProdPcList $back 'registry')
     $adaptersRead = @($facts.soundgrid.adapters).Count
     $adaptersBack = @(Get-ProdPcList (Get-ProdPcField $back 'soundgrid') 'adapters')
+    $everyNicBack = @(Get-ProdPcList $back 'adapters')
+    if ($everyNicBack.Count -ne @($facts.adapters).Count) {
+        throw "the facts did not come back from their JSON round trip in shape ($($everyNicBack.Count) of $(@($facts.adapters).Count) wired and other adapters)"
+    }
     if ($registryBack.Count -ne $registry.Count -or $null -eq (Get-ProdPcField $registryBack[0] 'path') -or $adaptersBack.Count -ne $adaptersRead) {
         throw "the facts did not come back from their JSON round trip in shape ($($registryBack.Count) of $($registry.Count) registry values, $($adaptersBack.Count) of $adaptersRead adapters)"
     }
@@ -794,6 +865,7 @@ function Invoke-ProdPcAction {
     switch ($Action.Kind) {
         'registry' { Set-ProdPcRegistryValue -Path $Action.Path -Name $Action.Name -Type $Action.Type -Value $Action.Wanted }
         'nic_keyword' { Set-NetAdapterAdvancedProperty -Name $Action.Adapter -RegistryKeyword $Action.Name -RegistryValue ([string]$Action.Wanted) -NoRestart }
+        'nic_value' { Set-ProdPcRegistryValue -Path $Action.Path -Name $Action.Name -Type 'String' -Value $Action.Wanted }
         'nic_pnp' { Set-ProdPcRegistryValue -Path $Action.Path -Name 'PnPCapabilities' -Type 'DWord' -Value $Action.Wanted }
         'power' {
             $set = Invoke-ProdPcNative -File 'powercfg.exe' -Arguments @('/setacvalueindex', 'SCHEME_CURRENT', 'SUB_PROCESSOR', 'CPMINCORES', [string]$Action.Wanted)

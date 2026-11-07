@@ -576,3 +576,14 @@ shell; ASCII only, it is read as cp1252) and pwsh 7 (the Linux tests).
   - `-a dumper -range` gives CSwitch/ReadyThread per thread: the SG audio
     thread's wake-ups turned 13 / 7.5 / 4.2 / 3.4 / 16.5 ms instead of
     10.7, ~60 ms after the process start.
+
+## Every network adapter, not only SoundGrid's (#285, the owner, 7.11.2026)
+
+"pravdaze usb sietovka musi byt spravne nastavena!!! to je vseobecne pravidlo vsade kde mame nejaku sietovku!!!" A setting a driver does not offer is a finding to solve, never a step to drop.
+
+- `Add-ProdPcEveryNicReview`, run last: every adapter of media `802.3` not `Disabled` gets `*FlowControl`, `*EEE`, `EEE`, `EnableGreenEthernet`, `AdvancedEEE`, `EnableExtraPowerSaving`, `GigaLite`, `*SelectiveSuspend` as REG_SZ "0" in its class key, offered by its driver or not; `*InterruptModeration`, `GreenEthernet`, `PowerSavingMode`, `*PowerSavingMode` 0 where present; `PnPCapabilities` with 0x08. One restart per adapter. What the SoundGrid review acts on is not acted on twice.
+- Written straight to the class key because `Set-NetAdapterAdvancedProperty` refuses a keyword the driver does not offer. resolume-snv's RTL8153 (`rtucx22x64`, NetAdapterCx) offers none of them, and neither does the inbox `rtux64w10` section for that model; both INFs delete these values at install, so the next deploy puts them back after a driver update.
+- Not proven: that a driver honours a value it hides. NDIS keeps reading `SelectiveSuspend : Enabled` on that NIC and Windows has no read of the PHY's EEE state. Say so; never report it as verified.
+- A restart of an adapter other than SongPlayer's own stops nothing here: the script runs between SongPlayer's stop and start, and dstack has no link-flap recovery, so never restart the Dante NIC with SongPlayer running.
+- Radios are not in the script: resolume-snv's unused Wi-Fi was disabled by hand on 7.11.2026.
+
