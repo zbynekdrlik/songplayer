@@ -469,6 +469,15 @@ def test_a_noisy_capture_of_the_right_rate_is_not_refused():
         wa.check_present_rate(times, 60, [0.0005] * len(times))
 
 
+def test_a_noisy_capture_updating_every_refresh_is_not_refused():
+    """Release review: rounding an interval under half a refresh up to one
+    refresh pushed the measured rate up, one-sidedly, past the check's noise."""
+    for seed in range(6):
+        rng = random.Random(seed)
+        times = sorted(n / 60 + rng.uniform(-0.009, 0.009) for n in range(1200))
+        wa.check_present_rate(times, 60, [0.0005] * len(times))
+
+
 def test_a_noisy_capture_still_catches_a_wrong_rate():
     for seed in range(6):
         times = noisy_presents(seed, 57, 0.003)

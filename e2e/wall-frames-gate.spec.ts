@@ -17,6 +17,7 @@ import {
   WallFramesReport,
   arenaOutputFailures,
   coveringLayers,
+  refreshRateFailures,
   wallFramesFailures,
 } from "./wall-frames-gate";
 
@@ -395,4 +396,23 @@ test("Arena's output with only contradictory boundaries, verdict incomplete, pas
   const report = arenaTake(0, 2);
   report.verdict = "incomplete";
   expect(arenaOutputFailures("wall-25", EXIT_INCOMPLETE, report)).toEqual([]);
+});
+
+test.describe("refreshRateFailures", () => {
+  test("the box's own measured refresh agrees with the rate the reader is told", () => {
+    expect(refreshRateFailures(60, 16_666_941)).toEqual([]); // SNV, 7.11.2026
+    expect(refreshRateFailures(60, 16_666_667)).toEqual([]);
+  });
+
+  test("a primary display at another rate fails by name", () => {
+    expect(refreshRateFailures(60, 20_000_000)[0]).toContain("50.000 Hz");
+    expect(refreshRateFailures(60, 16_806_723)[0]).toContain("59.500 Hz");
+    expect(refreshRateFailures(60, 8_333_333)[0]).toContain("120.000 Hz");
+  });
+
+  test("a refresh SongPlayer does not measure fails too: an unchecked rate reads as judder", () => {
+    for (const none of [null, undefined, 0]) {
+      expect(refreshRateFailures(60, none)[0]).toContain("cannot be checked");
+    }
+  });
 });

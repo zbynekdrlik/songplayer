@@ -293,3 +293,7 @@ export function coveringLayers(layers: ArenaLayer[]): string[] {
   });
   return above;
 }
+
+export function refreshRateFailures(_refreshHz: number, _periodNs: number | null | undefined): string[] {
+  return [];
+}
