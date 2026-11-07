@@ -166,6 +166,9 @@ pub(super) fn row(guid: &str, mac: &str, hardware: bool, filter: bool) -> IfRow 
         permanent_mac: mac.to_string(),
         hardware,
         filter,
+        // `NdisPhysicalMediumUnspecified`: the wired check has its own rows
+        // (`prod_env_audio_wired_tests.rs`), this fixture is PP before it.
+        medium: 0,
     }
 }
 

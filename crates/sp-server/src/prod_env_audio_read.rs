@@ -403,6 +403,8 @@ pub struct IfRow {
     pub hardware: bool,
     /// A filter module's interface (it repeats its adapter's MAC).
     pub filter: bool,
+    /// `PhysicalMediumType` (`NDIS_PHYSICAL_MEDIUM`).
+    pub medium: i32,
 }
 
 /// `MIB_IF_ROW2.InterfaceAndOperStatusFlags`'s `HardwareInterface` bit.
@@ -680,6 +682,7 @@ pub fn read_audio(
     );
     let mmcss = mmcss(reg, &mut errors);
     let power = power_facts(power, &mut errors);
+    let wired_nics = wired::wired_nics(reg, adapters, &mut errors);
     AudioFacts {
         soundgrid,
         dante,
@@ -687,6 +690,7 @@ pub fn read_audio(
         drivers_excluded,
         mmcss,
         power,
+        wired_nics,
         errors,
     }
 }
@@ -694,9 +698,12 @@ pub fn read_audio(
 #[path = "prod_env_audio_soundgrid.rs"]
 pub mod soundgrid;
 
+#[path = "prod_env_audio_wired.rs"]
+pub mod wired;
+
 #[cfg(test)]
 #[path = "prod_env_audio_read_fake.rs"]
-mod fake;
+pub(crate) mod fake;
 
 #[cfg(test)]
 #[path = "prod_env_audio_read_tests.rs"]

@@ -442,6 +442,7 @@ fn pp_s_profile_reads_as_its_facts_and_holds() {
                 scheme_name: Some("Bitsum Highest Performance".to_string()),
                 core_parking_min_cores: Some(100),
             },
+            wired_nics: Some(Vec::new()),
             errors: Vec::new(),
         }
     );
@@ -529,6 +530,7 @@ fn a_profile_that_cannot_be_read_says_why_once_per_reason() {
             "Windows Update's ExcludeWUDriversInQualityUpdate could not be read (error 5)",
             "the active power scheme could not be read (error 2)",
             "the core-parking minimum could not be read (error 2)",
+            "the wired adapters could not be listed (error 87)",
         ]
     );
 }

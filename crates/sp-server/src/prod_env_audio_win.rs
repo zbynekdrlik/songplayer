@@ -223,6 +223,7 @@ pub(super) fn if_table() -> Result<Vec<IfRow>, u32> {
                     permanent_mac: mac_hex(&row.PermanentPhysicalAddress[..len]),
                     hardware,
                     filter,
+                    medium: row.PhysicalMediumType,
                 }
             })
             .collect()

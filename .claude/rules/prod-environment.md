@@ -586,4 +586,5 @@ shell; ASCII only, it is read as cp1252) and pwsh 7 (the Linux tests).
 - Not proven: that a driver honours a value it hides. NDIS keeps reading `SelectiveSuspend : Enabled` on that NIC and Windows has no read of the PHY's EEE state. Say so; never report it as verified.
 - A restart of an adapter other than SongPlayer's own stops nothing here: the script runs between SongPlayer's stop and start, and dstack has no link-flap recovery, so never restart the Dante NIC with SongPlayer running.
 - Radios are not in the script: resolume-snv's unused Wi-Fi was disabled by hand on 7.11.2026.
+- The gate between deploys is `prod_env_audio_wired.rs`: `GetIfTable2` rows that are hardware, no filter module, `PhysicalMediumType` 14 (802.3), every 60 s with the rest of the check. The two keyword lists are the script's (a test compares them). `wired_nic_value:<keyword>` / `unreadable:wired_nic` / `unreadable:wired_nics` are problems, `audio.wired_nics` on the status; the post-deploy gate fails on an empty list or an adapter not `ok`. It reads the registry, what the driver was told, never the PHY.
 

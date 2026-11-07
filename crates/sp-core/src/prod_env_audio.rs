@@ -316,10 +316,41 @@ pub struct AudioProfile {
     pub mmcss: MmcssView,
     #[serde(default)]
     pub power: PowerView,
+    /// #285: every wired adapter (`None`: could not be listed, or an older
+    /// server).
+    #[serde(default)]
+    pub wired_nics: Option<Vec<WiredNicView>>,
     /// The report-only facts that are not the production ones ([`notes`]):
     /// shown, never a problem.
     #[serde(default)]
     pub notes: Vec<String>,
+}
+
+/// One value of a wired adapter on the status.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WiredValueView {
+    pub keyword: String,
+    /// As read (`None`: absent or unread).
+    #[serde(default)]
+    pub value: Option<String>,
+    /// `None`: could not be read.
+    #[serde(default)]
+    pub ok: Option<bool>,
+}
+
+/// One wired adapter on the status (#285).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WiredNicView {
+    pub guid: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub values: Vec<WiredValueView>,
+    /// Every value holds (`None`: something could not be read).
+    #[serde(default)]
+    pub ok: Option<bool>,
 }
 
 /// The report-only facts that are not the production ones, in Slovak: the

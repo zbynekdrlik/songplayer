@@ -77,6 +77,8 @@ pub enum Unreadable {
     WindowsUpdate,
     /// #255: MMCSS's system profile.
     Mmcss,
+    /// #285: the wired adapters could not be listed.
+    WiredNics,
 }
 
 /// One way a box is not a production environment.
@@ -114,6 +116,16 @@ pub enum EnvProblem {
     },
     /// #255: a SoundGrid adapter's driver or a setting could not be read.
     SoundGridNicUnreadable { nic: String },
+    /// #285: a wired adapter's value is not the production one: as read, or
+    /// `None` when a value it must have is not there (the deploy's
+    /// `scripts/setup-prod-pc.ps1` writes it; a driver's INF deletes it).
+    WiredNicValue {
+        nic: String,
+        keyword: String,
+        value: Option<String>,
+    },
+    /// #285: a wired adapter's values could not be read.
+    WiredNicUnreadable { nic: String },
     /// #255: Windows Update's automatic updates are not off
     /// (`NoAutoUpdate` is not 1).
     AutoUpdateOn,
@@ -150,6 +162,8 @@ impl EnvProblem {
                 format!("soundgrid_nic_setting:{}", setting.name())
             }
             Self::SoundGridNicUnreadable { .. } => "unreadable:soundgrid_nic".to_string(),
+            Self::WiredNicValue { keyword, .. } => format!("wired_nic_value:{keyword}"),
+            Self::WiredNicUnreadable { .. } => "unreadable:wired_nic".to_string(),
             Self::AutoUpdateOn => "windows_auto_update_on".to_string(),
             Self::DriversNotExcluded => "windows_update_drivers_on".to_string(),
             Self::Mmcss { setting, .. } => format!("mmcss:{}", setting.name()),
@@ -163,6 +177,7 @@ impl EnvProblem {
             Self::Unreadable(Unreadable::SoundGrid) => "unreadable:soundgrid".to_string(),
             Self::Unreadable(Unreadable::WindowsUpdate) => "unreadable:windows_update".to_string(),
             Self::Unreadable(Unreadable::Mmcss) => "unreadable:mmcss".to_string(),
+            Self::Unreadable(Unreadable::WiredNics) => "unreadable:wired_nics".to_string(),
         }
     }
 
@@ -216,6 +231,24 @@ impl EnvProblem {
             Self::SoundGridNicUnreadable { nic } => format!(
                 "ovládač alebo nastavenia sieťovej karty SoundGrid „{nic}“ sa nepodarilo zistiť"
             ),
+            Self::WiredNicValue {
+                nic,
+                keyword,
+                value: Some(value),
+            } => format!(
+                "sieťová karta „{nic}“: hodnota „{keyword}“ nie je produkčná (hodnota {value})"
+            ),
+            Self::WiredNicValue {
+                nic,
+                keyword,
+                value: None,
+            } => format!(
+                "sieťová karta „{nic}“: hodnota „{keyword}“ v registri chýba (ovládač ju mohol \
+                 pri inštalácii zmazať, najbližší deploy ju zapíše)"
+            ),
+            Self::WiredNicUnreadable { nic } => {
+                format!("nastavenia sieťovej karty „{nic}“ sa nepodarilo zistiť")
+            }
             Self::AutoUpdateOn => {
                 "automatické aktualizácie Windows nie sú vypnuté (NoAutoUpdate)".to_string()
             }
@@ -264,6 +297,9 @@ impl EnvProblem {
             }
             Self::Unreadable(Unreadable::Mmcss) => {
                 "nastavenia MMCSS sa nepodarilo zistiť".to_string()
+            }
+            Self::Unreadable(Unreadable::WiredNics) => {
+                "zoznam sieťových kariet sa nepodarilo zistiť".to_string()
             }
         }
     }

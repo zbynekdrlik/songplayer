@@ -71,6 +71,18 @@ fn every_audio_problem() -> Vec<EnvProblem> {
     all.push(EnvProblem::Unreadable(Unreadable::SoundGrid));
     all.push(EnvProblem::Unreadable(Unreadable::WindowsUpdate));
     all.push(EnvProblem::Unreadable(Unreadable::Mmcss));
+    all.push(EnvProblem::Unreadable(Unreadable::WiredNics));
+    all.push(EnvProblem::WiredNicValue {
+        nic: nic(),
+        keyword: "*EEE".to_string(),
+        value: Some("1".to_string()),
+    });
+    all.push(EnvProblem::WiredNicValue {
+        nic: nic(),
+        keyword: "*SelectiveSuspend".to_string(),
+        value: None,
+    });
+    all.push(EnvProblem::WiredNicUnreadable { nic: nic() });
     all
 }
 
@@ -102,6 +114,10 @@ fn every_audio_problem_has_its_stable_code() {
             "unreadable:soundgrid",
             "unreadable:windows_update",
             "unreadable:mmcss",
+            "unreadable:wired_nics",
+            "wired_nic_value:*EEE",
+            "wired_nic_value:*SelectiveSuspend",
+            "unreadable:wired_nic",
         ]
     );
 }
@@ -149,6 +165,11 @@ fn every_audio_problem_reads_in_slovak() {
             "väzby protokolu SoundGrid na sieťové karty sa nepodarilo zistiť",
             "nastavenia Windows Update sa nepodarilo zistiť",
             "nastavenia MMCSS sa nepodarilo zistiť",
+            "zoznam sieťových kariet sa nepodarilo zistiť",
+            "sieťová karta „soundgrid-pcie“: hodnota „*EEE“ nie je produkčná (hodnota 1)",
+            "sieťová karta „soundgrid-pcie“: hodnota „*SelectiveSuspend“ v registri chýba \
+             (ovládač ju mohol pri inštalácii zmazať, najbližší deploy ju zapíše)",
+            "nastavenia sieťovej karty „soundgrid-pcie“ sa nepodarilo zistiť",
         ]
     );
 }
@@ -283,6 +304,7 @@ fn the_status_serializes_every_field_by_name() {
                     "nic": null,
                 },
                 "windows_update": {"no_auto_update": null, "drivers_excluded": null},
+                "wired_nics": null,
                 "mmcss": {
                     "system_responsiveness": null,
                     "network_throttling_index": null,

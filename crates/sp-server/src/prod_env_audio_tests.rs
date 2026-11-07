@@ -429,6 +429,7 @@ fn the_profile_names_every_problem_in_order() {
             EnvProblem::Unreadable(Unreadable::SoundGrid),
             EnvProblem::Unreadable(Unreadable::WindowsUpdate),
             EnvProblem::Unreadable(Unreadable::Mmcss),
+            EnvProblem::Unreadable(Unreadable::WiredNics),
         ]
     );
     let mut bad = production_example();

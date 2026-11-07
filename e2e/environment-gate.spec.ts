@@ -39,6 +39,10 @@ const audioHolds = (over: Partial<AudioProfile> = {}): AudioProfile => ({
     nic: { guid: "{0B5E1C2D-3E4F-4A5B-9C6D-7E8F90A1B2C3}", name: "Ethernet 4", driver_model: "netadaptercx" },
   },
   windows_update: { no_auto_update: true, drivers_excluded: true },
+  wired_nics: [
+    { name: "soundgrid-pcie", guid: "{A}", ok: true },
+    { name: "Dante", guid: "{B}", ok: true },
+  ],
   mmcss: {
     system_responsiveness: 0,
     network_throttling_index: 4294967295,
@@ -275,6 +279,19 @@ test.describe("production environment gate (#233)", () => {
     ]);
   });
 
+  test("#285: every wired adapter must hold, named by the adapter", () => {
+    const failing = (wired_nics: AudioProfile["wired_nics"]) =>
+      environmentFailures(holds({ audio: audioHolds({ wired_nics }) }));
+    expect(failing([{ name: "Dante", guid: "{B}", ok: false }])).toEqual([
+      "audio.wired_nics[Dante].ok is false, not true",
+    ]);
+    expect(failing([{ guid: "{B}", ok: null }])).toEqual([
+      "audio.wired_nics[{B}].ok is null, not true",
+    ]);
+    expect(failing([])).toEqual(["audio.wired_nics is [], not a list of adapters"]);
+    expect(failing(null)).toEqual(["audio.wired_nics is null, not a list of adapters"]);
+  });
+
   test("#255: a status from before the audio profile fails on it", () => {
     const old = holds();
     delete old.audio;
@@ -286,6 +303,7 @@ test.describe("production environment gate (#233)", () => {
       "audio.mmcss.network_throttling_index is null, not 4294967295",
       "audio.mmcss.pro_audio_priority is null, not 6",
       'audio.mmcss.pro_audio_scheduling_category is null, not "High"',
+      "audio.wired_nics is null, not a list of adapters",
     ]);
     // An older server without SoundGrid's state: null, never "not installed".
     expect(environmentFailures(holds({ audio: audioHolds({ soundgrid: null }) }))).toEqual([

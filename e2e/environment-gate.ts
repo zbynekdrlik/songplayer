@@ -61,6 +61,8 @@ export interface AudioProfile {
     nic?: NicView | null;
   };
   windows_update?: { no_auto_update?: boolean | null; drivers_excluded?: boolean | null };
+  /** #285: every wired adapter (`sp_core::prod_env::audio::WiredNicView`). */
+  wired_nics?: { name?: string | null; guid?: string; ok?: boolean | null }[] | null;
   mmcss?: {
     system_responsiveness?: number | null;
     network_throttling_index?: number | null;
@@ -155,6 +157,16 @@ function factFailures(env: EnvironmentStatus): string[] {
   const scheduling = audio?.mmcss?.pro_audio_scheduling_category;
   if (typeof scheduling !== "string" || scheduling.trim().toLowerCase() !== "high") {
     f.push(`audio.mmcss.pro_audio_scheduling_category is ${shown(scheduling)}, not "High"`);
+  }
+  // #285, the owner's rule: every wired adapter, USB ones too. A box always has
+  // one (SongPlayer reaches this gate through it), so none read is a failure.
+  const wired = audio?.wired_nics;
+  if (!Array.isArray(wired) || wired.length === 0) {
+    f.push(`audio.wired_nics is ${shown(wired)}, not a list of adapters`);
+  } else {
+    for (const nic of wired) {
+      want(`audio.wired_nics[${nic.name ?? nic.guid}].ok`, nic.ok, true);
+    }
   }
   return f;
 }

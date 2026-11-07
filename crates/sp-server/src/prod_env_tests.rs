@@ -329,6 +329,7 @@ fn every_problem_is_listed_in_order() {
             EnvProblem::Unreadable(Unreadable::SoundGrid),
             EnvProblem::Unreadable(Unreadable::WindowsUpdate),
             EnvProblem::Unreadable(Unreadable::Mmcss),
+            EnvProblem::Unreadable(Unreadable::WiredNics),
         ]
     );
 }

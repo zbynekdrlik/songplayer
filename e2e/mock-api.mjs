@@ -1561,6 +1561,7 @@ const ENV_HOLDS = {
       pro_audio_scheduling_category: null,
     },
     power: { scheme_guid: null, scheme_name: null, core_parking_min_cores_pct: null },
+    wired_nics: null,
     notes: [],
   },
   problems: [],

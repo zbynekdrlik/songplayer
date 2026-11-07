@@ -22,6 +22,8 @@
 //! - **MMCSS** (GATE, #210 part 2): `SystemResponsiveness` 0,
 //!   `NetworkThrottlingIndex` 0xFFFFFFFF, the Pro Audio task at priority 6,
 //!   scheduling category High.
+//! - **Every wired adapter** (GATE, #285, the owner's rule):
+//!   `prod_env_audio_wired.rs`.
 //! - **Reported only**: Dante Virtual Soundcard's adapter (its effect is
 //!   still being measured), the power scheme and core parking
 //!   (`sp_core::prod_env::audio::notes`).
@@ -168,6 +170,8 @@ pub struct AudioFacts {
     pub drivers_excluded: Option<bool>,
     pub mmcss: MmcssFacts,
     pub power: PowerFacts,
+    /// #285: every wired adapter (`None`: could not be listed).
+    pub wired_nics: Option<Vec<read::wired::WiredNicFacts>>,
     /// Why a fact could not be read.
     pub errors: Vec<String>,
 }
@@ -363,7 +367,7 @@ pub fn soundgrid_problems(soundgrid: &SoundGridFacts) -> Vec<EnvProblem> {
 }
 
 /// The audio profile's problems, in order: SoundGrid, Windows Update,
-/// MMCSS. The report-only facts are never one.
+/// MMCSS, every wired adapter. The report-only facts are never one.
 pub fn problems(audio: &AudioFacts) -> Vec<EnvProblem> {
     let mut problems = soundgrid_problems(&audio.soundgrid);
     // Windows Update: one "cannot be read" for either policy, then each
@@ -378,6 +382,7 @@ pub fn problems(audio: &AudioFacts) -> Vec<EnvProblem> {
         problems.push(EnvProblem::DriversNotExcluded);
     }
     problems.extend(mmcss_problems(&audio.mmcss));
+    problems.extend(read::wired::problems(&audio.wired_nics));
     problems
 }
 
@@ -454,6 +459,10 @@ pub fn view(audio: &AudioFacts) -> AudioProfile {
             scheme_name: audio.power.scheme_name.clone(),
             core_parking_min_cores_pct: audio.power.core_parking_min_cores,
         },
+        wired_nics: audio
+            .wired_nics
+            .as_ref()
+            .map(|nics| nics.iter().map(read::wired::view).collect()),
         notes: Vec::new(),
     };
     profile.notes = notes(&profile);
@@ -521,6 +530,10 @@ pub fn production_example() -> AudioFacts {
             scheme_name: Some("High performance".to_string()),
             core_parking_min_cores: Some(100),
         },
+        wired_nics: Some(vec![
+            read::wired::example("{DBFC2CF4-0000-0000-0000-000000000001}", "soundgrid-pcie"),
+            read::wired::example("{0B5E0000-0000-0000-0000-000000000002}", "Ethernet 4"),
+        ]),
         errors: Vec::new(),
     }
 }
