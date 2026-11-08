@@ -666,3 +666,52 @@ fn soundgrid_is_shown_by_its_state_port_and_adapter() {
         )
     );
 }
+
+/// The review of 8.11.2026: one wrong value of the SoundGrid adapter is named
+/// once, by its own check, not again by the every-adapter check.
+#[test]
+fn a_soundgrid_value_is_named_once() {
+    let mut audio = production_example();
+    let SoundGridFacts::Adapter { nic, .. } = &mut audio.soundgrid else {
+        panic!("the fixture has a SoundGrid adapter");
+    };
+    let flow = nic
+        .settings
+        .iter_mut()
+        .find(|s| s.setting == NicSetting::FlowControl)
+        .unwrap();
+    flow.keyword = Some("*FlowControl".to_string());
+    flow.value = Reading::Value("1".to_string());
+    let guid = nic.guid.clone();
+    let wired = audio.wired_nics.as_mut().unwrap();
+    let sg = wired.iter_mut().find(|n| n.guid == guid).unwrap();
+    for v in &mut sg.values {
+        if v.keyword == "*FlowControl" || v.keyword == "PnPCapabilities" {
+            v.value = Reading::Value("1".to_string());
+        }
+    }
+    let codes: Vec<String> = problems(&audio).iter().map(EnvProblem::code).collect();
+    assert_eq!(codes, ["soundgrid_nic_setting:flow_control"], "{codes:?}");
+    // Another adapter's same value is still named.
+    let other = audio
+        .wired_nics
+        .as_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|n| n.guid != guid)
+        .unwrap();
+    for v in &mut other.values {
+        if v.keyword == "*FlowControl" {
+            v.value = Reading::Value("1".to_string());
+        }
+    }
+    let codes: Vec<String> = problems(&audio).iter().map(EnvProblem::code).collect();
+    assert_eq!(
+        codes,
+        [
+            "soundgrid_nic_setting:flow_control",
+            "wired_nic_value:*FlowControl"
+        ],
+        "{codes:?}"
+    );
+}

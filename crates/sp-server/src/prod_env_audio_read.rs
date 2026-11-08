@@ -405,6 +405,8 @@ pub struct IfRow {
     pub filter: bool,
     /// `PhysicalMediumType` (`NDIS_PHYSICAL_MEDIUM`).
     pub medium: i32,
+    /// `Type` (IANA ifType): 6 = Ethernet, 71 = Wi-Fi.
+    pub if_type: u32,
     /// The device is there: `OperStatus` is not `IfOperStatusNotPresent`.
     /// A removed adapter keeps its row (resolume-snv: "Ethernet 2" and
     /// "Ethernet 3", no device, no class key, no MAC).

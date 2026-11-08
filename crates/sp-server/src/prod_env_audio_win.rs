@@ -227,6 +227,7 @@ pub(super) fn if_table() -> Result<Vec<IfRow>, u32> {
                     hardware,
                     filter,
                     medium: row.PhysicalMediumType,
+                    if_type: row.Type,
                     present: row.OperStatus != IfOperStatusNotPresent,
                     enabled: row.AdminStatus != NET_IF_ADMIN_STATUS_DOWN,
                 }

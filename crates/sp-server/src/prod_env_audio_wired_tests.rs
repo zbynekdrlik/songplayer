@@ -16,6 +16,7 @@ fn wired_row(guid: &str) -> IfRow {
         hardware: true,
         filter: false,
         medium: MEDIUM_802_3,
+        if_type: IF_TYPE_ETHERNET,
         present: true,
         enabled: true,
     }
@@ -174,6 +175,7 @@ fn only_a_hardware_802_3_row_of_its_own_is_an_adapter() {
     // resolume-snv's Wi-Fi is `Native 802.11`, medium 9.
     let radio = IfRow {
         medium: 9,
+        if_type: 71,
         ..wired_row(GUID)
     };
     assert!(!is_wired(&filter));
@@ -203,6 +205,18 @@ fn a_removed_adapters_row_is_no_adapter() {
     assert_eq!(guids, [GUID]);
     assert_eq!(problems(&Some(nics)), []);
     assert_eq!(errors, Vec::<String>::new());
+}
+
+/// The review of 8.11.2026: a driver that reports no physical medium (0,
+/// unspecified) on an Ethernet interface is still a wired adapter, as the
+/// script sees it (`Get-NetAdapter` `MediaType` 802.3 is the NDIS medium).
+#[test]
+fn an_ethernet_row_with_no_physical_medium_is_an_adapter() {
+    let unspecified = IfRow {
+        medium: 0,
+        ..wired_row(GUID)
+    };
+    assert!(is_wired(&unspecified));
 }
 
 /// A disabled adapter keeps its row (resolume-snv's disabled Wi-Fi: OperStatus

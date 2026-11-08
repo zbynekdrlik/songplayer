@@ -23,6 +23,9 @@ use crate::prod_env::audio::{NDIS_DEVICE_DISABLE_PM, Reading};
 /// `NDIS_PHYSICAL_MEDIUM`'s `NdisPhysicalMedium802_3`.
 pub const MEDIUM_802_3: i32 = 14;
 
+/// `IF_TYPE_ETHERNET_CSMACD`: what the script's `MediaType` 802.3 is.
+pub const IF_TYPE_ETHERNET: u32 = 6;
+
 /// The values every wired adapter must hold at 0, offered by its driver or
 /// not (`Get-ProdPcEveryNicValues`, the same order: a test compares them).
 pub const ALWAYS: [&str; 8] = [
@@ -116,7 +119,12 @@ pub fn verdict(value: &WiredValue) -> Verdict {
 /// traffic, and `setup-prod-pc` leaves both alone (`Not Present`,
 /// `Disabled`).
 pub fn is_wired(row: &IfRow) -> bool {
-    row.present && row.enabled && row.hardware && !row.filter && row.medium == MEDIUM_802_3
+    row.present
+        && row.enabled
+        && row.hardware
+        && !row.filter
+        && row.if_type == IF_TYPE_ETHERNET
+        && row.medium == MEDIUM_802_3
 }
 
 /// One adapter's values. What cannot be read stays unread, and says why.
@@ -182,6 +190,16 @@ pub fn wired_nics(
 /// The problems of every wired adapter: one "cannot be read" per adapter,
 /// then each value in the order read.
 pub fn problems(nics: &Option<Vec<WiredNicFacts>>) -> Vec<EnvProblem> {
+    problems_besides(nics, &[])
+}
+
+/// The problems, leaving out each `(guid, keyword)` another check already
+/// judges on that adapter (the SoundGrid adapter's own settings), so one
+/// wrong value is named once.
+pub fn problems_besides(
+    nics: &Option<Vec<WiredNicFacts>>,
+    judged: &[(String, String)],
+) -> Vec<EnvProblem> {
     let Some(nics) = nics else {
         return vec![EnvProblem::Unreadable(Unreadable::WiredNics)];
     };
@@ -194,6 +212,12 @@ pub fn problems(nics: &Option<Vec<WiredNicFacts>>) -> Vec<EnvProblem> {
             problems.push(EnvProblem::WiredNicUnreadable { nic: name.clone() });
         }
         for (keyword, verdict) in verdicts {
+            let elsewhere = judged
+                .iter()
+                .any(|(g, k)| g.eq_ignore_ascii_case(&nic.guid) && k.eq_ignore_ascii_case(keyword));
+            if elsewhere {
+                continue;
+            }
             let value = match verdict {
                 Verdict::Wrong(value) => Some(value),
                 Verdict::Missing => None,

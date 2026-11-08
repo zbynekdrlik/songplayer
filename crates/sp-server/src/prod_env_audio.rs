@@ -382,8 +382,26 @@ pub fn problems(audio: &AudioFacts) -> Vec<EnvProblem> {
         problems.push(EnvProblem::DriversNotExcluded);
     }
     problems.extend(mmcss_problems(&audio.mmcss));
-    problems.extend(read::wired::problems(&audio.wired_nics));
+    let judged = soundgrid_judged(&audio.soundgrid);
+    problems.extend(read::wired::problems_besides(
+        &audio.wired_nics,
+        &judged[..0],
+    ));
     problems
+}
+
+/// The SoundGrid adapter's keywords its own check judges: each setting read
+/// under a keyword, and `PnPCapabilities` (always judged).
+pub fn soundgrid_judged(soundgrid: &SoundGridFacts) -> Vec<(String, String)> {
+    let SoundGridFacts::Adapter { nic, .. } = soundgrid else {
+        return Vec::new();
+    };
+    nic.settings
+        .iter()
+        .filter_map(|s| s.keyword.clone())
+        .chain(["PnPCapabilities".to_string()])
+        .map(|keyword| (nic.guid.clone(), keyword))
+        .collect()
 }
 
 /// One adapter on the status.
