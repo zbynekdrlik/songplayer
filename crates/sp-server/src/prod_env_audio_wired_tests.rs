@@ -16,6 +16,7 @@ fn wired_row(guid: &str) -> IfRow {
         hardware: true,
         filter: false,
         medium: MEDIUM_802_3,
+        present: true,
     }
 }
 
@@ -183,6 +184,24 @@ fn only_a_hardware_802_3_row_of_its_own_is_an_adapter() {
         &mut Vec::new(),
     );
     assert_eq!(nics, Some(vec![]));
+}
+
+/// resolume-snv 8.11.2026: "Ethernet 2" and "Ethernet 3" are rows of removed
+/// adapters (`OperStatus` 6, no device, no class key). They carry no traffic
+/// and `setup-prod-pc` never sees them, so they are no adapter to gate.
+#[test]
+fn a_removed_adapters_row_is_no_adapter() {
+    let ghost = IfRow {
+        present: false,
+        ..wired_row("{F6686CC8-B055-43F2-A33A-0244DB4140FA}")
+    };
+    assert!(!is_wired(&ghost));
+    let mut errors = Vec::new();
+    let nics = wired_nics(&dante_box(), &Ok(vec![wired_row(GUID), ghost]), &mut errors).unwrap();
+    let guids: Vec<&str> = nics.iter().map(|n| n.guid.as_str()).collect();
+    assert_eq!(guids, [GUID]);
+    assert_eq!(problems(&Some(nics)), []);
+    assert_eq!(errors, Vec::<String>::new());
 }
 
 #[test]

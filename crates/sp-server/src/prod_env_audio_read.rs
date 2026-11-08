@@ -405,6 +405,10 @@ pub struct IfRow {
     pub filter: bool,
     /// `PhysicalMediumType` (`NDIS_PHYSICAL_MEDIUM`).
     pub medium: i32,
+    /// The device is there: `OperStatus` is not `IfOperStatusNotPresent`.
+    /// A removed adapter keeps its row (resolume-snv: "Ethernet 2" and
+    /// "Ethernet 3", no device, no class key, no MAC).
+    pub present: bool,
 }
 
 /// `MIB_IF_ROW2.InterfaceAndOperStatusFlags`'s `HardwareInterface` bit.
