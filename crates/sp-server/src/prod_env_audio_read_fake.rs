@@ -170,6 +170,7 @@ pub(super) fn row(guid: &str, mac: &str, hardware: bool, filter: bool) -> IfRow 
         // (`prod_env_audio_wired_tests.rs`), this fixture is PP before it.
         medium: 0,
         present: true,
+        enabled: true,
     }
 }
 

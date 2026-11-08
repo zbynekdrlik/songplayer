@@ -192,7 +192,9 @@ pub(super) fn if_table() -> Result<Vec<IfRow>, u32> {
     use windows_sys::Win32::NetworkManagement::IpHelper::{
         FreeMibTable, GetIfTable2, MIB_IF_ROW2, MIB_IF_TABLE2,
     };
-    use windows_sys::Win32::NetworkManagement::Ndis::IfOperStatusNotPresent;
+    use windows_sys::Win32::NetworkManagement::Ndis::{
+        IfOperStatusNotPresent, NET_IF_ADMIN_STATUS_DOWN,
+    };
 
     let mut table: *mut MIB_IF_TABLE2 = std::ptr::null_mut();
     // SAFETY: the call allocates the table and writes its address.
@@ -226,6 +228,7 @@ pub(super) fn if_table() -> Result<Vec<IfRow>, u32> {
                     filter,
                     medium: row.PhysicalMediumType,
                     present: row.OperStatus != IfOperStatusNotPresent,
+                    enabled: row.AdminStatus != NET_IF_ADMIN_STATUS_DOWN,
                 }
             })
             .collect()

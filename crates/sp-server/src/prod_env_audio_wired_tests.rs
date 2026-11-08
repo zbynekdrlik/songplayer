@@ -17,6 +17,7 @@ fn wired_row(guid: &str) -> IfRow {
         filter: false,
         medium: MEDIUM_802_3,
         present: true,
+        enabled: true,
     }
 }
 
@@ -202,6 +203,26 @@ fn a_removed_adapters_row_is_no_adapter() {
     assert_eq!(guids, [GUID]);
     assert_eq!(problems(&Some(nics)), []);
     assert_eq!(errors, Vec::<String>::new());
+}
+
+/// A disabled adapter keeps its row (resolume-snv's disabled Wi-Fi: OperStatus
+/// 2, AdminStatus 2). `setup-prod-pc` leaves a disabled adapter alone, so
+/// the gate does too.
+#[test]
+fn a_disabled_adapter_is_no_adapter_to_gate() {
+    let off = IfRow {
+        enabled: false,
+        ..wired_row("{BBBBBBBB-0000-4000-8000-000000000002}")
+    };
+    assert!(!is_wired(&off));
+    let nics = wired_nics(
+        &dante_box(),
+        &Ok(vec![wired_row(GUID), off]),
+        &mut Vec::new(),
+    )
+    .unwrap();
+    let guids: Vec<&str> = nics.iter().map(|n| n.guid.as_str()).collect();
+    assert_eq!(guids, [GUID]);
 }
 
 #[test]

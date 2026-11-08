@@ -169,7 +169,7 @@ fn every_audio_problem_reads_in_slovak() {
             "nastavenia Windows Update sa nepodarilo zistiť",
             "nastavenia MMCSS sa nepodarilo zistiť",
             "zoznam sieťových kariet sa nepodarilo zistiť",
-            "sieťová karta „soundgrid-pcie“: hodnota „*EEE“ nie je produkčná (hodnota 1)",
+            "sieťová karta „soundgrid-pcie“: nastavenie „*EEE“ nie je produkčné (je 1)",
             "sieťová karta „soundgrid-pcie“: hodnota „*SelectiveSuspend“ v registri chýba \
              (ovládač ju mohol pri inštalácii zmazať, najbližší deploy ju zapíše)",
             "nastavenia sieťovej karty „soundgrid-pcie“ sa nepodarilo zistiť",

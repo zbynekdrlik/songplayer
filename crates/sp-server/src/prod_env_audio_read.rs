@@ -409,6 +409,10 @@ pub struct IfRow {
     /// A removed adapter keeps its row (resolume-snv: "Ethernet 2" and
     /// "Ethernet 3", no device, no class key, no MAC).
     pub present: bool,
+    /// Turned on: `AdminStatus` is not `NET_IF_ADMIN_STATUS_DOWN`. A
+    /// disabled adapter keeps a row (`OperStatus` down), and
+    /// `setup-prod-pc` leaves it alone.
+    pub enabled: bool,
 }
 
 /// `MIB_IF_ROW2.InterfaceAndOperStatusFlags`'s `HardwareInterface` bit.

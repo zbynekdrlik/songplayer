@@ -499,7 +499,27 @@ Describe 'Get-ProdPcPlan: every wired adapter (issue 285, the owner''s rule)' {
         $adapter.class_key = $null
         $facts = Read-Fixture 'fresh'
         $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @($adapter) -Force
-        @(Get-ProdPcBlockers -Facts $facts | ForEach-Object { $_.Code }) | Should -Contain 'unreadable:nic'
+        @(Get-ProdPcBlockers -Facts $facts | ForEach-Object { $_.Code }) | Should -Contain 'unreadable:wired_nic'
+    }
+
+    It 'leaves an adapter that is not present alone (an unplugged USB adapter)' {
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(New-Adapter 'Dante' '0014' -Status 'Not Present') -Force
+        Get-NicActions $facts | Should -HaveCount 0
+    }
+
+    It 'never writes a required SoundGrid setting the driver lacks: it stays a blocker' {
+        $facts = Read-Fixture 'pp'
+        $sg = $facts.soundgrid.adapters[0]
+        $sg.settings.PSObject.Properties.Remove('*FlowControl')
+        $copy = [pscustomobject]@{}
+        foreach ($p in $sg.settings.PSObject.Properties) { $copy | Add-Member -NotePropertyName $p.Name -NotePropertyValue $p.Value }
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(
+            [pscustomobject]@{ name = $sg.name; guid = $sg.guid; description = $sg.name; mac = ''; permanent_mac = ''
+                media = '802.3'; status = 'Up'; class_key = $sg.class_key; settings = $copy }
+        ) -Force
+        @(Get-ProdPcBlockers -Facts $facts | ForEach-Object { $_.Code }) | Should -Contain 'soundgrid_nic_setting:flow_control'
+        @(Get-NicActions $facts | Where-Object { $_.Name -eq '*FlowControl' }) | Should -HaveCount 0
     }
 
     It 'plans nothing on the second run' {
