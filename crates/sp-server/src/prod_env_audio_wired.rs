@@ -110,9 +110,11 @@ pub fn verdict(value: &WiredValue) -> Verdict {
     }
 }
 
-/// Whether a row is a wired adapter of its own.
+/// Whether a row is a wired adapter of its own, there now. A removed
+/// adapter's row (not present) carries no traffic, and `setup-prod-pc`
+/// (`Get-NetAdapter`) never lists it.
 pub fn is_wired(row: &IfRow) -> bool {
-    row.hardware && !row.filter && row.medium == MEDIUM_802_3
+    row.present && row.hardware && !row.filter && row.medium == MEDIUM_802_3
 }
 
 /// One adapter's values. What cannot be read stays unread, and says why.
