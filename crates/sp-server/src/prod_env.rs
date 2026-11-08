@@ -81,6 +81,9 @@ pub struct EnvFacts {
     pub defender_realtime: Option<bool>,
     /// Defender runs in a passive / EDR block mode (it still scans).
     pub defender_passive: Option<bool>,
+    /// Defender's other protections that are on, by its own status
+    /// (`read::defender_protections_on`); `[]` when Defender is off.
+    pub defender_protections_on: Option<Vec<String>>,
     /// Defender's running mode (`AMRunningMode`, shown only).
     pub defender_mode: Option<String>,
     /// Defender's antivirus engine is on (`AntivirusEnabled`, shown only).
@@ -168,10 +171,17 @@ pub fn verdict(facts: &EnvFacts) -> EnvVerdict {
         }),
         (Some(_), Some(true)) => {}
     }
-    match (facts.defender_realtime, facts.defender_passive) {
-        (Some(realtime), Some(passive)) => {
+    match (
+        facts.defender_realtime,
+        facts.defender_passive,
+        &facts.defender_protections_on,
+    ) {
+        (Some(realtime), Some(passive), Some(protections)) => {
             if realtime {
                 problems.push(EnvProblem::DefenderRealtimeOn);
+            }
+            for name in protections {
+                problems.push(EnvProblem::DefenderProtectionOn(name.clone()));
             }
             if passive {
                 let mode = facts.defender_mode.clone().unwrap_or_default();
@@ -244,6 +254,7 @@ pub fn status_of(check: &Check, now_ms: i64) -> (EnvironmentStatus, Vec<EnvProbl
         edition_allowed: v.edition_allowed,
         defender_realtime: facts.defender_realtime,
         defender_passive: facts.defender_passive,
+        defender_protections_on: facts.defender_protections_on.clone(),
         defender_mode: facts.defender_mode.clone(),
         defender_antivirus_enabled: facts.defender_antivirus_enabled,
         antivirus_on: facts.antivirus_on.clone(),

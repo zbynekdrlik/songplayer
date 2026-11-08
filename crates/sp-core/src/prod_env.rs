@@ -89,6 +89,11 @@ pub enum EnvProblem {
     EditionNotAllowed { edition: String, build: Option<u32> },
     /// Windows Defender's real-time protection is on.
     DefenderRealtimeOn,
+    /// Another of Defender's protections is on, as Defender's own status
+    /// reports it (#255): `behavior_monitoring`, `ioav`, `on_access`. A
+    /// security-intelligence update turned them back on while real-time
+    /// stayed off (resolume-snv, 7.11.2026).
+    DefenderProtectionOn(String),
     /// Windows Defender runs in a mode that still scans files while another
     /// product leads (`AMRunningMode`: passive, EDR block, side-by-side
     /// passive).
@@ -152,6 +157,7 @@ impl EnvProblem {
         match self {
             Self::EditionNotAllowed { .. } => "edition_not_allowed".to_string(),
             Self::DefenderRealtimeOn => "defender_realtime_on".to_string(),
+            Self::DefenderProtectionOn(name) => format!("defender_protection_on:{name}"),
             Self::DefenderPassive(_) => "defender_passive_mode".to_string(),
             Self::AntivirusOn(_) => "antivirus_on".to_string(),
             Self::FirewallOn(p) => format!("firewall_on:{}", p.name()),
@@ -193,6 +199,15 @@ impl EnvProblem {
             }
             Self::DefenderRealtimeOn => {
                 "ochrana Windows Defender v reálnom čase je zapnutá".to_string()
+            }
+            Self::DefenderProtectionOn(name) => {
+                let what = match name.as_str() {
+                    "behavior_monitoring" => "sledovanie správania",
+                    "ioav" => "kontrola stiahnutých súborov (IOAV)",
+                    "on_access" => "kontrola súborov pri prístupe",
+                    other => other,
+                };
+                format!("ochrana Windows Defender „{what}“ je zapnutá")
             }
             Self::DefenderPassive(mode) => {
                 format!("Windows Defender beží v režime „{mode}“ a súbory stále kontroluje")
@@ -367,6 +382,10 @@ pub struct EnvironmentStatus {
     /// Windows Defender runs in a passive / EDR block mode (still scans).
     #[serde(default)]
     pub defender_passive: Option<bool>,
+    /// Defender's other protections that are on (#255: `behavior_monitoring`,
+    /// `ioav`, `on_access`; `[]`: none; `None`: not read).
+    #[serde(default)]
+    pub defender_protections_on: Option<Vec<String>>,
     /// Windows Defender's running mode (`AMRunningMode`), for the operator.
     #[serde(default)]
     pub defender_mode: Option<String>,

@@ -76,6 +76,34 @@ pub struct DefenderRow {
     pub mode: Option<String>,
     /// `AntivirusEnabled`.
     pub antivirus_enabled: Option<bool>,
+    /// `BehaviorMonitorEnabled`.
+    pub behavior_monitor: Option<bool>,
+    /// `IoavProtectionEnabled`.
+    pub ioav: Option<bool>,
+    /// `OnAccessProtectionEnabled`.
+    pub on_access: Option<bool>,
+}
+
+/// Defender's protections besides real-time that are on, by the names of
+/// `EnvProblem::DefenderProtectionOn`; a property with no value cannot be
+/// verified.
+pub fn defender_protections_on(row: &DefenderRow) -> Result<Vec<String>, String> {
+    let mut on = Vec::new();
+    for (name, value) in [
+        ("behavior_monitoring", row.behavior_monitor),
+        ("ioav", row.ioav),
+        ("on_access", row.on_access),
+    ] {
+        match value {
+            Some(enabled) => {
+                if !enabled {
+                    on.push(name.to_string());
+                }
+            }
+            None => return Err(format!("Defender's status names no {name} state")),
+        }
+    }
+    Ok(on)
 }
 
 /// One firewall profile in the active policy store (`MSFT_NetFirewallProfile`).
@@ -421,6 +449,22 @@ pub fn facts_from(direct: &DirectRead, wmi: &Result<WmiRead, String>) -> EnvFact
             (None, None)
         }
     };
+    // The other protections, once real-time was decided: none with no row
+    // (not installed) or a stopped service, else what the row says.
+    let defender_protections_on = match (defender_realtime, row) {
+        (None, _) => None,
+        (Some(_), None) => Some(Vec::new()),
+        (Some(_), Some(row)) => match defender_protections_on(row) {
+            Ok(on) => Some(on),
+            Err(why) => match defender_service_off(direct.defender_service) {
+                Ok(()) => Some(Vec::new()),
+                Err(service) => {
+                    note(&mut errors, format!("{why}; {service}"));
+                    None
+                }
+            },
+        },
+    };
     let antivirus_on = match antivirus_on(wmi) {
         Ok(names) => Some(names),
         Err(why) => {
@@ -437,6 +481,7 @@ pub fn facts_from(direct: &DirectRead, wmi: &Result<WmiRead, String>) -> EnvFact
         build_number,
         defender_realtime,
         defender_passive,
+        defender_protections_on,
         defender_mode: row.and_then(|row| row.mode.clone()),
         defender_antivirus_enabled: row.and_then(|row| row.antivirus_enabled),
         antivirus_on,

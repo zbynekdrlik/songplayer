@@ -414,7 +414,8 @@ fn query_defender(
     let services = connect(locator, r"ROOT\Microsoft\Windows\Defender")?;
     let found = rows(
         &services,
-        "SELECT RealTimeProtectionEnabled, AMRunningMode, AntivirusEnabled \
+        "SELECT RealTimeProtectionEnabled, AMRunningMode, AntivirusEnabled, \
+         BehaviorMonitorEnabled, IoavProtectionEnabled, OnAccessProtectionEnabled \
          FROM MSFT_MpComputerStatus",
         None,
     )?;
@@ -422,6 +423,9 @@ fn query_defender(
         realtime: bool_of(row, "RealTimeProtectionEnabled"),
         mode: string_of(row, "AMRunningMode"),
         antivirus_enabled: bool_of(row, "AntivirusEnabled"),
+        behavior_monitor: bool_of(row, "BehaviorMonitorEnabled"),
+        ioav: bool_of(row, "IoavProtectionEnabled"),
+        on_access: bool_of(row, "OnAccessProtectionEnabled"),
     }))
 }
 

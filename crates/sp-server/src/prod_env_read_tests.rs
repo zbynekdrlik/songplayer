@@ -223,6 +223,9 @@ fn wmi() -> WmiRead {
             realtime: Some(false),
             mode: Some("Normal".to_string()),
             antivirus_enabled: Some(true),
+            behavior_monitor: Some(false),
+            ioav: Some(false),
+            on_access: Some(false),
         })),
         firewall: Ok(store(0, 0, 0)),
         antivirus: Ok(Vec::new()),
@@ -239,6 +242,7 @@ fn a_production_box_reads_as_its_facts() {
             build_number: Some(26100),
             defender_realtime: Some(false),
             defender_passive: Some(false),
+            defender_protections_on: Some(Vec::new()),
             defender_mode: Some("Normal".to_string()),
             defender_antivirus_enabled: Some(true),
             antivirus_on: Some(Vec::new()),
@@ -400,6 +404,9 @@ fn defenders_query_decides_its_fact() {
             realtime: Some(true),
             mode: Some("Normal".to_string()),
             antivirus_enabled: Some(true),
+            behavior_monitor: Some(false),
+            ioav: Some(false),
+            on_access: Some(false),
         })),
         ..wmi()
     };
@@ -418,6 +425,71 @@ fn defenders_query_decides_its_fact() {
           not stopped (state 4)"
         ]
     );
+}
+
+/// #255: the protections besides real-time, from Defender's own status.
+#[test]
+fn defenders_other_protections_are_read_from_its_status() {
+    let with = |behavior_monitor, ioav, on_access| WmiRead {
+        defender: Ok(Some(DefenderRow {
+            realtime: Some(false),
+            mode: Some("Normal".to_string()),
+            antivirus_enabled: Some(true),
+            behavior_monitor,
+            ioav,
+            on_access,
+        })),
+        ..wmi()
+    };
+    let read = |w: WmiRead| facts_from(&direct(), &Ok(w));
+    assert_eq!(
+        read(with(Some(true), Some(false), Some(true))).defender_protections_on,
+        Some(vec![
+            "behavior_monitoring".to_string(),
+            "on_access".to_string()
+        ])
+    );
+    assert_eq!(
+        read(with(Some(false), Some(true), Some(false))).defender_protections_on,
+        Some(vec!["ioav".to_string()])
+    );
+    assert_eq!(
+        read(with(Some(false), Some(false), Some(false))).defender_protections_on,
+        Some(Vec::new())
+    );
+    // A running Defender whose row names no state cannot be verified.
+    let unread = read(with(Some(false), None, Some(false)));
+    assert_eq!(unread.defender_protections_on, None);
+    assert_eq!(unread.defender_realtime, Some(false));
+    assert!(
+        unread
+            .read_errors
+            .contains(&"Defender's status names no ioav state; the WinDefend service is not stopped (state 4)".to_string()),
+        "{:?}",
+        unread.read_errors
+    );
+    // Its service stopped: off, whatever the row lacks.
+    let stopped = DirectRead {
+        defender_service: ServiceRead::State(SERVICE_STOPPED),
+        ..direct()
+    };
+    let w = with(None, None, None);
+    assert_eq!(
+        facts_from(&stopped, &Ok(w)).defender_protections_on,
+        Some(Vec::new())
+    );
+    // Not installed (no namespace): none.
+    let gone = WmiRead {
+        defender: Err(WBEM_E_INVALID_NAMESPACE),
+        ..wmi()
+    };
+    assert_eq!(read(gone).defender_protections_on, Some(Vec::new()));
+    // Real-time unreadable: these are not read either.
+    let refused = WmiRead {
+        defender: Err(0x8007_0005_u32 as i32),
+        ..wmi()
+    };
+    assert_eq!(read(refused).defender_protections_on, None);
 }
 
 // ---- Defender switched off entirely (review finding 3) ----
@@ -528,6 +600,9 @@ fn defender_in(mode: Option<&str>, realtime: bool) -> WmiRead {
             realtime: Some(realtime),
             mode: mode.map(str::to_string),
             antivirus_enabled: Some(true),
+            behavior_monitor: Some(false),
+            ioav: Some(false),
+            on_access: Some(false),
         })),
         ..wmi()
     }

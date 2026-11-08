@@ -155,6 +155,9 @@ fn fake_wmi() -> WmiRead {
             realtime: Some(true),
             mode: Some("Normal".to_string()),
             antivirus_enabled: Some(true),
+            behavior_monitor: Some(false),
+            ioav: Some(false),
+            on_access: Some(false),
         })),
         firewall: Ok(vec![
             FirewallRow {

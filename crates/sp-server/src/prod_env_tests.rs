@@ -21,6 +21,7 @@ fn production() -> EnvFacts {
         build_number: Some(26100),
         defender_realtime: Some(false),
         defender_passive: Some(false),
+        defender_protections_on: Some(Vec::new()),
         defender_mode: Some("Normal".to_string()),
         defender_antivirus_enabled: Some(true),
         antivirus_on: Some(Vec::new()),
@@ -204,6 +205,48 @@ fn defender_on_or_unread_is_a_problem() {
         ..production()
     });
     assert!(!unread.ok);
+    assert_eq!(
+        unread.problems,
+        [EnvProblem::Unreadable(Unreadable::Defender)]
+    );
+}
+
+/// #255: an intelligence update turned behaviour monitoring, IOAV and the
+/// on-access scan back on while real-time stayed off (resolume-snv,
+/// 7.11.2026). Each is named, after real-time and before the mode; unread
+/// is unreadable.
+#[test]
+fn defenders_other_protections_are_each_a_problem() {
+    let on = verdict(&EnvFacts {
+        defender_realtime: Some(true),
+        defender_passive: Some(true),
+        defender_mode: Some("Passive Mode".to_string()),
+        defender_protections_on: Some(vec!["behavior_monitoring".to_string(), "ioav".to_string()]),
+        ..production()
+    });
+    assert!(!on.ok);
+    assert_eq!(
+        on.problems,
+        [
+            EnvProblem::DefenderRealtimeOn,
+            EnvProblem::DefenderProtectionOn("behavior_monitoring".to_string()),
+            EnvProblem::DefenderProtectionOn("ioav".to_string()),
+            EnvProblem::DefenderPassive("Passive Mode".to_string()),
+        ]
+    );
+    let alone = verdict(&EnvFacts {
+        defender_protections_on: Some(vec!["on_access".to_string()]),
+        ..production()
+    });
+    assert!(!alone.ok);
+    assert_eq!(
+        alone.problems,
+        [EnvProblem::DefenderProtectionOn("on_access".to_string())]
+    );
+    let unread = verdict(&EnvFacts {
+        defender_protections_on: None,
+        ..production()
+    });
     assert_eq!(
         unread.problems,
         [EnvProblem::Unreadable(Unreadable::Defender)]
@@ -396,6 +439,7 @@ fn the_status_carries_every_fact_and_problem() {
         build_number: Some(22631),
         defender_realtime: Some(true),
         defender_passive: Some(true),
+        defender_protections_on: Some(Vec::new()),
         defender_mode: Some("Passive Mode".to_string()),
         defender_antivirus_enabled: Some(false),
         antivirus_on: Some(vec!["ESET Security".to_string()]),
@@ -426,6 +470,7 @@ fn the_status_carries_every_fact_and_problem() {
             edition_allowed: Some(false),
             defender_realtime: Some(true),
             defender_passive: Some(true),
+            defender_protections_on: Some(Vec::new()),
             defender_mode: Some("Passive Mode".to_string()),
             defender_antivirus_enabled: Some(false),
             antivirus_on: Some(vec!["ESET Security".to_string()]),
