@@ -96,7 +96,7 @@ pub fn defender_protections_on(row: &DefenderRow) -> Result<Vec<String>, String>
     ] {
         match value {
             Some(enabled) => {
-                if !enabled {
+                if enabled {
                     on.push(name.to_string());
                 }
             }

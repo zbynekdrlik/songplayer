@@ -71,6 +71,7 @@ const holds = (over: Partial<EnvironmentStatus> = {}): EnvironmentStatus => ({
   edition_allowed: true,
   defender_realtime: false,
   defender_passive: false,
+  defender_protections_on: [],
   defender_mode: "Normal",
   defender_antivirus_enabled: true,
   antivirus_on: [],
@@ -172,6 +173,12 @@ test.describe("production environment gate (#233)", () => {
       'antivirus_on is ["ESET Security"], not []',
     ]);
     expect(environmentFailures(holds({ antivirus_on: null }))).toEqual(["antivirus_on is null, not []"]);
+    expect(environmentFailures(holds({ defender_protections_on: ["ioav"] }))).toEqual([
+      'defender_protections_on is ["ioav"], not []',
+    ]);
+    expect(environmentFailures(holds({ defender_protections_on: null }))).toEqual([
+      "defender_protections_on is null, not []",
+    ]);
   });
 
   test("a status from before the guard knew a fact fails on it", () => {
@@ -180,12 +187,14 @@ test.describe("production environment gate (#233)", () => {
     delete old.defender_passive;
     delete old.antivirus_on;
     delete old.firewall;
+    delete old.defender_protections_on;
     expect(environmentFailures(old)).toEqual([
       "defender_passive is null, not false",
       "firewall.domain is null, not false",
       "firewall.private is null, not false",
       "firewall.public is null, not false",
       "antivirus_on is null, not []",
+      "defender_protections_on is null, not []",
     ]);
   });
 

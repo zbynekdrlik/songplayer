@@ -793,7 +793,11 @@ were enough:
 - a new fn only GREEN's predicate calls can be read by a debug log of the
   window inputs, which GREEN keeps.
 
-Write GREEN first and tar the changed files to the scratchpad. Build RED with
+Write GREEN first and tar the changed files to the scratchpad. Restore
+them with `tar xmf` (`-m`): a plain `tar xf` puts back the files' OLD
+mtimes, older than the build, so cargo skips the rebuild and the GREEN
+tree still runs the RED binary (#255, 8.11.2026: two tests read red on
+GREEN until a `touch`). Build RED with
 anchor-asserted scripts (rustfmt re-wraps lines, so re-read the formatted text
 before anchoring). Commit RED, then restore ONLY the files whose spots differ
 from the tar.

@@ -1541,6 +1541,7 @@ const ENV_HOLDS = {
   edition_allowed: null,
   defender_realtime: null,
   defender_passive: null,
+  defender_protections_on: null,
   defender_mode: null,
   defender_antivirus_enabled: null,
   antivirus_on: null,

@@ -97,6 +97,19 @@ process for this.
   `RealTimeProtectionEnabled`, `AMRunningMode`, `AntivirusEnabled`
   (`defender_realtime`, `PASSIVE_MODES`):
   - real-time on = `defender_realtime_on`;
+  - #255: `BehaviorMonitorEnabled`, `IoavProtectionEnabled`,
+    `OnAccessProtectionEnabled` from the same row
+    (`read::defender_protections_on`), each on = one
+    `defender_protection_on:<behavior_monitoring|ioav|on_access>` after
+    real-time; a row with no value is `unreadable:defender`, not installed
+    or the service stopped = none; `defender_protections_on` on the status,
+    the post-deploy gate wants `[]`. Why: on resolume-snv a
+    security-intelligence update (7.11.2026 16:33Z, event 5007 to
+    `Default`) turned behaviour monitoring, IOAV and script scanning back
+    on while real-time stayed off, and the check read ok for 25 h. Script
+    scanning has no status property: only the setup script sets it. The
+    Windows CI job does not compare these three with `Get-MpComputerStatus`
+    yet;
   - a mode that still scans files while another product leads ("Passive
     Mode", "Passive", "EDR Block Mode", "SxS Passive Mode", Microsoft's
     `Get-MpComputerStatus` doc) = `defender_passive_mode`, even with

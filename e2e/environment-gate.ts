@@ -89,6 +89,7 @@ export interface EnvironmentStatus {
   edition_allowed?: boolean | null;
   defender_realtime?: boolean | null;
   defender_passive?: boolean | null;
+  defender_protections_on?: string[] | null;
   defender_mode?: string | null;
   defender_antivirus_enabled?: boolean | null;
   antivirus_on?: string[] | null;
@@ -137,6 +138,10 @@ function factFailures(env: EnvironmentStatus): string[] {
   }
   if (!Array.isArray(env.antivirus_on) || env.antivirus_on.length > 0) {
     f.push(`antivirus_on is ${shown(env.antivirus_on)}, not []`);
+  }
+  // #255: behaviour monitoring, IOAV, on-access, by Defender's own status.
+  if (!Array.isArray(env.defender_protections_on) || env.defender_protections_on.length > 0) {
+    f.push(`defender_protections_on is ${shown(env.defender_protections_on)}, not []`);
   }
   const audio = env.audio;
   const soundgrid = audio?.soundgrid;
