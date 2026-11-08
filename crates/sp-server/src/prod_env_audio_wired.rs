@@ -5,8 +5,9 @@
 //! deploys: a driver's INF deletes them at install.
 //!
 //! Which adapters: what `GetIfTable2` lists as hardware, no filter module's
-//! row, medium 802.3 (USB ones too). A disabled adapter has no such row; a
-//! radio is another medium.
+//! row, medium 802.3 (USB ones too), present and turned on: a removed or a
+//! disabled adapter keeps a row (`OperStatus` 6, `AdminStatus` 2) and is left
+//! out, as the script leaves it alone; a radio is another medium.
 //!
 //! A value in the registry is what the driver was told, never proof that it
 //! obeys: a driver may hide a keyword and ignore it (resolume-snv's RTL8153
@@ -110,11 +111,12 @@ pub fn verdict(value: &WiredValue) -> Verdict {
     }
 }
 
-/// Whether a row is a wired adapter of its own, there now. A removed
-/// adapter's row (not present) carries no traffic, and `setup-prod-pc`
-/// (`Get-NetAdapter`) never lists it.
+/// Whether a row is a wired adapter of its own, in use: present and turned
+/// on. A removed adapter's row (not present) and a disabled one carry no
+/// traffic, and `setup-prod-pc` leaves both alone (`Not Present`,
+/// `Disabled`).
 pub fn is_wired(row: &IfRow) -> bool {
-    row.present && row.hardware && !row.filter && row.medium == MEDIUM_802_3
+    row.present && row.enabled && row.hardware && !row.filter && row.medium == MEDIUM_802_3
 }
 
 /// One adapter's values. What cannot be read stays unread, and says why.

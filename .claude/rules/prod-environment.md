@@ -248,14 +248,16 @@ lane 1; lane 2 made it a gate.) Their read errors still go to
 - `GET /api/v1/status.environment` and `GET /api/v1/environment`:
   `sp_core::prod_env::EnvironmentStatus` = `{checked, ok, note, edition_id,
   product_name, build_number, ltsc, edition_allowed, defender_realtime,
-  defender_passive, defender_mode, defender_antivirus_enabled,
+  defender_passive, defender_protections_on, defender_mode, defender_antivirus_enabled,
   antivirus_on, firewall: {domain, private, public}, audio: {soundgrid:
   "not_installed"|"unreadable"|"port_unset"|"port_missing"|"found",
   soundgrid_port_mac (12 hex digits), soundgrid_nic: NIC, dante: {installed, interface_address,
   interface_name, nic: NIC}, windows_update: {no_auto_update,
   drivers_excluded}, mmcss: {system_responsiveness, network_throttling_index,
   pro_audio_priority, pro_audio_scheduling_category}, power: {scheme_guid,
-  scheme_name, core_parking_min_cores_pct}, notes}, problems: [{code,
+  scheme_name, core_parking_min_cores_pct}, wired_nics: [{guid, name,
+  description, values: [{keyword, value, ok}], ok}] | null, notes},
+  problems: [{code,
   text_sk}], read_errors, checked_at_ms}`; NIC = `{guid, name, description,
   service, driver_model: "ndis"|"netadaptercx"|null, kmdf_library_version,
   netadaptercx_keywords, settings: [{setting, keyword, value, ok}],
@@ -266,6 +268,7 @@ lane 1; lane 2 made it a gate.) Their read errors still go to
   ok, `note` "not Windows: …", the audio profile all null and no note.
 - Problem codes (stable), in this order: `edition_not_allowed`,
   `unreadable:edition`, `unreadable:build`, `defender_realtime_on`,
+  `defender_protection_on:<behavior_monitoring|ioav|on_access>`,
   `defender_passive_mode`, `unreadable:defender`, `antivirus_on`,
   `unreadable:antivirus`, `firewall_on:<domain|private|public>`,
   `unreadable:firewall:<profile>`; then #255's: SoundGrid's one of
@@ -274,7 +277,9 @@ lane 1; lane 2 made it a gate.) Their read errors still go to
   `soundgrid_nic_setting:<name>` (in `NicSetting::ALL`'s order), then
   `unreadable:windows_update` (once, for either policy),
   `windows_auto_update_on`, `windows_update_drivers_on` (lane 2), then
-  `unreadable:mmcss` (once, first) and `mmcss:<name>`; Slovak texts in
+  `unreadable:mmcss` (once, first) and `mmcss:<name>`, then #285's
+  `unreadable:wired_nics` or, per adapter, `unreadable:wired_nic` /
+  `wired_nic_value:<keyword>`; Slovak texts in
   `sp_core::prod_env::EnvProblem::text_sk` (an adapter named by its
   connection name, else its driver's description, else its GUID).
 - Logs (`Reporter::step` → `LogStep`): ONE ERROR when the problems appear
@@ -307,7 +312,9 @@ lists it): polls `/api/v1/status` until `environment.checked` (60 s) and
 judges THAT status (no second read), then FAILS (`environment-gate.ts`) on
 every problem (`code: text`), on every fact that is not the production one
 whatever `ok` says (`edition_allowed` true; `defender_realtime`,
-`defender_passive` and every `firewall.*` false; `antivirus_on` `[]`; a fact
+`defender_passive` and every `firewall.*` false; `antivirus_on` and
+`defender_protections_on` `[]`; #285: `audio.wired_nics` a non-empty list
+with every adapter `ok`; a fact
 missing from an older server reads null and fails; #255: `audio.soundgrid`
 "not_installed", or "found" with `audio.soundgrid_nic` `driver_model` "ndis"
 and `settings_ok` true,
@@ -594,10 +601,10 @@ shell; ASCII only, it is read as cp1252) and pwsh 7 (the Linux tests).
 
 "pravdaze usb sietovka musi byt spravne nastavena!!! to je vseobecne pravidlo vsade kde mame nejaku sietovku!!!" A setting a driver does not offer is a finding to solve, never a step to drop.
 
-- `Add-ProdPcEveryNicReview`, run last: every adapter of media `802.3` not `Disabled` gets `*FlowControl`, `*EEE`, `EEE`, `EnableGreenEthernet`, `AdvancedEEE`, `EnableExtraPowerSaving`, `GigaLite`, `*SelectiveSuspend` as REG_SZ "0" in its class key, offered by its driver or not; `*InterruptModeration`, `GreenEthernet`, `PowerSavingMode`, `*PowerSavingMode` 0 where present; `PnPCapabilities` with 0x08. One restart per adapter. What the SoundGrid review acts on is not acted on twice.
+- `Add-ProdPcEveryNicReview`, run last: every adapter of media `802.3` neither `Disabled` nor `Not Present` gets `*FlowControl`, `*EEE`, `EEE`, `EnableGreenEthernet`, `AdvancedEEE`, `EnableExtraPowerSaving`, `GigaLite`, `*SelectiveSuspend` as REG_SZ "0" in its class key, offered by its driver or not; `*InterruptModeration`, `GreenEthernet`, `PowerSavingMode`, `*PowerSavingMode` 0 where present; `PnPCapabilities` with 0x08. One restart per adapter (the uplink the runner uses included, when its values differ). What the SoundGrid review acts on is not acted on twice, and a required keyword its driver lacks stays the SoundGrid blocker: never written around. Its own blocker is `unreadable:wired_nic`.
 - Written straight to the class key because `Set-NetAdapterAdvancedProperty` refuses a keyword the driver does not offer. resolume-snv's RTL8153 (`rtucx22x64`, NetAdapterCx) offers none of them, and neither does the inbox `rtux64w10` section for that model; both INFs delete these values at install, so the next deploy puts them back after a driver update.
 - Not proven: that a driver honours a value it hides. NDIS keeps reading `SelectiveSuspend : Enabled` on that NIC and Windows has no read of the PHY's EEE state. Say so; never report it as verified.
 - A restart of an adapter other than SongPlayer's own stops nothing here: the script runs between SongPlayer's stop and start, and dstack has no link-flap recovery, so never restart the Dante NIC with SongPlayer running.
 - Radios are not in the script: resolume-snv's unused Wi-Fi was disabled by hand on 7.11.2026.
-- The gate between deploys is `prod_env_audio_wired.rs`: `GetIfTable2` rows that are hardware, no filter module, `PhysicalMediumType` 14 (802.3) and present (`OperStatus` not 6 `IfOperStatusNotPresent`: a removed adapter keeps its row with no device, no class key and no MAC, resolume-snv's "Ethernet 2" / "Ethernet 3", which `Get-NetAdapter` never lists either), every 60 s with the rest of the check. The two keyword lists are the script's (a test compares them). `wired_nic_value:<keyword>` / `unreadable:wired_nic` / `unreadable:wired_nics` are problems, `audio.wired_nics` on the status; the post-deploy gate fails on an empty list or an adapter not `ok`. It reads the registry, what the driver was told, never the PHY.
+- The gate between deploys is `prod_env_audio_wired.rs`: `GetIfTable2` rows that are hardware, no filter module, `PhysicalMediumType` 14 (802.3), turned on (`AdminStatus` not 2: a disabled adapter keeps a row too, resolume-snv's disabled Wi-Fi reads `OperStatus` 2 `AdminStatus` 2) and present (`OperStatus` not 6 `IfOperStatusNotPresent`: a removed adapter keeps its row with no device, no class key and no MAC, resolume-snv's "Ethernet 2" / "Ethernet 3", which `Get-NetAdapter` never lists either), every 60 s with the rest of the check. The two keyword lists are the script's (a test compares them). `wired_nic_value:<keyword>` / `unreadable:wired_nic` / `unreadable:wired_nics` are problems, `audio.wired_nics` on the status; the post-deploy gate fails on an empty list or an adapter not `ok`. It reads the registry, what the driver was told, never the PHY.
 

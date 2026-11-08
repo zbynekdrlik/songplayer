@@ -251,7 +251,7 @@ impl EnvProblem {
                 keyword,
                 value: Some(value),
             } => format!(
-                "sieťová karta „{nic}“: hodnota „{keyword}“ nie je produkčná (hodnota {value})"
+                "sieťová karta „{nic}“: nastavenie „{keyword}“ nie je produkčné (je {value})"
             ),
             Self::WiredNicValue {
                 nic,

@@ -346,8 +346,8 @@ function New-ProdPcAction {
 # Something the script cannot do for the operator: a code (lane 1's
 # problem code where there is one) and its text.
 function New-ProdPcBlocker {
-    param([string]$Code, [string]$Text)
-    return [pscustomobject]@{ Code = $Code; Text = $Text }
+    param([string]$Code, [string]$Text, [string]$AdapterGuid = '', [string]$Keyword = '')
+    return [pscustomobject]@{ Code = $Code; Text = $Text; AdapterGuid = $AdapterGuid; Keyword = $Keyword }
 }
 
 # The adapters with a MAC: those whose current address is it, else those
@@ -419,7 +419,7 @@ function Add-ProdPcSoundGridReview {
         }
         if ($null -eq $keyword) {
             if ($group.Required) {
-                $Blockers.Add((New-ProdPcBlocker "soundgrid_nic_setting:$($group.Setting)" "sietova karta SoundGrid '$name': nastavenie $($group.Keywords[0]) chyba - its driver does not offer it, so it cannot be turned off"))
+                $Blockers.Add((New-ProdPcBlocker "soundgrid_nic_setting:$($group.Setting)" "sietova karta SoundGrid '$name': nastavenie $($group.Keywords[0]) chyba - its driver does not offer it, so it cannot be turned off" -AdapterGuid $guid -Keyword $group.Keywords[0]))
             }
             continue
         }
@@ -437,25 +437,30 @@ function Add-ProdPcSoundGridReview {
 }
 
 # Every wired adapter's actions and blockers (issue 285). What the SoundGrid
-# review already acts on is not acted on twice.
+# review already acts on is not acted on twice, and a keyword it blocked on
+# (its driver lacks a required one) is never written around. An adapter that
+# is disabled or not present (unplugged) is left alone, as the gate does.
 function Add-ProdPcEveryNicReview {
     param($Facts, $Actions, $Blockers)
     $why = 'every network adapter is configured: no power saving (the owner, issue 285)'
     foreach ($adapter in @(Get-ProdPcList $Facts 'adapters')) {
         if ([string](Get-ProdPcField $adapter 'media') -ne '802.3') { continue }
-        if ([string](Get-ProdPcField $adapter 'status') -eq 'Disabled') { continue }
+        if ([string](Get-ProdPcField $adapter 'status') -in @('Disabled', 'Not Present')) { continue }
         $name = [string](Get-ProdPcField $adapter 'name')
         $guid = [string](Get-ProdPcField $adapter 'guid')
         $settings = Get-ProdPcField $adapter 'settings'
         $classKey = Get-ProdPcField $adapter 'class_key'
         if ($null -eq $settings -or $null -eq $classKey) {
-            $Blockers.Add((New-ProdPcBlocker 'unreadable:nic' "the adapter '$name' ($guid) has no instance in the network class"))
+            $Blockers.Add((New-ProdPcBlocker 'unreadable:wired_nic' "the adapter '$name' ($guid) has no instance in the network class"))
             continue
         }
         $target = @{ Adapter = $name; AdapterGuid = $guid; Path = $classKey; Type = 'String' }
         $taken = @{}
         foreach ($action in $Actions) {
             if ($action.AdapterGuid -eq $guid) { $taken[$action.Name] = $true }
+        }
+        foreach ($blocker in $Blockers) {
+            if ($blocker.AdapterGuid -eq $guid -and $blocker.Keyword) { $taken[$blocker.Keyword] = $true }
         }
         $names = @(Get-ProdPcEveryNicValues)
         foreach ($keyword in @(Get-ProdPcEveryNicValuesWherePresent)) {
