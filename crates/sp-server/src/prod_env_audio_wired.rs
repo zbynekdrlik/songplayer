@@ -119,12 +119,7 @@ pub fn verdict(value: &WiredValue) -> Verdict {
 /// traffic, and `setup-prod-pc` leaves both alone (`Not Present`,
 /// `Disabled`).
 pub fn is_wired(row: &IfRow) -> bool {
-    row.present
-        && row.enabled
-        && row.hardware
-        && !row.filter
-        && row.if_type == IF_TYPE_ETHERNET
-        && row.medium == MEDIUM_802_3
+    row.present && row.enabled && row.hardware && !row.filter && row.if_type == IF_TYPE_ETHERNET
 }
 
 /// One adapter's values. What cannot be read stays unread, and says why.

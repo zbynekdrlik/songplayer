@@ -383,10 +383,7 @@ pub fn problems(audio: &AudioFacts) -> Vec<EnvProblem> {
     }
     problems.extend(mmcss_problems(&audio.mmcss));
     let judged = soundgrid_judged(&audio.soundgrid);
-    problems.extend(read::wired::problems_besides(
-        &audio.wired_nics,
-        &judged[..0],
-    ));
+    problems.extend(read::wired::problems_besides(&audio.wired_nics, &judged));
     problems
 }
 
