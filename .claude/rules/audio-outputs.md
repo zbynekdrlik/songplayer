@@ -1566,6 +1566,14 @@ difference with its UTC time.
 - Tests run the real stack on `ClockSource::System` (a test receiver over UDP,
   `ONE_DEVICE`: each binds the Dante ports). Not proven yet: Windows media
   threads at load, real PTP, a real receiver, Dante Controller.
+- **`pump_missed` on out-4 is audible silence** (dstack, 9.11.2026): dlink's
+  pump fell more than its work margin W (2/5 of the 15 ms budget = 6 ms
+  with TX) behind the media clock, re-bootstrapped and SKIPPED those blocks;
+  TX still sends on time, so the receivers read no lateness, only silence
+  (`tx[].holes`, ~2.7 ms per 128-frame block). The ledger's `pump_missed`
+  loss fails the post-deploy audio gate. dlink's media threads were
+  THREAD_PRIORITY_HIGHEST (normal band) below SongPlayer's own MMCSS Pro
+  Audio VBAN threads; dstack moves them to MMCSS after v0.6.56 (#285).
 - `cargo fmt --all` does not reach `sp-ui`, and `cargo fmt` inside it
   reformats unrelated files: run `rustfmt --edition 2024 <file>` on the ones
   you touched.
