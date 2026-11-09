@@ -43,10 +43,10 @@ async fn get_program_reports_the_ndi_block() {
         max.ndi.push(k, SharedFrame::new(vec![0; 4]));
     }
     assert!(
-        max.ndi.take(4).is_some(),
+        max.ndi.take_at(4, 10_000).is_some(),
         "boundary 4 sent: 2 and 3 go with it"
     );
-    max.ndi.push(3, SharedFrame::new(vec![0; 4]));
+    max.ndi.push_at(3, SharedFrame::new(vec![0; 4]), 10_250);
     let pid = add_playlist(&state.pool, "slow").await;
     let (status, json) = call(
         state,
@@ -65,7 +65,7 @@ async fn get_program_reports_the_ndi_block() {
             "fourcc": "UYVY",
             "repeats": 1,
             "readback_late": 1,
-            "readback_late_events": [{ "utc_ms": 0, "behind_slots": 0 }],
+            "readback_late_events": [{ "utc_ms": 0, "behind_slots": 0, "late_us": 250 }],
             "feed_coalesced": 1,
             "switches": 1,
             "readback_us_p99": 1700,

@@ -1838,9 +1838,14 @@ nothing on air (default `cpu`).
   store and `source: "cpu"` (no GPU).
 - `readback_late_events` (#279 gate 2, 6.11.2026): the last
   `NDI_LATE_EVENTS` (32) late pictures, oldest first, `{utc_ms,
-  behind_slots}` — the late boundary's stamp on the fleet line in ms (the
-  line `program/trace`'s `wire_100ns` is on) and how many slots it trailed
-  the boundary served (0 = it lost the race to its own boundary's take).
+  behind_slots, late_us}` — the late boundary's stamp on the fleet line in ms (the
+  line `program/trace`'s `wire_100ns` is on), how many slots it trailed
+  the boundary served (0 = it lost the race to its own boundary's take)
+  and µs from that take to its push on the box's monotonic clock
+  (`FeedCore::push_at` / `take_at`, `NdiFeed`'s `now_us` =
+  `mono_100ns / 10`; 9.11.2026: a gpu run repeated ~2 pictures/s, all
+  `behind_slots` 0, so the next run tells "a few hundred µs late" from a
+  stall).
   Kept by `FeedCore::push`'s `Late` branch under the feed's one lock. It
   times each miss to its boundary so a gpu run can match it against
   `program/trace` and `max.compose_*` (the 10 s samples only bracketed
