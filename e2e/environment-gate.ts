@@ -5,7 +5,8 @@
  * made PP's Waves SoundGrid driver resync (proven A/B/A). The owner's rule:
  * a production PC runs Windows LTSC or Windows 11 IoT Enterprise, with
  * Defender's real-time protection (and any passive / EDR block mode), every
- * other antivirus and every firewall profile OFF, and no deploy passes on a
+ * other antivirus OFF, the firewall off or (a PC with a Dante leg, #255)
+ * dstack's two-network standard, and no deploy passes on a
  * box that runs otherwise. SongPlayer checks it itself
  * (`crate::prod_env`, at the start and every minute) and publishes the
  * verdict on `GET /api/v1/status.environment`; `post-deploy-environment.spec.ts`
@@ -93,11 +94,63 @@ export interface EnvironmentStatus {
   defender_mode?: string | null;
   defender_antivirus_enabled?: boolean | null;
   antivirus_on?: string[] | null;
-  firewall?: { domain?: boolean | null; private?: boolean | null; public?: boolean | null };
+  firewall?: FirewallStatus;
   audio?: AudioProfile;
   problems: EnvProblemView[];
   read_errors?: string[];
   checked_at_ms?: number | null;
+}
+
+/** #255 (dstack#155): a profile's default actions (2 = Allow, 4 = Block). */
+export interface FirewallDefaults {
+  inbound: number;
+  outbound: number;
+}
+
+/** `status.environment.firewall` (`sp_core::prod_env::FirewallState`). */
+export interface FirewallStatus {
+  domain?: boolean | null;
+  private?: boolean | null;
+  public?: boolean | null;
+  /** #255: "off" | "dstack155" | "other" (null: a profile not read). */
+  mode?: string | null;
+  defaults?: (FirewallDefaults | null)[];
+  dstack_group_rules?: number | null;
+  block_rules_outside_group?: string[] | null;
+}
+
+/** #255 (dstack#155, the owner's ruling of 10.11.2026): the firewall is in
+ * one of two states. "off": every profile off (a PC with no Dante leg).
+ * "dstack155": dstack's two-network standard, every profile on, each default
+ * action Allow (2), every enabled Block rule in the group dstack155, which
+ * holds exactly 14. Each fact by name, whatever the mode says. */
+function firewallFailures(fw: FirewallStatus | undefined, shown: (v: unknown) => string): string[] {
+  const f: string[] = [];
+  const mode = fw?.mode ?? null;
+  const profiles = ["domain", "private", "public"] as const;
+  if (mode === "off") {
+    for (const p of profiles) {
+      if (fw?.[p] !== false) f.push(`firewall.${p} is ${shown(fw?.[p])}, not false`);
+    }
+  } else if (mode === "dstack155") {
+    profiles.forEach((p, i) => {
+      if (fw?.[p] !== true) f.push(`firewall.${p} is ${shown(fw?.[p])}, not true`);
+      const d = fw?.defaults?.[i];
+      if (d?.inbound !== 2 || d?.outbound !== 2) {
+        f.push(`firewall.defaults.${p} is ${shown(d)}, not {"inbound":2,"outbound":2}`);
+      }
+    });
+    if (fw?.dstack_group_rules !== 14) {
+      f.push(`firewall.dstack_group_rules is ${shown(fw?.dstack_group_rules)}, not 14`);
+    }
+    const outside = fw?.block_rules_outside_group;
+    if (!Array.isArray(outside) || outside.length > 0) {
+      f.push(`firewall.block_rules_outside_group is ${shown(outside)}, not []`);
+    }
+  } else {
+    f.push(`firewall.mode is ${shown(mode)}, not "off" or "dstack155"`);
+  }
+  return f;
 }
 
 /** How long the gate waits for SongPlayer's first check after a restart, ms
@@ -119,7 +172,7 @@ export const MMCSS_PRODUCTION = {
 /** The facts a production box shows, each by name, whatever `ok` says
  * (review finding 9: the gate never trusts `ok` alone): an allowed edition,
  * Defender's real-time protection and passive mode off, no other antivirus
- * on, every firewall profile off; #255: SoundGrid not installed, or its
+ * on, the firewall off or dstack's standard; #255: SoundGrid not installed, or its
  * chosen adapter found on NDIS with its settings off, automatic updates
  * off and drivers excluded from Windows Update (lane 2), MMCSS for Pro
  * Audio. A fact

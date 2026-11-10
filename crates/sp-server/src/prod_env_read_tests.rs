@@ -3,9 +3,11 @@
 //! (`facts_from`).
 
 use sp_core::prod_env::FirewallProfile;
+use sp_core::prod_env::firewall::FirewallDefaults;
 
 use super::*;
 use crate::prod_env::audio::production_example;
+use crate::prod_env::firewall::BlockRules;
 use crate::prod_env::{EnvFacts, WBEM_E_INVALID_CLASS, WBEM_E_INVALID_NAMESPACE};
 
 // ---- the firewall: the active store decides ----
@@ -14,6 +16,8 @@ fn row(name: &str, enabled: Option<u32>) -> FirewallRow {
     FirewallRow {
         name: name.to_string(),
         enabled,
+        default_inbound: Some(4),
+        default_outbound: Some(2),
     }
 }
 
@@ -228,6 +232,7 @@ fn wmi() -> WmiRead {
             on_access: Some(false),
         })),
         firewall: Ok(store(0, 0, 0)),
+        firewall_rules: Ok(Vec::new()),
         antivirus: Ok(Vec::new()),
     }
 }
@@ -247,6 +252,11 @@ fn a_production_box_reads_as_its_facts() {
             defender_antivirus_enabled: Some(true),
             antivirus_on: Some(Vec::new()),
             firewall: [Some(false); 3],
+            firewall_defaults: [Some(FirewallDefaults {
+                inbound: 4,
+                outbound: 2,
+            }); 3],
+            firewall_rules: Some(BlockRules::default()),
             audio: production_example(),
             read_errors: Vec::new(),
         }
@@ -774,7 +784,11 @@ fn every_wmi_query_fails_with_one_code() {
         WmiRead {
             defender: Err(-5),
             firewall: Err(-5),
+            firewall_rules: Err(-5),
             antivirus: Err(-5),
         }
     );
 }
+
+#[path = "prod_env_read_tests_firewall.rs"]
+mod firewall;

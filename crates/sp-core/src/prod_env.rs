@@ -6,11 +6,13 @@
 //!
 //! The owner's rule: a production PC runs Windows LTSC or Windows IoT
 //! Enterprise (his ruling of 11.10.2026), with Windows Defender's real-time
-//! protection and every firewall profile OFF. Nothing may scan or filter what
-//! SongPlayer launches: on PP every Defender scan of a launched yt-dlp made
+//! protection OFF. Nothing may scan what SongPlayer launches: on PP every
+//! Defender scan of a launched yt-dlp made
 //! the Waves SoundGrid driver resync (A/B/A, kernel trace). sp-server's
 //! `prod_env` reads the facts and decides; this module only names the outcome
-//! (WASM-safe: the dashboard shows it).
+//! (WASM-safe: the dashboard shows it). The firewall: every profile off, or
+//! (a PC with a Dante leg) dstack's standard ([`firewall`], #255, the owner's
+//! ruling on dstack#155, 10.11.2026).
 //!
 //! #255 adds the production PC's audio profile ([`audio`]): the network
 //! adapter the SoundGrid driver uses (its chosen port) runs an NDIS driver
@@ -25,7 +27,11 @@ use crate::health::HealthTone;
 #[path = "prod_env_audio.rs"]
 pub mod audio;
 
+#[path = "prod_env_firewall.rs"]
+pub mod firewall;
+
 use audio::{AudioProfile, MmcssSetting, NicSetting};
+use firewall::{DSTACK_GROUP, DSTACK_GROUP_RULES, FirewallDefaults, FirewallMode};
 
 /// A Windows Firewall profile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,6 +75,11 @@ pub enum Unreadable {
     /// The antivirus products the Security Center lists.
     Antivirus,
     Firewall(FirewallProfile),
+    /// #255 (dstack#155): a profile that is on has no default actions in
+    /// the active store.
+    FirewallDefaults(FirewallProfile),
+    /// #255 (dstack#155): the enabled Block rules could not be listed.
+    FirewallRules,
     /// #255: SoundGrid (the service, its driver's chosen port, the
     /// interfaces).
     SoundGrid,
@@ -101,8 +112,24 @@ pub enum EnvProblem {
     /// Another antivirus product is on (its name, as the Security Center
     /// lists it).
     AntivirusOn(String),
-    /// A firewall profile is on.
+    /// A firewall profile is on, and nothing on the box follows dstack's
+    /// standard (no rule of the group, no default Allow): neither of the
+    /// two accepted states (#255, dstack#155).
     FirewallOn(FirewallProfile),
+    /// #255: dstack's standard is set up, but this profile is off (it wants
+    /// every profile on).
+    FirewallOff(FirewallProfile),
+    /// #255: dstack's standard is set up, but this profile's default
+    /// actions are not both Allow.
+    FirewallDefaultBlock {
+        profile: FirewallProfile,
+        defaults: FirewallDefaults,
+    },
+    /// #255: enabled Block rules outside the group (their names).
+    FirewallBlockOutsideGroup(Vec<String>),
+    /// #255: the group does not hold exactly its enabled Block rules (how
+    /// many it holds).
+    FirewallGroupIncomplete { rules: u32 },
     /// #255: SoundGrid is installed and its driver has no port chosen (no
     /// preferences, no or an empty `LocalLanPort`).
     SoundGridPortUnset,
@@ -161,6 +188,12 @@ impl EnvProblem {
             Self::DefenderPassive(_) => "defender_passive_mode".to_string(),
             Self::AntivirusOn(_) => "antivirus_on".to_string(),
             Self::FirewallOn(p) => format!("firewall_on:{}", p.name()),
+            Self::FirewallOff(p) => format!("firewall_off:{}", p.name()),
+            Self::FirewallDefaultBlock { profile, .. } => {
+                format!("firewall_default_block:{}", profile.name())
+            }
+            Self::FirewallBlockOutsideGroup(_) => "firewall_block_outside_group".to_string(),
+            Self::FirewallGroupIncomplete { .. } => "firewall_group_incomplete".to_string(),
             Self::SoundGridPortUnset => "soundgrid_port_unset".to_string(),
             Self::SoundGridPortMissing { .. } => "soundgrid_port_missing".to_string(),
             Self::SoundGridNicNetAdapterCx { .. } => "soundgrid_nic_netadaptercx".to_string(),
@@ -180,6 +213,10 @@ impl EnvProblem {
             Self::Unreadable(Unreadable::Firewall(p)) => {
                 format!("unreadable:firewall:{}", p.name())
             }
+            Self::Unreadable(Unreadable::FirewallDefaults(p)) => {
+                format!("unreadable:firewall_defaults:{}", p.name())
+            }
+            Self::Unreadable(Unreadable::FirewallRules) => "unreadable:firewall_rules".to_string(),
             Self::Unreadable(Unreadable::SoundGrid) => "unreadable:soundgrid".to_string(),
             Self::Unreadable(Unreadable::WindowsUpdate) => "unreadable:windows_update".to_string(),
             Self::Unreadable(Unreadable::Mmcss) => "unreadable:mmcss".to_string(),
@@ -214,6 +251,26 @@ impl EnvProblem {
             }
             Self::AntivirusOn(name) => format!("antivírus „{name}“ je zapnutý"),
             Self::FirewallOn(p) => format!("brána firewall je zapnutá ({} profil)", p.name_sk()),
+            Self::FirewallOff(p) => format!(
+                "brána firewall je vypnutá ({} profil), hoci štandard dstack je nastavený — \
+                 má byť zapnutá vo všetkých profiloch",
+                p.name_sk()
+            ),
+            Self::FirewallDefaultBlock { profile, defaults } => format!(
+                "brána firewall ({} profil): predvolená akcia má byť povoliť (prichádzajúce: {}, \
+                 odchádzajúce: {})",
+                profile.name_sk(),
+                firewall::action_sk(defaults.inbound),
+                firewall::action_sk(defaults.outbound)
+            ),
+            Self::FirewallBlockOutsideGroup(names) => format!(
+                "brána firewall má zapnuté blokovacie pravidlá mimo skupiny {DSTACK_GROUP}: {}",
+                firewall::names_sk(names)
+            ),
+            Self::FirewallGroupIncomplete { rules } => format!(
+                "skupina pravidiel {DSTACK_GROUP} má {rules} zapnutých blokovacích pravidiel \
+                 (má ich mať {DSTACK_GROUP_RULES})"
+            ),
             Self::SoundGridPortUnset => {
                 "SoundGrid nemá zvolený sieťový port — nastav ho v SoundGrid \
                  Studio / ovládači"
@@ -304,6 +361,13 @@ impl EnvProblem {
                 "stav brány firewall ({} profil) sa nepodarilo zistiť",
                 p.name_sk()
             ),
+            Self::Unreadable(Unreadable::FirewallDefaults(p)) => format!(
+                "predvolené akcie brány firewall ({} profil) sa nepodarilo zistiť",
+                p.name_sk()
+            ),
+            Self::Unreadable(Unreadable::FirewallRules) => {
+                "blokovacie pravidlá brány firewall sa nepodarilo zistiť".to_string()
+            }
             Self::Unreadable(Unreadable::SoundGrid) => {
                 "väzby protokolu SoundGrid na sieťové karty sa nepodarilo zistiť".to_string()
             }
@@ -335,7 +399,9 @@ pub struct ProblemView {
     pub text_sk: String,
 }
 
-/// Each firewall profile: on, off, or `None` when it could not be read.
+/// Each firewall profile: on, off, or `None` when it could not be read;
+/// #255 (dstack#155): which accepted state the firewall is in and the facts
+/// dstack's standard is judged by.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FirewallState {
     #[serde(default)]
@@ -344,6 +410,20 @@ pub struct FirewallState {
     pub private: Option<bool>,
     #[serde(default)]
     pub public: Option<bool>,
+    /// `off`, `dstack155` or `other` (`None`: a profile was not read).
+    #[serde(default)]
+    pub mode: Option<FirewallMode>,
+    /// Each profile's default actions (domain, private, public; `None`: not
+    /// read).
+    #[serde(default)]
+    pub defaults: [Option<FirewallDefaults>; 3],
+    /// The enabled Block rules of the group `dstack155` (`None`: not read).
+    #[serde(default)]
+    pub dstack_group_rules: Option<u32>,
+    /// The enabled Block rules outside that group, by name (`None`: not
+    /// read).
+    #[serde(default)]
+    pub block_rules_outside_group: Option<Vec<String>>,
 }
 
 /// The production environment as `GET /api/v1/status.environment` and

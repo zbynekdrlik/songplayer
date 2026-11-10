@@ -29,7 +29,7 @@
 #   4. Power: the ACTIVE scheme's processor core parking minimum
 #      (SUB_PROCESSOR CPMINCORES, AC) = 100 %, never another scheme (Waves'
 #      guide; PP Bitsum Highest Performance 100, SNV High performance 100).
-#   5. Defender and the firewall (issue 233: Defender's scan of every
+#   5. Defender (issue 233: Defender's scan of every
 #      process SongPlayer launched made SoundGrid resync, A/B/A on PP), as
 #      PP and SNV were set on 11.10.2026: Set-MpPreference
 #      DisableRealtimeMonitoring / DisableBehaviorMonitoring /
@@ -37,8 +37,10 @@
 #      (off), SubmitSamplesConsent 2 (never send); the policy keys
 #      HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection
 #      Disable{RealtimeMonitoring,BehaviorMonitoring,OnAccessProtection,
-#      ScanOnRealtimeEnable,IOAVProtection} = 1; every firewall profile off
-#      (Set-NetFirewallProfile). Tamper Protection blocks the Defender
+#      ScanOnRealtimeEnable,IOAVProtection} = 1. The firewall is never
+#      changed (issue 255, dstack#155, 10.11.2026): every profile off (a PC
+#      with no Dante leg) or dstack's two-network standard holds, anything
+#      else is a blocker. Tamper Protection blocks the Defender
 #      changes: it is turned off by hand in Windows Security (Virus & threat
 #      protection > Manage settings), and this script says so and fails.
 #   6. Every wired adapter, USB ones included (issue 285, the owner's rule of
@@ -484,6 +486,104 @@ function Add-ProdPcEveryNicReview {
     }
 }
 
+# The firewall (issue 255, dstack#155, the owner's ruling of 10.11.2026):
+# dstack's two-network standard (dstack docs/two-networks.md section 3)
+# replaces issue 233's "every profile off" on a PC with a Dante leg. Two
+# states hold: every profile off (a PC with no Dante leg), or dstack's
+# standard: every profile on, its default actions Allow, every enabled Block
+# rule in the group dstack155, which holds exactly 14 enabled Block rules,
+# each bound to the Dante leg (InterfaceAlias Dante70), none naming
+# SongPlayer.exe. This script NEVER turns a profile off and never makes the
+# group (dstack does): anything else is a blocker naming what differs. The
+# same "attempted" rule as SongPlayer's own check (prod_env_firewall.rs): a
+# profile on with no group rule and no default Allow is a firewall that is
+# simply on (firewall_on), nothing more.
+# (The group's name, its 14 rules and the leg's alias are written as
+# literals: the tests load only this file's functions.)
+
+# Whether a rule of the facts' block_rules belongs to dstack's group.
+function Test-ProdPcDstackRule {
+    param($Rule)
+    foreach ($field in @('group', 'display_group')) {
+        $value = [string](Get-ProdPcField $Rule $field)
+        if ($value.Trim() -eq 'dstack155') { return $true }
+    }
+    return $false
+}
+
+# A profile's two default actions, both Allow.
+function Test-ProdPcFirewallAllows {
+    param($Defaults, [string]$ProfileName)
+    $profileDefaults = Get-ProdPcField $Defaults $ProfileName
+    return ([string](Get-ProdPcField $profileDefaults 'inbound') -eq 'Allow' -and [string](Get-ProdPcField $profileDefaults 'outbound') -eq 'Allow')
+}
+
+function Add-ProdPcFirewallReview {
+    param($Facts, $Blockers)
+    $firewall = Get-ProdPcField $Facts 'firewall'
+    $on = @()
+    $off = @()
+    $unread = $false
+    foreach ($profileName in @('Domain', 'Private', 'Public')) {
+        $enabled = Get-ProdPcField $firewall $profileName
+        if ($enabled -is [bool]) {
+            if ($enabled) { $on += $profileName } else { $off += $profileName }
+        } else {
+            $unread = $true
+            $shown = if ($null -eq $enabled) { '(unread)' } else { "$enabled" }
+            $Blockers.Add((New-ProdPcBlocker "unreadable:firewall:$($profileName.ToLower())" "the $profileName firewall profile reads $shown in the active store"))
+        }
+    }
+    if ($unread -or $on.Count -eq 0) { return }
+    $standard = Get-ProdPcField $Facts 'firewall_standard'
+    if ($null -eq $standard) {
+        $Blockers.Add((New-ProdPcBlocker 'unreadable:firewall_rules' "a firewall profile is on and its rules were not read (no firewall_standard in the facts)"))
+        return
+    }
+    $defaults = Get-ProdPcField $standard 'defaults'
+    $groupRules = @(Get-ProdPcList $standard 'group_rules')
+    $blockRules = @(Get-ProdPcList $standard 'block_rules')
+    $allowing = @($on | Where-Object { Test-ProdPcFirewallAllows -Defaults $defaults -ProfileName $_ })
+    if ($groupRules.Count -eq 0 -and $allowing.Count -eq 0) {
+        foreach ($profileName in $on) {
+            $Blockers.Add((New-ProdPcBlocker "firewall_on:$($profileName.ToLower())" "brana firewall je zapnuta ($profileName) a nie je nastavena podla standardu dstack (skupina pravidiel dstack155) - this script never turns a profile off: either every profile off (a PC with no Dante leg) or dstack's standard (dstack creates its group)"))
+        }
+        return
+    }
+    foreach ($profileName in @('Domain', 'Private', 'Public')) {
+        if ($off -contains $profileName) {
+            $Blockers.Add((New-ProdPcBlocker "firewall_off:$($profileName.ToLower())" "the $profileName firewall profile is off while dstack's standard is set up: it wants every profile on (this script never changes a profile)"))
+        } elseif (-not (Test-ProdPcFirewallAllows -Defaults $defaults -ProfileName $profileName)) {
+            $profileDefaults = Get-ProdPcField $defaults $profileName
+            $Blockers.Add((New-ProdPcBlocker "firewall_default_block:$($profileName.ToLower())" "the $profileName firewall profile's default actions are inbound $(Get-ProdPcField $profileDefaults 'inbound'), outbound $(Get-ProdPcField $profileDefaults 'outbound'): dstack's standard wants Allow both ways"))
+        }
+    }
+    $outside = @($blockRules | Where-Object { -not (Test-ProdPcDstackRule $_) } | ForEach-Object {
+            $name = [string](Get-ProdPcField $_ 'display_name')
+            if ($name -eq '') { [string](Get-ProdPcField $_ 'name') } else { $name }
+        })
+    if ($outside.Count -gt 0) {
+        $Blockers.Add((New-ProdPcBlocker 'firewall_block_outside_group' "enabled Block rules outside the group dstack155: $($outside -join ', ')"))
+    }
+    $groupBlocks = @($groupRules | Where-Object { $true -eq (Get-ProdPcField $_ 'enabled') -and [string](Get-ProdPcField $_ 'action') -eq 'Block' })
+    if ($groupBlocks.Count -ne 14 -or $groupBlocks.Count -ne $groupRules.Count) {
+        $Blockers.Add((New-ProdPcBlocker 'firewall_group_incomplete' "the group dstack155 holds $($groupRules.Count) rule(s), $($groupBlocks.Count) of them enabled Block: dstack's standard wants exactly 14, all enabled Block"))
+    }
+    $unbound = @($groupRules | Where-Object {
+            $aliases = @(Get-ProdPcList $_ 'interface_alias')
+            -not ($aliases.Count -eq 1 -and [string]$aliases[0] -eq 'Dante70')
+        } | ForEach-Object { [string](Get-ProdPcField $_ 'name') })
+    if ($unbound.Count -gt 0) {
+        $Blockers.Add((New-ProdPcBlocker 'firewall_group_interface' "rules of the group dstack155 not bound to the Dante leg (Dante70) alone: $($unbound -join ', ')"))
+    }
+    $songplayer = @($groupRules | Where-Object {
+            @(Get-ProdPcList $_ 'programs' | Where-Object { ([string]$_ -split '[\\/]')[-1] -eq 'SongPlayer.exe' }).Count -gt 0
+        } | ForEach-Object { [string](Get-ProdPcField $_ 'name') })
+    if ($songplayer.Count -gt 0) {
+        $Blockers.Add((New-ProdPcBlocker 'firewall_group_songplayer' "rules of the group dstack155 name SongPlayer.exe (it holds the native Dante device): $($songplayer -join ', ')"))
+    }
+}
+
 # Every action the profile needs on this PC (only what differs, in the
 # order of the header) and every blocker.
 function Get-ProdPcReview {
@@ -819,6 +919,54 @@ function Read-ProdPcFirewall {
     return $firewall
 }
 
+# Get-NetFirewallRule's own "nothing matches" (an ObjectNotFound error) is
+# no failure; any other error is.
+function Get-ProdPcFirewallRules {
+    param([hashtable]$Filter)
+    $found = @(Get-NetFirewallRule @Filter -PolicyStore ActiveStore -ErrorAction SilentlyContinue -ErrorVariable ruleErrors)
+    foreach ($ruleError in @($ruleErrors)) {
+        if ([string]$ruleError.CategoryInfo.Category -ne 'ObjectNotFound') { throw $ruleError }
+    }
+    return $found
+}
+
+# Issue 255 (dstack#155): the facts dstack's standard is judged by, from the
+# ACTIVE store: each profile's default actions, every enabled Block rule
+# (name and group), and every rule of dstack's group with its interface and
+# program filters. Read only: creating the group is dstack's job.
+function Read-ProdPcFirewallStandard {
+    $defaults = [ordered]@{}
+    foreach ($fwProfile in @(Get-NetFirewallProfile -PolicyStore ActiveStore)) {
+        $defaults[[string]$fwProfile.Name] = [ordered]@{
+            inbound = [string]$fwProfile.DefaultInboundAction
+            outbound = [string]$fwProfile.DefaultOutboundAction
+        }
+    }
+    $blockRules = New-Object System.Collections.Generic.List[object]
+    foreach ($rule in @(Get-ProdPcFirewallRules @{ Enabled = 'True'; Action = 'Block' })) {
+        $blockRules.Add([ordered]@{
+                name = [string]$rule.Name
+                display_name = [string]$rule.DisplayName
+                group = [string]$rule.Group
+                display_group = [string]$rule.DisplayGroup
+            })
+    }
+    $groupRules = New-Object System.Collections.Generic.List[object]
+    foreach ($rule in @(Get-ProdPcFirewallRules @{ Group = 'dstack155' })) {
+        $interfaces = @(@($rule | Get-NetFirewallInterfaceFilter) | ForEach-Object { @($_.InterfaceAlias) } | ForEach-Object { [string]$_ })
+        $programs = @(@($rule | Get-NetFirewallApplicationFilter) | ForEach-Object { [string]$_.Program })
+        $groupRules.Add([ordered]@{
+                name = [string]$rule.Name
+                display_name = [string]$rule.DisplayName
+                enabled = ([string]$rule.Enabled -eq 'True')
+                action = [string]$rule.Action
+                interface_alias = $interfaces
+                programs = $programs
+            })
+    }
+    return [ordered]@{ defaults = $defaults; block_rules = $blockRules.ToArray(); group_rules = $groupRules.ToArray() }
+}
+
 # Every fact the plan needs, read from this PC, in the same shape as a
 # -FactsJson file (a JSON round trip: the plan always reads that shape).
 function Read-ProdPcFacts {
@@ -839,6 +987,7 @@ function Read-ProdPcFacts {
         power = Read-ProdPcPower
         defender = Read-ProdPcDefender
         firewall = Read-ProdPcFirewall
+        firewall_standard = Read-ProdPcFirewallStandard
     }
     $back = ConvertTo-Json -InputObject $facts -Depth 20 | ConvertFrom-Json
     # The plan reads only this shape: a list that did not come back as a
@@ -849,6 +998,10 @@ function Read-ProdPcFacts {
     $everyNicBack = @(Get-ProdPcList $back 'adapters')
     if ($everyNicBack.Count -ne @($facts.adapters).Count) {
         throw "the facts did not come back from their JSON round trip in shape ($($everyNicBack.Count) of $(@($facts.adapters).Count) wired and other adapters)"
+    }
+    $groupRulesBack = @(Get-ProdPcList (Get-ProdPcField $back 'firewall_standard') 'group_rules')
+    if ($groupRulesBack.Count -ne @($facts.firewall_standard.group_rules).Count) {
+        throw "the facts did not come back from their JSON round trip in shape ($($groupRulesBack.Count) of $(@($facts.firewall_standard.group_rules).Count) firewall group rules)"
     }
     if ($registryBack.Count -ne $registry.Count -or $null -eq (Get-ProdPcField $registryBack[0] 'path') -or $adaptersBack.Count -ne $adaptersRead) {
         throw "the facts did not come back from their JSON round trip in shape ($($registryBack.Count) of $($registry.Count) registry values, $($adaptersBack.Count) of $adaptersRead adapters)"

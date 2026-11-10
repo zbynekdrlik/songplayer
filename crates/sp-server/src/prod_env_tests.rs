@@ -5,6 +5,7 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use sp_core::prod_env::firewall::FirewallDefaults;
 use sp_core::prod_env::{
     EnvProblem, EnvironmentStatus, FirewallProfile, FirewallState, Unreadable,
 };
@@ -13,7 +14,7 @@ use tower::ServiceExt;
 use super::*;
 
 /// A production box: IoT Enterprise LTSC, Defender real-time off, every
-/// firewall profile off.
+/// firewall profile off (Windows' own default actions, no Block rule).
 fn production() -> EnvFacts {
     EnvFacts {
         edition_id: Some("IoTEnterpriseS".to_string()),
@@ -26,10 +27,18 @@ fn production() -> EnvFacts {
         defender_antivirus_enabled: Some(true),
         antivirus_on: Some(Vec::new()),
         firewall: [Some(false); 3],
+        firewall_defaults: [Some(WINDOWS_DEFAULTS); 3],
+        firewall_rules: Some(firewall::BlockRules::default()),
         audio: audio::production_example(),
         read_errors: Vec::new(),
     }
 }
+
+/// Windows' own default actions: inbound Block, outbound Allow.
+const WINDOWS_DEFAULTS: FirewallDefaults = FirewallDefaults {
+    inbound: 4,
+    outbound: 2,
+};
 
 /// Production but for the edition and the build.
 fn with_edition(edition: &str, build: Option<u32>) -> EnvFacts {
@@ -354,9 +363,8 @@ fn every_problem_is_listed_in_order() {
         [
             not_allowed("Professional", Some(26100)),
             EnvProblem::DefenderRealtimeOn,
-            EnvProblem::FirewallOn(FirewallProfile::Domain),
+            // #255: a profile unread, the firewall is judged no further.
             EnvProblem::Unreadable(Unreadable::Firewall(FirewallProfile::Private)),
-            EnvProblem::FirewallOn(FirewallProfile::Public),
         ]
     );
     let nothing = verdict(&EnvFacts::unread("the check did not finish within 30s"));
@@ -444,6 +452,11 @@ fn the_status_carries_every_fact_and_problem() {
         defender_antivirus_enabled: Some(false),
         antivirus_on: Some(vec!["ESET Security".to_string()]),
         firewall: [Some(true), None, Some(false)],
+        firewall_defaults: [Some(WINDOWS_DEFAULTS), None, Some(WINDOWS_DEFAULTS)],
+        firewall_rules: Some(firewall::BlockRules {
+            in_group: 2,
+            outside: vec!["Block X".to_string()],
+        }),
         audio: audio::production_example(),
         read_errors: vec!["the private firewall setting is missing".to_string()],
     };
@@ -453,7 +466,7 @@ fn the_status_carries_every_fact_and_problem() {
         EnvProblem::DefenderRealtimeOn,
         EnvProblem::DefenderPassive("Passive Mode".to_string()),
         EnvProblem::AntivirusOn("ESET Security".to_string()),
-        EnvProblem::FirewallOn(FirewallProfile::Domain),
+        // #255: an unread profile: nothing else of the firewall is judged.
         EnvProblem::Unreadable(Unreadable::Firewall(FirewallProfile::Private)),
     ];
     assert_eq!(problems, expected_problems);
@@ -478,6 +491,10 @@ fn the_status_carries_every_fact_and_problem() {
                 domain: Some(true),
                 private: None,
                 public: Some(false),
+                mode: None,
+                defaults: [Some(WINDOWS_DEFAULTS), None, Some(WINDOWS_DEFAULTS)],
+                dstack_group_rules: Some(2),
+                block_rules_outside_group: Some(vec!["Block X".to_string()]),
             },
             audio: audio::view(&audio::production_example()),
             problems: expected_problems.iter().map(EnvProblem::view).collect(),
@@ -631,7 +648,8 @@ async fn both_routes_answer_the_published_status() {
         expected["problems"],
         serde_json::json!([{
             "code": "firewall_on:private",
-            "text_sk": "brána firewall je zapnutá (súkromný profil)",
+            "text_sk": "brána firewall je zapnutá (súkromný profil) a nie je nastavená podľa \
+                        štandardu dstack (skupina pravidiel dstack155)",
         }])
     );
     assert_eq!(

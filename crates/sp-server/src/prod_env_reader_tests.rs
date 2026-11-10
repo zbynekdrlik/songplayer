@@ -163,16 +163,23 @@ fn fake_wmi() -> WmiRead {
             FirewallRow {
                 name: "Domain".to_string(),
                 enabled: Some(0),
+                default_inbound: Some(4),
+                default_outbound: Some(2),
             },
             FirewallRow {
                 name: "Private".to_string(),
                 enabled: Some(1),
+                default_inbound: Some(4),
+                default_outbound: Some(2),
             },
             FirewallRow {
                 name: "Public".to_string(),
                 enabled: Some(0),
+                default_inbound: Some(4),
+                default_outbound: Some(2),
             },
         ]),
+        firewall_rules: Ok(Vec::new()),
         antivirus: Ok(Vec::new()),
     }
 }

@@ -20,7 +20,8 @@
 //! `mutants::skip`.
 
 use super::read::{
-    AvProduct, DefenderRow, DirectRead, FirewallRow, RegDword, RegString, ServiceRead, WmiRead,
+    AvProduct, DefenderRow, DirectRead, FirewallRow, FirewallRuleRow, RegDword, RegString,
+    ServiceRead, WmiRead,
 };
 
 /// The Windows version key (`EditionID`, `ProductName`, `CurrentBuildNumber`).
@@ -261,6 +262,7 @@ fn wmi_in_own_apartment() -> WmiRead {
     WmiRead {
         defender: query_defender(&locator).map_err(|e| e.code().0),
         firewall: query_firewall(&locator).map_err(|e| e.code().0),
+        firewall_rules: query_firewall_rules(&locator).map_err(|e| e.code().0),
         antivirus: query_antivirus(&locator).map_err(|e| e.code().0),
     }
 }
@@ -429,27 +431,34 @@ fn query_defender(
     }))
 }
 
-/// The firewall profiles as they apply now: the active policy store (the
-/// local settings merged with every group policy), through the
-/// `PolicyStore` context value the NetSecurity provider reads.
+/// The `PolicyStore = "ActiveStore"` context the NetSecurity provider reads:
+/// the local settings merged with every group policy.
 #[cfg_attr(test, mutants::skip)] // Windows glue
-fn query_firewall(
-    locator: &windows::Win32::System::Wmi::IWbemLocator,
-) -> windows::core::Result<Vec<FirewallRow>> {
+fn active_store() -> windows::core::Result<windows::Win32::System::Wmi::IWbemContext> {
     use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
     use windows::Win32::System::Wmi::{IWbemContext, WbemContext};
     use windows::core::{VARIANT, w};
 
-    let services = connect(locator, r"ROOT\StandardCimv2")?;
     // SAFETY: COM is initialized on this thread; the value outlives the call.
-    let context: IWbemContext = unsafe {
+    unsafe {
         let context: IWbemContext = CoCreateInstance(&WbemContext, None, CLSCTX_INPROC_SERVER)?;
         context.SetValue(w!("PolicyStore"), 0, &VARIANT::from("ActiveStore"))?;
-        context
-    };
+        Ok(context)
+    }
+}
+
+/// The firewall profiles as they apply now (the active policy store), with
+/// their default actions (#255).
+#[cfg_attr(test, mutants::skip)] // Windows glue
+fn query_firewall(
+    locator: &windows::Win32::System::Wmi::IWbemLocator,
+) -> windows::core::Result<Vec<FirewallRow>> {
+    let services = connect(locator, r"ROOT\StandardCimv2")?;
+    let context = active_store()?;
     let found = rows(
         &services,
-        "SELECT Name, Enabled FROM MSFT_NetFirewallProfile",
+        "SELECT Name, Enabled, DefaultInboundAction, DefaultOutboundAction \
+         FROM MSFT_NetFirewallProfile",
         Some(&context),
     )?;
     Ok(found
@@ -457,6 +466,33 @@ fn query_firewall(
         .map(|row| FirewallRow {
             name: string_of(row, "Name").unwrap_or_default(),
             enabled: u32_of(row, "Enabled"),
+            default_inbound: u32_of(row, "DefaultInboundAction"),
+            default_outbound: u32_of(row, "DefaultOutboundAction"),
+        })
+        .collect())
+}
+
+/// #255 (dstack#155): the active store's enabled Block rules (`Action` 4
+/// Block, `Enabled` 1 true), at most `MAX_ROWS` (dstack's group is 14).
+#[cfg_attr(test, mutants::skip)] // Windows glue
+fn query_firewall_rules(
+    locator: &windows::Win32::System::Wmi::IWbemLocator,
+) -> windows::core::Result<Vec<FirewallRuleRow>> {
+    let services = connect(locator, r"ROOT\StandardCimv2")?;
+    let context = active_store()?;
+    let found = rows(
+        &services,
+        "SELECT InstanceID, DisplayName, RuleGroup, DisplayGroup FROM MSFT_NetFirewallRule \
+         WHERE Action = 4 AND Enabled = 1",
+        Some(&context),
+    )?;
+    Ok(found
+        .iter()
+        .map(|row| FirewallRuleRow {
+            id: string_of(row, "InstanceID").unwrap_or_default(),
+            display_name: string_of(row, "DisplayName"),
+            rule_group: string_of(row, "RuleGroup"),
+            display_group: string_of(row, "DisplayGroup"),
         })
         .collect())
 }

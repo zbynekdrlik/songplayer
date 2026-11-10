@@ -64,7 +64,6 @@ BeforeAll {
                 }
                 'power' { $Facts.power.cpmincores_ac = $action.Wanted }
                 'defender' { $Facts.defender.preferences.($action.Name) = $action.Wanted }
-                'firewall' { $Facts.firewall.($action.Name) = $false }
                 default { throw "no fake apply for $($action.Kind)" }
             }
         }
@@ -246,10 +245,7 @@ Describe 'Get-ProdPcPlan' {
             'defender_policy DisableBehaviorMonitoring',
             'defender_policy DisableOnAccessProtection',
             'defender_policy DisableScanOnRealtimeEnable',
-            'defender_policy DisableIOAVProtection',
-            'firewall Domain',
-            'firewall Private',
-            'firewall Public'
+            'defender_policy DisableIOAVProtection'
         )
         @(Get-ProdPcBlockers -Facts $facts) | Should -HaveCount 0
     }
@@ -275,7 +271,6 @@ Describe 'Get-ProdPcPlan' {
         $byName['defender MAPSReporting'].Wanted | Should -Be 0
         $byName['defender SubmitSamplesConsent'].Wanted | Should -Be 2
         $byName['defender_policy DisableOnAccessProtection'].Path | Should -BeExactly 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection'
-        $byName['firewall Private'].Current | Should -BeExactly 'on'
     }
 
     It 'plans nothing once its own changes are applied (a second run plans nothing)' {
@@ -312,11 +307,11 @@ Describe 'Get-ProdPcPlan' {
         $plan[0].Current | Should -BeExactly '(none)'
     }
 
-    It 'plans one firewall profile that is on, and power with no core-parking value' {
+    It 'plans power with no core-parking value, and never a firewall profile that is on (issue 255)' {
         $facts = Read-Fixture 'pp'
         $facts.firewall.Public = $true
         $facts.power.cpmincores_ac = $null
-        Get-PlanLines $facts | Should -Be @('power CPMINCORES', 'firewall Public')
+        Get-PlanLines $facts | Should -Be @('power CPMINCORES')
         @(Get-ProdPcPlan -Facts $facts)[0].Current | Should -BeExactly '(none)'
     }
 }
@@ -592,6 +587,143 @@ Describe 'Get-ProdPcPlan: Defender' {
     }
 }
 
+Describe 'Get-ProdPcBlockers: the firewall (issue 255, dstack#155)' {
+    BeforeAll {
+        # The facts' blocker codes.
+        function Get-BlockerCodes {
+            param($Facts)
+            return @(Get-ProdPcBlockers -Facts $Facts | ForEach-Object { $_.Code })
+        }
+        # SNV with a firewall that is on and follows nothing of the standard
+        # (Windows' own default actions, no group rule).
+        function Get-PlainOnFacts {
+            $facts = Read-Fixture 'snv'
+            foreach ($p in @('Domain', 'Private', 'Public')) {
+                $facts.firewall_standard.defaults.$p.inbound = 'Block'
+            }
+            $facts.firewall_standard.block_rules = @()
+            $facts.firewall_standard.group_rules = @()
+            return $facts
+        }
+    }
+
+    It 'never plans a firewall action, whatever the state' {
+        $mixed = Read-Fixture 'snv'
+        $mixed.firewall.Public = $false
+        foreach ($facts in @((Read-Fixture 'pp'), (Read-Fixture 'snv'), (Read-Fixture 'fresh'), (Get-PlainOnFacts), $mixed)) {
+            @(Get-PlanLines $facts | Where-Object { $_ -like 'firewall *' }) | Should -HaveCount 0
+        }
+    }
+
+    It "holds dstack's standard as SNV read it on 10.11.2026" {
+        Get-BlockerCodes (Read-Fixture 'snv') | Should -HaveCount 0
+    }
+
+    It 'holds every profile off whatever its rules (PP; no firewall_standard needed)' {
+        Get-BlockerCodes (Read-Fixture 'pp') | Should -HaveCount 0
+        $facts = Read-Fixture 'snv'
+        foreach ($p in @('Domain', 'Private', 'Public')) { $facts.firewall.$p = $false }
+        $facts.firewall_standard.group_rules = @()
+        Get-BlockerCodes $facts | Should -HaveCount 0
+    }
+
+    It 'blocks a firewall that is on and follows nothing of the standard, never turning it off' {
+        $facts = Get-PlainOnFacts
+        Get-BlockerCodes $facts | Should -Be @('firewall_on:domain', 'firewall_on:private', 'firewall_on:public')
+        @(Get-ProdPcBlockers -Facts $facts)[0].Text | Should -Match 'never turns a profile off'
+        $facts.firewall.Domain = $false
+        $facts.firewall.Private = $false
+        # An OFF profile's Allow defaults are no attempt at the standard.
+        $facts.firewall_standard.defaults.Domain.inbound = 'Allow'
+        Get-BlockerCodes $facts | Should -Be @('firewall_on:public')
+    }
+
+    It 'blocks a profile that is on when its rules were not read' {
+        $facts = Read-Fixture 'pp'
+        $facts.firewall.Private = $true
+        Get-BlockerCodes $facts | Should -Be @('unreadable:firewall_rules')
+    }
+
+    It 'blocks an unread profile and judges nothing else' {
+        $facts = Read-Fixture 'snv'
+        $facts.firewall.Private = 'NotConfigured'
+        $facts.firewall_standard.group_rules = @()
+        $blockers = @(Get-ProdPcBlockers -Facts $facts)
+        @($blockers | ForEach-Object { $_.Code }) | Should -Be @('unreadable:firewall:private')
+        $blockers[0].Text | Should -Match 'reads NotConfigured'
+    }
+
+    It "blocks a profile that is off while dstack's standard is set up" {
+        $facts = Read-Fixture 'snv'
+        $facts.firewall.Public = $false
+        Get-BlockerCodes $facts | Should -Be @('firewall_off:public')
+    }
+
+    It 'blocks a default action that is not Allow, naming both' {
+        $facts = Read-Fixture 'snv'
+        $facts.firewall_standard.defaults.Private.outbound = 'Block'
+        $blockers = @(Get-ProdPcBlockers -Facts $facts)
+        @($blockers | ForEach-Object { $_.Code }) | Should -Be @('firewall_default_block:private')
+        $blockers[0].Text | Should -Match 'inbound Allow, outbound Block'
+        # Group rules alone are an attempt: Windows' defaults then block.
+        $facts = Read-Fixture 'snv'
+        foreach ($p in @('Domain', 'Private', 'Public')) { $facts.firewall_standard.defaults.$p.inbound = 'Block' }
+        Get-BlockerCodes $facts | Should -Be @('firewall_default_block:domain', 'firewall_default_block:private', 'firewall_default_block:public')
+    }
+
+    It 'blocks an enabled Block rule outside the group, by its display name else its name' {
+        $facts = Read-Fixture 'snv'
+        $facts.firewall_standard.block_rules = @($facts.firewall_standard.block_rules) + @(
+            [pscustomobject]@{ name = '{1}'; display_name = 'Block X'; group = ''; display_group = '' },
+            [pscustomobject]@{ name = '{2}'; display_name = ''; group = 'Other'; display_group = 'Other' },
+            [pscustomobject]@{ name = '{3}'; display_name = 'by display group'; group = ''; display_group = 'dstack155' }
+        )
+        $blockers = @(Get-ProdPcBlockers -Facts $facts)
+        @($blockers | ForEach-Object { $_.Code }) | Should -Be @('firewall_block_outside_group')
+        $blockers[0].Text | Should -Match 'dstack155: Block X, \{2\}$'
+    }
+
+    It 'blocks a group that does not hold exactly 14 enabled Block rules' {
+        $facts = Read-Fixture 'snv'
+        $facts.firewall_standard.group_rules = @($facts.firewall_standard.group_rules | Select-Object -First 13)
+        Get-BlockerCodes $facts | Should -Be @('firewall_group_incomplete')
+        $facts = Read-Fixture 'snv'
+        @($facts.firewall_standard.group_rules)[3].enabled = $false
+        Get-BlockerCodes $facts | Should -Be @('firewall_group_incomplete')
+        $facts = Read-Fixture 'snv'
+        @($facts.firewall_standard.group_rules)[5].action = 'Allow'
+        $blockers = @(Get-ProdPcBlockers -Facts $facts)
+        @($blockers | ForEach-Object { $_.Code }) | Should -Be @('firewall_group_incomplete')
+        $blockers[0].Text | Should -Match 'holds 14 rule\(s\), 13 of them enabled Block'
+        # Group rules but none left and default Allow: still the standard, incomplete.
+        $facts = Read-Fixture 'snv'
+        $facts.firewall_standard.group_rules = @()
+        $facts.firewall_standard.block_rules = @()
+        Get-BlockerCodes $facts | Should -Be @('firewall_group_incomplete')
+    }
+
+    It 'blocks a group rule not bound to the Dante leg alone' {
+        $facts = Read-Fixture 'snv'
+        $rules = @($facts.firewall_standard.group_rules)
+        $rules[0].interface_alias = @('Any')
+        $rules[1].interface_alias = @('Dante70', 'Ethernet 4')
+        $rules[2].interface_alias = @()
+        $blockers = @(Get-ProdPcBlockers -Facts $facts)
+        @($blockers | ForEach-Object { $_.Code }) | Should -Be @('firewall_group_interface')
+        $blockers[0].Text | Should -Match "\(Dante70\) alone: $([regex]::Escape($rules[0].name)), $([regex]::Escape($rules[1].name)), $([regex]::Escape($rules[2].name))$"
+    }
+
+    It 'blocks a group rule that names SongPlayer.exe' {
+        $facts = Read-Fixture 'snv'
+        $rules = @($facts.firewall_standard.group_rules)
+        $rules[4].programs = @('C:\Program Files\SongPlayer\songplayer.exe')
+        $rules[6].programs = @('SongPlayer.exe.bak')
+        $blockers = @(Get-ProdPcBlockers -Facts $facts)
+        @($blockers | ForEach-Object { $_.Code }) | Should -Be @('firewall_group_songplayer')
+        $blockers[0].Text | Should -Match "Dante device\): $([regex]::Escape($rules[4].name))$"
+    }
+}
+
 Describe 'setup-prod-pc.ps1 itself' {
     It 'plans from a facts file and changes nothing (-Plan -FactsJson), exit 0' {
         $output = & $script:Pwsh -NoProfile -NonInteractive -File $script:ScriptPath -Plan -FactsJson (Join-Path $script:FixtureDir 'snv.json') 2>&1
@@ -610,8 +742,24 @@ Describe 'setup-prod-pc.ps1 itself' {
     It 'prints every fresh action and still exits 0 in -Plan' {
         $output = & $script:Pwsh -NoProfile -NonInteractive -File $script:ScriptPath -Plan -FactsJson (Join-Path $script:FixtureDir 'fresh.json') 2>&1
         $LASTEXITCODE | Should -Be 0
-        @($output | Where-Object { "$_" -like 'PLAN  *' }) | Should -HaveCount 28
+        @($output | Where-Object { "$_" -like 'PLAN  *' }) | Should -HaveCount 25
         (($output | ForEach-Object { "$_" }) -join "`n") | Should -Match "PLAN  soundgrid_nic adapter 'Ethernet' \*FlowControl: 3 -> 0"
+    }
+
+    It "names each firewall blocker in -Plan and still exits 0 (issue 255)" {
+        $facts = Read-Fixture 'snv'
+        $facts.firewall.Public = $false
+        $path = Join-Path ([System.IO.Path]::GetTempPath()) "setup-prod-pc-fw-$PID.json"
+        try {
+            ConvertTo-Json -InputObject $facts -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
+            $output = & $script:Pwsh -NoProfile -NonInteractive -File $script:ScriptPath -Plan -FactsJson $path 2>&1
+            $LASTEXITCODE | Should -Be 0
+            $text = ($output | ForEach-Object { "$_" }) -join "`n"
+            $text | Should -Match 'BLOCKED firewall_off:public: '
+            $text | Should -Not -Match 'PLAN  firewall'
+        } finally {
+            Remove-Item -LiteralPath $path -ErrorAction SilentlyContinue
+        }
     }
 
     It 'refuses -FactsJson without -Plan (a fixture is never applied), exit 2' {

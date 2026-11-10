@@ -4,8 +4,9 @@
 //! scan of the processes SongPlayer launches (yt-dlp, deno) made the Waves
 //! SoundGrid driver resync, an audible pop each time. The owner's rule: a
 //! production PC runs Windows LTSC or Windows IoT Enterprise, with Defender's
-//! real-time protection and every firewall profile OFF, and no startup check
-//! or test may let a box run otherwise.
+//! real-time protection OFF, and no startup check or test may let a box run
+//! otherwise. The firewall (#255, dstack#155, 10.11.2026): every profile off,
+//! or dstack's two-network standard ([`firewall`]).
 //!
 //! This module turns the facts read from the box ([`EnvFacts`]: the raw
 //! reads of `prod_env_win.rs`, on Windows with no process spawned, made into
@@ -26,9 +27,8 @@
 use std::sync::{LazyLock, RwLock};
 use std::time::Duration;
 
-use sp_core::prod_env::{
-    EnvProblem, EnvironmentStatus, FirewallProfile, FirewallState, Unreadable,
-};
+use sp_core::prod_env::firewall::FirewallDefaults;
+use sp_core::prod_env::{EnvProblem, EnvironmentStatus, FirewallState, Unreadable};
 use tracing::{error, info, warn};
 
 /// How often the box is checked again.
@@ -93,6 +93,12 @@ pub struct EnvFacts {
     /// The domain, private and public firewall profile (the active policy
     /// store, `read::active_firewall`; the registry when it cannot be read).
     pub firewall: [Option<bool>; 3],
+    /// #255 (dstack#155): each profile's default actions in the active store
+    /// (`None`: not read; the registry fallback has none).
+    pub firewall_defaults: [Option<FirewallDefaults>; 3],
+    /// #255 (dstack#155): the active store's enabled Block rules by group
+    /// (`None`: not read).
+    pub firewall_rules: Option<firewall::BlockRules>,
     /// #255: the audio profile (`audio::read::read_audio`).
     pub audio: audio::AudioFacts,
     /// Why a fact could not be read.
@@ -198,13 +204,7 @@ pub fn verdict(facts: &EnvFacts) -> EnvVerdict {
             }
         }
     }
-    for (profile, on) in FirewallProfile::ALL.into_iter().zip(facts.firewall) {
-        match on {
-            None => problems.push(EnvProblem::Unreadable(Unreadable::Firewall(profile))),
-            Some(true) => problems.push(EnvProblem::FirewallOn(profile)),
-            Some(false) => {}
-        }
-    }
+    problems.extend(firewall::problems(facts));
     problems.extend(audio::problems(&facts.audio));
     EnvVerdict {
         ok: problems.is_empty(),
@@ -262,6 +262,10 @@ pub fn status_of(check: &Check, now_ms: i64) -> (EnvironmentStatus, Vec<EnvProbl
             domain,
             private,
             public,
+            mode: firewall::mode(facts, &firewall::problems(facts)),
+            defaults: facts.firewall_defaults,
+            dstack_group_rules: facts.firewall_rules.as_ref().map(|r| r.in_group),
+            block_rules_outside_group: facts.firewall_rules.as_ref().map(|r| r.outside.clone()),
         },
         audio: audio::view(&facts.audio),
         problems: v.problems.iter().map(EnvProblem::view).collect(),
@@ -361,8 +365,8 @@ fn log_step(step: LogStep, status: &EnvironmentStatus, problems: &[EnvProblem]) 
             Some(note) => info!(note = %note, "production environment: not checked"),
             None => info!(
                 edition = ?status.edition_id,
-                "production environment: holds (edition allowed, Defender and firewall off, \
-                 audio profile set)"
+                "production environment: holds (edition allowed, Defender off, the firewall off or \
+                 dstack's standard, audio profile set)"
             ),
         },
         LogStep::Problems => {
@@ -502,6 +506,9 @@ pub mod read;
 
 #[path = "prod_env_audio.rs"]
 pub mod audio;
+
+#[path = "prod_env_firewall.rs"]
+pub mod firewall;
 pub use read::{
     AvProduct, DefenderRow, DirectRead, FirewallRow, RegDword, RegString, ServiceRead, WmiRead,
     active_firewall, defender_realtime, facts_from, firewall_from_registry,

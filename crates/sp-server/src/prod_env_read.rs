@@ -8,6 +8,9 @@
 //! the policy as it applies), the registry only when that cannot be read.
 
 use sp_core::prod_env::FirewallProfile;
+use sp_core::prod_env::firewall::FirewallDefaults;
+
+use super::firewall::{BlockRules, in_dstack_group};
 
 use super::audio::AudioFacts;
 use super::{EnvFacts, WBEM_E_INVALID_CLASS, WBEM_E_INVALID_NAMESPACE};
@@ -113,6 +116,24 @@ pub struct FirewallRow {
     pub name: String,
     /// `Enabled`: 0 off, 1 on, 2 not configured.
     pub enabled: Option<u32>,
+    /// #255: `DefaultInboundAction` (2 Allow, 4 Block, 0 not configured).
+    pub default_inbound: Option<u32>,
+    /// #255: `DefaultOutboundAction`.
+    pub default_outbound: Option<u32>,
+}
+
+/// #255 (dstack#155): one enabled Block rule of the active store
+/// (`MSFT_NetFirewallRule WHERE Action=4 AND Enabled=1`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FirewallRuleRow {
+    /// `InstanceID` (the cmdlets' `Name`).
+    pub id: String,
+    /// `DisplayName`.
+    pub display_name: Option<String>,
+    /// `RuleGroup` (the cmdlets' `Group`).
+    pub rule_group: Option<String>,
+    /// `DisplayGroup`.
+    pub display_group: Option<String>,
 }
 
 /// One antivirus product the Security Center lists (`AntiVirusProduct`).
@@ -133,6 +154,8 @@ pub struct WmiRead {
     pub defender: Result<Option<DefenderRow>, i32>,
     /// The firewall profiles as they apply now.
     pub firewall: Result<Vec<FirewallRow>, i32>,
+    /// #255: the active store's enabled Block rules.
+    pub firewall_rules: Result<Vec<FirewallRuleRow>, i32>,
     /// The registered antivirus products.
     pub antivirus: Result<Vec<AvProduct>, i32>,
 }
@@ -143,6 +166,7 @@ impl WmiRead {
         Self {
             defender: Err(code),
             firewall: Err(code),
+            firewall_rules: Err(code),
             antivirus: Err(code),
         }
     }
@@ -167,6 +191,41 @@ pub fn active_firewall(rows: &[FirewallRow], profile: FirewallProfile) -> Result
             "the {name} firewall profile has no state in the active store"
         )),
     }
+}
+
+/// #255: a profile's default actions in the active store, once its row
+/// gives both (else `None`: the registry has none).
+pub fn active_defaults(rows: &[FirewallRow], profile: FirewallProfile) -> Option<FirewallDefaults> {
+    let row = rows
+        .iter()
+        .find(|row| row.name.trim().eq_ignore_ascii_case(profile.name()))?;
+    Some(FirewallDefaults {
+        inbound: row.default_inbound?,
+        outbound: row.default_outbound?,
+    })
+}
+
+/// #255: the enabled Block rules by group, or why they could not be read.
+pub fn block_rules(wmi: &Result<WmiRead, String>) -> Result<BlockRules, String> {
+    let rows = match wmi {
+        Ok(read) => read.firewall_rules.as_ref().map_err(|code| {
+            format!(
+                "the firewall's enabled block rules could not be read (0x{:08X})",
+                *code as u32
+            )
+        })?,
+        Err(why) => return Err(why.clone()),
+    };
+    let mut rules = BlockRules::default();
+    for row in rows {
+        if in_dstack_group(row.rule_group.as_deref(), row.display_group.as_deref()) {
+            rules.in_group += 1;
+        } else {
+            let name = row.display_name.clone().unwrap_or_else(|| row.id.clone());
+            rules.outside.push(name);
+        }
+    }
+    Ok(rules)
 }
 
 /// Whether a firewall profile is on by the registry (the fallback when the
@@ -380,7 +439,14 @@ pub fn facts_from(direct: &DirectRead, wmi: &Result<WmiRead, String>) -> EnvFact
     let product_name = string_fact(&direct.product_name, "ProductName", &mut errors);
     let build_number = build_fact(&direct.build, &mut errors);
     let mut firewall = [None; 3];
+    let mut firewall_defaults = [None; 3];
     for (i, profile) in FirewallProfile::ALL.into_iter().enumerate() {
+        if let Ok(WmiRead {
+            firewall: Ok(rows), ..
+        }) = wmi
+        {
+            firewall_defaults[i] = active_defaults(rows, profile);
+        }
         let active = match wmi {
             Ok(read) => match &read.firewall {
                 Ok(rows) => active_firewall(rows, profile),
@@ -472,6 +538,13 @@ pub fn facts_from(direct: &DirectRead, wmi: &Result<WmiRead, String>) -> EnvFact
             None
         }
     };
+    let firewall_rules = match block_rules(wmi) {
+        Ok(rules) => Some(rules),
+        Err(why) => {
+            note(&mut errors, why);
+            None
+        }
+    };
     for why in &direct.audio.errors {
         note(&mut errors, why.clone());
     }
@@ -486,6 +559,8 @@ pub fn facts_from(direct: &DirectRead, wmi: &Result<WmiRead, String>) -> EnvFact
         defender_antivirus_enabled: row.and_then(|row| row.antivirus_enabled),
         antivirus_on,
         firewall,
+        firewall_defaults,
+        firewall_rules,
         audio: direct.audio.clone(),
         read_errors: errors,
     }

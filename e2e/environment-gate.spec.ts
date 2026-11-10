@@ -58,6 +58,37 @@ const audioHolds = (over: Partial<AudioProfile> = {}): AudioProfile => ({
   ...over,
 });
 
+/** #255: the firewall of a PC with no Dante leg (PP): every profile off. */
+const FIREWALL_OFF = {
+  domain: false,
+  private: false,
+  public: false,
+  mode: "off",
+  defaults: [
+    { inbound: 4, outbound: 2 },
+    { inbound: 4, outbound: 2 },
+    { inbound: 4, outbound: 2 },
+  ],
+  dstack_group_rules: 0,
+  block_rules_outside_group: [],
+};
+
+/** #255 (dstack#155): dstack's two-network standard as resolume-snv read it
+ * on 10.11.2026. */
+const FIREWALL_DSTACK = {
+  domain: true,
+  private: true,
+  public: true,
+  mode: "dstack155",
+  defaults: [
+    { inbound: 2, outbound: 2 },
+    { inbound: 2, outbound: 2 },
+    { inbound: 2, outbound: 2 },
+  ],
+  dstack_group_rules: 14,
+  block_rules_outside_group: [],
+};
+
 /** PP as it must be: IoT Enterprise LTSC, Defender real-time and passive
  * mode off, no other antivirus, every firewall profile off. */
 const holds = (over: Partial<EnvironmentStatus> = {}): EnvironmentStatus => ({
@@ -75,7 +106,7 @@ const holds = (over: Partial<EnvironmentStatus> = {}): EnvironmentStatus => ({
   defender_mode: "Normal",
   defender_antivirus_enabled: true,
   antivirus_on: [],
-  firewall: { domain: false, private: false, public: false },
+  firewall: FIREWALL_OFF,
   audio: audioHolds(),
   problems: [],
   read_errors: [],
@@ -101,7 +132,7 @@ test.describe("production environment gate (#233)", () => {
       ltsc: false,
       edition_allowed: false,
       defender_realtime: true,
-      firewall: { domain: true, private: false, public: false },
+      firewall: { ...FIREWALL_OFF, domain: true, mode: "other" },
       problems: [
         {
           code: "edition_not_allowed",
@@ -109,16 +140,16 @@ test.describe("production environment gate (#233)", () => {
             "edícia Windows „Professional“ (zostava 22631) nie je povolená (povolené sú len Windows LTSC a Windows 11 IoT Enterprise)",
         },
         { code: "defender_realtime_on", text_sk: "ochrana Windows Defender v reálnom čase je zapnutá" },
-        { code: "firewall_on:domain", text_sk: "brána firewall je zapnutá (doménový profil)" },
+        { code: "firewall_on:domain", text_sk: "brána firewall je zapnutá (doménový profil) a nie je nastavená podľa štandardu dstack (skupina pravidiel dstack155)" },
       ],
     });
     expect(environmentFailures(env)).toEqual([
       "edition_not_allowed: edícia Windows „Professional“ (zostava 22631) nie je povolená (povolené sú len Windows LTSC a Windows 11 IoT Enterprise)",
       "defender_realtime_on: ochrana Windows Defender v reálnom čase je zapnutá",
-      "firewall_on:domain: brána firewall je zapnutá (doménový profil)",
+      "firewall_on:domain: brána firewall je zapnutá (doménový profil) a nie je nastavená podľa štandardu dstack (skupina pravidiel dstack155)",
       "edition_allowed is false, not true",
       "defender_realtime is true, not false",
-      "firewall.domain is true, not false",
+      'firewall.mode is "other", not "off" or "dstack155"',
     ]);
   });
 
@@ -163,10 +194,10 @@ test.describe("production environment gate (#233)", () => {
       "defender_passive is true, not false",
     ]);
     for (const profile of ["domain", "private", "public"] as const) {
-      const firewall = { domain: false, private: false, public: false, [profile]: true };
+      const firewall = { ...FIREWALL_OFF, [profile]: true };
       expect(environmentFailures(holds({ firewall }))).toEqual([`firewall.${profile} is true, not false`]);
     }
-    expect(environmentFailures(holds({ firewall: { domain: false, private: null, public: false } }))).toEqual([
+    expect(environmentFailures(holds({ firewall: { ...FIREWALL_OFF, private: null } }))).toEqual([
       "firewall.private is null, not false",
     ]);
     expect(environmentFailures(holds({ antivirus_on: ["ESET Security"] }))).toEqual([
@@ -181,6 +212,41 @@ test.describe("production environment gate (#233)", () => {
     ]);
   });
 
+  // #255 (dstack#155): a PC with a Dante leg keeps its firewall on, as
+  // dstack's two-network standard wants it; every fact of it by name.
+  test("dstack's two-network standard holds, and each of its facts is checked", () => {
+    expect(environmentFailures(holds({ firewall: FIREWALL_DSTACK }))).toEqual([]);
+    expect(environmentFailures(holds({ firewall: { ...FIREWALL_DSTACK, private: false } }))).toEqual([
+      "firewall.private is false, not true",
+    ]);
+    const defaults: ({ inbound: number; outbound: number } | null)[] = [...FIREWALL_DSTACK.defaults];
+    defaults[2] = { inbound: 4, outbound: 2 };
+    expect(environmentFailures(holds({ firewall: { ...FIREWALL_DSTACK, defaults } }))).toEqual([
+      'firewall.defaults.public is {"inbound":4,"outbound":2}, not {"inbound":2,"outbound":2}',
+    ]);
+    expect(
+      environmentFailures(holds({ firewall: { ...FIREWALL_DSTACK, defaults: [null, null, null] } })),
+    ).toEqual([
+      'firewall.defaults.domain is null, not {"inbound":2,"outbound":2}',
+      'firewall.defaults.private is null, not {"inbound":2,"outbound":2}',
+      'firewall.defaults.public is null, not {"inbound":2,"outbound":2}',
+    ]);
+    expect(environmentFailures(holds({ firewall: { ...FIREWALL_DSTACK, dstack_group_rules: 13 } }))).toEqual([
+      "firewall.dstack_group_rules is 13, not 14",
+    ]);
+    expect(
+      environmentFailures(holds({ firewall: { ...FIREWALL_DSTACK, block_rules_outside_group: ["Block X"] } })),
+    ).toEqual(['firewall.block_rules_outside_group is ["Block X"], not []']);
+    expect(
+      environmentFailures(holds({ firewall: { ...FIREWALL_DSTACK, block_rules_outside_group: null } })),
+    ).toEqual(["firewall.block_rules_outside_group is null, not []"]);
+    // A firewall that is on and follows nothing of the standard.
+    const on = { ...FIREWALL_OFF, domain: true, private: true, public: true, mode: "other" };
+    expect(environmentFailures(holds({ firewall: on }))).toEqual([
+      'firewall.mode is "other", not "off" or "dstack155"',
+    ]);
+  });
+
   test("a status from before the guard knew a fact fails on it", () => {
     // An older server: no passive mode, no antivirus list, no firewall.
     const old = holds();
@@ -190,9 +256,7 @@ test.describe("production environment gate (#233)", () => {
     delete old.defender_protections_on;
     expect(environmentFailures(old)).toEqual([
       "defender_passive is null, not false",
-      "firewall.domain is null, not false",
-      "firewall.private is null, not false",
-      "firewall.public is null, not false",
+      'firewall.mode is null, not "off" or "dstack155"',
       "antivirus_on is null, not []",
       "defender_protections_on is null, not []",
     ]);
