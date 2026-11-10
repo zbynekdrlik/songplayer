@@ -298,11 +298,29 @@ leg. It replaced the DVS note.
   - §6.1 `two_networks_physical_nics`: exactly ONE physical adapter turned
     on AND connected; another physical one turned on is a problem even
     unplugged ("disabled in the OS, not just unplugged"; the text marks it
-    "(odpojená)"). Physical = what `Get-NetAdapter -Physical` lists: the
-    `GetIfTable2` row's `ConnectorPresent` flag (0x04), no filter module's
-    row (0x02), present (`OperStatus` not 6). Turned on = `AdminStatus` not
-    2; connected = `OperStatus` 1. resolume-snv's `Dante70` (Realtek
-    Virtual Adapter) and Bluetooth PAN are virtual: no connector;
+    "(odpojená)"). The adapters are WMI's `root\StandardCimv2`
+    `MSFT_NetAdapter` rows (`SELECT Name, ConnectorPresent, Virtual, State,
+    InterfaceOperationalStatus`, what `Get-NetAdapter -Physical` reads;
+    `WmiRead::adapters` → `network::physical_nics`, merged by
+    `with_adapters` into `NetworkFacts::physical`): physical =
+    `ConnectorPresent` and not `Virtual`; turned on = `State` not 3
+    (disabled; 0 unknown / 1 present / 2 started count as on); connected =
+    `InterfaceOperationalStatus` 1. A row with no `ConnectorPresent` /
+    `Virtual`, a physical one with no name / state / link, a failed query,
+    or a list that filled `MAX_ROWS` 64 (it may have lost rows) =
+    `unreadable:network_interfaces` (the reason in `read_errors` only while
+    a leg exists). **Never `GetIfTable2` for this** (fixed 10.11.2026 after
+    the SNV deploy's gate failed): a REMOVED adapter keeps its IP Helper row
+    with the connector flag, admin up and an `OperStatus` other than 6 "not
+    present" — resolume-snv's unplugged USB NIC "Dante"
+    (`USB\VID_0BDA&PID_8153\0013000001`, Present False) read as an enabled
+    physical NIC "Dante (odpojená)", while `MSFT_NetAdapter` /
+    `Get-NetAdapter` list no such adapter (live on the box: `Ethernet 4`
+    connector / not virtual / State 2 / oper 1, `Ethernet` and `Wi-Fi` State
+    3 / oper 2, `Dante70` and Bluetooth PAN virtual with no connector).
+    `a_removed_nic_s_stale_interface_row_is_no_enabled_physical_nic` holds
+    both views. IP Helper's interfaces (`NetIf`: index, GUID, alias) only
+    find the leg's holder and name the default routes;
   - §6.2 `two_networks_default_routes`: exactly one IPv4 0.0.0.0/0 route
     (`GetIpForwardTable2`, prefix length 0; a second gateway on the same
     interface counts too), named by interface alias (unknown index:
@@ -322,9 +340,11 @@ leg. It replaced the DVS note.
     `unreadable:dante_leg_bindings` (a component with no row for the leg,
     or WMI unread);
   - a list IP Helper could not give: `unreadable:network_interfaces`
-    (interfaces or addresses), `unreadable:default_routes`.
+    (interfaces or addresses: the leg's holder, after §6.2),
+    `unreadable:default_routes`.
 - **Where each fact comes from, and why.** Live facts (interfaces,
   addresses, routes, metric) from IP Helper, since they are what holds now;
+  §6.1's physical adapters from WMI `MSFT_NetAdapter` (above);
   the configured gateway, DNS registration and NetBIOS from the registry
   (the values the adapter's TCP/IP and NetBT properties write; read through
   `RegistryRead`, so the walk runs over the in-memory registry on Linux);
@@ -355,10 +375,11 @@ leg. It replaced the DVS note.
   and client false). Logged as `[#255 two networks]`.
 - **Not verified from here:** the IP Helper / WMI glue's reading on the
   boxes (the Windows CI job reads one of the runner's own addresses as a
-  leg, `the_two_network_glue_reads_a_leg_on_windows`, readability only),
-  that `ConnectorPresent` matches `Get-NetAdapter -Physical` on SNV's
-  Realtek Virtual Adapter, and the binding rows' `Name` on SNV. The first
-  SNV deploy's `[#255 two networks]` line shows them.
+  leg, `the_two_network_glue_reads_a_leg_on_windows`, readability only,
+  the `physical` read included), the `MSFT_NetAdapter` glue's VARIANT
+  types on the boxes (`State` / `InterfaceOperationalStatus` as `u32`, the
+  two booleans), and the binding rows' `Name` on SNV. The next SNV
+  deploy's `[#255 two networks]` line shows them.
 
 ## Where it shows
 
