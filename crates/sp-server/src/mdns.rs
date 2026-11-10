@@ -79,11 +79,21 @@ pub(crate) fn is_real_lan_ipv4(addr: Ipv4Addr) -> bool {
 }
 
 /// Choose ONE canonical LAN IPv4 to advertise from candidate interface
-/// addresses. Prefers an RFC1918 private address (the church-LAN address —
-/// the box is `10.77.9.201`), deterministically the lowest so a multi-NIC box
-/// is stable across restarts; falls back to the lowest other routable
-/// address; `None` when only loopback / APIPA / empty.
-pub(crate) fn select_lan_ipv4(addrs: &[Ipv4Addr]) -> Option<Ipv4Addr> {
+/// addresses.
+///
+/// `default_route` is the address the OS sends from toward an outside
+/// destination ([`default_route_ipv4`]). On a two-network PC (#255, dstack's
+/// two-network standard) the LAN leg holds the only default route and the
+/// Dante leg none, so that address IS the LAN leg; it wins whenever the host
+/// really holds it as a routable address. Without one (no default route yet,
+/// a one-NIC box with no gateway) the old rule: an RFC1918 private address,
+/// deterministically the lowest so a multi-NIC box is stable across
+/// restarts; else the lowest other routable address; `None` when only
+/// loopback / APIPA / empty.
+pub(crate) fn select_lan_ipv4(
+    addrs: &[Ipv4Addr],
+    default_route: Option<Ipv4Addr>,
+) -> Option<Ipv4Addr> {
     let mut reals: Vec<Ipv4Addr> = addrs
         .iter()
         .copied()
@@ -93,6 +103,11 @@ pub(crate) fn select_lan_ipv4(addrs: &[Ipv4Addr]) -> Option<Ipv4Addr> {
         return None;
     }
     reals.sort_unstable();
+    if let Some(route) = default_route
+        && reals.first() == Some(&route)
+    {
+        return Some(route);
+    }
     // `reals` is sorted, so the first private is the lowest private; if none is
     // private, fall back to the lowest routable address.
     if let Some(private) = reals.iter().copied().find(|a| a.is_private()) {
@@ -131,7 +146,23 @@ fn list_ipv4_addresses() -> Vec<Ipv4Addr> {
 // is mutation-covered directly.
 #[cfg_attr(test, mutants::skip)]
 fn current_lan_ipv4() -> Option<Ipv4Addr> {
-    select_lan_ipv4(&list_ipv4_addresses())
+    select_lan_ipv4(&list_ipv4_addresses(), default_route_ipv4())
+}
+
+/// The IPv4 the OS would send from toward an outside address, i.e. the
+/// address of the interface that holds the default route. A UDP `connect`
+/// only asks the routing table: no packet is sent. `None` when there is no
+/// default route (or the socket cannot be made).
+// mutants::skip — the OS's routing table; the decision is `select_lan_ipv4`.
+#[cfg_attr(test, mutants::skip)]
+fn default_route_ipv4() -> Option<Ipv4Addr> {
+    let socket = std::net::UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    // TEST-NET-2 (RFC 5737): never local, so only the default route reaches it.
+    socket.connect((Ipv4Addr::new(198, 51, 100, 1), 9)).ok()?;
+    match socket.local_addr().ok()?.ip() {
+        std::net::IpAddr::V4(v4) if !v4.is_unspecified() => Some(v4),
+        _ => None,
+    }
 }
 
 /// Build the `ServiceInfo` for the `sp.local` A record at `ip`. Registering it
@@ -166,6 +197,9 @@ fn lan_url(port: u16) -> String {
 pub(crate) trait MdnsRegistrar {
     fn register_service(&self, info: mdns_sd::ServiceInfo) -> Result<(), String>;
     fn unregister_service(&self, fullname: &str) -> Result<(), String>;
+    /// Answer and announce on the interface holding `ip` alone (#255: never
+    /// on a Dante leg).
+    fn pin_interface(&self, ip: Ipv4Addr) -> Result<(), String>;
 }
 
 impl MdnsRegistrar for mdns_sd::ServiceDaemon {
@@ -177,6 +211,13 @@ impl MdnsRegistrar for mdns_sd::ServiceDaemon {
     fn unregister_service(&self, fullname: &str) -> Result<(), String> {
         self.unregister(fullname)
             .map(|_rx| ())
+            .map_err(|e| e.to_string())
+    }
+    fn pin_interface(&self, ip: Ipv4Addr) -> Result<(), String> {
+        // mdns-sd applies its selections in order, the last match winning:
+        // every interface off, then the one holding `ip` on again.
+        self.disable_interface(mdns_sd::IfKind::All)
+            .and_then(|()| self.enable_interface(mdns_sd::IfKind::Addr(std::net::IpAddr::V4(ip))))
             .map_err(|e| e.to_string())
     }
 }
@@ -307,7 +348,11 @@ async fn reconcile<D: MdnsRegistrar>(
     match build_service_info(new_ip, port) {
         Ok(info) => {
             let fullname = info.get_fullname().to_string();
-            match daemon.register_service(info) {
+            let registered = daemon.register_service(info);
+            if let Err(e) = daemon.pin_interface(new_ip) {
+                warn!("mdns: could not pin sp.local to the interface of {new_ip}: {e}");
+            }
+            match registered {
                 Ok(()) => {
                     let url = lan_url(port);
                     info!("mdns: advertising {MDNS_HOSTNAME} A={new_ip} -> {url}");
@@ -365,9 +410,12 @@ mod tests {
 
     #[test]
     fn select_returns_none_when_no_real_addr() {
-        assert_eq!(select_lan_ipv4(&[]), None);
+        assert_eq!(select_lan_ipv4(&[], None), None);
         assert_eq!(
-            select_lan_ipv4(&[Ipv4Addr::new(127, 0, 0, 1), Ipv4Addr::new(169, 254, 1, 2)]),
+            select_lan_ipv4(
+                &[Ipv4Addr::new(127, 0, 0, 1), Ipv4Addr::new(169, 254, 1, 2)],
+                None
+            ),
             None
         );
     }
@@ -375,25 +423,81 @@ mod tests {
     #[test]
     fn select_prefers_private_over_public() {
         // Even though 8.8.8.8 sorts lowest, the private LAN address wins.
-        let got = select_lan_ipv4(&[Ipv4Addr::new(8, 8, 8, 8), Ipv4Addr::new(10, 77, 9, 201)]);
+        let got = select_lan_ipv4(
+            &[Ipv4Addr::new(8, 8, 8, 8), Ipv4Addr::new(10, 77, 9, 201)],
+            None,
+        );
         assert_eq!(got, Some(Ipv4Addr::new(10, 77, 9, 201)));
     }
 
     #[test]
     fn select_is_deterministic_lowest_private() {
         // Multi-NIC box: pick the lowest private deterministically, ignore APIPA.
-        let got = select_lan_ipv4(&[
-            Ipv4Addr::new(192, 168, 1, 50),
-            Ipv4Addr::new(10, 77, 9, 201),
-            Ipv4Addr::new(169, 254, 1, 2),
-        ]);
+        let got = select_lan_ipv4(
+            &[
+                Ipv4Addr::new(192, 168, 1, 50),
+                Ipv4Addr::new(10, 77, 9, 201),
+                Ipv4Addr::new(169, 254, 1, 2),
+            ],
+            None,
+        );
         assert_eq!(got, Some(Ipv4Addr::new(10, 77, 9, 201)));
     }
 
     #[test]
     fn select_falls_back_to_lowest_public_when_no_private() {
-        let got = select_lan_ipv4(&[Ipv4Addr::new(203, 0, 113, 9), Ipv4Addr::new(8, 8, 8, 8)]);
+        let got = select_lan_ipv4(
+            &[Ipv4Addr::new(203, 0, 113, 9), Ipv4Addr::new(8, 8, 8, 8)],
+            None,
+        );
         assert_eq!(got, Some(Ipv4Addr::new(8, 8, 8, 8)));
+    }
+
+    /// #255: resolume-snv 10.11.2026 — LAN 10.77.9.201 (default route) and
+    /// the Dante VLAN leg 10.77.7.107 (no gateway). The lowest private
+    /// address is the Dante leg; the default route's address must win.
+    #[test]
+    fn select_takes_the_default_route_address_over_a_lower_dante_leg() {
+        let lan = Ipv4Addr::new(10, 77, 9, 201);
+        let dante = Ipv4Addr::new(10, 77, 7, 107);
+        assert_eq!(select_lan_ipv4(&[dante, lan], Some(lan)), Some(lan));
+        assert_eq!(select_lan_ipv4(&[lan, dante], Some(lan)), Some(lan));
+    }
+
+    /// A default-route address that is also the lowest private one is taken
+    /// (the one-NIC box).
+    #[test]
+    fn select_takes_the_default_route_address_when_it_is_also_the_lowest() {
+        let lan = Ipv4Addr::new(10, 77, 9, 201);
+        let other = Ipv4Addr::new(192, 168, 1, 50);
+        assert_eq!(select_lan_ipv4(&[other, lan], Some(lan)), Some(lan));
+    }
+
+    /// A route address the host does not hold, or one that is not routable,
+    /// never wins: the old rule decides.
+    #[test]
+    fn select_ignores_a_default_route_address_the_host_does_not_hold() {
+        let a = Ipv4Addr::new(10, 77, 9, 201);
+        let b = Ipv4Addr::new(192, 168, 1, 50);
+        assert_eq!(
+            select_lan_ipv4(&[b, a], Some(Ipv4Addr::new(172, 16, 0, 9))),
+            Some(a)
+        );
+        let apipa = Ipv4Addr::new(169, 254, 1, 2);
+        assert_eq!(select_lan_ipv4(&[b, apipa], Some(apipa)), Some(b));
+        assert_eq!(select_lan_ipv4(&[apipa], Some(apipa)), None);
+    }
+
+    /// A public default-route address beats a private interface (a box whose
+    /// LAN leg is public is still reached on its LAN leg).
+    #[test]
+    fn select_takes_a_public_default_route_address_over_a_private_one() {
+        let public = Ipv4Addr::new(203, 0, 113, 9);
+        let private = Ipv4Addr::new(10, 77, 7, 107);
+        assert_eq!(
+            select_lan_ipv4(&[private, public], Some(public)),
+            Some(public)
+        );
     }
 
     #[test]
@@ -443,11 +547,14 @@ mod tests {
     struct FakeDaemon {
         registered: std::sync::Mutex<Vec<String>>,
         unregistered: std::sync::Mutex<Vec<String>>,
+        /// Every call in order: `pin <ip>`, `register`, `unregister`.
+        calls: std::sync::Mutex<Vec<String>>,
         fail_register: bool,
     }
 
     impl MdnsRegistrar for FakeDaemon {
         fn register_service(&self, info: mdns_sd::ServiceInfo) -> Result<(), String> {
+            self.calls.lock().unwrap().push("register".into());
             if self.fail_register {
                 return Err("simulated register failure".into());
             }
@@ -458,9 +565,65 @@ mod tests {
             Ok(())
         }
         fn unregister_service(&self, fullname: &str) -> Result<(), String> {
+            self.calls.lock().unwrap().push("unregister".into());
             self.unregistered.lock().unwrap().push(fullname.to_string());
             Ok(())
         }
+        fn pin_interface(&self, ip: Ipv4Addr) -> Result<(), String> {
+            self.calls.lock().unwrap().push(format!("pin {ip}"));
+            Ok(())
+        }
+    }
+
+    /// #255: the daemon is pinned to the advertised address's interface
+    /// BEFORE the record goes out, so it is never announced on the Dante
+    /// leg; an IP change pins the new interface before its register.
+    #[tokio::test]
+    async fn reconcile_pins_the_interface_before_each_register() {
+        let daemon = FakeDaemon::default();
+        let status = new_status_handle();
+        let mut advertised_ip = None;
+        let mut advertised_fullname = None;
+        for ip in [some_ip(10, 77, 9, 201), some_ip(10, 77, 9, 202)] {
+            reconcile(
+                &daemon,
+                8920,
+                ip,
+                &mut advertised_ip,
+                &mut advertised_fullname,
+                &status,
+            )
+            .await;
+        }
+        assert_eq!(
+            daemon.calls.lock().unwrap().as_slice(),
+            &[
+                "pin 10.77.9.201",
+                "register",
+                "unregister",
+                "pin 10.77.9.202",
+                "register",
+            ]
+        );
+    }
+
+    /// No address: nothing pinned, nothing registered.
+    #[tokio::test]
+    async fn reconcile_with_no_ip_pins_nothing() {
+        let daemon = FakeDaemon::default();
+        let status = new_status_handle();
+        let mut advertised_ip = None;
+        let mut advertised_fullname = None;
+        reconcile(
+            &daemon,
+            8920,
+            None,
+            &mut advertised_ip,
+            &mut advertised_fullname,
+            &status,
+        )
+        .await;
+        assert!(daemon.calls.lock().unwrap().is_empty());
     }
 
     fn some_ip(a: u8, b: u8, c: u8, d: u8) -> Option<Ipv4Addr> {
