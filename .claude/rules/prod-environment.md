@@ -15,7 +15,7 @@ paths:
   - "scripts/tests/fixtures/prod-pc/**"
 ---
 
-# The production environment (#233): LTSC or Windows 11 IoT Enterprise, Defender / antivirus / firewall OFF; the audio profile (#255)
+# The production environment (#233): LTSC or Windows 11 IoT Enterprise, Defender / antivirus OFF, the firewall off or dstack's standard (#255); the audio profile (#255)
 
 ## Why
 
@@ -39,7 +39,9 @@ Defender / antivirus / firewall OFF, and "nemôže nič len tak zasahovať do
 production-grade PC/SW": no startup check and no E2E test may let a box run
 otherwise. **Ruling of the same night:** Windows 11 IoT Enterprise
 (`EditionID` `IoTEnterprise`, not LTSC: SNV) is allowed too. No allowance
-(env var, skip) exists in the gate. The review of 12.10.2026 (5🟡 7🔵, all
+(env var, skip) exists in the gate. **Superseded for the firewall (#255, dstack#155,
+10.11.2026):** a PC with a Dante leg keeps its firewall ON by dstack's
+two-network standard (below, "The firewall's rule"). The review of 12.10.2026 (5🟡 7🔵, all
 fixed) closed the gaps listed under "Review 12.10.2026" below.
 
 ## The check (pure: `prod_env.rs` the verdict, `prod_env_read.rs` the facts; glue: `prod_env_win.rs`)
@@ -93,6 +95,43 @@ process for this.
   (with either set, ANY set policy saying on reads on: a fallback never
   passes a box a policy turns on), else the local
   `HKLM\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\<Domain|Standard|Public>Profile\EnableFirewall`.
+- **The firewall's rule follows dstack's two-network standard** (#255, the
+  owner's ruling on dstack#155, 10.11.2026, after the trial 10:51–11:51Z;
+  dstack `docs/two-networks.md` §3; design comment on #255 "Design: the
+  firewall rule follows dstack's two-network standard"). It REPLACES #233's
+  "every profile off" (the firewall was part of #233's profile, never
+  separately proven: the pops were Defender's scan). Two states hold
+  (`sp_core::prod_env::firewall`, `FirewallMode` on the status's
+  `firewall.mode`):
+  - `off`: every profile off (a PC with no Dante leg, PP today);
+  - `dstack155`: every profile on, each profile's `DefaultInboundAction`
+    and `DefaultOutboundAction` Allow (2; 4 Block, 0 not configured), every
+    ENABLED Block rule in the group `dstack155`, which holds exactly
+    `DSTACK_GROUP_RULES` = 14 (resolume-snv, 12:00Z: all three profiles 1 /
+    2 / 2, 14 rows `MSFT_NetFirewallRule WHERE Action=4 AND Enabled=1`, all
+    `DisplayGroup dstack155`).
+  - Read in the same WMI pass: the profile row's two default actions
+    (`active_defaults`, both or none; the registry fallback has none) and
+    `SELECT InstanceID, DisplayName, RuleGroup, DisplayGroup FROM
+    MSFT_NetFirewallRule WHERE Action = 4 AND Enabled = 1` with the same
+    ActiveStore context (`query_firewall_rules`, `block_rules`: a rule is
+    the group's by its `RuleGroup` or `DisplayGroup`, trimmed, ASCII case
+    ignored; one outside is named by `DisplayName`, else `InstanceID`). At
+    most `MAX_ROWS` = 64 rows come back: more enabled Block rules than that
+    read as outside ones / a wrong count, never as the standard.
+  - The verdict (`prod_env_firewall.rs::problems`, pure): an unread profile
+    = `unreadable:firewall:<p>` and nothing else judged; all off = no
+    problem (rules and defaults ignored); a profile on: the standard is
+    ATTEMPTED once the group holds a rule, a profile that is ON allows both
+    ways, or the rules are unread. Not attempted = `firewall_on:<p>` for each
+    profile on, nothing else (a firewall simply on). Attempted = per profile
+    in order `firewall_off:<p>` (off) or, on, `firewall_default_block:<p>`
+    (`unreadable:firewall_defaults:<p>` with none read), then
+    `firewall_block_outside_group` (names), `firewall_group_incomplete`
+    (`rules` = the count) or `unreadable:firewall_rules`.
+  - Items 2's interface binding (`Dante70`) and 4 (no rule names
+    SongPlayer.exe) are read by the setup script only (the filter classes
+    are separate WMI associations; the cmdlets read them directly).
 - **Defender**: `root\Microsoft\Windows\Defender` `MSFT_MpComputerStatus`
   `RealTimeProtectionEnabled`, `AMRunningMode`, `AntivirusEnabled`
   (`defender_realtime`, `PASSIVE_MODES`):
@@ -249,7 +288,9 @@ lane 1; lane 2 made it a gate.) Their read errors still go to
   `sp_core::prod_env::EnvironmentStatus` = `{checked, ok, note, edition_id,
   product_name, build_number, ltsc, edition_allowed, defender_realtime,
   defender_passive, defender_protections_on, defender_mode, defender_antivirus_enabled,
-  antivirus_on, firewall: {domain, private, public}, audio: {soundgrid:
+  antivirus_on, firewall: {domain, private, public, mode: "off"|"dstack155"|"other"|null,
+  defaults: [{inbound, outbound}|null; 3], dstack_group_rules, block_rules_outside_group},
+  audio: {soundgrid:
   "not_installed"|"unreadable"|"port_unset"|"port_missing"|"found",
   soundgrid_port_mac (12 hex digits), soundgrid_nic: NIC, dante: {installed, interface_address,
   interface_name, nic: NIC}, windows_update: {no_auto_update,
@@ -270,8 +311,11 @@ lane 1; lane 2 made it a gate.) Their read errors still go to
   `unreadable:edition`, `unreadable:build`, `defender_realtime_on`,
   `defender_protection_on:<behavior_monitoring|ioav|on_access>`,
   `defender_passive_mode`, `unreadable:defender`, `antivirus_on`,
-  `unreadable:antivirus`, `firewall_on:<domain|private|public>`,
-  `unreadable:firewall:<profile>`; then #255's: SoundGrid's one of
+  `unreadable:antivirus`, `unreadable:firewall:<profile>` (each, then
+  nothing else of the firewall), or `firewall_on:<domain|private|public>`,
+  or per profile `firewall_off:<p>` / `firewall_default_block:<p>` /
+  `unreadable:firewall_defaults:<p>`, then `firewall_block_outside_group`,
+  `firewall_group_incomplete` / `unreadable:firewall_rules`; then #255's: SoundGrid's one of
   `unreadable:soundgrid` / `soundgrid_port_unset` / `soundgrid_port_missing`,
   or its adapter's `unreadable:soundgrid_nic`, `soundgrid_nic_netadaptercx`,
   `soundgrid_nic_setting:<name>` (in `NicSetting::ALL`'s order), then
@@ -312,7 +356,10 @@ lists it): polls `/api/v1/status` until `environment.checked` (60 s) and
 judges THAT status (no second read), then FAILS (`environment-gate.ts`) on
 every problem (`code: text`), on every fact that is not the production one
 whatever `ok` says (`edition_allowed` true; `defender_realtime`,
-`defender_passive` and every `firewall.*` false; `antivirus_on` and
+`defender_passive` false; the firewall by its `mode`: `off` with every profile
+false, or `dstack155` with every profile true, each `defaults` entry 2 / 2,
+`dstack_group_rules` 14 and `block_rules_outside_group` `[]` (any other
+mode, null included, fails: `firewallFailures`); `antivirus_on` and
 `defender_protections_on` `[]`; #285: `audio.wired_nics` a non-empty list
 with every adapter `ok`; a fact
 missing from an older server reads null and fails; #255: `audio.soundgrid`
@@ -328,7 +375,8 @@ are logged (`[#255 report-only] …`) and never fail. Unit-tested by
 `environment-gate.spec.ts` (mock suite).
 
 A red gate means the BOX is wrong: fix the box (Defender real-time off and
-its policy keys, firewall off, the edition; #255: the SoundGrid adapter's
+its policy keys, the edition; the firewall is NEVER switched by us — off
+on a PC with no Dante leg, else dstack's standard, which dstack sets up; #255: the SoundGrid adapter's
 NDIS driver and settings, `NoAutoUpdate`, the driver exclusion, MMCSS),
 never the gate. Everything but the edition and the NIC driver is what
 `scripts/setup-prod-pc.ps1` applies: the deploy ran it before the start, so
@@ -374,10 +422,24 @@ shell; ASCII only, it is read as cp1252) and pwsh 7 (the Linux tests).
      service runs: stopped or missing = Defender off, nothing to set; another
      state = a blocker); the policy keys `…\Windows Defender\Real-Time
      Protection` `Disable{RealtimeMonitoring,BehaviorMonitoring,
-     OnAccessProtection,ScanOnRealtimeEnable,IOAVProtection}` = 1; the
-     firewall: each profile ON in the ACTIVE store → `Set-NetFirewallProfile
-     -Profile <it> -Enabled False` (a group policy that keeps it on fails the
-     verify).
+     OnAccessProtection,ScanOnRealtimeEnable,IOAVProtection}` = 1.
+  The firewall is NEVER changed (#255, dstack#155: "must never turn
+  profiles off again"; it turned every profile off until 10.11.2026):
+  `Read-ProdPcFirewallStandard` reads the ACTIVE store (each profile's
+  default actions; `Get-NetFirewallRule -Enabled True -Action Block`; every
+  rule of `-Group dstack155` with `Get-NetFirewallInterfaceFilter`'s
+  `InterfaceAlias` and `Get-NetFirewallApplicationFilter`'s `Program`; a
+  cmdlet's ObjectNotFound = none, any other error throws) into the facts'
+  `firewall_standard`, and `Add-ProdPcFirewallReview` (pure) gives BLOCKERS
+  only, with lane 1's codes and the same "attempted" rule: `firewall_on:<p>`,
+  `firewall_off:<p>`, `firewall_default_block:<p>`,
+  `firewall_block_outside_group`, `firewall_group_incomplete` (exactly 14,
+  every one enabled Block), `unreadable:firewall:<p>`,
+  `unreadable:firewall_rules` (a profile on and no `firewall_standard`),
+  plus the script's own `firewall_group_interface` (a group rule not bound
+  to `Dante70` alone) and `firewall_group_songplayer` (a group rule whose
+  program's file name is SongPlayer.exe, case ignored). Creating the group
+  stays dstack's job.
   Not here: the NIC driver swap (lane 3), the Dante adapter, CPU
   reservation, the edition.
 - **Shape:** READ every fact into one object (`Read-ProdPcFacts`, then a
@@ -438,12 +500,19 @@ shell; ASCII only, it is read as cp1252) and pwsh 7 (the Linux tests).
   - deploy-pp.yml: its own step after "Install SongPlayer…", before the
     `always()` "Start SongPlayer", `timeout-minutes: 5`. PP's dispatch runs
     main's workflow: PP gets the step with the next release.
+- **The firewall's Windows reads** run first on CI's Build (Windows) job
+  (`-Plan` on the runner: the ActiveStore cmdlets and the ObjectNotFound
+  path, its own firewall judged, `-Plan` exits 0 whatever it blocks); the
+  boxes' standard (SNV's 14 rules on `Dante70`) is first read by a deploy.
 - **Tests:** `scripts/tests/setup-prod-pc.Tests.ps1` (Pester 5, pwsh 7 on
   ubuntu; the functions are loaded from the script's syntax tree, nothing
   runs at load): the MAC rule, PP's preferences verbatim and every
   malformed shape, the PnPCapabilities bit math, the DWORD conversions,
   `powercfg`'s AC index, the plan on PP (empty), SNV (exactly
-  `ExcludeWUDriversInQualityUpdate`), a fresh PC (all 28 actions, in order),
+  `ExcludeWUDriversInQualityUpdate`; its firewall is dstack's standard as
+  read on 10.11.2026, the rules' names and paths written from dstack's
+  design), a fresh PC (all 25 actions, in order; its firewall off), every
+  firewall blocker and that no state ever plans a firewall action,
   a second run after its own changes (empty, through a JSON round trip),
   each blocker, Defender's service states, and the script itself in
   `-Plan -FactsJson` mode (exit codes 0 / 2 / 3, `-SaveFacts`); fixtures

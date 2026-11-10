@@ -250,7 +250,11 @@ impl EnvProblem {
                 format!("Windows Defender beží v režime „{mode}“ a súbory stále kontroluje")
             }
             Self::AntivirusOn(name) => format!("antivírus „{name}“ je zapnutý"),
-            Self::FirewallOn(p) => format!("brána firewall je zapnutá ({} profil)", p.name_sk()),
+            Self::FirewallOn(p) => format!(
+                "brána firewall je zapnutá ({} profil) a nie je nastavená podľa štandardu dstack \
+                 (skupina pravidiel {DSTACK_GROUP})",
+                p.name_sk()
+            ),
             Self::FirewallOff(p) => format!(
                 "brána firewall je vypnutá ({} profil), hoci štandard dstack je nastavený — \
                  má byť zapnutá vo všetkých profiloch",
@@ -514,7 +518,9 @@ pub fn marker(status: &EnvironmentStatus) -> &'static str {
 /// What the health bar's tooltip says before the problems.
 pub const RULE_SK: &str = "Produkčný počítač musí bežať na Windows LTSC alebo Windows 11 IoT \
      Enterprise, s vypnutou ochranou Windows Defender v reálnom čase (ani v pasívnom režime), \
-     bez iného antivírusu a s vypnutou bránou firewall — nič nesmie kontrolovať ani filtrovať programy, ktoré SongPlayer spúšťa. \
+     bez iného antivírusu — nič nesmie kontrolovať programy, ktoré SongPlayer spúšťa. \
+     Brána firewall je vypnutá vo všetkých profiloch, alebo (počítač so sieťou Dante) zapnutá vo všetkých \
+     podľa štandardu dstack: predvolene všetko povolené a blokuje len skupina pravidiel dstack155. \
      Sieťová karta, ktorú má ovládač SoundGrid zvolenú ako port, beží na ovládači NDIS s vypnutým moderovaním \
      prerušení, riadením toku a úsporou energie, automatické aktualizácie Windows sú vypnuté a MMCSS je nastavené \
      pre Pro Audio.";

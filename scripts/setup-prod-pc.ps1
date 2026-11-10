@@ -641,13 +641,7 @@ function Get-ProdPcReview {
         $blockers.Add((New-ProdPcBlocker 'defender_realtime_on' $text))
     }
 
-    $firewall = Get-ProdPcField $Facts 'firewall'
-    foreach ($profileName in @('Domain', 'Private', 'Public')) {
-        $enabled = Get-ProdPcField $firewall $profileName
-        if ($enabled -is [bool] -and -not $enabled) { continue }
-        $current = if ($enabled -is [bool]) { 'on' } elseif ($null -eq $enabled) { '(unread)' } else { "$enabled" }
-        $actions.Add((New-ProdPcAction -Area 'firewall' -Name $profileName -Current $current -Wanted 'off' -Reason 'the production rule: firewall off (issue 233, the owner, 11.10.2026)' -Kind 'firewall'))
-    }
+    Add-ProdPcFirewallReview -Facts $Facts -Blockers $blockers
     Add-ProdPcEveryNicReview -Facts $Facts -Actions $actions -Blockers $blockers
     return [pscustomobject]@{ Actions = $actions.ToArray(); Blockers = $blockers.ToArray() }
 }
@@ -1036,7 +1030,6 @@ function Invoke-ProdPcAction {
             $preference[$Action.Name] = $Action.Wanted
             Set-MpPreference @preference
         }
-        'firewall' { Set-NetFirewallProfile -Profile $Action.Name -Enabled False }
         default { throw "unknown action kind '$($Action.Kind)'" }
     }
 }

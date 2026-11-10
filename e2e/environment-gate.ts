@@ -186,9 +186,7 @@ function factFailures(env: EnvironmentStatus): string[] {
   want("edition_allowed", env.edition_allowed, true);
   want("defender_realtime", env.defender_realtime, false);
   want("defender_passive", env.defender_passive, false);
-  for (const profile of ["domain", "private", "public"] as const) {
-    want(`firewall.${profile}`, env.firewall?.[profile], false);
-  }
+  f.push(...firewallFailures(env.firewall, shown));
   if (!Array.isArray(env.antivirus_on) || env.antivirus_on.length > 0) {
     f.push(`antivirus_on is ${shown(env.antivirus_on)}, not []`);
   }

@@ -13,7 +13,7 @@
 //! judged fact by fact, every profile in order (`firewall_off` for one that
 //! is off, the default actions of one that is on), then the rules.
 
-use sp_core::prod_env::firewall::{DSTACK_GROUP, FirewallMode};
+use sp_core::prod_env::firewall::{DSTACK_GROUP, DSTACK_GROUP_RULES, FirewallMode};
 use sp_core::prod_env::{EnvProblem, FirewallProfile, Unreadable};
 
 use super::EnvFacts;
@@ -40,13 +40,54 @@ pub fn in_dstack_group(rule_group: Option<&str>, display_group: Option<&str>) ->
 /// (nothing else is judged then), else, with a profile on, the state the box
 /// is in (module doc).
 pub fn problems(facts: &EnvFacts) -> Vec<EnvProblem> {
-    // RED: #233's rule still (every profile on is `firewall_on`).
     let mut problems = Vec::new();
     for (profile, on) in FirewallProfile::ALL.into_iter().zip(facts.firewall) {
-        match on {
-            None => problems.push(EnvProblem::Unreadable(Unreadable::Firewall(profile))),
-            Some(true) => problems.push(EnvProblem::FirewallOn(profile)),
-            Some(false) => {}
+        if on.is_none() {
+            problems.push(EnvProblem::Unreadable(Unreadable::Firewall(profile)));
+        }
+    }
+    if !problems.is_empty() || !facts.firewall.contains(&Some(true)) {
+        return problems;
+    }
+    let profiles = FirewallProfile::ALL.into_iter().enumerate();
+    let defaults_allow = profiles.clone().any(|(i, _)| {
+        facts.firewall[i] == Some(true) && facts.firewall_defaults[i].is_some_and(|d| d.allow())
+    });
+    let attempted = match &facts.firewall_rules {
+        Some(rules) => rules.in_group > 0 || defaults_allow,
+        None => true,
+    };
+    for (i, profile) in profiles {
+        match (facts.firewall[i], attempted) {
+            (Some(true), false) => problems.push(EnvProblem::FirewallOn(profile)),
+            (Some(true), true) => match facts.firewall_defaults[i] {
+                None => problems.push(EnvProblem::Unreadable(Unreadable::FirewallDefaults(
+                    profile,
+                ))),
+                Some(d) if !d.allow() => problems.push(EnvProblem::FirewallDefaultBlock {
+                    profile,
+                    defaults: d,
+                }),
+                Some(_) => {}
+            },
+            (_, true) => problems.push(EnvProblem::FirewallOff(profile)),
+            (_, false) => {}
+        }
+    }
+    if !attempted {
+        return problems;
+    }
+    match &facts.firewall_rules {
+        None => problems.push(EnvProblem::Unreadable(Unreadable::FirewallRules)),
+        Some(rules) => {
+            if !rules.outside.is_empty() {
+                problems.push(EnvProblem::FirewallBlockOutsideGroup(rules.outside.clone()));
+            }
+            if rules.in_group != DSTACK_GROUP_RULES {
+                problems.push(EnvProblem::FirewallGroupIncomplete {
+                    rules: rules.in_group,
+                });
+            }
         }
     }
     problems
