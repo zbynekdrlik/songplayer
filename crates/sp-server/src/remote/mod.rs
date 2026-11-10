@@ -68,6 +68,7 @@ use tokio::sync::{Semaphore, broadcast, mpsc, oneshot};
 use tokio::task::{JoinHandle, JoinSet};
 use tracing::{info, warn};
 
+use crate::dante_guard::{DanteGuard, Which};
 use crate::obs::remote_call::RemoteCall;
 use crate::obs::{ObsCommand, ObsEvent};
 use crate::playback::program_bus::ProgramBus;
@@ -540,6 +541,12 @@ impl Facade {
 /// so does this listener's program feedback (#221 L3,
 /// `studio_events::run_program_feedback`).
 pub async fn serve(listener: TcpListener, facade: Arc<Facade>) {
+    serve_guarded(listener, facade, Arc::clone(crate::dante_guard::global())).await;
+}
+
+/// [`serve`] with the #255 Dante guard given: a client whose connection
+/// arrived on the Dante network is dropped before its handshake is read.
+pub async fn serve_guarded(listener: TcpListener, facade: Arc<Facade>, dante: Arc<DanteGuard>) {
     let mut sessions = JoinSet::new();
     let (on_air, last) = studio_events::subscribe_program(&facade.bus);
     let feedback = studio_events::run_program_feedback(on_air, last, facade.events.clone());
@@ -548,7 +555,9 @@ pub async fn serve(listener: TcpListener, facade: Arc<Facade>) {
         tokio::select! {
             accepted = listener.accept() => match accepted {
                 Ok((stream, peer)) => {
-                    sessions.spawn(session::run(stream, peer, Arc::clone(&facade)));
+                    if !dante.refuse(Which::Remote, stream.local_addr(), peer) {
+                        sessions.spawn(session::run(stream, peer, Arc::clone(&facade)));
+                    }
                 }
                 Err(e) => {
                     warn!(%e, "remote: accepting a client failed");

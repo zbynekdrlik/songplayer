@@ -1676,6 +1676,7 @@ app.get("/api/v1/status", (_req, res) => {
     // reads these to show the offline-LAN URL + raw-IP fallback.
     lan_url: "http://sp.local:8920",
     lan_ip: "10.77.9.201",
+    dante_refusals: { http: 0, remote: 0 },
     // #229 item C: the node's name and its paid-AI switch, as the server
     // (`paid_ai_held` = the kinds held while off; the mock's lyrics and
     // metadata always are).

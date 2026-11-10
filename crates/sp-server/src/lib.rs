@@ -10,6 +10,7 @@ pub mod cache_sweep; // #261: the daily cache sweep (files no row needs) + the d
 pub mod cache_sweep_plan; // #261: what the sweep deletes, decided with no I/O
 pub mod dabing;
 pub mod daily_pass; // the daily timer (#260 retention, #256 usage-log prune, #261 bounds)
+pub mod dante_guard; // #255 item C: refuse LAN-service connections that arrive on the Dante leg
 pub mod data_size; // #261: the data dir's size on the status
 pub mod db;
 pub mod diag; // #223 S0: /api/v1/diag/* measurement benches
@@ -792,8 +793,14 @@ pub async fn start(
         socket.set_nonblocking(true)?;
         socket.bind(&std::net::SocketAddr::from(([0, 0, 0, 0], config.port)).into())?;
         socket.listen(128)?;
-        tokio::net::TcpListener::from_std(socket.into())?
+        let tcp = tokio::net::TcpListener::from_std(socket.into())?;
+        dante_guard::GuardedListener::new(
+            tcp,
+            dante_guard::global().clone(),
+            dante_guard::Which::Http,
+        )
     };
+    dante_guard::start(pool.clone(), shutdown_tx.subscribe()); // #255: the refused set, every 10 s
     info!(port = config.port, "HTTP server listening");
 
     // Serve with graceful shutdown

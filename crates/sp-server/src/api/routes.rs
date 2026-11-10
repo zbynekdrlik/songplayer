@@ -114,6 +114,10 @@ pub struct StatusResponse {
     /// `data_dir_measured_ms` at the top level; null until the first measure).
     #[serde(flatten)]
     pub data_size: sp_core::data_size::DataSize,
+    /// #255 item C: connections refused because they arrived on the Dante
+    /// network, per listener (`crate::dante_guard`). Missing key → zero.
+    #[serde(default)]
+    pub dante_refusals: crate::dante_guard::DanteRefusals,
 }
 
 // #136 / #223 S3b: moved to `routes_status` for the 1000-line cap.
@@ -753,6 +757,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
         paid_ai_held: paid_ai.held,
         environment,
         data_size: crate::data_size::current(),
+        dante_refusals: crate::dante_guard::global().refusals(),
     })
 }
 
