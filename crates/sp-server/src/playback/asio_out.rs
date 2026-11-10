@@ -36,6 +36,8 @@
 //! and opened again at once (DEBUG, `clock_waits`, never a reset or a
 //! backoff), on and on; its first tick ends the wait (one INFO), the servo
 //! starting afresh. A driver that ticked and stops is a stall, as before.
+//! A card that ticks over 1 % off its driver's rate is no usable clock
+//! either: waiting, reason `clock_off_rate` (#229, `asio_out_rate.rs`).
 //! The worker is not an MMCSS thread (iemmixer: a helper never pre-empts the
 //! driver's own callback thread; it has two slots of cushion). Status:
 //! `AsioOut::snapshot` → `GET /api/v1/program` `outputs[i].asio`.
@@ -50,15 +52,15 @@ use tracing::{debug, info, warn};
 use crate::playback::asio_format::AsioSample;
 use crate::playback::asio_loop::{LoopFeed, LoopLink, LoopTaps, StartLoop, spawn_loop_thread};
 use crate::playback::asio_state::{
-    ClockStep, DeviceEvents, POLL_100NS, Reason, StallWatch, admit_rate, asio_latency_ms,
-    backoff_100ns, buffer_note, clock_step, close_reason, failures_after_close,
+    ClockStep, DeviceEvents, POLL_100NS, RateWatch, Reason, StallWatch, admit_rate,
+    asio_latency_ms, backoff_100ns, buffer_note, clock_step, close_reason, failures_after_close,
     ring_capacity_frames,
 };
 use crate::playback::asrc::{Asrc, Splice};
 use crate::playback::asrc_servo::{
     BASE_LATENCY_100NS, Observation, Recentre, Servo, frames_from_100ns,
 };
-use crate::playback::audio_out::{STATE_OPENING, STATE_RUNNING, STATE_WAITING};
+use crate::playback::audio_out::{STATE_OPENING, STATE_WAITING};
 use crate::playback::audio_out_block::ProgramBlock;
 use crate::playback::audio_out_queue::{BlockQueue, RunGuard, Take, lock};
 use crate::playback::stat_window::WarnLimiter;
@@ -161,6 +163,8 @@ pub struct AsioOut {
     target_100ns: i64,
     /// Compare what it sends with what returns (`asio_loop.rs`).
     loop_check: bool,
+    /// The network's rate an open is held against (#229, `asio_out_rate.rs`).
+    network_rate: Option<u32>,
     live: Mutex<Live>,
     running: AtomicBool,
     /// Blocks the ASIO host's link did not take (SongPlayer's side only).
@@ -181,6 +185,7 @@ impl AsioOut {
             channels: a.channels,
             delay_ms: entry.delay_ms,
             loop_check: a.loop_check,
+            network_rate: None,
         }))
     }
 
@@ -197,6 +202,7 @@ impl AsioOut {
             channels: [0, 1],
             delay_ms: entry.delay_ms,
             loop_check: false,
+            network_rate: None,
         }))
     }
 
@@ -211,6 +217,7 @@ impl AsioOut {
             channels: spec.channels,
             target_100ns: BASE_LATENCY_100NS + delay_100ns,
             loop_check: spec.loop_check,
+            network_rate: spec.network_rate,
             live: Mutex::new(Live {
                 state: STATE_OPENING,
                 reason: None,
@@ -333,6 +340,12 @@ struct Run {
     /// the driver's ticks count from there (a burst of callbacks at the
     /// open, then nothing, is no clock).
     consumed_at_prime: u64,
+    /// `consumed_at_prime` is taken: at the priming, or at a silent run's
+    /// first step (#229).
+    clock_base: bool,
+    /// The run feeds nothing until the card's rate is proven (#229).
+    proving: bool,
+    rate: RateWatch,
 }
 
 enum State {
@@ -392,8 +405,11 @@ pub struct AsioWorker {
     /// ruling, #233, 8.10.2026; `asio_state::clock_step`), across the
     /// reopens every 60 s, until it ticks or the output closes otherwise.
     waiting_for_clock: bool,
-    /// Those reopens (`AsioStatus::clock_waits`).
+    /// Those reopens, and an off-rate card's (`AsioStatus::clock_waits`).
     clock_waits: u64,
+    /// The card was found off its driver's rate at this rate and buffer
+    /// (#229, `asio_out_rate.rs`): the output waits for a usable clock.
+    off_rate: rate::OffRate,
     /// The driver's resync requests and callback timing (`asio_out_events.rs`).
     resyncs: events::Resyncs,
     timing: events::CallbackTiming,
@@ -417,6 +433,7 @@ impl AsioWorker {
             hard_warns: WarnLimiter::default(),
             waiting_for_clock: false,
             clock_waits: 0,
+            off_rate: None,
             resyncs: events::Resyncs::default(),
             timing: events::CallbackTiming::default(),
             loop_start: Box::new(spawn_loop_thread),
@@ -464,10 +481,14 @@ impl AsioWorker {
             .saturating_sub(run.consumed_at_prime);
         let clock = clock_step(
             ticks,
-            run.primed,
+            run.clock_base,
             self.waiting_for_clock,
             now_100ns - run.opened_at_100ns,
         );
+        if run.proving && !run.clock_base {
+            run.clock_base = true;
+            run.consumed_at_prime = device.consumed_frames();
+        }
         match clock {
             ClockStep::Ticking | ClockStep::Quiet => {}
             ClockStep::ClockArrived => {
@@ -480,10 +501,11 @@ impl AsioWorker {
                     driver = %out.driver,
                     "asio output: the driver gives a clock now - running"
                 );
+                let (state, reason) = rate::run_state(self.off_rate, run.proving);
                 out.update(|l| {
-                    l.state = STATE_RUNNING;
-                    l.reason = None;
-                    l.status.reason_code = None;
+                    l.state = state;
+                    l.status.reason_code = reason.as_ref().map(Reason::code);
+                    l.reason = reason;
                 });
             }
             ClockStep::StartsWaiting => {
@@ -501,31 +523,29 @@ impl AsioWorker {
                 });
             }
             ClockStep::Reopen => {
-                self.clock_waits += 1;
-                self.closed.add(run, &*device);
-                let (closed, waits) = (self.closed, self.clock_waits);
-                out.update(|l| {
-                    closed.write(&mut l.status);
-                    l.status.clock_waits = waits;
-                });
-                debug!(
-                    id = %out.id,
-                    driver = %out.driver,
-                    waits,
-                    "asio output: still no clock 60 s after the open - closing and opening the driver again"
-                );
+                let counts = (&mut self.clock_waits, &mut self.closed);
+                let what = "still no clock 60 s after the open";
+                rate::reopen_for_clock(counts, run, out, device, what);
                 self.state = State::Closed {
                     retry_at_100ns: now_100ns,
                 };
-                device.close();
                 return POLL_100NS;
             }
         }
         let ticking = matches!(clock, ClockStep::Ticking | ClockStep::ClockArrived);
+        // #229: a card far off its driver's rate is no usable clock either.
+        if ticking && rate::rate_step(&mut self.off_rate, run, out, &*device, now_100ns) {
+            let counts = (&mut self.clock_waits, &mut self.closed);
+            rate::reopen_for_clock(counts, run, out, device, "an off-rate card");
+            self.state = State::Closed {
+                retry_at_100ns: now_100ns,
+            };
+            return POLL_100NS;
+        }
         // After the priming, a block waits for the driver's first tick: what
         // a card that takes nothing would pile up is no fault of the output
-        // (#233, PP): neither observed nor pushed.
-        let block = block.filter(|_| !run.primed || ticking);
+        // (#233, PP): neither observed nor pushed. A silent run feeds none.
+        let block = block.filter(|_| !run.proving && (!run.primed || ticking));
         if let Some(hard) = block.and_then(|b| process(run, out, device, now_100ns, b)) {
             if let Some(held_back) = self.hard_warns.admit(now_100ns, HARD_WARN_EVERY_100NS) {
                 log_hard(&out.id, &hard, held_back);
@@ -581,17 +601,18 @@ impl AsioWorker {
 
     fn open(&mut self, out: &AsioOut, device: &mut dyn AsioDevice, now_100ns: i64) {
         match build(out, device, now_100ns) {
-            Ok((run, feed)) => {
+            Ok((mut run, feed)) => {
                 let o = run.opened;
                 let rate = o.rate.round() as u32;
-                // While it waits for its clock, a reopen is a retry: DEBUG,
-                // and the output keeps reading waiting.
-                let waiting = self.waiting_for_clock;
+                run.proving = self.proves_at_open(out, &o);
+                // While it waits for a usable clock, a reopen is a retry:
+                // DEBUG, and the output keeps reading waiting.
+                let waiting = self.waiting_for_clock || self.off_rate.is_some();
                 if waiting {
                     debug!(
                         id = %out.id,
                         driver = %out.driver,
-                        "asio output: opened the driver again - still waiting for its clock"
+                        "asio output: opened the driver again - still waiting for a usable clock"
                     );
                 } else {
                     info!(
@@ -613,10 +634,10 @@ impl AsioWorker {
                 // sees is a fresh one. A reopen during a wait for the clock
                 // is a retry: its count logs at DEBUG (review round 10).
                 log_stale(&out.id, out.queue.clear(), waiting);
-                let (state, reason) = if waiting {
+                let (state, reason) = if self.waiting_for_clock {
                     (STATE_WAITING, Some(Reason::NoClock))
                 } else {
-                    (STATE_RUNNING, None)
+                    rate::run_state(self.off_rate, run.proving)
                 };
                 out.update(|l| {
                     l.state = state;
@@ -739,6 +760,9 @@ fn build(
         fast_callbacks: 0,
         primed: false,
         consumed_at_prime: 0,
+        clock_base: false,
+        proving: false,
+        rate: RateWatch::default(),
     };
     Ok((run, feed))
 }
@@ -812,7 +836,11 @@ fn process(
     if !run.primed {
         device.mark_primed();
         run.primed = true;
-        run.consumed_at_prime = device.consumed_frames();
+        // A silent run's ticks count from its first step (#229).
+        if !run.clock_base {
+            run.clock_base = true;
+            run.consumed_at_prime = device.consumed_frames();
+        }
     }
     out.update(|l| l.blocks_sent += 1);
     hard
@@ -920,6 +948,8 @@ pub use status::{AsioStatus, HardRecentre};
 #[path = "asio_out_remote.rs"]
 mod remote;
 pub use remote::AsioSpec;
+#[path = "asio_out_rate.rs"]
+mod rate;
 
 #[cfg(test)]
 #[path = "asio_out_fake.rs"]
@@ -936,6 +966,9 @@ mod tests_cushion;
 #[cfg(test)]
 #[path = "asio_out_tests_loop.rs"]
 mod tests_loop;
+#[cfg(test)]
+#[path = "asio_out_tests_rate.rs"]
+mod tests_rate;
 #[cfg(test)]
 #[path = "asio_out_tests_resync.rs"]
 mod tests_resync;

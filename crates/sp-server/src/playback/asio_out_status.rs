@@ -55,13 +55,15 @@ pub struct AsioStatus {
     pub overloads: u64,
     /// While waiting: the seconds to the next open (None for a parked
     /// driver, which is never reopened, or for one waiting for its clock —
-    /// `no_clock`, the driver open, reopened each minute on its own).
+    /// `no_clock` or `clock_off_rate`, the driver open, reopened each
+    /// minute on its own).
     pub retry_in_s: Option<f64>,
     /// While waiting: the reason's stable code (`Reason::code`).
     pub reason_code: Option<&'static str>,
-    /// The times the driver, giving no clock for 60 s after an open, was
-    /// closed and opened again (`Reason::NoClock`), since the output was
-    /// built: a calm wait, neither a reset nor a fault.
+    /// The times the driver, giving no clock for 60 s after an open
+    /// (`Reason::NoClock`) or a card found off its rate
+    /// (`Reason::ClockOffRate`, #229), was closed and opened again, since
+    /// the output was built: a calm wait, neither a reset nor a fault.
     pub clock_waits: u64,
     /// The driver's resync requests (`kAsioResyncRequest`: its sample
     /// position jumped), since the output was built: counted only (the

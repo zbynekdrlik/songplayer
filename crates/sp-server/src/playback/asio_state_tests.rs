@@ -302,6 +302,7 @@ fn every_reason_code_has_its_slovak_on_the_dashboard() {
         Reason::Held,
         Reason::Parked,
         Reason::NoClock,
+        Reason::ClockOffRate,
         Reason::HostDown(String::new()),
     ];
     // One reason of every variant: a new variant fails to compile here (no
@@ -319,9 +320,10 @@ fn every_reason_code_has_its_slovak_on_the_dashboard() {
         Reason::Parked => 9,
         Reason::NoClock => 10,
         Reason::HostDown(_) => 11,
+        Reason::ClockOffRate => 12,
     };
     let listed: std::collections::BTreeSet<usize> = reasons.iter().map(variant).collect();
-    assert_eq!(listed.len(), 12, "every variant is listed");
+    assert_eq!(listed.len(), 13, "every variant is listed");
     for r in reasons {
         assert_ne!(
             sp_core::audio_outputs::asio_reason_sk(r.code()),

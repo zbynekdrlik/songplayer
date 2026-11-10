@@ -17,6 +17,7 @@ fn spec() -> AsioSpec {
         channels: [3, 4],
         delay_ms: 250,
         loop_check: true,
+        network_rate: Some(96_000),
     }
 }
 

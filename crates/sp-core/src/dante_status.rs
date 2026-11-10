@@ -149,6 +149,9 @@ pub fn dante_reason_sk(code: &str) -> &'static str {
         "held" => "predchádzajúci výstup ešte neuvoľnil zariadenie Dante",
         "parked" => "zariadenie Dante zamrzlo — pomôže len reštart SongPlayera",
         "no_clock" => "zariadenie Dante nemá hodiny — dantesync nebeží alebo v sieti nie je PTP",
+        "clock_off_rate" => {
+            "zariadenie Dante neberie zvuk svojou frekvenciou — hodiny sa nedajú použiť"
+        }
         _ => "neznámy dôvod",
     }
 }

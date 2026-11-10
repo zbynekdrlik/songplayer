@@ -14,6 +14,12 @@
 //!   no Dante PTP clock): no close, no reset, no backoff — the output waits
 //!   for it from 2 s after the open and the driver is opened again every
 //!   60 s (`clock_step`; the owner's ruling, #233, 8.10.2026).
+//! - A driver that ticks at a rate far from the one it reports (PP's Waves
+//!   SoundGrid with its network off: 44 100 Hz reported, ~2.9 % more taken)
+//!   is no usable clock either: [`RateWatch`] compares the frames the card
+//!   took with the clock over windows of at least 10 s, and over 1 % off
+//!   the output waits calmly, reason `clock_off_rate` (the owner's ruling,
+//!   #229, 9.11.2026; the main session's option H).
 //! - asioMessage replies: iemmixer `telemetry.rs:79-99`.
 //! - The driver's rate, buffer and sample type are read, never set: the rate
 //!   is admitted (8–384 kHz) and noted when it is not the network's; a
@@ -23,7 +29,7 @@
 use serde::{Deserialize, Serialize};
 use sp_core::audio_outputs::OutputType;
 
-use crate::playback::asrc_servo::{SLOT_100NS, frames_from_100ns};
+use crate::playback::asrc_servo::{SLOT_100NS, frames_from_100ns, frames_to_100ns};
 
 pub const BACKOFF_S: [i64; 4] = [2, 10, 30, 60];
 /// A run this long resets the backoff (60 s).
@@ -85,6 +91,10 @@ pub enum Reason {
     /// e.g. DVS is not running, or its network has no Dante PTP clock. A
     /// calm wait, never a fault ([`clock_step`]).
     NoClock,
+    /// The driver ticks, but the card takes audio more than 1 % off the
+    /// rate it reports ([`RateWatch`]): no usable clock, a calm wait like
+    /// [`Reason::NoClock`] (#229, 9.11.2026).
+    ClockOffRate,
     /// The ASIO host process (`sp-audio-host.exe`, which runs every ASIO
     /// output since #233's spawn finding) is not running or not reachable:
     /// why (its exe is missing, it did not start, it ended). SongPlayer
@@ -108,6 +118,7 @@ impl Reason {
             Self::Held => "held",
             Self::Parked => "parked",
             Self::NoClock => "no_clock",
+            Self::ClockOffRate => "clock_off_rate",
             Self::HostDown(_) => "host_down",
         }
     }
@@ -135,6 +146,7 @@ impl Reason {
             Self::Held => "another SongPlayer output still holds the driver (the output this one replaces is releasing it)".into(),
             Self::Parked => "a driver callback did not return for 1 s: the driver is parked until SongPlayer restarts".into(),
             Self::NoClock => "the driver gives no clock (no callback since it opened): e.g. Dante Virtual Soundcard is not running, or there is no Dante PTP clock".into(),
+            Self::ClockOffRate => "the card takes audio more than 1 % off the rate its driver reports: no usable clock (e.g. Waves SoundGrid with its network off)".into(),
         }
     }
 }
@@ -214,6 +226,89 @@ pub fn clock_step(ticks: u64, primed: bool, waiting: bool, since_open_100ns: i64
         ClockStep::StartsWaiting
     } else {
         ClockStep::Quiet
+    }
+}
+
+/// A rate window lasts at least this long (10 s; #229).
+pub const RATE_WINDOW_100NS: i64 = 100_000_000;
+/// ... and at least this many driver buffers: the consumed count moves in
+/// whole buffers, so one buffer stays under 0.2 % of a window.
+pub const RATE_WINDOW_BUFFERS: i64 = 500;
+/// A card more than this far off its reported rate is no usable clock (1 %;
+/// a healthy card is within ±300 ppm, PP's SoundGrid offline ~29 000 ppm).
+pub const OFF_RATE_PPM: f64 = 1_000_000.0;
+/// Off-rate windows in a row before a PLAYING output stops for it (a driver
+/// stall at a window's edge reads as one window off, never two).
+pub const OFF_RATE_STRIKES_PLAYING: u32 = 2;
+
+/// The length of a rate window of a driver with `buffer_frames` at `rate`.
+pub fn rate_window_100ns(buffer_frames: u32, rate: f64) -> i64 {
+    let buffers = frames_to_100ns(RATE_WINDOW_BUFFERS * i64::from(buffer_frames), rate);
+    buffers.max(RATE_WINDOW_100NS)
+}
+
+/// How far `frames` taken over `span_100ns` are off `rate`, ppm (positive:
+/// the card takes more than its rate).
+pub fn consumed_ppm(frames: u64, span_100ns: i64, rate: f64) -> f64 {
+    let taken_hz = frames as f64 * 1e7 / span_100ns as f64;
+    (taken_hz / rate - 1.0) * 1e6
+}
+
+/// What a [`RateWatch`] step found.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RateStep {
+    /// A window runs (or an off window waits for the next one).
+    Measuring,
+    /// A window closed within [`OFF_RATE_PPM`].
+    Plausible,
+    /// `strikes` windows in a row closed beyond it.
+    OffRate { ppm: f64 },
+}
+
+/// The card's consumed rate against its reported one, over back-to-back
+/// windows of [`rate_window_100ns`] (#229). The worker starts it once the
+/// driver ticks; a clock read that goes back starts the window again.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RateWatch {
+    from: Option<(u64, i64)>,
+    strikes: u32,
+}
+
+impl RateWatch {
+    /// The card took `consumed` frames (since its start) by `now_100ns`,
+    /// its driver at `(rate, buffer_frames)`; `strikes` off windows in a
+    /// row make the verdict.
+    pub fn step(
+        &mut self,
+        consumed: u64,
+        now_100ns: i64,
+        (rate, buffer_frames): (f64, u32),
+        strikes: u32,
+    ) -> RateStep {
+        let Some((from_frames, from_100ns)) = self.from else {
+            self.from = Some((consumed, now_100ns));
+            return RateStep::Measuring;
+        };
+        let span = now_100ns - from_100ns;
+        if span < 0 {
+            self.from = Some((consumed, now_100ns));
+            return RateStep::Measuring;
+        }
+        if span < rate_window_100ns(buffer_frames, rate) {
+            return RateStep::Measuring;
+        }
+        self.from = Some((consumed, now_100ns));
+        let ppm = consumed_ppm(consumed.saturating_sub(from_frames), span, rate);
+        if ppm.abs() <= OFF_RATE_PPM {
+            self.strikes = 0;
+            return RateStep::Plausible;
+        }
+        self.strikes += 1;
+        if self.strikes >= strikes {
+            RateStep::OffRate { ppm }
+        } else {
+            RateStep::Measuring
+        }
     }
 }
 
@@ -408,3 +503,7 @@ pub fn asio_latency_ms(
 #[cfg(test)]
 #[path = "asio_state_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "asio_state_tests_rate.rs"]
+mod tests_rate;
