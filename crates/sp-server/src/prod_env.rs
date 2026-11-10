@@ -211,6 +211,7 @@ pub fn verdict(facts: &EnvFacts) -> EnvVerdict {
     }
     problems.extend(firewall::problems(facts));
     problems.extend(audio::problems(&facts.audio));
+    problems.extend(network::problems(&facts.network));
     EnvVerdict {
         ok: problems.is_empty(),
         ltsc: edition.map(is_ltsc),

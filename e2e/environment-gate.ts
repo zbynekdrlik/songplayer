@@ -19,8 +19,14 @@
  * (`LocalLanPort`) found and on an NDIS driver with Waves' settings off;
  * Windows Update's automatic updates off and (lane 2: scripts/setup-prod-pc.ps1
  * applies it at every deploy) its drivers excluded; MMCSS set for Pro Audio.
- * The Dante adapter and the power scheme are reported only (`audio.notes`),
- * never a failure.
+ * The power scheme is reported only (`audio.notes`), never a failure.
+ *
+ * #255 item D (dstack, the owner of the two-network standard, 10.11.2026):
+ * a PC with a Dante leg (an enabled Dante output's `ip`) follows dstack's
+ * `docs/two-networks.md` §6 items 1–3 (`status.environment.two_networks`):
+ * one physical adapter on and connected, one default route not through the
+ * leg, the leg with no gateway, metric 900 fixed, no DNS registration,
+ * NetBIOS off, sharing and client unbound. No Dante leg (PP) = not judged.
  */
 
 /** One problem as the server names it (`sp_core::prod_env::ProblemView`). */
@@ -55,12 +61,6 @@ export interface AudioProfile {
   soundgrid?: "not_installed" | "unreadable" | "port_unset" | "port_missing" | "found" | null;
   soundgrid_port_mac?: string | null;
   soundgrid_nic?: NicView | null;
-  dante?: {
-    installed?: boolean | null;
-    interface_address?: string | null;
-    interface_name?: string | null;
-    nic?: NicView | null;
-  };
   windows_update?: { no_auto_update?: boolean | null; drivers_excluded?: boolean | null };
   /** #285: every wired adapter (`sp_core::prod_env::audio::WiredNicView`). */
   wired_nics?: { name?: string | null; guid?: string; ok?: boolean | null }[] | null;
@@ -96,9 +96,79 @@ export interface EnvironmentStatus {
   antivirus_on?: string[] | null;
   firewall?: FirewallStatus;
   audio?: AudioProfile;
+  /** #255 item D (null/absent: an older server, or not checked). */
+  two_networks?: TwoNetworks | null;
   problems: EnvProblemView[];
   read_errors?: string[];
   checked_at_ms?: number | null;
+}
+
+/** #255 item D: one Dante leg (`sp_core::prod_env::network::DanteLegView`). */
+export interface DanteLeg {
+  ip: string;
+  nic?: string | null;
+  gateways?: string[] | null;
+  metric?: number | null;
+  automatic_metric?: boolean | null;
+  dns_registration?: boolean | null;
+  netbios_options?: number | null;
+  file_sharing_bound?: boolean | null;
+  client_bound?: boolean | null;
+}
+
+/** #255 item D: `status.environment.two_networks`
+ * (`sp_core::prod_env::network::TwoNetworksView`). */
+export interface TwoNetworks {
+  /** The enabled Dante outputs' addresses ([]: no Dante leg; null: unread). */
+  dante_ips?: string[] | null;
+  physical_enabled?: string[] | null;
+  physical_up?: string[] | null;
+  default_routes?: string[] | null;
+  legs?: DanteLeg[];
+}
+
+/** #255 item D: dstack's two-network standard §6 items 1–3, each fact by
+ * name, on a PC with a Dante leg; a status without the facts, or whose
+ * Dante outputs could not be read, fails. */
+function twoNetworkFailures(two: TwoNetworks | null | undefined, shown: (v: unknown) => string): string[] {
+  if (two === null || two === undefined) return ["two_networks is missing (a server without #255 item D?)"];
+  const ips = two.dante_ips;
+  if (!Array.isArray(ips)) return [`two_networks.dante_ips is ${shown(ips)}, not a list`];
+  if (ips.length === 0) return [];
+  const f: string[] = [];
+  const enabled = two.physical_enabled;
+  if (!Array.isArray(enabled) || enabled.length !== 1) {
+    f.push(`two_networks.physical_enabled is ${shown(enabled)}, not exactly one adapter`);
+  } else if (JSON.stringify(two.physical_up) !== JSON.stringify(enabled)) {
+    f.push(`two_networks.physical_up is ${shown(two.physical_up)}, not ${shown(enabled)}`);
+  }
+  const routes = two.default_routes;
+  if (!Array.isArray(routes) || routes.length !== 1) {
+    f.push(`two_networks.default_routes is ${shown(routes)}, not exactly one`);
+  }
+  const legs = two.legs ?? [];
+  if (legs.length !== ips.length) f.push(`two_networks.legs has ${legs.length}, not ${ips.length}`);
+  for (const leg of legs) {
+    const at = `two_networks.legs[${leg.ip}]`;
+    if (typeof leg.nic !== "string") {
+      f.push(`${at}.nic is ${shown(leg.nic)}: no interface holds it`);
+      continue;
+    }
+    if (Array.isArray(routes) && routes.includes(leg.nic)) f.push(`${at}: a default route goes through ${leg.nic}`);
+    if (!Array.isArray(leg.gateways) || leg.gateways.length > 0) f.push(`${at}.gateways is ${shown(leg.gateways)}, not []`);
+    const want: [keyof DanteLeg, unknown][] = [
+      ["metric", 900],
+      ["automatic_metric", false],
+      ["dns_registration", false],
+      ["netbios_options", 2],
+      ["file_sharing_bound", false],
+      ["client_bound", false],
+    ];
+    for (const [key, expected] of want) {
+      if (leg[key] !== expected) f.push(`${at}.${key} is ${shown(leg[key])}, not ${JSON.stringify(expected)}`);
+    }
+  }
+  return f;
 }
 
 /** #255 (dstack#155): a profile's default actions (2 = Allow, 4 = Block). */
@@ -224,6 +294,7 @@ function factFailures(env: EnvironmentStatus): string[] {
       want(`audio.wired_nics[${nic.name ?? nic.guid}].ok`, nic.ok, true);
     }
   }
+  f.push(...twoNetworkFailures(env.two_networks, shown));
   return f;
 }
 

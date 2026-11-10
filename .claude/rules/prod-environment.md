@@ -203,7 +203,7 @@ decoded by the pure `reg_value_from`) and `RegOpenKeyExW` /
 `RegEnumKeyExW`; the tests with an in-memory registry
 (`prod_env_audio_read_fake.rs`, PP's and SNV's layout as read on the boxes).
 Nothing spawns a process: the network interfaces come from `GetIfTable2`,
-power from the power API, DVS's file from `std::fs`. A source scan
+power from the power API, the SoundGrid preferences from `std::fs`. A source scan
 (`the_environment_reads_spawn_no_process`) refuses `std::process`,
 `Command::new`, `CreateProcess`, `ShellExecute` in every reader.
 
@@ -233,15 +233,15 @@ name** (a reinstalled PC with other adapter names is covered), matched by
   adapter and about ten adapters that no longer exist (the Dante adapter
   and Wi-Fi have the binding disabled) — so gating it failed PP on
   adapters SoundGrid never uses.
-- **Dante Virtual Soundcard**: `%ProgramData%\Audinate\Dante Virtual
-  Soundcard\manager.json` (no file = not installed; at most 256 KiB, a BOM
-  skipped) read into a typed struct (never `serde_json::Value`; other
-  fields skipped): `PrimaryInterfaceAddress` (MAC; `:`, `-`, `.` dropped,
-  lowercase, 12 hex digits) and `PrimaryInterfaceName` (shown only). The
-  adapter: the `GetIfTable2` row with that MAC that is a hardware interface
-  and no filter module's (`InterfaceAndOperStatusFlags` bit 0 / bit 1; a
-  filter repeats its adapter's MAC), the current address before the
-  permanent one; none or several says why.
+- **The MAC match** (`adapter_for_mac`): the `GetIfTable2` row with that
+  MAC that is a hardware interface and no filter module's
+  (`InterfaceAndOperStatusFlags` bit 0 / bit 1; a filter repeats its
+  adapter's MAC), the current address before the permanent one; none or
+  several says why. (#255 item D deleted Dante Virtual Soundcard's
+  `manager.json` reader and its note: DVS is not used, SongPlayer's Dante
+  output is a native device, and on resolume-snv the file named a removed
+  NIC. A PC with a Dante leg is checked by "The two-network standard"
+  below.)
 - **From the GUID** (`nic`): its instance in the network class
   (`Control\Class\{4d36e972-e325-11ce-bfc1-08002be10318}\<nnnn>`, only
   4-digit keys, `NetCfgInstanceId` equal, case ignored) holds `DriverDesc`,
@@ -261,7 +261,6 @@ name** (a reinstalled PC with other adapter names is covered), matched by
 | `NoAutoUpdate` | `HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU` | DWORD 1 (missing, another number or type = on) | a Windows Update driver push would undo PP's NDIS swap; both boxes 1 (12.10.2026) | **GATE** `windows_auto_update_on`, `unreadable:windows_update` |
 | `ExcludeWUDriversInQualityUpdate` | `…\WindowsUpdate` | DWORD 1 (missing, another number or type = not excluded) | a driver push would undo PP's NDIS swap; PP 1 (set 12.10.2026), SNV lacked it until lane 2's setup set it at its first deploy | **GATE** since lane 2 (the setup applies it before every start) `windows_update_drivers_on`, `unreadable:windows_update` (ONE for either policy) |
 | MMCSS | `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile` `SystemResponsiveness` 0, `NetworkThrottlingIndex` 0xFFFFFFFF; `…\Tasks\Pro Audio` `Priority` 6, `Scheduling Category` High (case and padding ignored) | each exact; missing = `mmcss:<name>` "chýba"; another type = unreadable | #210 part 2 (`vban-out.md`); both boxes hold | **GATE** `mmcss:<system_responsiveness\|network_throttling_index\|pro_audio_priority\|pro_audio_scheduling_category>`, `unreadable:mmcss` |
-| Dante adapter's model + settings | as for SoundGrid | NetAdapterCx = a note | the 12.10.2026 finding: BOTH boxes' DVS adapters are Realtek USB NetAdapterCx (PP `rtucx21x64`, SNV `rtucx22x64`); the effect on Dante is still being measured | **report only** |
 | power | `PowerGetActiveScheme`, `PowerReadFriendlyName`, `PowerReadACValueIndex(SUB_PROCESSOR, CPMINCORES)` | `CPMINCORES` < 100 = a note; Balanced or Power saver active = a note (`ECONOMY_SCHEMES`, any other scheme is the operator's) | Waves' guide; PP Bitsum Highest Performance 100 %, SNV High performance 100 %; PP's Lenovo Legion Toolkit puts Balanced back at every boot, so the setup sets no scheme | **report only** (the setup applies 100 on the active scheme; it stays a note here) |
 
 Why the power API and not the registry: the registry holds only a scheme's
@@ -273,11 +272,93 @@ setting: no read error, and the note "parkovanie jadier sa nepodarilo
 zistiť".
 
 **Report-only facts are notes, never problems** (`sp_core::prod_env::audio::notes`,
-put on the status as `audio.notes` by the server): the Dante adapter on
-NetAdapterCx or unreadable, DVS not determinable, no power scheme, core
-parking under 100 % or unreadable. (The driver exclusion was a note in
+put on the status as `audio.notes` by the server): no power scheme, an
+economy scheme, core parking under 100 % or unreadable. (The driver exclusion was a note in
 lane 1; lane 2 made it a gate.) Their read errors still go to
 `read_errors` (the gate prints read errors only next to a failure).
+
+## The two-network standard (#255 item D: `prod_env_network.rs`)
+
+dstack, the owner of the standard (dstack `docs/two-networks.md`, read it
+with `gh api repos/zbynekdrlik/dstack/contents/docs/two-networks.md?ref=dev
+-q .content | base64 -d`), decided on 10.11.2026: SongPlayer's gate asserts
+§6 "Checking a PC" items 1–3, as gate problems, on a PC that HAS a Dante
+leg. It replaced the DVS note.
+
+- **A Dante leg** = the interface holding the `ip` of an enabled `type:
+  dante` audio output (`dante_guard::dante_ips`, the LAN guard's own rule;
+  each address once). `run` reads the outputs from the DB at each check
+  (`prod_env::dante_ips`, then `next_check(platform, bound, dante)`: the
+  direct read is `fn(&[Ipv4Addr]) -> DirectRead`). No such output (PP
+  today) = nothing judged (the facts are still read and shown). The
+  outputs unread = `unreadable:dante_outputs`.
+- **The rules** (`network::problems`, pure; `sp_core::prod_env::network`
+  names them, `EnvProblem::Network(NetProblem)`), after every other
+  problem, each once:
+  - §6.1 `two_networks_physical_nics`: exactly ONE physical adapter turned
+    on AND connected; another physical one turned on is a problem even
+    unplugged ("disabled in the OS, not just unplugged"; the text marks it
+    "(odpojená)"). Physical = what `Get-NetAdapter -Physical` lists: the
+    `GetIfTable2` row's `ConnectorPresent` flag (0x04), no filter module's
+    row (0x02), present (`OperStatus` not 6). Turned on = `AdminStatus` not
+    2; connected = `OperStatus` 1. resolume-snv's `Dante70` (Realtek
+    Virtual Adapter) and Bluetooth PAN are virtual: no connector;
+  - §6.2 `two_networks_default_routes`: exactly one IPv4 0.0.0.0/0 route
+    (`GetIpForwardTable2`, prefix length 0; a second gateway on the same
+    interface counts too), named by interface alias (unknown index:
+    "rozhranie N"); `dante_leg_default_route`: one goes through the leg;
+  - §6.3, per leg in this order: `dante_leg_missing` (no interface holds
+    the address: `GetUnicastIpAddressTable`), `unreadable:dante_leg` (any
+    leg value unread, first), `dante_leg_default_route`,
+    `dante_leg_gateway` (the configured gateways: `EnableDHCP` 1 →
+    `DhcpDefaultGateway`, else `DefaultGateway`, under
+    `Tcpip\Parameters\Interfaces\{GUID}`; a stale DHCP gateway of a static
+    leg is not used), `dante_leg_metric` (`GetIpInterfaceTable`: metric
+    900 and `UseAutomaticMetric` false), `dante_leg_dns_registration`
+    (`RegistrationEnabled` 0; absent = Windows' default, on),
+    `dante_leg_netbios` (`NetBT\Parameters\Interfaces\Tcpip_{GUID}`
+    `NetbiosOptions` 2; absent = the DHCP default, a problem),
+    `dante_leg_binding:ms_server` / `:ms_msclient`,
+    `unreadable:dante_leg_bindings` (a component with no row for the leg,
+    or WMI unread);
+  - a list IP Helper could not give: `unreadable:network_interfaces`
+    (interfaces or addresses), `unreadable:default_routes`.
+- **Where each fact comes from, and why.** Live facts (interfaces,
+  addresses, routes, metric) from IP Helper, since they are what holds now;
+  the configured gateway, DNS registration and NetBIOS from the registry
+  (the values the adapter's TCP/IP and NetBT properties write; read through
+  `RegistryRead`, so the walk runs over the in-memory registry on Linux);
+  the bindings from WMI `root\StandardCimv2`
+  `MSFT_NetAdapterBindingSettingData` (`SELECT Name, ComponentID, Enabled
+  … WHERE ComponentID = 'ms_server' OR ComponentID = 'ms_msclient'`, what
+  `Get-NetAdapterBinding` reads), in the existing bounded WMI pass
+  (`WmiRead::bindings`, matched by the adapter's alias = `Name`, ASCII
+  case ignored). Not the services' `Linkage\Bind`: NetCfg's private store,
+  which lane 1 measured listing adapters that no longer exist. Nothing
+  spawns a process. A bindings read error is a read error only while a
+  leg exists. At most `MAX_ROWS` 64 binding rows: a leg whose rows did not
+  fit reads as unreadable, never as unbound.
+- **Glue** `prod_env_network_win.rs` (`read_network(dante_ips)`, one
+  `table_rows!` macro over the four IP Helper tables, every fn
+  `mutants::skip`; windows-sys feature `Win32_Networking_WinSock` for
+  `AF_INET` / `SOCKADDR_INET`, an IPv4 `S_addr` is in network order:
+  `to_ne_bytes`).
+- **Status** `two_networks: {dante_ips, physical_enabled, physical_up,
+  default_routes, legs: [{ip, nic, gateways, metric, automatic_metric,
+  dns_registration, netbios_options, file_sharing_bound, client_bound}]}`
+  (`null` off Windows or from an older server).
+- **Gate** (`environment-gate.ts` `twoNetworkFailures`): `two_networks`
+  missing or `dante_ips` null fails; with a leg, each fact by name
+  (exactly one physical adapter on and the same one up, exactly one
+  default route not the leg's, each leg: an interface, `gateways` [],
+  metric 900, automatic false, DNS registration false, NetBIOS 2, sharing
+  and client false). Logged as `[#255 two networks]`.
+- **Not verified from here:** the IP Helper / WMI glue's reading on the
+  boxes (the Windows CI job reads one of the runner's own addresses as a
+  leg, `the_two_network_glue_reads_a_leg_on_windows`, readability only),
+  that `ConnectorPresent` matches `Get-NetAdapter -Physical` on SNV's
+  Realtek Virtual Adapter, and the binding rows' `Name` on SNV. The first
+  SNV deploy's `[#255 two networks]` line shows them.
 
 ## Where it shows
 
@@ -292,13 +373,12 @@ lane 1; lane 2 made it a gate.) Their read errors still go to
   defaults: [{inbound, outbound}|null; 3], dstack_group_rules, block_rules_outside_group},
   audio: {soundgrid:
   "not_installed"|"unreadable"|"port_unset"|"port_missing"|"found",
-  soundgrid_port_mac (12 hex digits), soundgrid_nic: NIC, dante: {installed, interface_address,
-  interface_name, nic: NIC}, windows_update: {no_auto_update,
+  soundgrid_port_mac (12 hex digits), soundgrid_nic: NIC, windows_update: {no_auto_update,
   drivers_excluded}, mmcss: {system_responsiveness, network_throttling_index,
   pro_audio_priority, pro_audio_scheduling_category}, power: {scheme_guid,
   scheme_name, core_parking_min_cores_pct}, wired_nics: [{guid, name,
   description, values: [{keyword, value, ok}], ok}] | null, notes},
-  problems: [{code,
+  two_networks: (#255 item D, above) | null, problems: [{code,
   text_sk}], read_errors, checked_at_ms}`; NIC = `{guid, name, description,
   service, driver_model: "ndis"|"netadaptercx"|null, kmdf_library_version,
   netadaptercx_keywords, settings: [{setting, keyword, value, ok}],
@@ -323,7 +403,8 @@ lane 1; lane 2 made it a gate.) Their read errors still go to
   `windows_auto_update_on`, `windows_update_drivers_on` (lane 2), then
   `unreadable:mmcss` (once, first) and `mmcss:<name>`, then #285's
   `unreadable:wired_nics` or, per adapter, `unreadable:wired_nic` /
-  `wired_nic_value:<keyword>`; Slovak texts in
+  `wired_nic_value:<keyword>`, then #255 item D's (above, "The
+  two-network standard"); Slovak texts in
   `sp_core::prod_env::EnvProblem::text_sk` (an adapter named by its
   connection name, else its driver's description, else its GUID).
 - Logs (`Reporter::step` → `LogStep`): ONE ERROR when the problems appear
@@ -344,8 +425,7 @@ lane 1; lane 2 made it a gate.) Their read errors still go to
   segment "Profil PC: N poznámka|poznámky|poznámok" (`notes_label`,
   `HealthTone::Off`), the notes and the power scheme as its tooltip, shown
   only while `audio.notes` is not empty; it never changes
-  `data-environment` (the box still holds). Both boxes show it today (their
-  DVS adapters are NetAdapterCx). The mock default sends no note; a spec
+  `data-environment` (the box still holds). The mock default sends no note; a spec
   sends `audio: {notes: […]}`.
 
 ## The gate
@@ -568,7 +648,7 @@ shell; ASCII only, it is read as cp1252) and pwsh 7 (the Linux tests).
   adapter over the in-memory registry, every way a read fails, the
   no-process scan), `prod_env_audio_soundgrid_tests.rs` (PP's preferences
   verbatim, every malformed shape, unset / missing / unreadable / found,
-  not installed whatever the file) and `prod_env_audio_read_tests_dvs.rs` (DVS's file and config,
+  not installed whatever the file) and `prod_env_audio_read_tests_profile.rs` (a file read,
   the MAC, the interfaces, the policies, MMCSS, power, PP's and SNV's
   whole profile) over `prod_env_audio_read_fake.rs`; and on the Windows
   job `the_audio_glue_reads_what_windows_itself_reports`: the same CI step
@@ -578,7 +658,15 @@ shell; ASCII only, it is read as cp1252) and pwsh 7 (the Linux tests).
   connection name) and its service's `Parameters\Wdf` into
   `SP_ENV_EXPECT_{MMCSS,WU,POWER,NIC}`; the glue must read the same, find
   that adapter by GUID with no error and list its MAC in `GetIfTable2`
-  (the runner has neither SoundGrid nor DVS).
+  (the runner has no SoundGrid).
+- #255 item D: `crates/sp-core/src/prod_env_network_tests.rs` (every code
+  and Slovak text, the wire shape) and
+  `crates/sp-server/src/prod_env_network_tests.rs` (resolume-snv as
+  dstack set it up holds; each §6.1–6.3 departure in order; no Dante leg
+  is not judged; every unread value and list says why); the verdict and the
+  status in `prod_env_tests.rs`, the bindings' merge in
+  `prod_env_read_tests.rs`, the outputs' addresses through `next_check` in
+  `prod_env_reader_tests.rs`; mock `environment-gate.spec.ts`.
 
 ## Review 12.10.2026 (all fixed)
 
@@ -624,9 +712,6 @@ shell; ASCII only, it is read as cp1252) and pwsh 7 (the Linux tests).
   environment reads "%APPDATA% is not set" → `unreadable:soundgrid` (a
   visible failure, never a pass). A user who chooses another port in
   SoundGrid Studio moves the gate with it at the next minute's check.
-- #255: only `PrimaryInterfaceAddress` / `PrimaryInterfaceName` of
-  `manager.json` are read, as top-level strings (read on both boxes
-  12.10.2026); another shape is a read error and a note, never a problem.
 
 ## Diagnosing an audio disturbance on a box: the method that found this
 
