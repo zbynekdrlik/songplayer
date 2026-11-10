@@ -104,7 +104,7 @@ pub(crate) fn select_lan_ipv4(
     }
     reals.sort_unstable();
     if let Some(route) = default_route
-        && reals.first() == Some(&route)
+        && reals.contains(&route)
     {
         return Some(route);
     }
@@ -213,6 +213,9 @@ impl MdnsRegistrar for mdns_sd::ServiceDaemon {
             .map(|_rx| ())
             .map_err(|e| e.to_string())
     }
+    // mutants::skip — the real daemon opens sockets (no CI test can run it);
+    // the order of pin and register is `reconcile`'s, tested over the fake.
+    #[cfg_attr(test, mutants::skip)]
     fn pin_interface(&self, ip: Ipv4Addr) -> Result<(), String> {
         // mdns-sd applies its selections in order, the last match winning:
         // every interface off, then the one holding `ip` on again.
@@ -348,11 +351,10 @@ async fn reconcile<D: MdnsRegistrar>(
     match build_service_info(new_ip, port) {
         Ok(info) => {
             let fullname = info.get_fullname().to_string();
-            let registered = daemon.register_service(info);
             if let Err(e) = daemon.pin_interface(new_ip) {
                 warn!("mdns: could not pin sp.local to the interface of {new_ip}: {e}");
             }
-            match registered {
+            match daemon.register_service(info) {
                 Ok(()) => {
                     let url = lan_url(port);
                     info!("mdns: advertising {MDNS_HOSTNAME} A={new_ip} -> {url}");

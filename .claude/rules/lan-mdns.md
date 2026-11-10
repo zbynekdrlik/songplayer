@@ -44,12 +44,30 @@ sockets coexist as standard mDNS multi-responders. This module never touches
 the NDI path. Windows `SO_REUSEADDR` co-reception is the one genuinely
 uncertain bit — verify live, don't assume.
 
-## IP selection mirrors `sp-ndi::network_ready`
+## IP selection: the default route's address, mDNS pinned to it (#255)
 
-`select_lan_ipv4` filters non-loopback / non-link-local (169.254/16) /
-non-unspecified via std `Ipv4Addr` methods, prefers the RFC1918 private address
-deterministically (lowest). Reimplemented, not reused, because
-`sp_ndi::network_ready::is_real_ipv4` is `pub(crate)` + Windows-only.
+`select_lan_ipv4(addrs, default_route)` filters non-loopback / non-link-local
+(169.254/16) / non-unspecified via std `Ipv4Addr` methods (reimplemented, not
+reused: `sp_ndi::network_ready::is_real_ipv4` is `pub(crate)` + Windows-only).
+
+- **The default route's address wins** when the host holds it as a real
+  address: `default_route_ipv4` = a UDP socket `connect`ed to TEST-NET-2
+  (198.51.100.1, no packet sent) and its `local_addr`. On a two-network PC
+  (dstack `docs/two-networks.md`: the LAN leg holds the only default route,
+  the Dante VLAN leg none) that is the LAN leg. The old rule — the lowest
+  RFC1918 address — picked resolume-snv's Dante leg 10.77.7.107 over the LAN
+  10.77.9.201 on 10.11.2026, so `sp.local` resolved to the Dante network.
+- No default route: the old rule (lowest private, else lowest routable).
+- **The daemon is pinned to that interface** before every register
+  (`MdnsRegistrar::pin_interface`: `disable_interface(All)` then
+  `enable_interface(Addr(ip))`; mdns-sd applies its selections in order, the
+  last match wins), so nothing is announced on the Dante leg.
+- The standard's next step (dstack, 10.11.2026): a process that is both a
+  Dante device and a LAN service binds its LAN services (HTTP 8920, facade
+  4456) to the LAN address + 127.0.0.1 only — tracked on #255.
+- Live check: `/api/v1/status` `lan_ip` = the LAN address; from dev1
+  `avahi-browse -rpt _http._tcp` shows no SongPlayer record on the Dante VLAN
+  interface (`enp38s0.70`).
 
 ## Testability: the `MdnsRegistrar` seam
 
