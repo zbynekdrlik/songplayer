@@ -8,6 +8,12 @@ use super::*;
 
 const GUID: &str = "{AAAAAAAA-0000-4000-8000-000000000001}";
 
+/// A Realtek RTL8153 (USB GbE): no RTL8156, so none of its values.
+const RTL8153: &str = r"USB\VID_0BDA&PID_8153\000001";
+
+/// resolume-snv's `Ethernet 4` (PnPDeviceID as read on 10.11.2026).
+const RTL8156: &str = r"USB\VID_0BDA&PID_8156\4F13005C8C";
+
 fn wired_row(guid: &str) -> IfRow {
     IfRow {
         guid: guid.to_string(),
@@ -30,6 +36,7 @@ fn dante_box() -> Fake {
     let key = class_key("0014");
     reg.set(&key, "NetCfgInstanceId", t(GUID));
     reg.set(&key, "DriverDesc", t("Realtek USB GbE Family Controller"));
+    reg.set(&key, "DeviceInstanceID", t(RTL8153));
     for keyword in ALWAYS {
         reg.set(&key, keyword, t("0"));
     }
@@ -65,6 +72,7 @@ fn a_driver_install_that_deleted_the_values_names_each_of_them() {
     let mut reg = Fake::default();
     reg.add_instance("0014");
     reg.set(&class_key("0014"), "NetCfgInstanceId", t(GUID));
+    reg.set(&class_key("0014"), "DeviceInstanceID", t(RTL8153));
     reg.set(&connection(GUID), "Name", t("Dante"));
     let mut wanted: Vec<EnvProblem> = ALWAYS.iter().map(|k| value_problem(k, None)).collect();
     wanted.push(value_problem(PNP_CAPABILITIES, None));
@@ -288,4 +296,163 @@ fn the_lists_are_the_setup_scripts() {
         "{}",
         line(&WHERE_PRESENT)
     );
+}
+
+/// resolume-snv's `Ethernet 4` before dstack's A/B (10.11.2026): the
+/// configured values of every adapter, and "Transmit URBs" 3 / "Transmit
+/// Buffers" 18 as its driver had them.
+fn rtl8156_box() -> Fake {
+    let mut reg = dante_box();
+    let key = class_key("0014");
+    reg.set(
+        &key,
+        "DriverDesc",
+        t("Realtek Gaming USB 2.5GbE Family Controller"),
+    );
+    reg.set(&key, "DeviceInstanceID", t(RTL8156));
+    reg.set(&key, "PendingTransmits", t("3"));
+    reg.set(&key, "TransmitBufferLen", t("18"));
+    reg
+}
+
+#[test]
+fn an_rtl8156_is_known_by_its_hardware_id() {
+    for (id, is) in [
+        (RTL8156, true),
+        (r"usb\vid_0bda&pid_8156\4f13005c8c", true),
+        (r" USB\VID_0BDA&PID_8156 ", true),
+        (r"USB\VID_0BDA&PID_8156&MI_00\7&1", true),
+        (r"USB\VID_0BDA&PID_81560\1", false),
+        (RTL8153, false),
+        (r"PCI\VEN_10EC&DEV_8125&SUBSYS_0", false),
+        (r"XUSB\VID_0BDA&PID_8156\1", false),
+        ("", false),
+    ] {
+        assert_eq!(is_rtl8156(id), is, "{id:?}");
+    }
+}
+
+#[test]
+fn the_rtl8156s_values_are_dstacks_and_every_other_value_is_0() {
+    assert_eq!(wanted("PendingTransmits"), 8);
+    assert_eq!(wanted("TransmitBufferLen"), 64);
+    assert_eq!(wanted("*EEE"), 0);
+    assert_eq!(wanted("PendingReceives"), 0);
+}
+
+#[test]
+fn an_rtl8156_at_its_drivers_values_names_both() {
+    let nics = read(&rtl8156_box());
+    assert_eq!(
+        problems(&nics),
+        [
+            value_problem("PendingTransmits", Some("3")),
+            value_problem("TransmitBufferLen", Some("18")),
+        ]
+    );
+    let shown = view(&nics.unwrap()[0]);
+    assert_eq!(shown.ok, Some(false));
+    assert_eq!(shown.values.len(), 15, "13 + the RTL8156's 2");
+    assert_eq!(shown.values[13].keyword, "PendingTransmits");
+    assert_eq!(shown.values[13].ok, Some(false));
+    assert_eq!(shown.values[14].keyword, "TransmitBufferLen");
+}
+
+#[test]
+fn an_rtl8156_at_8_and_64_holds() {
+    let mut reg = rtl8156_box();
+    reg.set(&class_key("0014"), "PendingTransmits", t("8"));
+    reg.set(&class_key("0014"), "TransmitBufferLen", RegValue::Dword(64));
+    let nics = read(&reg);
+    assert_eq!(problems(&nics), []);
+    let shown = view(&nics.unwrap()[0]);
+    assert_eq!(shown.ok, Some(true));
+    assert_eq!(shown.values[13].value.as_deref(), Some("8"));
+    assert_eq!(shown.values[14].value.as_deref(), Some("64"));
+}
+
+/// Exactly the value: more is not the measured setting either, and 0 (every
+/// other value's production one) is wrong here.
+#[test]
+fn an_rtl8156_value_is_exact() {
+    let mut reg = rtl8156_box();
+    reg.set(&class_key("0014"), "PendingTransmits", t("0"));
+    reg.set(&class_key("0014"), "TransmitBufferLen", t("128"));
+    assert_eq!(
+        problems(&read(&reg)),
+        [
+            value_problem("PendingTransmits", Some("0")),
+            value_problem("TransmitBufferLen", Some("128")),
+        ]
+    );
+}
+
+/// The driver offers both, so one that is gone is a problem (the deploy's
+/// setup sets it through the driver).
+#[test]
+fn an_rtl8156_value_that_is_missing_is_named() {
+    let mut reg = rtl8156_box();
+    reg.set(&class_key("0014"), "PendingTransmits", RegValue::Absent);
+    reg.set(&class_key("0014"), "TransmitBufferLen", t("64"));
+    assert_eq!(
+        problems(&read(&reg)),
+        [value_problem("PendingTransmits", None)]
+    );
+}
+
+#[test]
+fn another_adapter_never_carries_the_rtl8156s_values() {
+    let mut reg = dante_box();
+    reg.set(&class_key("0014"), "PendingTransmits", t("3"));
+    let nics = read(&reg);
+    assert_eq!(problems(&nics), []);
+    assert_eq!(view(&nics.unwrap()[0]).values.len(), 13);
+}
+
+/// PP's Dante adapter names its device in the connection only.
+#[test]
+fn the_connection_names_the_device_when_the_class_does_not() {
+    let mut reg = rtl8156_box();
+    reg.set(&class_key("0014"), "DeviceInstanceID", RegValue::Absent);
+    reg.set(&connection(GUID), "PnPInstanceId", t(RTL8156));
+    let nics = read(&reg);
+    assert_eq!(nics.as_ref().unwrap()[0].device.as_deref(), Some(RTL8156));
+    assert_eq!(problems(&nics).len(), 2, "{:?}", problems(&nics));
+}
+
+/// With no device instance it is not known whether the RTL8156's values
+/// apply: unreadable, never fine.
+#[test]
+fn an_adapter_naming_no_device_is_unreadable() {
+    let mut reg = rtl8156_box();
+    reg.set(&class_key("0014"), "DeviceInstanceID", RegValue::Absent);
+    reg.set(&class_key("0014"), "PendingTransmits", t("8"));
+    reg.set(&class_key("0014"), "TransmitBufferLen", t("64"));
+    let mut errors = Vec::new();
+    let nics = wired_nics(&reg, &Ok(vec![wired_row(GUID)]), &mut errors);
+    assert_eq!(
+        problems(&nics),
+        [EnvProblem::WiredNicUnreadable {
+            nic: "Dante".to_string()
+        }]
+    );
+    assert_eq!(view(&nics.unwrap()[0]).ok, None);
+    assert_eq!(
+        errors,
+        [format!(
+            "the network adapter {GUID} names no device instance"
+        )]
+    );
+}
+
+/// The script sets what this check reads: the same hardware id and pairs.
+#[test]
+fn the_rtl8156_rule_is_the_setup_scripts() {
+    let script = include_str!("../../../scripts/setup-prod-pc.ps1");
+    let id = RTL8156_DEVICE;
+    assert!(script.contains(&format!("'{id}'")), "{id}");
+    for (keyword, value) in RTL8156_VALUES {
+        let pair = format!("[pscustomobject]@{{ Keyword = '{keyword}'; Wanted = '{value}' }}");
+        assert!(script.contains(&pair), "{pair}");
+    }
 }

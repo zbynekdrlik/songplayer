@@ -58,7 +58,7 @@ BeforeAll {
                     $adapter = @($Facts.soundgrid.adapters | Where-Object { $_.guid -eq $action.AdapterGuid })[0]
                     $adapter.settings | Add-Member -NotePropertyName $action.Name -NotePropertyValue ([string]$action.Wanted) -Force
                 }
-                'nic_value' {
+                { $_ -eq 'nic_value' -or $_ -eq 'nic_advanced' } {
                     $adapter = @($Facts.adapters | Where-Object { $_.guid -eq $action.AdapterGuid })[0]
                     $adapter.settings | Add-Member -NotePropertyName $action.Name -NotePropertyValue ([string]$action.Wanted) -Force
                 }
@@ -430,10 +430,11 @@ Describe 'Get-ProdPcPlan: the SoundGrid adapter' {
 Describe 'Get-ProdPcPlan: every wired adapter (issue 285, the owner''s rule)' {
     BeforeAll {
         function New-Adapter {
-            param([string]$Name, [string]$Guid, [string]$Media = '802.3', [string]$Status = 'Up', $Settings = $null)
+            param([string]$Name, [string]$Guid, [string]$Media = '802.3', [string]$Status = 'Up', $Settings = $null, [string]$PnpDeviceId = 'USB\VID_0BDA&PID_8153\000001')
             if ($null -eq $Settings) { $Settings = [pscustomobject]@{} }
             return [pscustomobject]@{
                 name = $Name; guid = $Guid; description = $Name; mac = ''; permanent_mac = ''; media = $Media; status = $Status
+                pnp_device_id = $PnpDeviceId
                 class_key = "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e972-e325-11ce-bfc1-08002be10318}\$Guid"
                 settings = $Settings
             }
@@ -443,6 +444,95 @@ Describe 'Get-ProdPcPlan: every wired adapter (issue 285, the owner''s rule)' {
             return @(Get-ProdPcPlan -Facts $Facts | Where-Object { $_.Area -eq 'nic' })
         }
         $script:Always = @('*FlowControl', '*EEE', 'EEE', 'EnableGreenEthernet', 'AdvancedEEE', 'EnableExtraPowerSaving', 'GigaLite', '*SelectiveSuspend')
+        # resolume-snv's 'Ethernet 4' (PnPDeviceID as read on 10.11.2026).
+        $script:Rtl8156 = 'USB\VID_0BDA&PID_8156\4F13005C8C'
+        function Get-Rtl8156Actions {
+            param($Facts)
+            return @(Get-NicActions $Facts | Where-Object { $_.Kind -eq 'nic_advanced' })
+        }
+    }
+
+    It 'knows an RTL8156 by its hardware id' {
+        foreach ($case in @(
+                @($script:Rtl8156, $true),
+                @('usb\vid_0bda&pid_8156\4f13005c8c', $true),
+                @(' USB\VID_0BDA&PID_8156 ', $true),
+                @('USB\VID_0BDA&PID_8156&MI_00\7&1', $true),
+                @('USB\VID_0BDA&PID_81560\1', $false),
+                @('USB\VID_0BDA&PID_8153\000001', $false),
+                @('PCI\VEN_10EC&DEV_8125&SUBSYS_0', $false),
+                @('XUSB\VID_0BDA&PID_8156\1', $false),
+                @('', $false))) {
+            Test-ProdPcRtl8156 $case[0] | Should -Be $case[1] -Because $case[0]
+        }
+    }
+
+    It 'sets an RTL8156 to 8 transmit URBs and 64 transmit buffers through its driver' {
+        $settings = [pscustomobject]@{ PendingTransmits = '3'; TransmitBufferLen = '18' }
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(New-Adapter 'Ethernet 4' '0014' -Settings $settings -PnpDeviceId $script:Rtl8156) -Force
+        $own = Get-Rtl8156Actions $facts
+        @($own | ForEach-Object { "$($_.Name) $($_.Current) $($_.Wanted)" }) | Should -Be @('PendingTransmits 3 8', 'TransmitBufferLen 18 64')
+        $own[0].Adapter | Should -BeExactly 'Ethernet 4'
+        $own[0].AdapterGuid | Should -BeExactly '0014'
+        # after every other value of the adapter, its restart covers both
+        @(Get-NicActions $facts)[-1].Name | Should -BeExactly 'TransmitBufferLen'
+    }
+
+    It 'leaves an RTL8156 already at 8 and 64 alone, and sets one that is missing' {
+        $settings = [pscustomobject]@{ PendingTransmits = '8'; TransmitBufferLen = '64' }
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(New-Adapter 'Ethernet 4' '0014' -Settings $settings -PnpDeviceId $script:Rtl8156) -Force
+        Get-Rtl8156Actions $facts | Should -HaveCount 0
+        $settings.PSObject.Properties.Remove('TransmitBufferLen')
+        $settings.PendingTransmits = '128'
+        @(Get-Rtl8156Actions $facts | ForEach-Object { "$($_.Name) $($_.Current) $($_.Wanted)" }) | Should -Be @('PendingTransmits 128 8', 'TransmitBufferLen (none) 64')
+    }
+
+    It 'never sets the RTL8156 values on another adapter' {
+        $settings = [pscustomobject]@{ PendingTransmits = '3'; TransmitBufferLen = '18' }
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(
+            (New-Adapter 'Dante' '0014' -Settings $settings),
+            (New-Adapter 'NoId' '0015' -Settings $settings -PnpDeviceId '')
+        ) -Force
+        Get-Rtl8156Actions $facts | Should -HaveCount 0
+        @(Get-NicActions $facts | Where-Object { $_.Name -in @('PendingTransmits', 'TransmitBufferLen') }) | Should -HaveCount 0
+    }
+
+    It 'sets the RTL8156 values on an adapter whose PnPCapabilities the SoundGrid review sets' {
+        $facts = Read-Fixture 'pp'
+        $sg = $facts.soundgrid.adapters[0]
+        $sg.settings.PSObject.Properties.Remove('PnPCapabilities')
+        $copy = $sg | ConvertTo-Json -Depth 5 | ConvertFrom-Json
+        $copy | Add-Member -NotePropertyName media -NotePropertyValue '802.3' -Force
+        $copy | Add-Member -NotePropertyName status -NotePropertyValue 'Up' -Force
+        $copy | Add-Member -NotePropertyName pnp_device_id -NotePropertyValue $script:Rtl8156 -Force
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @($copy) -Force
+        @(Get-ProdPcPlan -Facts $facts | Where-Object { $_.Name -eq 'PnPCapabilities' }) | Should -HaveCount 1
+        @(Get-Rtl8156Actions $facts | ForEach-Object { $_.Name }) | Should -Be @('PendingTransmits', 'TransmitBufferLen')
+    }
+
+    It 'plans no RTL8156 value on the second run' {
+        $settings = [pscustomobject]@{ PendingTransmits = '3' }
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(New-Adapter 'Ethernet 4' '0014' -Settings $settings -PnpDeviceId $script:Rtl8156) -Force
+        $facts = Copy-Facts $facts
+        $own = Get-Rtl8156Actions $facts
+        $own | Should -HaveCount 2
+        Set-FactsAsApplied -Facts $facts -Actions $own
+        Get-Rtl8156Actions (Copy-Facts $facts) | Should -HaveCount 0
+    }
+
+    It 'applies an RTL8156 value through the driver, never around it' {
+        $script:Set = @()
+        function Set-NetAdapterAdvancedProperty {
+            param([string]$Name, [string]$RegistryKeyword, [string]$RegistryValue, [switch]$NoRestart)
+            $script:Set += "$Name|$RegistryKeyword|$RegistryValue|$NoRestart"
+        }
+        $action = New-ProdPcAction -Area 'nic' -Name 'PendingTransmits' -Current '3' -Wanted '8' -Reason 'r' -Kind 'nic_advanced' -Target @{ Adapter = 'Ethernet 4'; AdapterGuid = '0014'; Path = 'HKLM:\x'; Type = 'String' }
+        Invoke-ProdPcAction -Action $action
+        $script:Set | Should -Be @('Ethernet 4|PendingTransmits|8|True')
     }
 
     It 'turns off the values a USB driver hides, on a PC with no SoundGrid, and stops Windows turning it off' {

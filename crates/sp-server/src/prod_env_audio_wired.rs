@@ -48,6 +48,35 @@ pub const WHERE_PRESENT: [&str; 4] = [
     "*PowerSavingMode",
 ];
 
+/// A Realtek RTL8156 USB 2.5GbE adapter ("Realtek Gaming USB 2.5GbE Family
+/// Controller", resolume-snv's `Ethernet 4`): its device instance starts
+/// with this hardware id (`USB\VID_0BDA&PID_8156\<serial>`).
+pub const RTL8156_DEVICE: &str = r"USB\VID_0BDA&PID_8156";
+
+/// The RTL8156's own values (#255 / #285, dstack's receiver A/B of
+/// 10.11.2026: "Transmit URBs" 3 to 8 and "Transmit Buffers" 18 to 64 took
+/// the receivers' reorders from ~9/h to ~3/h and the FOH card's peak from
+/// 9.6 to 4.7 ms). The keywords the driver names them by, read live on
+/// resolume-snv (`Get-NetAdapterAdvancedProperty`); its driver offers them,
+/// so a missing one is a problem (`Get-ProdPcRtl8156Values`, the same pairs:
+/// a test compares them).
+pub const RTL8156_VALUES: [(&str, u32); 2] = [("PendingTransmits", 3), ("TransmitBufferLen", 18)];
+
+/// Whether a device instance id is an RTL8156's (ASCII case ignored).
+pub fn is_rtl8156(device_instance: &str) -> bool {
+    let id = device_instance.trim().to_ascii_uppercase();
+    id.strip_prefix(RTL8156_DEVICE)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('\\') || rest.starts_with('&'))
+}
+
+/// The value a keyword must hold: an RTL8156 value's own, else 0.
+pub fn wanted(keyword: &str) -> u32 {
+    RTL8156_VALUES
+        .iter()
+        .find(|(k, _)| *k == keyword)
+        .map_or(0, |&(_, value)| value)
+}
+
 /// "Allow the computer to turn off this device": must carry
 /// [`NDIS_DEVICE_DISABLE_PM`]; no value means 0.
 pub const PNP_CAPABILITIES: &str = "PnPCapabilities";
@@ -65,6 +94,10 @@ pub struct WiredNicFacts {
     pub guid: String,
     pub name: Option<String>,
     pub description: Option<String>,
+    /// Its device instance id (the class instance's `DeviceInstanceID`, else
+    /// the connection's `PnPInstanceId`); `None`: neither names one, so
+    /// whether it is an RTL8156 is not known (unreadable).
+    pub device: Option<String>,
     /// Empty: its instance in the network class was not found.
     pub values: Vec<WiredValue>,
 }
@@ -104,7 +137,7 @@ pub fn verdict(value: &WiredValue) -> Verdict {
         if value.keyword == PNP_CAPABILITIES {
             (n & NDIS_DEVICE_DISABLE_PM) != 0
         } else {
-            n == 0
+            n == wanted(value.keyword)
         }
     });
     if holds {
@@ -134,10 +167,20 @@ fn wired_nic(reg: &dyn RegistryRead, guid: &str, errors: &mut Vec<String>) -> Wi
         return nic;
     };
     nic.description = text_of(reg.value(&key, "DriverDesc"));
+    nic.device = text_of(reg.value(&key, "DeviceInstanceID"))
+        .or_else(|| text_of(reg.value(&connection, "PnPInstanceId")));
+    if nic.device.is_none() {
+        errors.push(format!(
+            "the network adapter {guid} names no device instance"
+        ));
+    }
+    let rtl8156 = nic.device.as_deref().is_some_and(is_rtl8156);
+    let own: &[(&'static str, u32)] = if rtl8156 { &RTL8156_VALUES } else { &[] };
     nic.values = ALWAYS
         .iter()
         .chain(WHERE_PRESENT.iter())
         .chain([&PNP_CAPABILITIES])
+        .chain(own.iter().map(|(keyword, _)| keyword))
         .map(|&keyword| WiredValue {
             keyword,
             value: reading_of(reg.value(&key, keyword)).unwrap_or_else(|code| {
@@ -203,7 +246,10 @@ pub fn problems_besides(
         let name = nic.label();
         let verdicts: Vec<(&str, Verdict)> =
             nic.values.iter().map(|v| (v.keyword, verdict(v))).collect();
-        if nic.values.is_empty() || verdicts.iter().any(|(_, v)| *v == Verdict::Unread) {
+        if nic.values.is_empty()
+            || nic.device.is_none()
+            || verdicts.iter().any(|(_, v)| *v == Verdict::Unread)
+        {
             problems.push(EnvProblem::WiredNicUnreadable { nic: name.clone() });
         }
         for (keyword, verdict) in verdicts {
@@ -231,7 +277,8 @@ pub fn problems_besides(
 /// One adapter on the status. `ok` is `None` while anything is unread.
 pub fn view(nic: &WiredNicFacts) -> WiredNicView {
     let verdicts: Vec<Verdict> = nic.values.iter().map(verdict).collect();
-    let ok = if nic.values.is_empty() || verdicts.contains(&Verdict::Unread) {
+    let ok = if nic.values.is_empty() || nic.device.is_none() || verdicts.contains(&Verdict::Unread)
+    {
         None
     } else {
         Some(verdicts.iter().all(|v| *v == Verdict::Holds))
@@ -269,6 +316,7 @@ pub fn example(guid: &str, name: &str) -> WiredNicFacts {
         guid: guid.to_string(),
         name: Some(name.to_string()),
         description: None,
+        device: Some(r"PCI\VEN_10EC&DEV_8125\0".to_string()),
         values: ALWAYS
             .iter()
             .chain(WHERE_PRESENT.iter())
