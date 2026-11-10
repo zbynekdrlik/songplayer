@@ -494,8 +494,8 @@ pub fn bound(bindings: &[BindingRow], alias: &str, binding: Binding) -> Option<b
 }
 
 /// §6.1: exactly one physical adapter turned on, and it is connected.
-fn physical_problem(nics: &[NetIf]) -> Option<NetProblem> {
-    let enabled: Vec<&NetIf> = nics.iter().filter(|i| i.physical && i.enabled).collect();
+fn physical_problem(nics: &[PhysicalNic]) -> Option<NetProblem> {
+    let enabled: Vec<&PhysicalNic> = nics.iter().filter(|i| i.enabled).collect();
     let up = enabled.iter().filter(|i| i.up).count();
     if enabled.len() == 1 && up == 1 {
         return None;
@@ -504,9 +504,9 @@ fn physical_problem(nics: &[NetIf]) -> Option<NetProblem> {
         .iter()
         .map(|i| {
             if i.up {
-                i.alias.clone()
+                i.name.clone()
             } else {
-                format!("{} (odpojená)", i.alias)
+                format!("{} (odpojená)", i.name)
             }
         })
         .collect();
@@ -606,7 +606,7 @@ pub fn problems(f: &NetworkFacts) -> Vec<EnvProblem> {
         return Vec::new();
     }
     let mut all = Vec::new();
-    match &f.interfaces {
+    match &f.physical {
         None => all.push(NetProblem::UnreadableInterfaces),
         Some(nics) => all.extend(physical_problem(nics)),
     }
@@ -634,11 +634,11 @@ pub fn problems(f: &NetworkFacts) -> Vec<EnvProblem> {
 
 /// The facts on the status.
 pub fn view(f: &NetworkFacts) -> TwoNetworksView {
-    let names = |pick: fn(&NetIf) -> bool| {
-        f.interfaces.as_ref().map(|nics| {
+    let names = |pick: fn(&PhysicalNic) -> bool| {
+        f.physical.as_ref().map(|nics| {
             nics.iter()
                 .filter(|i| pick(i))
-                .map(|i| i.alias.clone())
+                .map(|i| i.name.clone())
                 .collect()
         })
     };
@@ -672,8 +672,8 @@ pub fn view(f: &NetworkFacts) -> TwoNetworksView {
             .dante_ips
             .as_ref()
             .map(|ips| ips.iter().map(Ipv4Addr::to_string).collect()),
-        physical_enabled: names(|i| i.physical && i.enabled),
-        physical_up: names(|i| i.physical && i.enabled && i.up),
+        physical_enabled: names(|i| i.enabled),
+        physical_up: names(|i| i.enabled && i.up),
         default_routes: f.default_routes.as_ref().map(|routes| {
             routes
                 .iter()
