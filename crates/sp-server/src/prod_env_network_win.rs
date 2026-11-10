@@ -90,17 +90,14 @@ fn interfaces() -> Result<Vec<NetIf>, u32> {
             .iter()
             .position(|&c| c == 0)
             .unwrap_or(row.Alias.len());
-        NetIf::from_row(
-            row.InterfaceIndex,
-            &format!(
+        NetIf {
+            index: row.InterfaceIndex,
+            guid: format!(
                 "{{{}}}",
                 guid_text(g.data1, g.data2, g.data3, g.data4).to_ascii_uppercase()
             ),
-            &String::from_utf16_lossy(&row.Alias[..alias_len]),
-            row.InterfaceAndOperStatusFlags._bitfield,
-            row.OperStatus,
-            row.AdminStatus,
-        )
+            alias: String::from_utf16_lossy(&row.Alias[..alias_len]),
+        }
     }))
 }
 

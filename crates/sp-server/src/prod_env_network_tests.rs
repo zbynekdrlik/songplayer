@@ -14,10 +14,9 @@ use super::super::audio::Reading;
 use super::super::audio::read::RegValue;
 use super::super::audio::read::fake::Fake;
 use super::{
-    ADAPTER_DISABLED, ADAPTER_OPER_UP, AdapterRow, BindingRow, Holder, IF_ADMIN_DOWN,
-    IF_CONNECTOR_PRESENT, IF_OPER_NOT_PRESENT, IF_OPER_UP, IpIf, LegFacts, NETBT_INTERFACES, NetIf,
-    NetRead, NetworkFacts, PhysicalNic, TCPIP_INTERFACES, bound, physical_nics, problems, read,
-    snv_adapter_rows, view, with_adapters, with_bindings,
+    ADAPTER_DISABLED, ADAPTER_OPER_UP, AdapterRow, BindingRow, Holder, IpIf, LegFacts,
+    NETBT_INTERFACES, NetIf, NetRead, NetworkFacts, PhysicalNic, TCPIP_INTERFACES, bound,
+    physical_nics, problems, read, snv_adapter_rows, view, with_adapters, with_bindings,
 };
 
 const DANTE: Ipv4Addr = Ipv4Addr::new(10, 77, 7, 107);
@@ -25,82 +24,43 @@ const LAN: Ipv4Addr = Ipv4Addr::new(10, 77, 9, 201);
 const DANTE_GUID: &str = "{7A1B0000-0000-4000-8000-000000000070}";
 const LAN_GUID: &str = "{E4000000-0000-4000-8000-000000000004}";
 
-/// Hardware + connector (what a physical adapter's row has).
-const PHYSICAL: u8 = 0x01 | IF_CONNECTOR_PRESENT;
-/// Hardware, no connector (Realtek's VLAN adapter, Bluetooth PAN).
-const VIRTUAL: u8 = 0x01;
-/// `IfOperStatusDown`, `IfOperStatusLowerLayerDown`.
-const OPER_DOWN: i32 = 2;
-const OPER_LOWER_DOWN: i32 = 7;
-/// `NET_IF_ADMIN_STATUS_UP`.
-const ADMIN_UP: i32 = 1;
-
-fn nic(index: u32, guid: &str, alias: &str, flags: u8, oper: i32, admin: i32) -> NetIf {
-    NetIf::from_row(index, guid, alias, flags, oper, admin)
+fn nic(index: u32, guid: &str, alias: &str) -> NetIf {
+    NetIf {
+        index,
+        guid: guid.to_string(),
+        alias: alias.to_string(),
+    }
 }
 
 /// resolume-snv's interfaces (with `Ethernet 4`'s filter module row and two
 /// removed adapters that keep their rows: "Ethernet 2", not present, and the
 /// unplugged USB NIC "Dante", `USB\VID_0BDA&PID_8153\0013000001`, whose
-/// row still has the connector flag, admin up and `OperStatus` down).
+/// row still has the connector flag, admin up and `OperStatus` down: none
+/// of those flags is read any more).
 fn snv_interfaces() -> Vec<NetIf> {
     vec![
-        nic(12, LAN_GUID, "Ethernet 4", PHYSICAL, IF_OPER_UP, ADMIN_UP),
+        nic(12, LAN_GUID, "Ethernet 4"),
         nic(
             13,
             "{F0000000-0000-4000-8000-000000000012}",
             "Ethernet 4-WFP Native MAC Layer LightWeight Filter-0000",
-            PHYSICAL | 0x02,
-            IF_OPER_UP,
-            ADMIN_UP,
         ),
-        nic(
-            8,
-            "{18000000-0000-4000-8000-000000000008}",
-            "Ethernet",
-            PHYSICAL,
-            OPER_DOWN,
-            IF_ADMIN_DOWN,
-        ),
-        nic(
-            15,
-            "{15000000-0000-4000-8000-000000000015}",
-            "Wi-Fi",
-            PHYSICAL,
-            OPER_DOWN,
-            IF_ADMIN_DOWN,
-        ),
-        nic(30, DANTE_GUID, "Dante70", VIRTUAL, IF_OPER_UP, ADMIN_UP),
+        nic(8, "{18000000-0000-4000-8000-000000000008}", "Ethernet"),
+        nic(15, "{15000000-0000-4000-8000-000000000015}", "Wi-Fi"),
+        nic(30, DANTE_GUID, "Dante70"),
         nic(
             20,
             "{20000000-0000-4000-8000-000000000020}",
             "Bluetooth Network Connection",
-            VIRTUAL,
-            OPER_LOWER_DOWN,
-            ADMIN_UP,
         ),
-        nic(
-            9,
-            "{90000000-0000-4000-8000-000000000009}",
-            "Ethernet 2",
-            PHYSICAL,
-            IF_OPER_NOT_PRESENT,
-            ADMIN_UP,
-        ),
+        nic(9, "{90000000-0000-4000-8000-000000000009}", "Ethernet 2"),
         ghost_dante(),
     ]
 }
 
 /// The removed USB NIC "Dante"'s stale `GetIfTable2` row.
 fn ghost_dante() -> NetIf {
-    nic(
-        33,
-        "{D4000000-0000-4000-8000-000000000033}",
-        "Dante",
-        PHYSICAL,
-        OPER_DOWN,
-        ADMIN_UP,
-    )
+    nic(33, "{D4000000-0000-4000-8000-000000000033}", "Dante")
 }
 
 fn snv_raw() -> NetRead {
@@ -237,49 +197,6 @@ fn net(problems: Vec<EnvProblem>) -> Vec<NetProblem> {
 
 fn s(v: &str) -> String {
     v.to_string()
-}
-
-#[test]
-fn an_interface_row_is_physical_by_its_connector_and_never_a_filter_s() {
-    assert_eq!(
-        (
-            IF_CONNECTOR_PRESENT,
-            IF_OPER_UP,
-            IF_OPER_NOT_PRESENT,
-            IF_ADMIN_DOWN
-        ),
-        (0x04, 1, 6, 2)
-    );
-    let row = |flags, oper, admin| nic(1, "{G}", "x", flags, oper, admin);
-    let up = row(PHYSICAL, IF_OPER_UP, ADMIN_UP);
-    assert_eq!(
-        (up.physical, up.enabled, up.up),
-        (true, true, true),
-        "a connected physical adapter"
-    );
-    assert_eq!(
-        (up.index, up.guid.as_str(), up.alias.as_str()),
-        (1, "{G}", "x")
-    );
-    assert!(row(IF_CONNECTOR_PRESENT, IF_OPER_UP, ADMIN_UP).physical);
-    assert!(!row(VIRTUAL, IF_OPER_UP, ADMIN_UP).physical, "no connector");
-    assert!(!row(0, IF_OPER_UP, ADMIN_UP).physical, "no flag at all");
-    assert!(
-        !row(PHYSICAL | 0x02, IF_OPER_UP, ADMIN_UP).physical,
-        "a filter"
-    );
-    assert!(
-        !row(PHYSICAL, IF_OPER_NOT_PRESENT, ADMIN_UP).physical,
-        "a removed adapter"
-    );
-    let disabled = row(PHYSICAL, OPER_DOWN, IF_ADMIN_DOWN);
-    assert_eq!(
-        (disabled.physical, disabled.enabled, disabled.up),
-        (true, false, false)
-    );
-    let unplugged = row(PHYSICAL, OPER_DOWN, ADMIN_UP);
-    assert_eq!((unplugged.enabled, unplugged.up), (true, false));
-    assert!(!row(PHYSICAL, OPER_LOWER_DOWN, ADMIN_UP).up);
 }
 
 #[test]

@@ -50,24 +50,16 @@ use sp_core::prod_env::network::{
 };
 
 use super::audio::Reading;
-use super::audio::read::{IF_FILTER, RegValue, RegistryRead};
+use super::audio::read::{RegValue, RegistryRead};
 
 /// The IPv4 interfaces' TCP/IP settings (`{GUID}`).
 pub const TCPIP_INTERFACES: &str = r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces";
 /// NetBT's per-interface settings (`Tcpip_{GUID}`).
 pub const NETBT_INTERFACES: &str = r"SYSTEM\CurrentControlSet\Services\NetBT\Parameters\Interfaces";
 
-/// `MIB_IF_ROW2.InterfaceAndOperStatusFlags`'s `ConnectorPresent` bit: what
-/// `Get-NetAdapter -Physical` lists.
-pub const IF_CONNECTOR_PRESENT: u8 = 0x04;
-/// `IfOperStatusUp`.
-pub const IF_OPER_UP: i32 = 1;
-/// `IfOperStatusNotPresent`: a removed adapter keeps its row.
-pub const IF_OPER_NOT_PRESENT: i32 = 6;
-/// `NET_IF_ADMIN_STATUS_DOWN`: disabled in the OS.
-pub const IF_ADMIN_DOWN: i32 = 2;
-
-/// One network interface as judged here.
+/// One network interface (`GetIfTable2`): the Dante leg's holder and a
+/// default route's name. Never §6.1's physical adapters: a removed adapter
+/// keeps its row (`MSFT_NetAdapter` decides those).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NetIf {
     /// `InterfaceIndex`.
@@ -76,36 +68,6 @@ pub struct NetIf {
     pub guid: String,
     /// Its alias (the connection's name).
     pub alias: String,
-    /// What `Get-NetAdapter -Physical` lists: a connector, no filter module,
-    /// present.
-    pub physical: bool,
-    /// Turned on in the OS.
-    pub enabled: bool,
-    /// Connected (`OperStatus` up).
-    pub up: bool,
-}
-
-impl NetIf {
-    /// One `GetIfTable2` row: its flags, `OperStatus` and `AdminStatus`.
-    pub fn from_row(
-        index: u32,
-        guid: &str,
-        alias: &str,
-        flags: u8,
-        oper: i32,
-        admin: i32,
-    ) -> NetIf {
-        let connector = flags & IF_CONNECTOR_PRESENT != 0;
-        let filter = flags & IF_FILTER != 0;
-        NetIf {
-            index,
-            guid: guid.to_string(),
-            alias: alias.to_string(),
-            physical: connector && !filter && oper != IF_OPER_NOT_PRESENT,
-            enabled: admin != IF_ADMIN_DOWN,
-            up: oper == IF_OPER_UP,
-        }
-    }
 }
 
 /// One IPv4 interface's metric (`GetIpInterfaceTable`).
@@ -691,22 +653,12 @@ pub fn view(f: &NetworkFacts) -> TwoNetworksView {
 /// `Wi-Fi` disabled.
 #[cfg(test)]
 pub fn snv_example() -> NetworkFacts {
-    let nic = |index, guid: &str, alias: &str, physical, enabled, up| NetIf {
+    let nic = |index, guid: &str, alias: &str| NetIf {
         index,
         guid: guid.to_string(),
         alias: alias.to_string(),
-        physical,
-        enabled,
-        up,
     };
-    let dante = nic(
-        30,
-        "{7A1B0000-0000-4000-8000-000000000070}",
-        "Dante70",
-        false,
-        true,
-        true,
-    );
+    let dante = nic(30, "{7A1B0000-0000-4000-8000-000000000070}", "Dante70");
     let binding = |name: &str, component: &str, enabled| BindingRow {
         name: Some(name.to_string()),
         component: Some(component.to_string()),
@@ -715,30 +667,9 @@ pub fn snv_example() -> NetworkFacts {
     NetworkFacts {
         dante_ips: Some(vec![Ipv4Addr::new(10, 77, 7, 107)]),
         interfaces: Some(vec![
-            nic(
-                12,
-                "{E4000000-0000-4000-8000-000000000004}",
-                "Ethernet 4",
-                true,
-                true,
-                true,
-            ),
-            nic(
-                8,
-                "{18000000-0000-4000-8000-000000000008}",
-                "Ethernet",
-                true,
-                false,
-                false,
-            ),
-            nic(
-                15,
-                "{15000000-0000-4000-8000-000000000015}",
-                "Wi-Fi",
-                true,
-                false,
-                false,
-            ),
+            nic(12, "{E4000000-0000-4000-8000-000000000004}", "Ethernet 4"),
+            nic(8, "{18000000-0000-4000-8000-000000000008}", "Ethernet"),
+            nic(15, "{15000000-0000-4000-8000-000000000015}", "Wi-Fi"),
             dante.clone(),
         ]),
         physical: Some(physical_nics(&snv_adapter_rows()).expect("SNV's rows say it all")),
