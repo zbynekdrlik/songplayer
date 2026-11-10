@@ -369,3 +369,34 @@ fn only_an_asio_output_is_held_against_the_network_rate() {
     assert_eq!(out().spec().network_rate, Some(NETWORK));
     assert_eq!(AsioOut::from_spec(&out().spec()).spec(), out().spec());
 }
+
+/// Only a SILENT run takes its tick base at its first step: a run that
+/// plays takes it at its priming, as before #229. A driver that calls back
+/// a few times after the open's first step but before the first block, and
+/// then never again, gives no clock: it waits (block 60, 2 s after the
+/// open), never a stall and a reset.
+#[test]
+fn a_playing_run_takes_its_tick_base_at_its_priming() {
+    let o = out();
+    let mut d = FakeDevice::answering(vec![]);
+    let mut w = AsioWorker::new(T0);
+    w.step(&o, &mut d, T0, None);
+    w.step(&o, &mut d, T0 + 10_000, None);
+    d.drain(3);
+    let mut seen: Vec<(i64, Shown)> = Vec::new();
+    for k in 1..=200 {
+        let due = T0 + k * SLOT;
+        w.step(&o, &mut d, due + 50_000, Some(block_due(due)));
+        let s = o.snapshot();
+        let now = (s.state, s.status.reason_code, s.status.clock_waits);
+        if seen.last().is_none_or(|l| l.1 != now) {
+            seen.push((k, now));
+        }
+    }
+    let no_clock = Some("no_clock");
+    assert_eq!(
+        seen,
+        [(1, ("running", None, 0)), (60, ("waiting", no_clock, 0))]
+    );
+    assert_eq!(o.snapshot().status.resets, 0);
+}

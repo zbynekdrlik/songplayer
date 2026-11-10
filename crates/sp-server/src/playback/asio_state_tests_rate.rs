@@ -140,6 +140,32 @@ fn a_clock_that_goes_back_starts_the_window_again() {
     );
 }
 
+/// A read at the window's start instant moves nothing: the window keeps
+/// its first frame count (only a read that goes back starts it again).
+#[test]
+fn a_read_at_the_windows_start_instant_keeps_the_window() {
+    let window = rate_window_100ns(DVS.1, DVS.0);
+    let mut w = RateWatch::default();
+    w.step(0, T, DVS, 1);
+    assert_eq!(w.step(100_000, T, DVS, 1), RateStep::Measuring);
+    assert_eq!(
+        w.step(969_000, T + window, DVS, 1),
+        RateStep::Plausible,
+        "969 000 frames over the window from 0: +0.94 % (from 100 000: −9.5 %)"
+    );
+}
+
+/// A run's windows start after a quarter second of the card's audio: at a
+/// quarter second exactly, never a frame before.
+#[test]
+fn the_windows_start_after_a_quarter_second_of_ticks() {
+    assert_eq!(RATE_SETTLE_PER_S, 4.0);
+    assert!(rate_settled(12_000, 48_000.0));
+    assert!(!rate_settled(11_999, 48_000.0));
+    assert!(rate_settled(11_025, 44_100.0));
+    assert!(!rate_settled(11_024, 44_100.0));
+}
+
 #[test]
 fn an_off_rate_card_has_its_own_code() {
     assert_eq!(

@@ -906,7 +906,9 @@ own callback thread and has two slots of cushion):
     back-to-back windows of max(10 s, 500 driver buffers)
     (`rate_window_100ns`: one buffer stays under 0.2 % of a window; PP's
     1024 / 44.1 kHz = 11.6 s), from a quarter second of ticks after the
-    run's tick base (the open's first callbacks never weigh in); over 1 %
+    run's tick base (`rate_settled`: the open's first callbacks never weigh
+    in); a read at the window's start instant keeps it, one that goes back
+    starts it again; over 1 %
     off (`OFF_RATE_PPM`, `consumed_ppm`) is no usable clock;
   - an open at the network's rate PLAYS AT ONCE, as before (a healthy
     card's run is unchanged: every older pin held); there the verdict
@@ -926,7 +928,8 @@ own callback thread and has two slots of cushion):
     silently). It reads `opening` while it proves, then `running` (one
     INFO; the next block primes), or `waiting` `clock_off_rate` (the WARN
     once per wait), the driver kept open and opened again 60 s after its
-    open (`reopen_for_clock`, the `no_clock` cycle: a DEBUG,
+    open (`reopen_for_clock`, the `no_clock` cycle, decided by the wait
+    alone: a card found off is always a silent run; a DEBUG,
     `clock_waits`, never a reset, a backoff or a fault);
   - a silent run takes its tick base at its first step
     (`Run::clock_base`; the priming keeps a base already taken), so a

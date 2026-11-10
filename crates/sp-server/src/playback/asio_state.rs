@@ -241,6 +241,17 @@ pub const OFF_RATE_PPM: f64 = 10_000.0;
 /// stall at a window's edge reads as one window off, never two).
 pub const OFF_RATE_STRIKES_PLAYING: u32 = 2;
 
+/// A run's rate windows start once its card took a quarter second of
+/// audio since the run's tick base: the open's first callbacks (a burst)
+/// never weigh in a window.
+pub const RATE_SETTLE_PER_S: f64 = 4.0;
+
+/// Whether `ticks` frames at `rate` are enough to start the rate windows
+/// ([`RATE_SETTLE_PER_S`]).
+pub fn rate_settled(ticks: u64, rate: f64) -> bool {
+    ticks as f64 * RATE_SETTLE_PER_S >= rate
+}
+
 /// The length of a rate window of a driver with `buffer_frames` at `rate`.
 pub fn rate_window_100ns(buffer_frames: u32, rate: f64) -> i64 {
     let buffers = frames_to_100ns(RATE_WINDOW_BUFFERS * i64::from(buffer_frames), rate);

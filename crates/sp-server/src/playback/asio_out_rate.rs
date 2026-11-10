@@ -32,13 +32,9 @@ use tracing::{debug, info, warn};
 
 use super::{AsioDevice, AsioOut, AsioWorker, Closed, Opened, Run};
 use crate::playback::asio_state::{
-    NO_CLOCK_REOPEN_100NS, OFF_RATE_STRIKES_PLAYING, RateStep, Reason, rate_note,
+    NO_CLOCK_REOPEN_100NS, OFF_RATE_STRIKES_PLAYING, RateStep, Reason, rate_note, rate_settled,
 };
 use crate::playback::audio_out::{STATE_OPENING, STATE_RUNNING, STATE_WAITING};
-
-/// The ticks, as a share of a second of the card's rate, before its rate
-/// windows start: the open's first callbacks (a burst) stay out of them.
-const SETTLE_PER_S: f64 = 4.0;
 
 /// The card's rate and buffer it was found off at, while the output waits
 /// for a usable clock (`AsioWorker::off_rate`).
@@ -90,13 +86,14 @@ pub(super) fn rate_step(
     device: &dyn AsioDevice,
     now_100ns: i64,
 ) -> bool {
-    if run.proving && off_rate.is_some() && now_100ns - run.opened_at_100ns >= NO_CLOCK_REOPEN_100NS
-    {
+    // A card found off its rate is a silent run (a run that played was
+    // opened again), so the wait alone decides the 60 s reopen.
+    if off_rate.is_some() && now_100ns - run.opened_at_100ns >= NO_CLOCK_REOPEN_100NS {
         return true;
     }
     let consumed = device.consumed_frames();
     let ticks = consumed.saturating_sub(run.consumed_at_prime);
-    if !run.clock_base || (ticks as f64) * SETTLE_PER_S < run.opened.rate {
+    if !run.clock_base || !rate_settled(ticks, run.opened.rate) {
         return false;
     }
     let strikes = if run.proving {
