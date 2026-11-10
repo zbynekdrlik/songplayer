@@ -8,7 +8,7 @@ use sp_core::prod_env::firewall::FirewallDefaults;
 use super::*;
 use crate::prod_env::audio::production_example;
 use crate::prod_env::firewall::BlockRules;
-use crate::prod_env::network::{NetworkFacts, snv_example};
+use crate::prod_env::network::{NetworkFacts, snv_adapter_rows, snv_example};
 use crate::prod_env::{EnvFacts, WBEM_E_INVALID_CLASS, WBEM_E_INVALID_NAMESPACE};
 
 // ---- the firewall: the active store decides ----
@@ -222,6 +222,7 @@ fn direct() -> DirectRead {
         audio: production_example(),
         network: NetworkFacts {
             bindings: None,
+            physical: None,
             ..snv_example()
         },
     }
@@ -241,6 +242,7 @@ fn wmi() -> WmiRead {
         firewall_rules: Ok(Vec::new()),
         antivirus: Ok(Vec::new()),
         bindings: Ok(snv_example().bindings.unwrap()),
+        adapters: Ok(snv_adapter_rows()),
     }
 }
 
@@ -288,10 +290,12 @@ fn the_two_network_facts_take_wmi_s_bindings_and_their_reasons_follow() {
     };
     let refused = WmiRead {
         bindings: Err(-5),
+        adapters: Err(-6),
         ..wmi()
     };
     let facts = facts_from(&read, &Ok(refused));
     assert_eq!(facts.network.bindings, None);
+    assert_eq!(facts.network.physical, None);
     assert_eq!(facts.network.legs, snv_example().legs);
     assert_eq!(
         facts.read_errors,
@@ -299,13 +303,30 @@ fn the_two_network_facts_take_wmi_s_bindings_and_their_reasons_follow() {
             "EditionID is missing",
             "the routing table could not be listed (error 87)",
             "the network adapters' bindings could not be read (0xFFFFFFFB)",
+            "the network adapters could not be read (0xFFFFFFFA)",
         ]
+    );
+    // The adapters alone refused: the bindings are taken.
+    let adapters_refused = WmiRead {
+        adapters: Err(-6),
+        ..wmi()
+    };
+    let facts = facts_from(&direct(), &Ok(adapters_refused));
+    assert_eq!(facts.network.bindings, snv_example().bindings);
+    assert_eq!(facts.network.physical, None);
+    assert_eq!(
+        facts.read_errors,
+        ["the network adapters could not be read (0xFFFFFFFA)"]
     );
     let gone = facts_from(&direct(), &Err("the WMI check did not finish".to_string()));
     assert_eq!(gone.network.bindings, None);
-    assert!(
+    assert_eq!(gone.network.physical, None);
+    assert_eq!(
         gone.read_errors
-            .contains(&"the WMI check did not finish".to_string())
+            .iter()
+            .filter(|why| *why == "the WMI check did not finish")
+            .count(),
+        1
     );
 }
 
@@ -833,6 +854,7 @@ fn every_wmi_query_fails_with_one_code() {
             firewall_rules: Err(-5),
             antivirus: Err(-5),
             bindings: Err(-5),
+            adapters: Err(-5),
         }
     );
 }

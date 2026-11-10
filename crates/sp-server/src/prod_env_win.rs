@@ -15,13 +15,14 @@
 //!   `MSFT_NetFirewallProfile` in the active policy store) and the registered
 //!   antivirus products (`root\SecurityCenter2` `AntiVirusProduct`) and
 //!   #255 item D's adapter bindings (`root\StandardCimv2`
-//!   `MSFT_NetAdapterBindingSettingData`), over COM on a thread of its own.
+//!   `MSFT_NetAdapterBindingSettingData`) and adapters (`MSFT_NetAdapter`),
+//!   over COM on a thread of its own.
 //!
 //! Every decision on what was read is `prod_env_read.rs`'s, tested on Linux;
 //! this file only reads. Not compiled on the Linux runner, so every fn is
 //! `mutants::skip`.
 
-use super::network::BindingRow;
+use super::network::{AdapterRow, BindingRow};
 use super::read::{
     AvProduct, DefenderRow, DirectRead, FirewallRow, FirewallRuleRow, RegDword, RegString,
     ServiceRead, WmiRead,
@@ -270,6 +271,7 @@ fn wmi_in_own_apartment() -> WmiRead {
         firewall_rules: query_firewall_rules(&locator).map_err(|e| e.code().0),
         antivirus: query_antivirus(&locator).map_err(|e| e.code().0),
         bindings: query_bindings(&locator).map_err(|e| e.code().0),
+        adapters: query_adapters(&locator).map_err(|e| e.code().0),
     }
 }
 
@@ -546,6 +548,36 @@ fn query_bindings(
             name: string_of(row, "Name"),
             component: string_of(row, "ComponentID"),
             enabled: bool_of(row, "Enabled"),
+        })
+        .collect())
+}
+
+/// #255 item D: every adapter `Get-NetAdapter` lists (`MSFT_NetAdapter`),
+/// for §6.1's physical ones. A list that filled `MAX_ROWS` may have lost
+/// rows (one of them a physical adapter turned on), so it is an error,
+/// never a short list.
+#[cfg_attr(test, mutants::skip)] // Windows glue
+fn query_adapters(
+    locator: &windows::Win32::System::Wmi::IWbemLocator,
+) -> windows::core::Result<Vec<AdapterRow>> {
+    let services = connect(locator, r"ROOT\StandardCimv2")?;
+    let found = rows(
+        &services,
+        "SELECT Name, ConnectorPresent, Virtual, State, InterfaceOperationalStatus \
+         FROM MSFT_NetAdapter",
+        None,
+    )?;
+    if found.len() >= MAX_ROWS {
+        return Err(windows::core::Error::from(windows::core::HRESULT(E_FAIL)));
+    }
+    Ok(found
+        .iter()
+        .map(|row| AdapterRow {
+            name: string_of(row, "Name"),
+            connector_present: bool_of(row, "ConnectorPresent"),
+            is_virtual: bool_of(row, "Virtual"),
+            state: u32_of(row, "State"),
+            oper: u32_of(row, "InterfaceOperationalStatus"),
         })
         .collect())
 }

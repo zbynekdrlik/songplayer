@@ -13,7 +13,7 @@ use sp_core::prod_env::firewall::FirewallDefaults;
 use super::firewall::{BlockRules, in_dstack_group};
 
 use super::audio::AudioFacts;
-use super::network::{BindingRow, NetworkFacts, with_bindings};
+use super::network::{AdapterRow, BindingRow, NetworkFacts, with_adapters, with_bindings};
 use super::{EnvFacts, WBEM_E_INVALID_CLASS, WBEM_E_INVALID_NAMESPACE};
 
 /// A registry string as read: the value, `None` when the key or the value
@@ -69,8 +69,9 @@ pub struct DirectRead {
     /// (`audio::read::read_audio`; registry-fast, so read directly).
     pub audio: AudioFacts,
     /// #255 item D: the two-network facts for the Dante outputs' addresses
-    /// (`network::read`, IP Helper and the registry; the bindings come from
-    /// WMI, [`WmiRead::bindings`]).
+    /// (`network::read`, IP Helper and the registry; the bindings and §6.1's
+    /// physical adapters come from WMI, [`WmiRead::bindings`],
+    /// [`WmiRead::adapters`]).
     pub network: NetworkFacts,
 }
 
@@ -165,6 +166,8 @@ pub struct WmiRead {
     pub antivirus: Result<Vec<AvProduct>, i32>,
     /// #255 item D: the adapters' `ms_server` / `ms_msclient` bindings.
     pub bindings: Result<Vec<BindingRow>, i32>,
+    /// #255 item D: the adapters (`MSFT_NetAdapter`), §6.1's physical ones.
+    pub adapters: Result<Vec<AdapterRow>, i32>,
 }
 
 impl WmiRead {
@@ -176,6 +179,7 @@ impl WmiRead {
             firewall_rules: Err(code),
             antivirus: Err(code),
             bindings: Err(code),
+            adapters: Err(code),
         }
     }
 }
@@ -568,8 +572,18 @@ pub fn facts_from(direct: &DirectRead, wmi: &Result<WmiRead, String>) -> EnvFact
         }),
         Err(why) => Err(why.clone()),
     };
+    let adapters = match wmi {
+        Ok(read) => read.adapters.clone().map_err(|code| {
+            format!(
+                "the network adapters could not be read (0x{:08X})",
+                code as u32
+            )
+        }),
+        Err(why) => Err(why.clone()),
+    };
     let mut network_errors = Vec::new();
     let network = with_bindings(&direct.network, bindings, &mut network_errors);
+    let network = with_adapters(&network, adapters, &mut network_errors);
     for why in network_errors {
         note(&mut errors, why);
     }

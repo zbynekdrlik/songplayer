@@ -14,9 +14,10 @@ use super::super::audio::Reading;
 use super::super::audio::read::RegValue;
 use super::super::audio::read::fake::Fake;
 use super::{
-    BindingRow, Holder, IF_ADMIN_DOWN, IF_CONNECTOR_PRESENT, IF_OPER_NOT_PRESENT, IF_OPER_UP, IpIf,
-    LegFacts, NETBT_INTERFACES, NetIf, NetRead, NetworkFacts, TCPIP_INTERFACES, bound, problems,
-    read, view, with_bindings,
+    ADAPTER_DISABLED, ADAPTER_OPER_UP, AdapterRow, BindingRow, Holder, IF_ADMIN_DOWN,
+    IF_CONNECTOR_PRESENT, IF_OPER_NOT_PRESENT, IF_OPER_UP, IpIf, LegFacts, NETBT_INTERFACES, NetIf,
+    NetRead, NetworkFacts, PhysicalNic, TCPIP_INTERFACES, bound, physical_nics, problems, read,
+    snv_adapter_rows, view, with_adapters, with_bindings,
 };
 
 const DANTE: Ipv4Addr = Ipv4Addr::new(10, 77, 7, 107);
@@ -38,8 +39,10 @@ fn nic(index: u32, guid: &str, alias: &str, flags: u8, oper: i32, admin: i32) ->
     NetIf::from_row(index, guid, alias, flags, oper, admin)
 }
 
-/// resolume-snv's interfaces (with `Ethernet 4`'s filter module row and a
-/// removed adapter that keeps its row).
+/// resolume-snv's interfaces (with `Ethernet 4`'s filter module row and two
+/// removed adapters that keep their rows: "Ethernet 2", not present, and the
+/// unplugged USB NIC "Dante", `USB\VID_0BDA&PID_8153\0013000001`, whose
+/// row still has the connector flag, admin up and `OperStatus` down).
 fn snv_interfaces() -> Vec<NetIf> {
     vec![
         nic(12, LAN_GUID, "Ethernet 4", PHYSICAL, IF_OPER_UP, ADMIN_UP),
@@ -84,7 +87,20 @@ fn snv_interfaces() -> Vec<NetIf> {
             IF_OPER_NOT_PRESENT,
             ADMIN_UP,
         ),
+        ghost_dante(),
     ]
+}
+
+/// The removed USB NIC "Dante"'s stale `GetIfTable2` row.
+fn ghost_dante() -> NetIf {
+    nic(
+        33,
+        "{D4000000-0000-4000-8000-000000000033}",
+        "Dante",
+        PHYSICAL,
+        OPER_DOWN,
+        ADMIN_UP,
+    )
 }
 
 fn snv_raw() -> NetRead {
@@ -164,13 +180,40 @@ fn snv_bindings() -> Vec<BindingRow> {
     ]
 }
 
-/// The facts of a check on `raw` + `reg` with the bindings, and the errors.
+/// The facts of a check on `raw` + `reg` with SNV's bindings and adapters,
+/// and the errors.
 fn check(reg: &Fake, raw: &NetRead, ips: &[Ipv4Addr]) -> (NetworkFacts, Vec<String>) {
+    check_with(reg, raw, ips, snv_adapter_rows())
+}
+
+/// The same with these `MSFT_NetAdapter` rows.
+fn check_with(
+    reg: &Fake,
+    raw: &NetRead,
+    ips: &[Ipv4Addr],
+    adapters: Vec<AdapterRow>,
+) -> (NetworkFacts, Vec<String>) {
     let mut errors = Vec::new();
     let facts = read(reg, raw, ips, &mut errors);
     let facts = with_bindings(&facts, Ok(snv_bindings()), &mut errors);
+    let facts = with_adapters(&facts, Ok(adapters), &mut errors);
     (facts, errors)
 }
+
+/// One `MSFT_NetAdapter` row of a physical adapter.
+fn adapter(name: &str, state: u32, oper: u32) -> AdapterRow {
+    AdapterRow {
+        name: Some(name.to_string()),
+        connector_present: Some(true),
+        is_virtual: Some(false),
+        state: Some(state),
+        oper: Some(oper),
+    }
+}
+
+/// `MSFT_NetAdapter.State` started, `InterfaceOperationalStatus` down.
+const STARTED: u32 = 2;
+const DOWN: u32 = 2;
 
 fn snv() -> NetworkFacts {
     let (facts, errors) = check(&snv_registry(), &snv_raw(), &[DANTE]);
@@ -260,6 +303,26 @@ fn snv_as_dstack_set_it_up_holds() {
     assert_eq!(problems(&facts), Vec::<EnvProblem>::new());
 }
 
+/// resolume-snv, 10.11.2026: the gate read `two_networks_physical_nics`
+/// (enabled: "Dante (odpojená)", "Ethernet 4") off the removed USB NIC's
+/// stale `GetIfTable2` row (connector flag, admin up, `OperStatus` down).
+/// Windows' own view, `MSFT_NetAdapter` / `Get-NetAdapter -Physical`, has
+/// no such adapter: `Ethernet 4` is the one physical adapter on.
+#[test]
+fn a_removed_nic_s_stale_interface_row_is_no_enabled_physical_nic() {
+    let raw = snv_raw();
+    assert!(
+        raw.interfaces.as_ref().unwrap().contains(&ghost_dante()),
+        "the box's interfaces hold the ghost's row"
+    );
+    let (facts, errors) = check(&snv_registry(), &raw, &[DANTE]);
+    assert!(errors.is_empty(), "{errors:?}");
+    assert_eq!(problems(&facts), Vec::<EnvProblem>::new());
+    let shown = view(&facts);
+    assert_eq!(shown.physical_enabled, Some(vec![s("Ethernet 4")]));
+    assert_eq!(shown.physical_up, Some(vec![s("Ethernet 4")]));
+}
+
 #[test]
 fn snv_s_view_names_every_fact() {
     assert_eq!(
@@ -328,22 +391,17 @@ fn an_output_listed_twice_is_one_leg() {
     assert_eq!(facts.legs.len(), 1);
 }
 
-/// §6.1: a second physical adapter turned on, even unplugged, fails; so does
-/// the only one when it is not connected, and none at all.
+/// §6.1 (from `MSFT_NetAdapter`): a second physical adapter turned on, even
+/// unplugged, fails; so does the only one when it is not connected, and
+/// none at all. Turned on = `State` not 3, whatever the link.
 #[test]
 fn exactly_one_physical_adapter_is_on_and_connected() {
-    let mut raw = snv_raw();
-    let mut ifs = snv_interfaces();
-    ifs[2] = nic(
-        8,
-        "{18000000-0000-4000-8000-000000000008}",
-        "Ethernet",
-        PHYSICAL,
-        OPER_DOWN,
-        ADMIN_UP,
-    );
-    raw.interfaces = Ok(ifs.clone());
-    let (facts, _) = check(&snv_registry(), &raw, &[DANTE]);
+    let with = |second: AdapterRow| {
+        let mut rows = snv_adapter_rows();
+        rows[1] = second;
+        check_with(&snv_registry(), &snv_raw(), &[DANTE], rows).0
+    };
+    let facts = with(adapter("Ethernet", STARTED, DOWN));
     assert_eq!(
         net(problems(&facts)),
         [NetProblem::PhysicalNics {
@@ -356,17 +414,17 @@ fn exactly_one_physical_adapter_is_on_and_connected() {
         Some(vec![s("Ethernet 4"), s("Ethernet")])
     );
     assert_eq!(view(&facts).physical_up, Some(vec![s("Ethernet 4")]));
+    // Unknown (0) and present (1) count as on.
+    for state in [0, 1] {
+        let facts = with(adapter("Ethernet", state, DOWN));
+        assert_eq!(
+            view(&facts).physical_enabled,
+            Some(vec![s("Ethernet 4"), s("Ethernet")]),
+            "State {state}"
+        );
+    }
     // Two connected.
-    ifs[2] = nic(
-        8,
-        "{18000000-0000-4000-8000-000000000008}",
-        "Ethernet",
-        PHYSICAL,
-        IF_OPER_UP,
-        ADMIN_UP,
-    );
-    raw.interfaces = Ok(ifs.clone());
-    let (facts, _) = check(&snv_registry(), &raw, &[DANTE]);
+    let facts = with(adapter("Ethernet", STARTED, ADAPTER_OPER_UP));
     assert_eq!(
         net(problems(&facts)),
         [NetProblem::PhysicalNics {
@@ -374,11 +432,14 @@ fn exactly_one_physical_adapter_is_on_and_connected() {
             up: 2,
         }]
     );
+    // A disabled one that still reads up is off.
+    let facts = with(adapter("Ethernet", ADAPTER_DISABLED, ADAPTER_OPER_UP));
+    assert_eq!(problems(&facts), Vec::<EnvProblem>::new());
+    assert_eq!(view(&facts).physical_up, Some(vec![s("Ethernet 4")]));
     // The only one on is unplugged.
-    let mut alone = snv_interfaces();
-    alone[0] = nic(12, LAN_GUID, "Ethernet 4", PHYSICAL, OPER_DOWN, ADMIN_UP);
-    raw.interfaces = Ok(alone);
-    let (facts, _) = check(&snv_registry(), &raw, &[DANTE]);
+    let mut alone = snv_adapter_rows();
+    alone[0] = adapter("Ethernet 4", STARTED, DOWN);
+    let (facts, _) = check_with(&snv_registry(), &snv_raw(), &[DANTE], alone);
     assert_eq!(
         net(problems(&facts))[0],
         NetProblem::PhysicalNics {
@@ -386,18 +447,11 @@ fn exactly_one_physical_adapter_is_on_and_connected() {
             up: 0,
         }
     );
+    assert_eq!(view(&facts).physical_up, Some(Vec::new()));
     // None on.
-    let mut none = snv_interfaces();
-    none[0] = nic(
-        12,
-        LAN_GUID,
-        "Ethernet 4",
-        PHYSICAL,
-        OPER_DOWN,
-        IF_ADMIN_DOWN,
-    );
-    raw.interfaces = Ok(none);
-    let (facts, _) = check(&snv_registry(), &raw, &[DANTE]);
+    let mut none = snv_adapter_rows();
+    none[0] = adapter("Ethernet 4", ADAPTER_DISABLED, DOWN);
+    let (facts, _) = check_with(&snv_registry(), &snv_raw(), &[DANTE], none);
     assert_eq!(
         net(problems(&facts))[0],
         NetProblem::PhysicalNics {
@@ -405,6 +459,137 @@ fn exactly_one_physical_adapter_is_on_and_connected() {
             up: 0,
         }
     );
+}
+
+/// Physical = a connector and not virtual; a row that does not say so, or a
+/// physical one that does not say its name, state or link, is unread.
+#[test]
+fn an_adapter_is_physical_by_its_connector_and_not_virtual() {
+    assert_eq!((ADAPTER_DISABLED, ADAPTER_OPER_UP), (3, 1));
+    let row = |connector, is_virtual| AdapterRow {
+        connector_present: Some(connector),
+        is_virtual: Some(is_virtual),
+        ..adapter("x", STARTED, ADAPTER_OPER_UP)
+    };
+    let one = PhysicalNic {
+        name: s("x"),
+        enabled: true,
+        up: true,
+    };
+    assert_eq!(physical_nics(&[row(true, false)]), Ok(vec![one]));
+    assert_eq!(physical_nics(&[row(true, true)]), Ok(Vec::new()));
+    assert_eq!(physical_nics(&[row(false, false)]), Ok(Vec::new()));
+    assert_eq!(physical_nics(&[row(false, true)]), Ok(Vec::new()));
+    assert_eq!(
+        physical_nics(&snv_adapter_rows()),
+        Ok(vec![
+            PhysicalNic {
+                name: s("Ethernet 4"),
+                enabled: true,
+                up: true,
+            },
+            PhysicalNic {
+                name: s("Ethernet"),
+                enabled: false,
+                up: false,
+            },
+            PhysicalNic {
+                name: s("Wi-Fi"),
+                enabled: false,
+                up: false,
+            },
+        ])
+    );
+    let says_not = |row: AdapterRow| physical_nics(&[adapter("Ethernet 4", 2, 1), row]);
+    assert_eq!(
+        says_not(AdapterRow {
+            connector_present: None,
+            ..adapter("y", STARTED, DOWN)
+        }),
+        Err(s(
+            "the network adapter y does not say whether it is physical"
+        ))
+    );
+    assert_eq!(
+        says_not(AdapterRow {
+            is_virtual: None,
+            name: None,
+            ..adapter("y", STARTED, DOWN)
+        }),
+        Err(s(
+            "the network adapter ? does not say whether it is physical"
+        ))
+    );
+    for row in [
+        AdapterRow {
+            name: None,
+            ..adapter("y", STARTED, DOWN)
+        },
+        AdapterRow {
+            state: None,
+            ..adapter("y", STARTED, DOWN)
+        },
+        AdapterRow {
+            oper: None,
+            ..adapter("y", STARTED, DOWN)
+        },
+    ] {
+        let name = row.name.clone().unwrap_or(s("?"));
+        assert_eq!(
+            says_not(row),
+            Err(format!(
+                "the physical network adapter {name} does not say its name, state or link"
+            ))
+        );
+    }
+    // A virtual row needs no name, state or link.
+    assert_eq!(
+        says_not(AdapterRow {
+            is_virtual: Some(true),
+            name: None,
+            state: None,
+            oper: None,
+            ..adapter("y", STARTED, DOWN)
+        })
+        .map(|nics| nics.len()),
+        Ok(1)
+    );
+}
+
+/// The adapters not read (WMI, or a row that says too little): §6.1 is
+/// unreadable and the reason is said, only with a leg to judge.
+#[test]
+fn adapters_that_cannot_be_read_leave_6_1_unreadable() {
+    let (facts, _) = check(&snv_registry(), &snv_raw(), &[DANTE]);
+    let mut errors = Vec::new();
+    let failed = with_adapters(&facts, Err(s("WMI down")), &mut errors);
+    assert_eq!(failed.physical, None);
+    assert_eq!(errors, ["WMI down"]);
+    assert_eq!(codes(&failed), ["unreadable:network_interfaces"]);
+    let shown = view(&failed);
+    assert_eq!((shown.physical_enabled, shown.physical_up), (None, None));
+    // A row that says too little.
+    let mut errors = Vec::new();
+    let vague = with_adapters(
+        &facts,
+        Ok(vec![AdapterRow {
+            state: None,
+            ..adapter("Ethernet 4", STARTED, ADAPTER_OPER_UP)
+        }]),
+        &mut errors,
+    );
+    assert_eq!(vague.physical, None);
+    assert_eq!(
+        errors,
+        ["the physical network adapter Ethernet 4 does not say its name, state or link"]
+    );
+    assert_eq!(codes(&vague), ["unreadable:network_interfaces"]);
+    // No leg: nothing said, nothing judged.
+    let (pp, _) = check(&snv_registry(), &snv_raw(), &[]);
+    let mut errors = Vec::new();
+    let pp = with_adapters(&pp, Err(s("WMI down")), &mut errors);
+    assert!(errors.is_empty());
+    assert_eq!(problems(&pp), Vec::<EnvProblem>::new());
 }
 
 /// §6.2: exactly one default route, never through the Dante leg.
@@ -785,18 +970,25 @@ fn a_list_that_cannot_be_read_says_why() {
         ]
     );
     assert_eq!(facts.legs[0].holder, Holder::Unread);
+    // §6.1 is judged from WMI's adapters, so the leg's unknown interface
+    // comes after §6.2.
     assert_eq!(
         codes(&facts),
-        ["unreadable:network_interfaces", "unreadable:default_routes"]
+        ["unreadable:default_routes", "unreadable:network_interfaces"]
     );
     let shown = view(&facts);
+    // §6.1's adapters come from WMI: still read.
     assert_eq!(
         (
             shown.physical_enabled,
             shown.physical_up,
             shown.default_routes
         ),
-        (None, None, None)
+        (
+            Some(vec![s("Ethernet 4")]),
+            Some(vec![s("Ethernet 4")]),
+            None
+        )
     );
     // The addresses not read: the leg is unknown.
     let mut raw = snv_raw();

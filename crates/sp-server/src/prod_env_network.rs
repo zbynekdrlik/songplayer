@@ -22,9 +22,15 @@
 //! - the interfaces, their addresses, the default routes and the IPv4
 //!   interface metric from IP Helper (`GetIfTable2`,
 //!   `GetUnicastIpAddressTable`, `GetIpForwardTable2`,
-//!   `GetIpInterfaceTable`): what is live now. "Physical" is what
-//!   `Get-NetAdapter -Physical` lists: the interface's `ConnectorPresent`
-//!   flag ([`IF_CONNECTOR_PRESENT`]), no filter module's row, present;
+//!   `GetIpInterfaceTable`): what is live now;
+//! - §6.1's physical adapters from WMI (`root\StandardCimv2`
+//!   `MSFT_NetAdapter`, what `Get-NetAdapter -Physical` reads):
+//!   `ConnectorPresent` and not `Virtual`, turned on = `State` not 3
+//!   (disabled), connected = `InterfaceOperationalStatus` 1. Never IP
+//!   Helper's rows: a REMOVED adapter keeps its `GetIfTable2` row with the
+//!   connector flag, admin up and an `OperStatus` other than "not present"
+//!   (resolume-snv's unplugged USB NIC "Dante", 10.11.2026), which
+//!   `Get-NetAdapter` never lists;
 //! - the leg's configured gateway, DNS registration and NetBIOS from the
 //!   registry through [`RegistryRead`] (the values the adapter's TCP/IP
 //!   and NetBT properties write: `DefaultGateway` / `DhcpDefaultGateway` by
@@ -132,6 +138,64 @@ pub struct BindingRow {
     pub enabled: Option<bool>,
 }
 
+/// `MSFT_NetAdapter.State` of an adapter disabled in the OS.
+pub const ADAPTER_DISABLED: u32 = 3;
+/// `MSFT_NetAdapter.InterfaceOperationalStatus` up.
+pub const ADAPTER_OPER_UP: u32 = 1;
+
+/// One row of `MSFT_NetAdapter` (WMI, what `Get-NetAdapter` reads).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AdapterRow {
+    /// The adapter's name (its alias).
+    pub name: Option<String>,
+    pub connector_present: Option<bool>,
+    /// `Virtual`.
+    pub is_virtual: Option<bool>,
+    /// `State` (2 started, 3 disabled).
+    pub state: Option<u32>,
+    /// `InterfaceOperationalStatus` (1 up, 2 down).
+    pub oper: Option<u32>,
+}
+
+/// One physical adapter as §6.1 judges it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PhysicalNic {
+    pub name: String,
+    /// Turned on in the OS (`State` not disabled).
+    pub enabled: bool,
+    /// Connected (`InterfaceOperationalStatus` up).
+    pub up: bool,
+}
+
+/// The physical adapters among `rows`: a connector and not virtual (`Err`:
+/// a row that does not say whether it is physical, or a physical one that
+/// does not say its name, state or link).
+pub fn physical_nics(rows: &[AdapterRow]) -> Result<Vec<PhysicalNic>, String> {
+    let mut nics = Vec::new();
+    for row in rows {
+        let name = row.name.as_deref().unwrap_or("?");
+        let (Some(connector), Some(is_virtual)) = (row.connector_present, row.is_virtual) else {
+            return Err(format!(
+                "the network adapter {name} does not say whether it is physical"
+            ));
+        };
+        if !connector || is_virtual {
+            continue;
+        }
+        let (Some(name), Some(state), Some(oper)) = (row.name.clone(), row.state, row.oper) else {
+            return Err(format!(
+                "the physical network adapter {name} does not say its name, state or link"
+            ));
+        };
+        nics.push(PhysicalNic {
+            name,
+            enabled: state != ADAPTER_DISABLED,
+            up: oper == ADAPTER_OPER_UP,
+        });
+    }
+    Ok(nics)
+}
+
 /// Which interface holds a Dante output's address.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Holder {
@@ -166,6 +230,8 @@ pub struct NetworkFacts {
     /// could not be read).
     pub dante_ips: Option<Vec<Ipv4Addr>>,
     pub interfaces: Option<Vec<NetIf>>,
+    /// §6.1's physical adapters (WMI; `None`: not read).
+    pub physical: Option<Vec<PhysicalNic>>,
     pub default_routes: Option<Vec<u32>>,
     pub legs: Vec<LegFacts>,
     /// The bindings (WMI; `None`: not read).
@@ -179,6 +245,7 @@ impl Default for NetworkFacts {
         Self {
             dante_ips: Some(Vec::new()),
             interfaces: None,
+            physical: None,
             default_routes: None,
             legs: Vec::new(),
             bindings: None,
@@ -355,6 +422,7 @@ pub fn read(
     NetworkFacts {
         dante_ips: Some(ips),
         interfaces: raw.interfaces.clone().ok(),
+        physical: None,
         default_routes: raw.default_routes.clone().ok(),
         legs,
         bindings: None,
@@ -372,6 +440,26 @@ pub fn with_bindings(
     let mut facts = facts.clone();
     facts.bindings = match bindings {
         Ok(rows) => Some(rows),
+        Err(why) => {
+            if !facts.legs.is_empty() {
+                errors.push(why);
+            }
+            None
+        }
+    };
+    facts
+}
+
+/// The facts with §6.1's physical adapters from WMI's `MSFT_NetAdapter`
+/// rows (or why not; said only when there is a leg to judge them for).
+pub fn with_adapters(
+    facts: &NetworkFacts,
+    adapters: Result<Vec<AdapterRow>, String>,
+    errors: &mut Vec<String>,
+) -> NetworkFacts {
+    let mut facts = facts.clone();
+    facts.physical = match adapters.and_then(|rows| physical_nics(&rows)) {
+        Ok(nics) => Some(nics),
         Err(why) => {
             if !facts.legs.is_empty() {
                 errors.push(why);
@@ -406,11 +494,8 @@ pub fn bound(bindings: &[BindingRow], alias: &str, binding: Binding) -> Option<b
 }
 
 /// §6.1: exactly one physical adapter turned on, and it is connected.
-fn physical_problem(interfaces: &[NetIf]) -> Option<NetProblem> {
-    let enabled: Vec<&NetIf> = interfaces
-        .iter()
-        .filter(|i| i.physical && i.enabled)
-        .collect();
+fn physical_problem(nics: &[NetIf]) -> Option<NetProblem> {
+    let enabled: Vec<&NetIf> = nics.iter().filter(|i| i.physical && i.enabled).collect();
     let up = enabled.iter().filter(|i| i.up).count();
     if enabled.len() == 1 && up == 1 {
         return None;
@@ -523,7 +608,7 @@ pub fn problems(f: &NetworkFacts) -> Vec<EnvProblem> {
     let mut all = Vec::new();
     match &f.interfaces {
         None => all.push(NetProblem::UnreadableInterfaces),
-        Some(interfaces) => all.extend(physical_problem(interfaces)),
+        Some(nics) => all.extend(physical_problem(nics)),
     }
     match &f.default_routes {
         None => all.push(NetProblem::UnreadableRoutes),
@@ -550,8 +635,8 @@ pub fn problems(f: &NetworkFacts) -> Vec<EnvProblem> {
 /// The facts on the status.
 pub fn view(f: &NetworkFacts) -> TwoNetworksView {
     let names = |pick: fn(&NetIf) -> bool| {
-        f.interfaces.as_ref().map(|ifs| {
-            ifs.iter()
+        f.interfaces.as_ref().map(|nics| {
+            nics.iter()
                 .filter(|i| pick(i))
                 .map(|i| i.alias.clone())
                 .collect()
@@ -656,6 +741,7 @@ pub fn snv_example() -> NetworkFacts {
             ),
             dante.clone(),
         ]),
+        physical: Some(physical_nics(&snv_adapter_rows()).expect("SNV's rows say it all")),
         default_routes: Some(vec![12]),
         legs: vec![LegFacts {
             ip: Ipv4Addr::new(10, 77, 7, 107),
@@ -673,6 +759,29 @@ pub fn snv_example() -> NetworkFacts {
         ]),
         errors: Vec::new(),
     }
+}
+
+/// resolume-snv's `MSFT_NetAdapter` rows as read live on 10.11.2026
+/// (`Name`, `ConnectorPresent`, `Virtual`, `State`,
+/// `InterfaceOperationalStatus`): `Ethernet 4` started and up, `Ethernet`
+/// and `Wi-Fi` disabled, `Dante70` and Bluetooth PAN virtual. The removed
+/// USB NIC "Dante" has no row.
+#[cfg(test)]
+pub fn snv_adapter_rows() -> Vec<AdapterRow> {
+    let row = |name: &str, connector, is_virtual, state, oper| AdapterRow {
+        name: Some(name.to_string()),
+        connector_present: Some(connector),
+        is_virtual: Some(is_virtual),
+        state: Some(state),
+        oper: Some(oper),
+    };
+    vec![
+        row("Ethernet 4", true, false, 2, 1),
+        row("Ethernet", true, false, 3, 2),
+        row("Dante70", false, true, 2, 1),
+        row("Wi-Fi", true, false, 3, 2),
+        row("Bluetooth Network Connection", false, true, 2, 2),
+    ]
 }
 
 #[cfg(windows)]

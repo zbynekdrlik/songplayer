@@ -187,6 +187,7 @@ fn fake_wmi() -> WmiRead {
         firewall_rules: Ok(Vec::new()),
         antivirus: Ok(Vec::new()),
         bindings: Ok(crate::prod_env::network::snv_example().bindings.unwrap()),
+        adapters: Ok(crate::prod_env::network::snv_adapter_rows()),
     }
 }
 
@@ -384,6 +385,8 @@ fn the_two_network_glue_reads_a_leg_on_windows() {
     );
     assert!(facts.read_errors.is_empty(), "{:?}", facts.read_errors);
     assert!(facts.network.interfaces.is_some());
+    // §6.1's physical adapters from WMI's MSFT_NetAdapter.
+    assert!(facts.network.physical.is_some());
     assert!(facts.network.default_routes.is_some());
     let leg = &facts.network.legs[0];
     assert!(
