@@ -236,7 +236,7 @@ pub const RATE_WINDOW_100NS: i64 = 100_000_000;
 pub const RATE_WINDOW_BUFFERS: i64 = 500;
 /// A card more than this far off its reported rate is no usable clock (1 %;
 /// a healthy card is within ±300 ppm, PP's SoundGrid offline ~29 000 ppm).
-pub const OFF_RATE_PPM: f64 = 1_000_000.0;
+pub const OFF_RATE_PPM: f64 = 10_000.0;
 /// Off-rate windows in a row before a PLAYING output stops for it (a driver
 /// stall at a window's edge reads as one window off, never two).
 pub const OFF_RATE_STRIKES_PLAYING: u32 = 2;
