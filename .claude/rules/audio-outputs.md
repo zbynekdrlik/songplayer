@@ -910,10 +910,20 @@ own callback thread and has two slots of cushion):
     in); a read at the window's start instant keeps it, one that goes back
     starts it again; over 1 %
     off (`OFF_RATE_PPM`, `consumed_ppm`) is no usable clock;
+  - a gap in the card's callbacks (a driver stall, under the 2 s stall
+    watch) is no rate (review round 2: a 1 s stall across a window's edge
+    read short in BOTH windows and stopped a healthy playing card):
+    `RateWatch::track`, called at every rate step, starts the windows and
+    the strikes again when the card moves after more than 100 ms or three
+    buffers (`rate_gap_limit_100ns`) without a callback. While a stall
+    lasts it cannot be told from a slow card, so a window closing inside
+    it is still judged (a silent proof's one strike; a playing run's first
+    strike, which the gap then clears);
   - an open at the network's rate PLAYS AT ONCE, as before (a healthy
     card's run is unchanged: every older pin held); there the verdict
     needs two off windows in a row (`OFF_RATE_STRIKES_PLAYING`: a driver
-    stall at a window's edge is one), then `waiting`, reason
+    stall straddling a window's edge clears the strikes, below), then
+    `waiting`, reason
     `clock_off_rate` ("karta neberie zvuk svojou frekvenciou — hodiny sa
     nedajú použiť (napr. SoundGrid bez siete)"; Dante: "zariadenie Dante
     neberie zvuk …"), ONE WARN, and the driver is closed and opened again
@@ -961,7 +971,8 @@ own callback thread and has two slots of cushion):
     one; a reopen at 96 kHz runs at once; a 48 kHz card on a 96 kHz
     network proves itself in 10 s then runs; ±29 000 ppm at the network's
     rate caught at block 611, nothing moving after it; ±300 and ±9 000 ppm
-    run on for 5 min; only an ASIO output carries the network's rate).
+    run on for 80 s; a 1 s callback stall across a window's edge plays on;
+    only an ASIO output carries the network's rate).
 - close: a reset request or a buffer-size change (answered 0: never
   resized live), a rate change of 1 Hz or more (`sampleRateDidChange(0)` =
   a lost clock, code `clock_lost`, "ovládač stratil hodinový signál": a

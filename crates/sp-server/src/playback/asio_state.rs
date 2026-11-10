@@ -237,9 +237,21 @@ pub const RATE_WINDOW_BUFFERS: i64 = 500;
 /// A card more than this far off its reported rate is no usable clock (1 %;
 /// a healthy card is within ±300 ppm, PP's SoundGrid offline ~29 000 ppm).
 pub const OFF_RATE_PPM: f64 = 10_000.0;
-/// Off-rate windows in a row before a PLAYING output stops for it (a driver
-/// stall at a window's edge reads as one window off, never two).
+/// Off-rate windows in a row before a PLAYING output stops for it.
 pub const OFF_RATE_STRIKES_PLAYING: u32 = 2;
+/// A gap in the card's callbacks longer than this (or than
+/// [`RATE_GAP_PERIODS`] of its buffers) starts the rate windows again: the
+/// frames a stalled driver never took are no rate (review round 2).
+pub const RATE_GAP_MIN_100NS: i64 = 1_000_000;
+/// ... in buffer periods.
+pub const RATE_GAP_PERIODS: i64 = 3;
+
+/// The longest gap in a card's callbacks its rate windows read through:
+/// 100 ms, or three of its buffers when that is longer.
+pub fn rate_gap_limit_100ns(buffer_frames: u32, rate: f64) -> i64 {
+    let periods = frames_to_100ns(RATE_GAP_PERIODS * i64::from(buffer_frames), rate);
+    periods.max(RATE_GAP_MIN_100NS)
+}
 
 /// A run's rate windows start once its card took a quarter second of
 /// audio since the run's tick base: the open's first callbacks (a burst)
@@ -283,9 +295,27 @@ pub enum RateStep {
 pub struct RateWatch {
     from: Option<(u64, i64)>,
     strikes: u32,
+    /// The card's consumed count when it last moved, and when.
+    moved: Option<(u64, i64)>,
 }
 
 impl RateWatch {
+    /// Follow the card's consumed count at every step: a gap in its
+    /// callbacks over [`rate_gap_limit_100ns`] (a driver stall) starts the
+    /// windows and the strikes again, so a stall across a window's edge
+    /// never reads as two windows off (review round 2).
+    pub fn track(&mut self, consumed: u64, now_100ns: i64, (rate, buffer_frames): (f64, u32)) {
+        match self.moved {
+            Some((frames, _)) if frames == consumed => {}
+            Some((_, at)) if now_100ns - at > rate_gap_limit_100ns(buffer_frames, rate) => {
+                self.from = None;
+                self.strikes = 0;
+                self.moved = Some((consumed, now_100ns));
+            }
+            _ => self.moved = Some((consumed, now_100ns)),
+        }
+    }
+
     /// The card took `consumed` frames (since its start) by `now_100ns`,
     /// its driver at `(rate, buffer_frames)`; `strikes` off windows in a
     /// row make the verdict.

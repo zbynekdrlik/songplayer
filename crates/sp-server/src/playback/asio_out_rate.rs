@@ -11,7 +11,9 @@
 //! - Every running output measures the card's consumed frames against the
 //!   clock in back-to-back windows of at least 10 s
 //!   (`asio_state::RateWatch`), from a quarter second after its ticks start
-//!   (the open's first callbacks never weigh in a window).
+//!   (the open's first callbacks never weigh in a window). A gap in the
+//!   card's callbacks (a driver stall) starts the windows and the strikes
+//!   again once the card moves (`RateWatch::track`, review round 2).
 //! - A PLAYING output (an open at the network's rate) stops after two
 //!   windows in a row more than 1 % off: one WARN, waiting, reason
 //!   `clock_off_rate`, and the driver is opened again at once to measure
@@ -102,6 +104,7 @@ pub(super) fn rate_step(
         OFF_RATE_STRIKES_PLAYING
     };
     let driver = (run.opened.rate, run.opened.buffer_frames);
+    run.rate.track(consumed, now_100ns, driver);
     match run.rate.step(consumed, now_100ns, driver, strikes) {
         RateStep::Measuring => false,
         RateStep::Plausible => {

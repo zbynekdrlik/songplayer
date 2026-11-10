@@ -187,3 +187,118 @@ fn an_off_rate_card_has_its_own_code() {
         "zariadenie Dante neberie zvuk svojou frekvenciou — hodiny sa nedajú použiť"
     );
 }
+
+/// Review round 2: the longest callback gap the windows read through is
+/// 100 ms, or three of the driver's buffers when that is longer.
+#[test]
+fn a_callback_gap_over_100_ms_or_3_buffers_is_a_stall() {
+    assert_eq!((RATE_GAP_MIN_100NS, RATE_GAP_PERIODS), (1_000_000, 3));
+    assert_eq!(rate_gap_limit_100ns(128, 96_000.0), 1_000_000);
+    assert_eq!(rate_gap_limit_100ns(1024, 44_100.0), 1_000_000, "69.7 ms");
+    assert_eq!(rate_gap_limit_100ns(2048, 44_100.0), 1_393_197);
+}
+
+/// A DVS card read the way the worker steps it: its count tracked and the
+/// watch stepped every 50 ms.
+struct Feed {
+    w: RateWatch,
+    frames: u64,
+    at: i64,
+    strikes: u32,
+}
+
+/// A read: 50 ms.
+const READ: i64 = 500_000;
+
+impl Feed {
+    fn new(strikes: u32) -> Self {
+        let mut f = Self {
+            w: RateWatch::default(),
+            frames: 0,
+            at: T,
+            strikes,
+        };
+        f.read();
+        f
+    }
+
+    fn read(&mut self) -> RateStep {
+        self.w.track(self.frames, self.at, DVS);
+        self.w.step(self.frames, self.at, DVS, self.strikes)
+    }
+
+    /// `reads` reads, the card taking `per_read` frames between two (0: a
+    /// stall); the first verdict and when.
+    fn run(&mut self, reads: u32, per_read: u64) -> Option<(i64, RateStep)> {
+        let mut first = None;
+        for _ in 0..reads {
+            self.at += READ;
+            self.frames += per_read;
+            let step = self.read();
+            if first.is_none() && step != RateStep::Measuring {
+                first = Some((self.at, step));
+            }
+        }
+        first
+    }
+
+    /// The card's callbacks stop for `gap`, then it moves again (with the
+    /// frames it owes, so only the gap differs).
+    fn gap(&mut self, gap: i64) {
+        self.at += gap;
+        self.frames += (gap as u64) * 96_000 / 10_000_000;
+        self.read();
+    }
+}
+
+/// On its rate: 4 800 frames a read; 2.9 % more: 4 939.2, as 4 939.
+const ON: u64 = 4_800;
+const OFF: u64 = 4_939;
+
+/// A gap up to the limit is read through: the window closes at its length
+/// from the start (T + 10 s). A longer one starts the window again from
+/// the card's next move (T + 1.1000001 s), so it closes 10 s after that.
+#[test]
+fn a_callback_gap_over_the_limit_starts_the_window_again() {
+    let window = rate_window_100ns(DVS.1, DVS.0);
+    let mut f = Feed::new(1);
+    f.run(20, ON);
+    f.gap(1_000_000);
+    let verdict = f.run(400, ON).unwrap();
+    assert_eq!(verdict, (T + window, RateStep::Plausible));
+    let mut f = Feed::new(1);
+    f.run(20, ON);
+    f.gap(1_000_001);
+    let resumed = T + 10_000_000 + 1_000_001;
+    assert_eq!(
+        f.run(400, ON).unwrap(),
+        (resumed + window, RateStep::Plausible)
+    );
+}
+
+/// A gap also ends the strikes so far: an off window, a stall, then one
+/// more off window is one strike, never the verdict; the next is.
+#[test]
+fn a_callback_gap_ends_the_strikes_so_far() {
+    let window = rate_window_100ns(DVS.1, DVS.0);
+    let mut f = Feed::new(OFF_RATE_STRIKES_PLAYING);
+    assert_eq!(f.run(200, OFF), None, "one strike at T + 10 s");
+    f.gap(20_000_000);
+    let resumed = T + window + 20_000_000;
+    let (at, step) = f.run(500, OFF).unwrap();
+    assert_eq!(at, resumed + 2 * window, "two windows after the gap");
+    assert!(matches!(step, RateStep::OffRate { .. }), "{step:?}");
+}
+
+/// While a stall lasts it cannot be told from a slow card: a window that
+/// closes in it is judged (a silent proof's one strike); only the card's
+/// next move starts the windows again.
+#[test]
+fn a_window_that_closes_inside_a_stall_is_judged() {
+    let window = rate_window_100ns(DVS.1, DVS.0);
+    let mut f = Feed::new(1);
+    assert_eq!(f.run(190, ON), None, "9.5 s on its rate");
+    let (at, step) = f.run(40, 0).unwrap();
+    assert_eq!(at, T + window);
+    assert!(matches!(step, RateStep::OffRate { .. }), "{step:?}");
+}
