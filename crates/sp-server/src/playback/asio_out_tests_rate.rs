@@ -401,3 +401,33 @@ fn a_playing_run_takes_its_tick_base_at_its_priming() {
     );
     assert_eq!(o.snapshot().status.resets, 0);
 }
+
+/// Review round 2: a healthy card whose driver stalls for a second (blocks
+/// 295 to 324: no callback, under the 2 s stall watch) across the edge of
+/// two rate windows (the first closes at block 310) reads short in BOTH —
+/// the frames it never took are no rate. A gap in the card's callbacks
+/// starts the windows again, so the card plays on: running throughout, one
+/// open, never `clock_off_rate`.
+#[test]
+fn a_callback_stall_across_a_window_edge_is_no_off_rate() {
+    let o = out();
+    let mut d = FakeDevice::answering(vec![]);
+    let mut w = AsioWorker::new(T0);
+    let mut card = Card::new();
+    w.step(&o, &mut d, T0, None);
+    let mut seen: Vec<(i64, Shown)> = Vec::new();
+    for k in 1..=1500 {
+        let due = T0 + k * SLOT;
+        w.step(&o, &mut d, due + 50_000, Some(block_due(due)));
+        let s = o.snapshot();
+        let now = (s.state, s.status.reason_code, s.status.clock_waits);
+        if seen.last().is_none_or(|l| l.1 != now) {
+            seen.push((k, now));
+        }
+        if !(295..=324).contains(&k) {
+            card.play(&mut d, 96_000.0, 0.0);
+        }
+    }
+    assert_eq!(seen, [(1, ("running", None, 0))]);
+    assert_eq!(d.starts, 1);
+}
