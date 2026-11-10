@@ -10,8 +10,7 @@
 //!
 //! - the SoundGrid driver's chosen port, its preferences' `LocalLanPort`
 //!   ([`soundgrid`]: never the protocol's `Linkage\Bind`, which on PP lists
-//!   14 adapters, virtual and long gone ones among them);
-//! - Dante Virtual Soundcard's `manager.json` `PrimaryInterfaceAddress`.
+//!   14 adapters, virtual and long gone ones among them).
 //!
 //! From the GUID ([`nic`]): the adapter's instance in the network class
 //! (`NetCfgInstanceId`) holds its settings; its device instance
@@ -22,10 +21,9 @@
 use std::io::Read;
 use std::path::Path;
 
-use serde::Deserialize;
 use sp_core::prod_env::audio::NicSetting;
 
-use super::{AudioFacts, DanteFacts, MmcssFacts, NicFacts, PowerFacts, Reading, SettingRead};
+use super::{AudioFacts, MmcssFacts, NicFacts, PowerFacts, Reading, SettingRead};
 
 /// A registry value as read.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -115,8 +113,6 @@ pub const MMCSS_PROFILE: &str =
 /// MMCSS's Pro Audio task.
 pub const MMCSS_PRO_AUDIO: &str =
     r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio";
-/// Dante Virtual Soundcard's configuration, under `%ProgramData%`.
-pub const DVS_MANAGER_JSON: &str = r"Audinate\Dante Virtual Soundcard\manager.json";
 /// The SoundGrid driver's preferences (its chosen port), under the user's
 /// `%APPDATA%`: SongPlayer runs as the user whose driver it hosts.
 pub const SOUNDGRID_PREFERENCES: &str = r"Waves Audio\Preferences\SoundGrid.Driver.preferences";
@@ -298,8 +294,7 @@ pub fn nic(reg: &dyn RegistryRead, guid: &str, errors: &mut Vec<String>) -> NicF
     nic
 }
 
-/// A configuration file as read (DVS's `manager.json`, the SoundGrid
-/// driver's preferences).
+/// A configuration file as read (the SoundGrid driver's preferences).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FileRead {
     /// No such file.
@@ -333,47 +328,6 @@ pub fn read_under(folder: Option<&Path>, variable: &str, relative: &str) -> File
         Some(folder) => read_file(&folder.join(relative)),
         None => FileRead::Failed(format!("%{variable}% is not set")),
     }
-}
-
-/// The two fields of `manager.json` the profile reads, typed (an untrusted
-/// file never goes through `serde_json::Value`; every other field is
-/// skipped).
-#[derive(Deserialize)]
-struct DvsManager {
-    #[serde(rename = "PrimaryInterfaceAddress", default)]
-    address: Option<String>,
-    #[serde(rename = "PrimaryInterfaceName", default)]
-    name: Option<String>,
-}
-
-/// What `manager.json` says about DVS's adapter.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DvsConfig {
-    /// `PrimaryInterfaceAddress` as written.
-    pub address: Option<String>,
-    /// `PrimaryInterfaceName` (shown only).
-    pub name: Option<String>,
-}
-
-/// `manager.json`'s adapter fields (a leading BOM is skipped); why not, by
-/// the parser's category and place only.
-pub fn dvs_config(text: &str) -> Result<DvsConfig, String> {
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    let manager: DvsManager = serde_json::from_str(text).map_err(|e| {
-        format!(
-            "{:?} error at line {} column {}",
-            e.classify(),
-            e.line(),
-            e.column()
-        )
-    })?;
-    Ok(DvsConfig {
-        address: manager.address,
-        name: manager
-            .name
-            .map(|n| n.trim().to_string())
-            .filter(|n| !n.is_empty()),
-    })
 }
 
 /// A MAC as lowercase hex with no separators (`6c1ff773c7d9`): `:`, `-` and
@@ -477,76 +431,6 @@ pub fn adapter_for_mac<'a>(rows: &'a [IfRow], mac: &str) -> Result<&'a IfRow, Ma
         ([], _) => Err(MacMiss::NoneHas),
         _ => Err(MacMiss::Several(candidates.len())),
     }
-}
-
-/// Dante Virtual Soundcard and the adapter its `manager.json` names (report
-/// only): not installed when there is no file.
-pub fn dante(
-    reg: &dyn RegistryRead,
-    dvs: &FileRead,
-    adapters: &Result<Vec<IfRow>, u32>,
-    errors: &mut Vec<String>,
-) -> DanteFacts {
-    let text = match dvs {
-        FileRead::Missing => {
-            return DanteFacts {
-                installed: Some(false),
-                ..DanteFacts::default()
-            };
-        }
-        FileRead::Failed(why) => {
-            errors.push(format!(
-                "Dante Virtual Soundcard's manager.json could not be read: {why}"
-            ));
-            return DanteFacts::default();
-        }
-        FileRead::Text(text) => text,
-    };
-    let mut dante = DanteFacts {
-        installed: Some(true),
-        ..DanteFacts::default()
-    };
-    let config = match dvs_config(text) {
-        Ok(config) => config,
-        Err(why) => {
-            errors.push(format!(
-                "Dante Virtual Soundcard's manager.json does not read: {why}"
-            ));
-            return dante;
-        }
-    };
-    dante.interface_name = config.name;
-    let Some(written) = config.address else {
-        errors.push(
-            "Dante Virtual Soundcard's manager.json names no PrimaryInterfaceAddress".to_string(),
-        );
-        return dante;
-    };
-    let Some(mac) = normalize_mac(&written) else {
-        errors.push(format!(
-            "Dante Virtual Soundcard's PrimaryInterfaceAddress {written:?} is no MAC"
-        ));
-        dante.interface_address = Some(written);
-        return dante;
-    };
-    dante.interface_address = Some(mac.clone());
-    let rows = match adapters {
-        Ok(rows) => rows,
-        Err(code) => {
-            errors.push(format!(
-                "the network interfaces could not be listed (error {code})"
-            ));
-            return dante;
-        }
-    };
-    match adapter_for_mac(rows, &mac) {
-        Ok(row) => dante.nic = Some(nic(reg, &row.guid, errors)),
-        Err(miss) => errors.push(format!(
-            "Dante Virtual Soundcard's adapter: {}",
-            miss.why(&mac)
-        )),
-    }
-    dante
 }
 
 /// A policy DWORD that is 1 (`None`: could not be read). A missing value,
@@ -666,18 +550,16 @@ pub fn power_facts(read: &PowerRead, errors: &mut Vec<String>) -> PowerFacts {
 }
 
 /// Every audio-profile fact of one check: the registry through `reg`, the
-/// network interfaces, DVS's configuration, the SoundGrid driver's
-/// preferences and the power API as read.
+/// network interfaces, the SoundGrid driver's preferences and the power API
+/// as read.
 pub fn read_audio(
     reg: &dyn RegistryRead,
     adapters: &Result<Vec<IfRow>, u32>,
-    dvs: &FileRead,
     soundgrid_preferences: &FileRead,
     power: &PowerRead,
 ) -> AudioFacts {
     let mut errors = Vec::new();
     let soundgrid = soundgrid::soundgrid(reg, soundgrid_preferences, adapters, &mut errors);
-    let dante = dante(reg, dvs, adapters, &mut errors);
     let no_auto_update = policy_on(
         reg.value(WINDOWS_UPDATE_AU, "NoAutoUpdate"),
         "Windows Update's NoAutoUpdate",
@@ -695,7 +577,6 @@ pub fn read_audio(
     let wired_nics = wired::wired_nics(reg, adapters, &mut errors);
     AudioFacts {
         soundgrid,
-        dante,
         no_auto_update,
         drivers_excluded,
         mmcss,
@@ -720,5 +601,5 @@ pub(crate) mod fake;
 mod tests;
 
 #[cfg(test)]
-#[path = "prod_env_audio_read_tests_dvs.rs"]
-mod tests_dvs;
+#[path = "prod_env_audio_read_tests_profile.rs"]
+mod tests_profile;

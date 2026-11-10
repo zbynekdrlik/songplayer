@@ -9,10 +9,9 @@
 //! - the active power scheme through the power API (`PowerGetActiveScheme`,
 //!   `PowerReadFriendlyName`, `PowerReadACValueIndex`: what `powercfg`
 //!   calls, defaults and custom schemes included);
-//! - Dante Virtual Soundcard's `manager.json` and the SoundGrid driver's
-//!   `SoundGrid.Driver.preferences` (under this process's own `%APPDATA%`:
-//!   SongPlayer and its ASIO host run as the user whose driver they host)
-//!   with `std::fs`.
+//! - the SoundGrid driver's `SoundGrid.Driver.preferences` (under this
+//!   process's own `%APPDATA%`: SongPlayer and its ASIO host run as the user
+//!   whose driver they host) with `std::fs`.
 //!
 //! Every decision on what was read is `prod_env_audio_read.rs`'s and
 //! `prod_env_audio.rs`'s, tested on Linux; this file only reads. Not
@@ -22,8 +21,8 @@ use std::path::PathBuf;
 
 use super::AudioFacts;
 use super::read::{
-    DVS_MANAGER_JSON, IfRow, PowerRead, RegValue, RegistryRead, SOUNDGRID_PREFERENCES, guid_text,
-    if_flags, mac_hex, read_audio as walk, read_file, read_under, reg_value_from,
+    IfRow, PowerRead, RegValue, RegistryRead, SOUNDGRID_PREFERENCES, guid_text, if_flags, mac_hex,
+    read_audio as walk, read_under, reg_value_from,
 };
 
 /// The processor settings' power subgroup (`SUB_PROCESSOR`).
@@ -55,17 +54,9 @@ impl RegistryRead for WinRegistry {
 /// Every audio-profile fact of one check (`prod_env::read_direct`).
 #[cfg_attr(test, mutants::skip)] // Windows glue, not compiled on the Linux runner
 pub fn read_audio() -> AudioFacts {
-    let dvs = read_file(&dvs_manager_path());
     let appdata = std::env::var_os("APPDATA").map(PathBuf::from);
     let soundgrid = read_under(appdata.as_deref(), "APPDATA", SOUNDGRID_PREFERENCES);
-    walk(&WinRegistry, &if_table(), &dvs, &soundgrid, &power())
-}
-
-/// `%ProgramData%\Audinate\Dante Virtual Soundcard\manager.json`.
-#[cfg_attr(test, mutants::skip)] // Windows glue
-fn dvs_manager_path() -> PathBuf {
-    let data = std::env::var_os("ProgramData").unwrap_or_else(|| r"C:\ProgramData".into());
-    PathBuf::from(data).join(DVS_MANAGER_JSON)
+    walk(&WinRegistry, &if_table(), &soundgrid, &power())
 }
 
 /// `s` as a NUL-terminated UTF-16 string.

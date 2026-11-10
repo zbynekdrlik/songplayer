@@ -6,6 +6,7 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use sp_core::prod_env::firewall::FirewallDefaults;
+use sp_core::prod_env::network::NetProblem;
 use sp_core::prod_env::{
     EnvProblem, EnvironmentStatus, FirewallProfile, FirewallState, Unreadable,
 };
@@ -14,7 +15,8 @@ use tower::ServiceExt;
 use super::*;
 
 /// A production box: IoT Enterprise LTSC, Defender real-time off, every
-/// firewall profile off (Windows' own default actions, no Block rule).
+/// firewall profile off (Windows' own default actions, no Block rule),
+/// resolume-snv's two networks as dstack set them up (#255 item D).
 fn production() -> EnvFacts {
     EnvFacts {
         edition_id: Some("IoTEnterpriseS".to_string()),
@@ -30,6 +32,7 @@ fn production() -> EnvFacts {
         firewall_defaults: [Some(WINDOWS_DEFAULTS); 3],
         firewall_rules: Some(firewall::BlockRules::default()),
         audio: audio::production_example(),
+        network: network::snv_example(),
         read_errors: Vec::new(),
     }
 }
@@ -458,6 +461,11 @@ fn the_status_carries_every_fact_and_problem() {
             outside: vec!["Block X".to_string()],
         }),
         audio: audio::production_example(),
+        // #255 item D: a second default route, through the Dante leg.
+        network: network::NetworkFacts {
+            default_routes: Some(vec![12, 30]),
+            ..network::snv_example()
+        },
         read_errors: vec!["the private firewall setting is missing".to_string()],
     };
     let (status, problems) = status_of(&Check::Read(facts), 2_000);
@@ -468,6 +476,14 @@ fn the_status_carries_every_fact_and_problem() {
         EnvProblem::AntivirusOn("ESET Security".to_string()),
         // #255: an unread profile: nothing else of the firewall is judged.
         EnvProblem::Unreadable(Unreadable::Firewall(FirewallProfile::Private)),
+        // #255 item D: after the audio profile's.
+        EnvProblem::Network(NetProblem::DefaultRoutes(vec![
+            "Ethernet 4".to_string(),
+            "Dante70".to_string(),
+        ])),
+        EnvProblem::Network(NetProblem::LegDefaultRoute {
+            nic: "Dante70".to_string(),
+        }),
     ];
     assert_eq!(problems, expected_problems);
     assert_eq!(
@@ -497,6 +513,10 @@ fn the_status_carries_every_fact_and_problem() {
                 block_rules_outside_group: Some(vec!["Block X".to_string()]),
             },
             audio: audio::view(&audio::production_example()),
+            two_networks: Some(network::view(&network::NetworkFacts {
+                default_routes: Some(vec![12, 30]),
+                ..network::snv_example()
+            })),
             problems: expected_problems.iter().map(EnvProblem::view).collect(),
             read_errors: vec!["the private firewall setting is missing".to_string()],
             checked_at_ms: Some(2_000),
@@ -520,12 +540,67 @@ fn the_status_carries_every_fact_and_problem() {
             .and_then(|n| n.service.as_deref()),
         Some("rt640x64")
     );
-    // One note: the DVS adapter on NetAdapterCx. The driver exclusion is
-    // a gate since lane 2, and production_example() holds it.
-    assert_eq!(held.audio.notes.len(), 1);
+    // No note: #255 item D deleted the one on Dante Virtual Soundcard's
+    // adapter. The driver exclusion is a gate since lane 2, and
+    // production_example() holds it.
+    assert_eq!(held.audio.notes, Vec::<String>::new());
+    // #255 item D: the two networks on the status.
+    let two = held.two_networks.expect("two_networks");
+    assert_eq!(two.dante_ips, Some(vec!["10.77.7.107".to_string()]));
+    assert_eq!(two.legs[0].nic.as_deref(), Some("Dante70"));
     // Off Windows nothing is read, so no note either.
     let (off, _) = status_of(&Check::NotWindows, 4_000);
     assert_eq!(off.audio, sp_core::prod_env::audio::AudioProfile::default());
+    assert_eq!(off.two_networks, None);
+}
+
+/// #255 item D: a PC with a Dante leg that departs from dstack's two-network
+/// standard fails the check, after every other problem; with no Dante
+/// output (PP) the same departures are not judged; outputs that cannot be
+/// read are a problem.
+#[test]
+fn the_two_network_standard_gates_a_pc_with_a_dante_leg() {
+    let mut facts = production();
+    facts.network.legs[0].netbios = audio::Reading::Value(1);
+    facts.antivirus_on = Some(vec!["ESET Security".to_string()]);
+    let v = verdict(&facts);
+    assert!(!v.ok);
+    assert_eq!(
+        v.problems,
+        [
+            EnvProblem::AntivirusOn("ESET Security".to_string()),
+            EnvProblem::Network(NetProblem::LegNetbios {
+                nic: "Dante70".to_string(),
+                value: Some(1),
+            }),
+        ]
+    );
+    let pp = EnvFacts {
+        network: network::NetworkFacts {
+            dante_ips: Some(Vec::new()),
+            legs: Vec::new(),
+            ..facts.network.clone()
+        },
+        antivirus_on: Some(Vec::new()),
+        ..facts.clone()
+    };
+    assert!(verdict(&pp).ok);
+    let unread = EnvFacts {
+        network: network::NetworkFacts {
+            dante_ips: None,
+            ..facts.network.clone()
+        },
+        antivirus_on: Some(Vec::new()),
+        ..facts
+    };
+    assert_eq!(
+        verdict(&unread)
+            .problems
+            .iter()
+            .map(EnvProblem::code)
+            .collect::<Vec<_>>(),
+        ["unreadable:dante_outputs"]
+    );
 }
 
 // ---- what a check logs ----

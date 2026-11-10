@@ -1561,7 +1561,6 @@ const ENV_HOLDS = {
     soundgrid: null,
     soundgrid_port_mac: null,
     soundgrid_nic: null,
-    dante: { installed: null, interface_address: null, interface_name: null, nic: null },
     windows_update: { no_auto_update: null, drivers_excluded: null },
     mmcss: {
       system_responsiveness: null,
@@ -1573,6 +1572,8 @@ const ENV_HOLDS = {
     wired_nics: null,
     notes: [],
   },
+  // #255 item D: the two-network facts (none read off Windows).
+  two_networks: null,
   problems: [],
   read_errors: [],
   checked_at_ms: null,

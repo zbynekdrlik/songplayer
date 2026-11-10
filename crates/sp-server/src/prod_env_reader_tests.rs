@@ -136,7 +136,8 @@ async fn a_read_that_panics_is_unreadable() {
     assert!(why.starts_with("the WMI check failed: "), "{why}");
 }
 
-fn fake_direct() -> DirectRead {
+/// The direct reads, with the Dante outputs' addresses they were asked for.
+fn fake_direct(dante_ips: &[std::net::Ipv4Addr]) -> DirectRead {
     DirectRead {
         edition_id: Ok(Some("IoTEnterprise".to_string())),
         product_name: Ok(None),
@@ -146,6 +147,10 @@ fn fake_direct() -> DirectRead {
         firewall_local: [RegDword::Value(0); 3],
         defender_service: ServiceRead::State(4),
         audio: crate::prod_env::audio::production_example(),
+        network: crate::prod_env::network::NetworkFacts {
+            dante_ips: Some(dante_ips.to_vec()),
+            ..crate::prod_env::network::snv_example()
+        },
     }
 }
 
@@ -181,20 +186,27 @@ fn fake_wmi() -> WmiRead {
         ]),
         firewall_rules: Ok(Vec::new()),
         antivirus: Ok(Vec::new()),
+        bindings: Ok(crate::prod_env::network::snv_example().bindings.unwrap()),
     }
 }
 
 #[tokio::test]
 async fn a_check_reads_the_platform_or_says_not_windows() {
+    let dante = std::net::Ipv4Addr::new(10, 77, 7, 107);
     assert_eq!(
-        next_check(None, Duration::from_secs(60)).await,
+        next_check(None, Duration::from_secs(60), Ok(vec![dante])).await,
         Check::NotWindows
     );
     let mut platform = Platform::new(fake_direct, fake_wmi);
-    let check = next_check(Some(&mut platform), Duration::from_secs(60)).await;
+    let check = next_check(
+        Some(&mut platform),
+        Duration::from_secs(60),
+        Ok(vec![dante]),
+    )
+    .await;
     assert_eq!(
         check,
-        Check::Read(facts_from(&fake_direct(), &Ok(fake_wmi())))
+        Check::Read(facts_from(&fake_direct(&[dante]), &Ok(fake_wmi())))
     );
     let Check::Read(facts) = check else {
         unreachable!()
@@ -203,6 +215,34 @@ async fn a_check_reads_the_platform_or_says_not_windows() {
     assert_eq!(facts.build_number, Some(22631));
     assert_eq!(facts.defender_realtime, Some(true));
     assert_eq!(facts.firewall, [Some(false), Some(true), Some(false)]);
+    // #255 item D: the Dante outputs' addresses reach the direct reads.
+    assert_eq!(facts.network.dante_ips, Some(vec![dante]));
+    assert_eq!(facts.network, crate::prod_env::network::snv_example());
+}
+
+/// #255 item D: audio outputs that cannot be read leave the PC's Dante leg
+/// unknown: a problem, and the reason in the read errors.
+#[tokio::test]
+async fn audio_outputs_that_cannot_be_read_make_the_dante_leg_unknown() {
+    let mut platform = Platform::new(fake_direct, fake_wmi);
+    let why = "the audio outputs could not be read: db".to_string();
+    let Check::Read(facts) = next_check(
+        Some(&mut platform),
+        Duration::from_secs(60),
+        Err(why.clone()),
+    )
+    .await
+    else {
+        panic!("not read");
+    };
+    assert_eq!(facts.network.dante_ips, None);
+    assert_eq!(facts.read_errors.last(), Some(&why));
+    assert!(
+        verdict(&facts)
+            .problems
+            .iter()
+            .any(|p| p.code() == "unreadable:dante_outputs")
+    );
 }
 
 // ---- the Windows glue, on the Windows CI job ----
@@ -263,7 +303,7 @@ fn the_windows_glue_reads_what_windows_itself_reports() {
     use sp_core::prod_env::FirewallProfile;
     use std::io::Write;
 
-    let direct = super::win::read_direct();
+    let direct = super::win::read_direct(&[]);
     // Defender's state can change while the job runs (14.10.2026: the step
     // read "Normal", the glue "Not running" minutes later), so the glue's WMI
     // read is compared with Windows' own answer taken around it, and taken
@@ -312,4 +352,48 @@ fn the_windows_glue_reads_what_windows_itself_reports() {
         .parse()
         .expect("SP_ENV_EXPECT_BUILD is a number");
     assert_eq!(facts.build_number, Some(build), "Win32_OperatingSystem");
+}
+
+/// #255 item D: the two-network glue (IP Helper, the registry, WMI's
+/// bindings) on a real Windows (the CI runner): one of the runner's own
+/// IPv4 addresses read as if a Dante output had it. Every fact of that leg
+/// reads with no error (the runner's values are whatever they are: only
+/// readability is asserted). Its reads go to the job's log.
+#[cfg(windows)]
+#[test]
+fn the_two_network_glue_reads_a_leg_on_windows() {
+    use std::io::Write;
+
+    let ip = if_addrs::get_if_addrs()
+        .expect("the runner's interfaces")
+        .into_iter()
+        .find_map(|i| match i.addr {
+            if_addrs::IfAddr::V4(v4) if !v4.ip.is_loopback() && !v4.ip.is_link_local() => {
+                Some(v4.ip)
+            }
+            _ => None,
+        })
+        .expect("the runner has an IPv4 address");
+    let direct = super::win::read_direct(&[ip]);
+    let facts = facts_from(&direct, &Ok(super::win::read_wmi()));
+    let _ = writeln!(
+        std::io::stderr(),
+        "[#255 item D on the runner] {ip} {:?} {:?}",
+        facts.network,
+        network::view(&facts.network)
+    );
+    assert!(facts.read_errors.is_empty(), "{:?}", facts.read_errors);
+    assert!(facts.network.interfaces.is_some());
+    assert!(facts.network.default_routes.is_some());
+    let leg = &facts.network.legs[0];
+    assert!(
+        matches!(&leg.holder, network::Holder::Interface(nic) if !nic.alias.is_empty()),
+        "{leg:?}"
+    );
+    assert!(leg.metric.value().is_some(), "{leg:?}");
+    assert!(leg.gateways.value().is_some(), "{leg:?}");
+    assert!(leg.dns_registration.value().is_some(), "{leg:?}");
+    let shown = &network::view(&facts.network).legs[0];
+    assert!(shown.file_sharing_bound.is_some(), "{shown:?}");
+    assert!(shown.client_bound.is_some(), "{shown:?}");
 }

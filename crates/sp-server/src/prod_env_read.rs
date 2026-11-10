@@ -13,6 +13,7 @@ use sp_core::prod_env::firewall::FirewallDefaults;
 use super::firewall::{BlockRules, in_dstack_group};
 
 use super::audio::AudioFacts;
+use super::network::{BindingRow, NetworkFacts, with_bindings};
 use super::{EnvFacts, WBEM_E_INVALID_CLASS, WBEM_E_INVALID_NAMESPACE};
 
 /// A registry string as read: the value, `None` when the key or the value
@@ -67,6 +68,10 @@ pub struct DirectRead {
     /// interfaces, DVS's configuration and the power API
     /// (`audio::read::read_audio`; registry-fast, so read directly).
     pub audio: AudioFacts,
+    /// #255 item D: the two-network facts for the Dante outputs' addresses
+    /// (`network::read`, IP Helper and the registry; the bindings come from
+    /// WMI, [`WmiRead::bindings`]).
+    pub network: NetworkFacts,
 }
 
 /// Defender's status row (`MSFT_MpComputerStatus`), each property `None`
@@ -158,6 +163,8 @@ pub struct WmiRead {
     pub firewall_rules: Result<Vec<FirewallRuleRow>, i32>,
     /// The registered antivirus products.
     pub antivirus: Result<Vec<AvProduct>, i32>,
+    /// #255 item D: the adapters' `ms_server` / `ms_msclient` bindings.
+    pub bindings: Result<Vec<BindingRow>, i32>,
 }
 
 impl WmiRead {
@@ -168,6 +175,7 @@ impl WmiRead {
             firewall: Err(code),
             firewall_rules: Err(code),
             antivirus: Err(code),
+            bindings: Err(code),
         }
     }
 }
@@ -548,6 +556,23 @@ pub fn facts_from(direct: &DirectRead, wmi: &Result<WmiRead, String>) -> EnvFact
     for why in &direct.audio.errors {
         note(&mut errors, why.clone());
     }
+    for why in &direct.network.errors {
+        note(&mut errors, why.clone());
+    }
+    let bindings = match wmi {
+        Ok(read) => read.bindings.clone().map_err(|code| {
+            format!(
+                "the network adapters' bindings could not be read (0x{:08X})",
+                code as u32
+            )
+        }),
+        Err(why) => Err(why.clone()),
+    };
+    let mut network_errors = Vec::new();
+    let network = with_bindings(&direct.network, bindings, &mut network_errors);
+    for why in network_errors {
+        note(&mut errors, why);
+    }
     EnvFacts {
         edition_id,
         product_name,
@@ -562,6 +587,7 @@ pub fn facts_from(direct: &DirectRead, wmi: &Result<WmiRead, String>) -> EnvFact
         firewall_defaults,
         firewall_rules,
         audio: direct.audio.clone(),
+        network,
         read_errors: errors,
     }
 }

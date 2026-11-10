@@ -1,7 +1,6 @@
-//! #255: the audio profile's walk — Dante Virtual Soundcard's
-//! configuration and adapter, the interfaces, Windows Update, MMCSS, power,
-//! one check's facts — and, on the Windows CI job, the glue against
-//! Windows' own reading.
+//! #255: the audio profile's walk — the configuration files, the MACs, the
+//! interfaces, Windows Update, MMCSS, power, one check's facts — and, on the
+//! Windows CI job, the glue against Windows' own reading.
 
 #[cfg(windows)]
 use std::collections::HashMap;
@@ -13,13 +12,13 @@ use sp_core::prod_env::audio::NicSetting;
 use super::fake::*;
 use super::*;
 use crate::prod_env::audio::{
-    AudioFacts, DanteFacts, MmcssFacts, PowerFacts, Reading, SoundGridFacts, problems, view,
+    AudioFacts, MmcssFacts, PowerFacts, Reading, SoundGridFacts, problems, view,
 };
 
-// ---- Dante Virtual Soundcard ----
+// ---- the configuration files, the MACs, the interfaces ----
 
 #[test]
-fn dvs_s_configuration_is_read_or_missing_or_says_why() {
+fn a_configuration_file_is_read_or_missing_or_says_why() {
     let dir = tempfile::tempdir().unwrap();
     assert_eq!(read_file(&dir.path().join("none.json")), FileRead::Missing);
     // A directory is no file (Linux reads it and fails; Windows refuses it).
@@ -27,12 +26,12 @@ fn dvs_s_configuration_is_read_or_missing_or_says_why() {
     // An open that fails for another reason than a missing file (here a
     // NUL in the name, refused on every platform) is no missing file.
     assert!(matches!(
-        read_file(std::path::Path::new("manager\0.json")),
+        read_file(std::path::Path::new("prefs\0.xml")),
         FileRead::Failed(_)
     ));
-    let path = dir.path().join("manager.json");
-    std::fs::write(&path, MANAGER).unwrap();
-    assert_eq!(read_file(&path), FileRead::Text(MANAGER.to_string()));
+    let path = dir.path().join("prefs.xml");
+    std::fs::write(&path, SG_PREFERENCES).unwrap();
+    assert_eq!(read_file(&path), FileRead::Text(SG_PREFERENCES.to_string()));
     let at_cap = "a".repeat(MAX_FILE_BYTES as usize);
     std::fs::write(&path, &at_cap).unwrap();
     assert_eq!(read_file(&path), FileRead::Text(at_cap));
@@ -42,36 +41,6 @@ fn dvs_s_configuration_is_read_or_missing_or_says_why() {
         FileRead::Failed("it is larger than 262144 bytes".to_string())
     );
     assert_eq!(MAX_FILE_BYTES, 262_144);
-    assert_eq!(
-        DVS_MANAGER_JSON,
-        r"Audinate\Dante Virtual Soundcard\manager.json"
-    );
-}
-
-#[test]
-fn dvs_s_configuration_names_its_adapter() {
-    assert_eq!(
-        dvs_config(MANAGER),
-        Ok(DvsConfig {
-            address: Some(DVS_MAC.to_string()),
-            name: Some("Ethernet 4".to_string()),
-        })
-    );
-    // A BOM, a blank name and no address.
-    assert_eq!(
-        dvs_config("\u{feff}{\"PrimaryInterfaceName\":\" \"}"),
-        Ok(DvsConfig {
-            address: None,
-            name: None,
-        })
-    );
-    let wrong = dvs_config(r#"{"PrimaryInterfaceAddress":5}"#).unwrap_err();
-    assert!(wrong.starts_with("Data error at line 1 column "), "{wrong}");
-    let broken = dvs_config("{,}").unwrap_err();
-    assert!(
-        broken.starts_with("Syntax error at line 1 column "),
-        "{broken}"
-    );
 }
 
 #[test]
@@ -83,11 +52,7 @@ fn a_mac_is_lower_case_hex_with_no_separators() {
         "6c-1f-f7-73-c7-d9",
         "6c1f.f773.c7d9",
     ] {
-        assert_eq!(
-            normalize_mac(written).as_deref(),
-            Some(DVS_MAC),
-            "{written}"
-        );
+        assert_eq!(normalize_mac(written).as_deref(), Some(CX_MAC), "{written}");
     }
     for no in [
         "",
@@ -109,7 +74,7 @@ fn an_interface_s_flags_and_addresses_read_as_windows_writes_them() {
     assert_eq!(if_flags(0x03), (true, true));
     assert_eq!(if_flags(0x05), (true, false));
     assert_eq!(if_flags(0xFC), (false, false));
-    assert_eq!(mac_hex(&[0x6c, 0x1f, 0xf7, 0x73, 0xc7, 0xd9]), DVS_MAC);
+    assert_eq!(mac_hex(&[0x6c, 0x1f, 0xf7, 0x73, 0xc7, 0xd9]), CX_MAC);
     assert_eq!(mac_hex(&[]), "");
     assert_eq!(
         guid_text(
@@ -129,26 +94,26 @@ fn an_interface_s_flags_and_addresses_read_as_windows_writes_them() {
 #[test]
 fn the_adapter_with_a_mac_is_a_hardware_one_and_never_a_filter_s() {
     let rows = interfaces().unwrap();
-    assert_eq!(adapter_for_mac(&rows, DVS_MAC), Ok(&rows[3]));
+    assert_eq!(adapter_for_mac(&rows, CX_MAC), Ok(&rows[3]));
     assert_eq!(adapter_for_mac(&rows, SG_MAC), Ok(&rows[1]));
     assert_eq!(
         adapter_for_mac(&rows, "000000000000"),
         Err(MacMiss::NoneHas)
     );
     // A virtual interface (not hardware) with the MAC is skipped.
-    let virtual_one = [row("{V}", DVS_MAC, false, false), rows[3].clone()];
-    assert_eq!(adapter_for_mac(&virtual_one, DVS_MAC), Ok(&virtual_one[1]));
+    let virtual_one = [row("{V}", CX_MAC, false, false), rows[3].clone()];
+    assert_eq!(adapter_for_mac(&virtual_one, CX_MAC), Ok(&virtual_one[1]));
     // The permanent address finds an adapter whose address was changed.
     let moved = [IfRow {
         mac: "020000000001".to_string(),
         ..rows[3].clone()
     }];
-    assert_eq!(adapter_for_mac(&moved, DVS_MAC), Ok(&moved[0]));
+    assert_eq!(adapter_for_mac(&moved, CX_MAC), Ok(&moved[0]));
     // The current address wins over another adapter's permanent one.
-    let both = [moved[0].clone(), row("{B}", DVS_MAC, true, false)];
-    assert_eq!(adapter_for_mac(&both, DVS_MAC), Ok(&both[1]));
-    let two = [rows[3].clone(), row("{B}", DVS_MAC, true, false)];
-    assert_eq!(adapter_for_mac(&two, DVS_MAC), Err(MacMiss::Several(2)));
+    let both = [moved[0].clone(), row("{B}", CX_MAC, true, false)];
+    assert_eq!(adapter_for_mac(&both, CX_MAC), Ok(&both[1]));
+    let two = [rows[3].clone(), row("{B}", CX_MAC, true, false)];
+    assert_eq!(adapter_for_mac(&two, CX_MAC), Err(MacMiss::Several(2)));
 }
 
 #[test]
@@ -158,8 +123,8 @@ fn a_mac_no_single_adapter_has_says_why() {
         "no network adapter has the MAC 000000000000"
     );
     assert_eq!(
-        MacMiss::Several(3).why(DVS_MAC),
-        format!("3 network adapters have the MAC {DVS_MAC}")
+        MacMiss::Several(3).why(CX_MAC),
+        format!("3 network adapters have the MAC {CX_MAC}")
     );
 }
 
@@ -183,113 +148,6 @@ fn a_file_under_an_unset_folder_says_so() {
         SOUNDGRID_PREFERENCES,
         r"Waves Audio\Preferences\SoundGrid.Driver.preferences"
     );
-}
-
-#[test]
-fn pp_s_dante_adapter_is_found_by_its_mac() {
-    let mut errors = Vec::new();
-    assert_eq!(
-        dante(
-            &pp(),
-            &FileRead::Text(MANAGER.to_string()),
-            &interfaces(),
-            &mut errors
-        ),
-        DanteFacts {
-            installed: Some(true),
-            interface_address: Some(DVS_MAC.to_string()),
-            interface_name: Some("Ethernet 4".to_string()),
-            nic: Some(dante_facts()),
-        }
-    );
-    assert!(errors.is_empty(), "{errors:?}");
-}
-
-#[test]
-fn dvs_that_is_not_installed_is_no_error() {
-    let mut errors = Vec::new();
-    assert_eq!(
-        dante(&pp(), &FileRead::Missing, &interfaces(), &mut errors),
-        DanteFacts {
-            installed: Some(false),
-            ..DanteFacts::default()
-        }
-    );
-    assert!(errors.is_empty());
-}
-
-/// A DVS configuration, the interfaces, the facts and the reason.
-type DanteCase = (FileRead, Result<Vec<IfRow>, u32>, DanteFacts, String);
-
-#[test]
-fn a_dante_adapter_that_cannot_be_found_says_why() {
-    let reg = pp();
-    let cases: [DanteCase; 6] = [
-        (
-            FileRead::Failed("access denied".to_string()),
-            interfaces(),
-            DanteFacts::default(),
-            "Dante Virtual Soundcard's manager.json could not be read: access denied".to_string(),
-        ),
-        (
-            FileRead::Text("{,}".to_string()),
-            interfaces(),
-            DanteFacts {
-                installed: Some(true),
-                ..DanteFacts::default()
-            },
-            "Dante Virtual Soundcard's manager.json does not read: Syntax error at line 1 \
-             column 2"
-                .to_string(),
-        ),
-        (
-            FileRead::Text(r#"{"PrimaryInterfaceName":"Dante"}"#.to_string()),
-            interfaces(),
-            DanteFacts {
-                installed: Some(true),
-                interface_name: Some("Dante".to_string()),
-                ..DanteFacts::default()
-            },
-            "Dante Virtual Soundcard's manager.json names no PrimaryInterfaceAddress".to_string(),
-        ),
-        (
-            FileRead::Text(r#"{"PrimaryInterfaceAddress":"eth0"}"#.to_string()),
-            interfaces(),
-            DanteFacts {
-                installed: Some(true),
-                interface_address: Some("eth0".to_string()),
-                ..DanteFacts::default()
-            },
-            r#"Dante Virtual Soundcard's PrimaryInterfaceAddress "eth0" is no MAC"#.to_string(),
-        ),
-        (
-            FileRead::Text(MANAGER.to_string()),
-            Err(87),
-            DanteFacts {
-                installed: Some(true),
-                interface_address: Some(DVS_MAC.to_string()),
-                interface_name: Some("Ethernet 4".to_string()),
-                nic: None,
-            },
-            "the network interfaces could not be listed (error 87)".to_string(),
-        ),
-        (
-            FileRead::Text(MANAGER.to_string()),
-            Ok(Vec::new()),
-            DanteFacts {
-                installed: Some(true),
-                interface_address: Some(DVS_MAC.to_string()),
-                interface_name: Some("Ethernet 4".to_string()),
-                nic: None,
-            },
-            format!("Dante Virtual Soundcard's adapter: no network adapter has the MAC {DVS_MAC}"),
-        ),
-    ];
-    for (file, adapters, facts, why) in cases {
-        let mut errors = Vec::new();
-        assert_eq!(dante(&reg, &file, &adapters, &mut errors), facts, "{why}");
-        assert_eq!(errors, [why]);
-    }
 }
 
 // ---- Windows Update, MMCSS, power ----
@@ -412,7 +270,6 @@ fn pp_s_profile_reads_as_its_facts_and_holds() {
     let facts = read_audio(
         &pp(),
         &interfaces(),
-        &FileRead::Text(MANAGER.to_string()),
         &FileRead::Text(SG_PREFERENCES.to_string()),
         &power_read(),
     );
@@ -422,12 +279,6 @@ fn pp_s_profile_reads_as_its_facts_and_holds() {
             soundgrid: SoundGridFacts::Adapter {
                 mac: SG_MAC.to_string(),
                 nic: soundgrid_facts(),
-            },
-            dante: DanteFacts {
-                installed: Some(true),
-                interface_address: Some(DVS_MAC.to_string()),
-                interface_name: Some("Ethernet 4".to_string()),
-                nic: Some(dante_facts()),
             },
             no_auto_update: Some(true),
             drivers_excluded: Some(true),
@@ -447,36 +298,28 @@ fn pp_s_profile_reads_as_its_facts_and_holds() {
         }
     );
     assert!(problems(&facts).is_empty());
-    assert_eq!(
-        view(&facts).notes,
-        [
-            "sieťová karta Dante (DVS) „Ethernet 4“ beží na ovládači NetAdapterCx (vplyv sa ešte \
-          meria)"
-        ]
-    );
+    assert_eq!(view(&facts).notes, Vec::<String>::new());
 }
 
 /// SNV: no SoundGrid (its preferences, if any, are never read for a port),
-/// DVS on its own USB adapter (a note). As lane 1 read it on 13.10.2026 the
+/// its USB adapter. As lane 1 read it on 13.10.2026 the
 /// Windows Update driver exclusion was missing: since #255 lane 2 that is a
 /// problem, and the deploy's `scripts/setup-prod-pc.ps1` sets it before
 /// SongPlayer starts, after which SNV holds.
 #[test]
 fn snv_s_profile_fails_only_on_the_driver_exclusion_until_the_setup_sets_it() {
     let mut reg = Fake::default();
-    add_dante(&mut reg);
+    add_cx_nic(&mut reg);
     add_policies(&mut reg);
     reg.set(
         WINDOWS_UPDATE,
         "ExcludeWUDriversInQualityUpdate",
         RegValue::Absent,
     );
-    let manager = r#"{"PrimaryInterfaceName":"Dante","PrimaryInterfaceAddress":"00e04c02d461"}"#;
     let read = |reg: &Fake| {
         read_audio(
             reg,
-            &Ok(vec![row(DVS_GUID, "00e04c02d461", true, false)]),
-            &FileRead::Text(manager.to_string()),
+            &Ok(vec![row(CX_GUID, "00e04c02d461", true, false)]),
             &FileRead::Failed("%APPDATA% is not set".to_string()),
             &power_read(),
         )
@@ -486,7 +329,7 @@ fn snv_s_profile_fails_only_on_the_driver_exclusion_until_the_setup_sets_it() {
     assert_eq!(before.soundgrid, SoundGridFacts::NotInstalled);
     assert_eq!(before.drivers_excluded, Some(false));
     assert_eq!(problems(&before), [EnvProblem::DriversNotExcluded]);
-    assert_eq!(view(&before).notes.len(), 1);
+    assert_eq!(view(&before).notes.len(), 0);
     reg.set(
         WINDOWS_UPDATE,
         "ExcludeWUDriversInQualityUpdate",
@@ -495,7 +338,7 @@ fn snv_s_profile_fails_only_on_the_driver_exclusion_until_the_setup_sets_it() {
     let after = read(&reg);
     assert_eq!(after.drivers_excluded, Some(true));
     assert!(problems(&after).is_empty());
-    assert_eq!(view(&after).notes.len(), 1);
+    assert_eq!(view(&after).notes.len(), 0);
 }
 
 #[test]
@@ -511,7 +354,6 @@ fn a_profile_that_cannot_be_read_says_why_once_per_reason() {
     let facts = read_audio(
         &reg,
         &Err(87),
-        &FileRead::Missing,
         &FileRead::Missing,
         &PowerRead {
             scheme: Err(2),
@@ -589,7 +431,6 @@ fn the_audio_glue_reads_what_windows_itself_reports() {
     );
     assert!(audio.errors.is_empty(), "{:?}", audio.errors);
     assert_eq!(audio.soundgrid, SoundGridFacts::NotInstalled);
-    assert_eq!(audio.dante.installed, Some(false));
 
     let mmcss = pairs(&expected("SP_ENV_EXPECT_MMCSS"));
     assert_eq!(

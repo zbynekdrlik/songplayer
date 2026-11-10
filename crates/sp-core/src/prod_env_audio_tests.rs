@@ -96,21 +96,10 @@ fn an_adapter_is_named_by_its_connection_then_its_driver_then_its_guid() {
     assert_eq!(named.label(), "Dante");
 }
 
-/// A profile whose report-only facts all hold: DVS on an NDIS adapter, the
-/// Windows Update driver exclusion on, a power scheme with no core parking.
+/// A profile whose report-only facts all hold: the Windows Update driver
+/// exclusion on, a power scheme with no core parking.
 fn quiet() -> AudioProfile {
     AudioProfile {
-        dante: DanteView {
-            installed: Some(true),
-            interface_address: Some("6c1ff773c7d9".to_string()),
-            interface_name: Some("Ethernet 4".to_string()),
-            nic: Some(NicView {
-                guid: "{G}".to_string(),
-                name: Some("Ethernet 4".to_string()),
-                driver_model: Some(DriverModel::Ndis),
-                ..NicView::default()
-            }),
-        },
         windows_update: WindowsUpdateView {
             no_auto_update: Some(true),
             drivers_excluded: Some(true),
@@ -127,52 +116,7 @@ fn quiet() -> AudioProfile {
 #[test]
 fn a_profile_whose_report_only_facts_hold_has_no_note() {
     assert_eq!(notes(&quiet()), Vec::<String>::new());
-    // No DVS at all: nothing to report on it.
-    let mut no_dvs = quiet();
-    no_dvs.dante = DanteView {
-        installed: Some(false),
-        ..DanteView::default()
-    };
-    assert_eq!(notes(&no_dvs), Vec::<String>::new());
     assert_eq!(FULL_CORES_PCT, 100);
-}
-
-#[test]
-fn the_dante_adapter_on_netadaptercx_is_a_note() {
-    let mut p = quiet();
-    p.dante.nic.as_mut().unwrap().driver_model = Some(DriverModel::NetAdapterCx);
-    assert_eq!(
-        notes(&p),
-        [
-            "sieťová karta Dante (DVS) „Ethernet 4“ beží na ovládači NetAdapterCx (vplyv sa ešte \
-          meria)"
-        ]
-    );
-    p.dante.nic.as_mut().unwrap().driver_model = None;
-    assert_eq!(
-        notes(&p),
-        ["ovládač sieťovej karty Dante (DVS) „Ethernet 4“ sa nepodarilo zistiť"]
-    );
-}
-
-#[test]
-fn a_dante_adapter_that_cannot_be_found_is_a_note() {
-    let mut p = quiet();
-    p.dante.nic = None;
-    assert_eq!(
-        notes(&p),
-        ["sieťovú kartu Dante Virtual Soundcard (MAC 6c1ff773c7d9) sa nepodarilo určiť"]
-    );
-    p.dante.interface_address = None;
-    assert_eq!(
-        notes(&p),
-        ["sieťovú kartu Dante Virtual Soundcard sa nepodarilo určiť"]
-    );
-    p.dante.installed = None;
-    assert_eq!(
-        notes(&p),
-        ["inštaláciu Dante Virtual Soundcard sa nepodarilo zistiť"]
-    );
 }
 
 /// #255 lane 2: the Windows Update driver exclusion is a gate now
@@ -216,7 +160,6 @@ fn every_note_is_listed_in_order() {
     assert_eq!(
         notes(&p),
         [
-            "inštaláciu Dante Virtual Soundcard sa nepodarilo zistiť",
             "aktívny plán napájania sa nepodarilo zistiť",
             "parkovanie jadier sa nepodarilo zistiť",
         ]

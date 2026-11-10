@@ -22,9 +22,11 @@
  *
  * #255: the same gate covers the production PC's audio profile (with
  * SoundGrid installed, the adapter its driver chose as its port on NDIS with
- * Waves' settings off; automatic updates off; MMCSS for Pro Audio). Its report-only facts (the Dante adapter's driver,
- * the Windows Update driver exclusion, power) never fail: they are logged
- * and shown as the grey "Profil PC" segment.
+ * Waves' settings off; automatic updates off and drivers excluded; MMCSS for
+ * Pro Audio). Its report-only facts (power) never fail: they are logged and
+ * shown as the grey "Profil PC" segment. #255 item D: on a PC with a Dante
+ * leg (SNV's out-4), dstack's two-network standard §6 items 1–3
+ * (`status.environment.two_networks`, `environment-gate.ts`).
  */
 
 import { test, expect, type APIRequestContext } from "@playwright/test";
@@ -95,6 +97,7 @@ test.describe("production environment post-deploy verification (#233)", () => {
         (nic ? ` adapter ${nic.name ?? nic.guid} ${nic.service ?? "?"} ${nic.driver_model ?? "?"}` : ""),
     );
     console.log(`[#255 report-only] ${notes.length === 0 ? "none" : notes.join("; ")}`);
+    console.log(`[#255 two networks] ${JSON.stringify((env as EnvironmentStatus | null)?.two_networks ?? null)}`);
     expect(environmentFailures(env), "the production environment").toEqual([]);
 
     // The dashboard agrees: its poll's marker says "ok" (asserted FIRST: an

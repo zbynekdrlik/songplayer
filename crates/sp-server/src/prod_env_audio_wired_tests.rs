@@ -268,7 +268,6 @@ fn a_check_reads_every_wired_adapter_into_the_gate() {
         &reg,
         &Ok(vec![wired_row(GUID)]),
         &super::super::FileRead::Missing,
-        &super::super::FileRead::Missing,
         &super::super::fake::power_read(),
     );
     assert_eq!(facts.wired_nics.as_ref().map(Vec::len), Some(1));

@@ -24,13 +24,15 @@
 //!   scheduling category High.
 //! - **Every wired adapter** (GATE, #285, the owner's rule):
 //!   `prod_env_audio_wired.rs`.
-//! - **Reported only**: Dante Virtual Soundcard's adapter (its effect is
-//!   still being measured), the power scheme and core parking
-//!   (`sp_core::prod_env::audio::notes`).
+//! - **Reported only**: the power scheme and core parking
+//!   (`sp_core::prod_env::audio::notes`). #255 item D deleted the note on
+//!   Dante Virtual Soundcard's adapter: DVS is not used (SongPlayer's Dante
+//!   output is a native device); a PC with a Dante leg is checked by
+//!   `prod_env::network`.
 
 use sp_core::prod_env::audio::{
-    AudioProfile, DanteView, DriverModel, MmcssSetting, MmcssView, NicSetting, NicSettingView,
-    NicView, PowerView, SoundGridState, WindowsUpdateView, nic_label, notes,
+    AudioProfile, DriverModel, MmcssSetting, MmcssView, NicSetting, NicSettingView, NicView,
+    PowerView, SoundGridState, WindowsUpdateView, nic_label, notes,
 };
 use sp_core::prod_env::{EnvProblem, Unreadable};
 
@@ -107,19 +109,6 @@ impl NicFacts {
     }
 }
 
-/// Dante Virtual Soundcard as read (report only).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct DanteFacts {
-    /// Its `manager.json` exists (`None`: could not be read).
-    pub installed: Option<bool>,
-    /// `PrimaryInterfaceAddress` (the adapter's MAC).
-    pub interface_address: Option<String>,
-    /// `PrimaryInterfaceName` (shown only).
-    pub interface_name: Option<String>,
-    /// The adapter with that MAC.
-    pub nic: Option<NicFacts>,
-}
-
 /// MMCSS's system profile as read.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MmcssFacts {
@@ -162,7 +151,6 @@ pub enum SoundGridFacts {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AudioFacts {
     pub soundgrid: SoundGridFacts,
-    pub dante: DanteFacts,
     /// `NoAutoUpdate` is 1.
     pub no_auto_update: Option<bool>,
     /// `ExcludeWUDriversInQualityUpdate` is 1 (a gate since lane 2's setup
@@ -453,12 +441,6 @@ pub fn view(audio: &AudioFacts) -> AudioProfile {
         soundgrid: Some(state),
         soundgrid_port_mac: port_mac.cloned(),
         soundgrid_nic: nic,
-        dante: DanteView {
-            installed: audio.dante.installed,
-            interface_address: audio.dante.interface_address.clone(),
-            interface_name: audio.dante.interface_name.clone(),
-            nic: audio.dante.nic.as_ref().map(nic_view),
-        },
         windows_update: WindowsUpdateView {
             no_auto_update: audio.no_auto_update,
             drivers_excluded: audio.drivers_excluded,
@@ -485,8 +467,7 @@ pub fn view(audio: &AudioFacts) -> AudioProfile {
 }
 
 /// A production PC's audio facts (the tests' fixture): PP's SoundGrid
-/// adapter on its NDIS driver with every setting off, DVS on a NetAdapterCx
-/// adapter (report only), automatic updates off and drivers excluded from
+/// adapter on its NDIS driver with every setting off, automatic updates off and drivers excluded from
 /// Windows Update (both 1 on PP since 12.10.2026), MMCSS set, no core
 /// parking.
 #[cfg(test)]
@@ -520,17 +501,6 @@ pub fn production_example() -> AudioFacts {
                 "rt640x64",
                 Reading::Absent,
             ),
-        },
-        dante: DanteFacts {
-            installed: Some(true),
-            interface_address: Some("6c1ff773c7d9".to_string()),
-            interface_name: Some("Ethernet 4".to_string()),
-            nic: Some(nic(
-                "{0B5E0000-0000-0000-0000-000000000002}",
-                "Ethernet 4",
-                "rtucx21x64",
-                Reading::Value("1.33".to_string()),
-            )),
         },
         no_auto_update: Some(true),
         drivers_excluded: Some(true),

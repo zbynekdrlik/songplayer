@@ -8,6 +8,7 @@ use sp_core::prod_env::firewall::FirewallDefaults;
 use super::*;
 use crate::prod_env::audio::production_example;
 use crate::prod_env::firewall::BlockRules;
+use crate::prod_env::network::{NetworkFacts, snv_example};
 use crate::prod_env::{EnvFacts, WBEM_E_INVALID_CLASS, WBEM_E_INVALID_NAMESPACE};
 
 // ---- the firewall: the active store decides ----
@@ -207,7 +208,8 @@ fn a_defender_status_that_cannot_be_read_says_why() {
 // ---- one check's facts ----
 
 /// A production box's raw reads: IoT Enterprise LTSC, Defender real-time
-/// off, every firewall profile off (locally, no policy).
+/// off, every firewall profile off (locally, no policy), resolume-snv's two
+/// networks (the bindings come from WMI).
 fn direct() -> DirectRead {
     DirectRead {
         edition_id: Ok(Some("IoTEnterpriseS".to_string())),
@@ -218,6 +220,10 @@ fn direct() -> DirectRead {
         firewall_local: [RegDword::Value(0); 3],
         defender_service: ServiceRead::State(4),
         audio: production_example(),
+        network: NetworkFacts {
+            bindings: None,
+            ..snv_example()
+        },
     }
 }
 
@@ -234,6 +240,7 @@ fn wmi() -> WmiRead {
         firewall: Ok(store(0, 0, 0)),
         firewall_rules: Ok(Vec::new()),
         antivirus: Ok(Vec::new()),
+        bindings: Ok(snv_example().bindings.unwrap()),
     }
 }
 
@@ -258,8 +265,47 @@ fn a_production_box_reads_as_its_facts() {
             }); 3],
             firewall_rules: Some(BlockRules::default()),
             audio: production_example(),
+            network: snv_example(),
             read_errors: Vec::new(),
         }
+    );
+}
+
+/// #255 item D: the two-network facts are taken as read with WMI's
+/// bindings; why one could not be read follows, each once; a bindings read
+/// that failed is said, and leaves them unread.
+#[test]
+fn the_two_network_facts_take_wmi_s_bindings_and_their_reasons_follow() {
+    let mut network = direct().network;
+    network.errors = vec![
+        "the routing table could not be listed (error 87)".to_string(),
+        "EditionID is missing".to_string(),
+    ];
+    let read = DirectRead {
+        edition_id: Ok(None),
+        network,
+        ..direct()
+    };
+    let refused = WmiRead {
+        bindings: Err(-5),
+        ..wmi()
+    };
+    let facts = facts_from(&read, &Ok(refused));
+    assert_eq!(facts.network.bindings, None);
+    assert_eq!(facts.network.legs, snv_example().legs);
+    assert_eq!(
+        facts.read_errors,
+        [
+            "EditionID is missing",
+            "the routing table could not be listed (error 87)",
+            "the network adapters' bindings could not be read (0xFFFFFFFB)",
+        ]
+    );
+    let gone = facts_from(&direct(), &Err("the WMI check did not finish".to_string()));
+    assert_eq!(gone.network.bindings, None);
+    assert!(
+        gone.read_errors
+            .contains(&"the WMI check did not finish".to_string())
     );
 }
 
@@ -786,6 +832,7 @@ fn every_wmi_query_fails_with_one_code() {
             firewall: Err(-5),
             firewall_rules: Err(-5),
             antivirus: Err(-5),
+            bindings: Err(-5),
         }
     );
 }

@@ -6,19 +6,22 @@
 //!
 //! - [`read_direct`], at each check: the edition, the build and the
 //!   firewall's policy and local values from the registry (`RegGetValueW`),
-//!   the WinDefend service's state from the service manager, and the #255
-//!   audio profile (`prod_env_audio_win.rs`);
+//!   the WinDefend service's state from the service manager, the #255
+//!   audio profile (`prod_env_audio_win.rs`) and the #255 item D
+//!   two-network facts (`prod_env_network_win.rs`);
 //! - [`read_wmi`], behind the bounded reader: Defender's status
 //!   (`root\Microsoft\Windows\Defender` `MSFT_MpComputerStatus`), the
 //!   firewall's effective state (`root\StandardCimv2`
 //!   `MSFT_NetFirewallProfile` in the active policy store) and the registered
-//!   antivirus products (`root\SecurityCenter2` `AntiVirusProduct`), over
-//!   COM on a thread of its own.
+//!   antivirus products (`root\SecurityCenter2` `AntiVirusProduct`) and
+//!   #255 item D's adapter bindings (`root\StandardCimv2`
+//!   `MSFT_NetAdapterBindingSettingData`), over COM on a thread of its own.
 //!
 //! Every decision on what was read is `prod_env_read.rs`'s, tested on Linux;
 //! this file only reads. Not compiled on the Linux runner, so every fn is
 //! `mutants::skip`.
 
+use super::network::BindingRow;
 use super::read::{
     AvProduct, DefenderRow, DirectRead, FirewallRow, FirewallRuleRow, RegDword, RegString,
     ServiceRead, WmiRead,
@@ -55,9 +58,10 @@ const MAX_ROWS: usize = 64;
 /// E_FAIL: the WMI thread could not be started or ended in a panic.
 const E_FAIL: i32 = 0x8000_4005_u32 as i32;
 
-/// The registry and the service manager, read at each check.
+/// The registry and the service manager, read at each check; the
+/// two-network facts for the Dante outputs' addresses `dante_ips`.
 #[cfg_attr(test, mutants::skip)] // Windows glue, not compiled on the Linux runner
-pub fn read_direct() -> DirectRead {
+pub fn read_direct(dante_ips: &[std::net::Ipv4Addr]) -> DirectRead {
     DirectRead {
         edition_id: reg_string(CURRENT_VERSION, "EditionID"),
         product_name: reg_string(CURRENT_VERSION, "ProductName"),
@@ -67,6 +71,7 @@ pub fn read_direct() -> DirectRead {
         firewall_local: LOCAL_FIREWALL.map(|key| reg_dword(key, "EnableFirewall")),
         defender_service: read_service("WinDefend"),
         audio: super::audio::win::read_audio(),
+        network: super::network::win::read_network(dante_ips),
     }
 }
 
@@ -264,6 +269,7 @@ fn wmi_in_own_apartment() -> WmiRead {
         firewall: query_firewall(&locator).map_err(|e| e.code().0),
         firewall_rules: query_firewall_rules(&locator).map_err(|e| e.code().0),
         antivirus: query_antivirus(&locator).map_err(|e| e.code().0),
+        bindings: query_bindings(&locator).map_err(|e| e.code().0),
     }
 }
 
@@ -515,6 +521,31 @@ fn query_antivirus(
             name: string_of(row, "displayName").unwrap_or_default(),
             guid: string_of(row, "instanceGuid").unwrap_or_default(),
             state: u32_of(row, "productState"),
+        })
+        .collect())
+}
+
+/// #255 item D: every adapter's File and Printer Sharing (`ms_server`) and
+/// Client for Microsoft Networks (`ms_msclient`) binding, as
+/// `Get-NetAdapterBinding` reads them (at most `MAX_ROWS`: two per adapter;
+/// a leg whose rows did not fit reads as unreadable, never as unbound).
+#[cfg_attr(test, mutants::skip)] // Windows glue
+fn query_bindings(
+    locator: &windows::Win32::System::Wmi::IWbemLocator,
+) -> windows::core::Result<Vec<BindingRow>> {
+    let services = connect(locator, r"ROOT\StandardCimv2")?;
+    let found = rows(
+        &services,
+        "SELECT Name, ComponentID, Enabled FROM MSFT_NetAdapterBindingSettingData \
+         WHERE ComponentID = 'ms_server' OR ComponentID = 'ms_msclient'",
+        None,
+    )?;
+    Ok(found
+        .iter()
+        .map(|row| BindingRow {
+            name: string_of(row, "Name"),
+            component: string_of(row, "ComponentID"),
+            enabled: bool_of(row, "Enabled"),
         })
         .collect())
 }

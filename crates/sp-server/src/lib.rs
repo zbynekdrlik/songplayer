@@ -448,7 +448,7 @@ pub async fn start(
     tokio::spawn(crate::lyrics::host_commit::run_host_commit_logger(
         shutdown_tx.subscribe(),
     )); // #207: per-minute host commit/pagefile logger (Windows only)
-    tokio::spawn(crate::prod_env::run(shutdown_tx.subscribe())); // #233: checked now + every minute
+    tokio::spawn(crate::prod_env::run(pool.clone(), shutdown_tx.subscribe())); // #233: checked now + every minute
     tokio::spawn(crate::wall::run(shutdown_tx.subscribe())); // #259: the wall, now + every 5 s
     // #260: a song that left its YouTube playlist goes a year later, files and all.
     tokio::spawn(playlist::retention::run(

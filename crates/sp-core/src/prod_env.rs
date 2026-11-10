@@ -30,8 +30,12 @@ pub mod audio;
 #[path = "prod_env_firewall.rs"]
 pub mod firewall;
 
+#[path = "prod_env_network.rs"]
+pub mod network;
+
 use audio::{AudioProfile, MmcssSetting, NicSetting};
 use firewall::{DSTACK_GROUP, DSTACK_GROUP_RULES, FirewallDefaults, FirewallMode};
+use network::{NetProblem, TwoNetworksView};
 
 /// A Windows Firewall profile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -172,6 +176,9 @@ pub enum EnvProblem {
         setting: MmcssSetting,
         value: Option<String>,
     },
+    /// #255 item D: a PC with a Dante leg does not follow dstack's
+    /// two-network standard §6 items 1–3 ([`network`]).
+    Network(NetProblem),
     /// A fact could not be read, so the box cannot be verified.
     Unreadable(Unreadable),
 }
@@ -206,6 +213,7 @@ impl EnvProblem {
             Self::AutoUpdateOn => "windows_auto_update_on".to_string(),
             Self::DriversNotExcluded => "windows_update_drivers_on".to_string(),
             Self::Mmcss { setting, .. } => format!("mmcss:{}", setting.name()),
+            Self::Network(p) => p.code(),
             Self::Unreadable(Unreadable::Edition) => "unreadable:edition".to_string(),
             Self::Unreadable(Unreadable::Build) => "unreadable:build".to_string(),
             Self::Unreadable(Unreadable::Defender) => "unreadable:defender".to_string(),
@@ -349,6 +357,7 @@ impl EnvProblem {
                 setting.label(),
                 setting.wanted()
             ),
+            Self::Network(p) => p.text_sk(),
             Self::Unreadable(Unreadable::Edition) => {
                 "edíciu Windows sa nepodarilo zistiť".to_string()
             }
@@ -484,10 +493,15 @@ pub struct EnvironmentStatus {
     /// Each firewall profile.
     #[serde(default)]
     pub firewall: FirewallState,
-    /// #255: the production PC's audio profile (the SoundGrid and Dante
-    /// adapters, Windows Update, MMCSS, power) and its report-only notes.
+    /// #255: the production PC's audio profile (the SoundGrid adapter,
+    /// Windows Update, MMCSS, the wired adapters, power) and its report-only
+    /// notes.
     #[serde(default)]
     pub audio: AudioProfile,
+    /// #255 item D: the two-network facts (`None`: not checked here, or an
+    /// older server).
+    #[serde(default)]
+    pub two_networks: Option<TwoNetworksView>,
     /// Every problem, in a fixed order: the edition, Defender, the firewall's
     /// domain, private and public profile, then the audio profile's.
     #[serde(default)]
@@ -523,7 +537,8 @@ pub const RULE_SK: &str = "Produkčný počítač musí bežať na Windows LTSC 
      podľa štandardu dstack: predvolene všetko povolené a blokuje len skupina pravidiel dstack155. \
      Sieťová karta, ktorú má ovládač SoundGrid zvolenú ako port, beží na ovládači NDIS s vypnutým moderovaním \
      prerušení, riadením toku a úsporou energie, automatické aktualizácie Windows sú vypnuté a MMCSS je nastavené \
-     pre Pro Audio.";
+     pre Pro Audio. Počítač so sieťou Dante má zapnutú jednu fyzickú sieťovú kartu, jednu predvolenú trasu cez LAN \
+     a sieť Dante bez brány, s metrikou 900, bez registrácie v DNS, bez NetBIOS, zdieľania a klienta siete.";
 
 /// The health bar's segment, shown only while a check names a problem:
 /// `Prostredie: <the first problem>` (and ` (+N)` for N more), red, with the

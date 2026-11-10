@@ -301,6 +301,7 @@ fn the_status_serializes_every_field_by_name() {
             notes: vec!["parkovanie jadier je zapnuté (minimum 50 % jadier)".to_string()],
             ..AudioProfile::default()
         },
+        two_networks: None,
         problems: vec![EnvProblem::DefenderRealtimeOn.view()],
         read_errors: vec!["firewall private: error 5".to_string()],
         checked_at_ms: Some(1_791_608_681_366),
@@ -340,12 +341,6 @@ fn the_status_serializes_every_field_by_name() {
                 "soundgrid": "not_installed",
                 "soundgrid_port_mac": null,
                 "soundgrid_nic": null,
-                "dante": {
-                    "installed": null,
-                    "interface_address": null,
-                    "interface_name": null,
-                    "nic": null,
-                },
                 "windows_update": {"no_auto_update": null, "drivers_excluded": null},
                 "wired_nics": null,
                 "mmcss": {
@@ -361,6 +356,7 @@ fn the_status_serializes_every_field_by_name() {
                 },
                 "notes": ["parkovanie jadier je zapnuté (minimum 50 % jadier)"],
             },
+            "two_networks": null,
             "problems": [{
                 "code": "defender_realtime_on",
                 "text_sk": "ochrana Windows Defender v reálnom čase je zapnutá",
@@ -483,7 +479,9 @@ fn the_rule_names_the_audio_profile() {
         "skupina pravidiel dstack155. Sieťová karta, ktorú má ovládač SoundGrid zvolenú \
          ako port, beží na ovládači NDIS s vypnutým moderovaním prerušení, riadením toku a \
          úsporou energie, automatické aktualizácie Windows sú vypnuté a MMCSS je nastavené pre \
-         Pro Audio."
+         Pro Audio. Počítač so sieťou Dante má zapnutú jednu fyzickú sieťovú kartu, jednu \
+         predvolenú trasu cez LAN a sieť Dante bez brány, s metrikou 900, bez registrácie v \
+         DNS, bez NetBIOS, zdieľania a klienta siete."
     ));
 }
 

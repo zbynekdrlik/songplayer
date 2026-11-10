@@ -134,6 +134,11 @@ windows-sys = { version = "0.59", features = [
     "Win32_NetworkManagement_IpHelper",
     "Win32_NetworkManagement_Ndis",
     "Win32_System_Power",
+    # #255 item D: the Dante leg's address, the default routes and the
+    # interface metric (GetUnicastIpAddressTable, GetIpForwardTable2,
+    # GetIpInterfaceTable take an ADDRESS_FAMILY and hand SOCKADDR_INETs,
+    # `prod_env_network_win.rs`).
+    "Win32_Networking_WinSock",
     # #259: the wall report reads Windows' displays (EnumDisplayDevicesW,
     # EnumDisplaySettingsW) and the process list (a Toolhelp snapshot) to
     # find Resolume Arena, with no process spawned (`wall/win.rs`; its

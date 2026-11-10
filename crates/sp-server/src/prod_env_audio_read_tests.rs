@@ -98,14 +98,14 @@ fn an_instance_key_is_four_digits() {
 #[test]
 fn an_adapter_with_no_device_instance_in_its_class_takes_the_connection_s() {
     let mut errors = Vec::new();
-    assert_eq!(nic(&pp(), DVS_GUID, &mut errors), dante_facts());
+    assert_eq!(nic(&pp(), CX_GUID, &mut errors), cx_facts());
     assert!(errors.is_empty(), "{errors:?}");
 }
 
 #[test]
 fn the_class_instance_s_device_wins_over_the_connection_s() {
     let mut reg = pp();
-    reg.set(&connection(SG_GUID), "PnPInstanceId", t(DVS_DEVICE));
+    reg.set(&connection(SG_GUID), "PnPInstanceId", t(CX_DEVICE));
     let mut errors = Vec::new();
     assert_eq!(
         nic(&reg, SG_GUID, &mut errors).service.as_deref(),
@@ -140,18 +140,18 @@ fn an_adapter_missing_from_the_class_says_why() {
     reg.set(&class_key("0014"), "NetCfgInstanceId", RegValue::Failed(5));
     reg.set(&class_key("0012"), "NetCfgInstanceId", RegValue::Failed(5));
     let mut errors = Vec::new();
-    nic(&reg, DVS_GUID, &mut errors);
+    nic(&reg, CX_GUID, &mut errors);
     assert_eq!(
         errors[0],
         format!(
-            "the network adapter {DVS_GUID} was not found in the network class (3 instance(s) \
+            "the network adapter {CX_GUID} was not found in the network class (3 instance(s) \
              could not be read)"
         )
     );
     // The class itself cannot be read.
     reg.subkeys_of(NET_CLASS, Err(5));
     let mut errors = Vec::new();
-    nic(&reg, DVS_GUID, &mut errors);
+    nic(&reg, CX_GUID, &mut errors);
     assert_eq!(
         errors[0],
         "the network adapters' class could not be read (error 5)"
@@ -289,14 +289,14 @@ fn the_netadaptercx_keyword_is_read_as_present_absent_or_unread() {
     let key = class_key("0012");
     let mut errors = Vec::new();
     assert_eq!(
-        nic(&reg, DVS_GUID, &mut errors).netadaptercx_keywords,
+        nic(&reg, CX_GUID, &mut errors).netadaptercx_keywords,
         Some(true)
     );
     reg.set(&key, "*IfConnectorPresent", RegValue::Failed(5));
-    assert_eq!(nic(&reg, DVS_GUID, &mut errors).netadaptercx_keywords, None);
+    assert_eq!(nic(&reg, CX_GUID, &mut errors).netadaptercx_keywords, None);
     reg.set(&key, "*IfConnectorPresent", RegValue::Absent);
     assert_eq!(
-        nic(&reg, DVS_GUID, &mut errors).netadaptercx_keywords,
+        nic(&reg, CX_GUID, &mut errors).netadaptercx_keywords,
         Some(false)
     );
 }

@@ -7,6 +7,7 @@ import {
   environmentNotes,
   type AudioProfile,
   type EnvironmentStatus,
+  type TwoNetworks,
 } from "./environment-gate";
 
 // #233: the post-deploy production-environment gate's pure decision
@@ -16,9 +17,8 @@ import {
 /** #255: PP's audio profile as it must be: the adapter the SoundGrid driver
  * chose (soundgrid-pcie) on its NDIS driver with every setting off,
  * automatic updates off and drivers excluded from Windows Update, MMCSS for
- * Pro Audio; the Dante adapter on NetAdapterCx is a report-only note. */
-const DVS_NOTE =
-  "sieťová karta Dante (DVS) „Ethernet 4“ beží na ovládači NetAdapterCx (vplyv sa ešte meria)";
+ * Pro Audio; an economy power scheme is a report-only note. */
+const SCHEME_NOTE = "aktívny plán napájania je úsporný: Balanced";
 const PARKING_NOTE = "parkovanie jadier je zapnuté (minimum 50 % jadier)";
 const audioHolds = (over: Partial<AudioProfile> = {}): AudioProfile => ({
   soundgrid: "found",
@@ -31,12 +31,6 @@ const audioHolds = (over: Partial<AudioProfile> = {}): AudioProfile => ({
     kmdf_library_version: null,
     settings_ok: true,
     settings: [],
-  },
-  dante: {
-    installed: true,
-    interface_address: "6c1ff773c7d9",
-    interface_name: "Ethernet 4",
-    nic: { guid: "{0B5E1C2D-3E4F-4A5B-9C6D-7E8F90A1B2C3}", name: "Ethernet 4", driver_model: "netadaptercx" },
   },
   windows_update: { no_auto_update: true, drivers_excluded: true },
   wired_nics: [
@@ -54,9 +48,40 @@ const audioHolds = (over: Partial<AudioProfile> = {}): AudioProfile => ({
     scheme_name: "High performance",
     core_parking_min_cores_pct: 100,
   },
-  notes: [DVS_NOTE],
+  notes: [SCHEME_NOTE],
   ...over,
 });
+
+/** #255 item D: PP has no Dante output, so nothing is judged. */
+const NO_DANTE_LEG: TwoNetworks = {
+  dante_ips: [],
+  physical_enabled: ["soundgrid-pcie", "Ethernet 4"],
+  physical_up: ["soundgrid-pcie", "Ethernet 4"],
+  default_routes: ["Ethernet 4"],
+  legs: [],
+};
+
+/** #255 item D: resolume-snv's two networks as dstack set them up on
+ * 10.11.2026 (dstack `docs/two-networks.md` §6 items 1–3). */
+const SNV_TWO_NETWORKS: TwoNetworks = {
+  dante_ips: ["10.77.7.107"],
+  physical_enabled: ["Ethernet 4"],
+  physical_up: ["Ethernet 4"],
+  default_routes: ["Ethernet 4"],
+  legs: [
+    {
+      ip: "10.77.7.107",
+      nic: "Dante70",
+      gateways: [],
+      metric: 900,
+      automatic_metric: false,
+      dns_registration: false,
+      netbios_options: 2,
+      file_sharing_bound: false,
+      client_bound: false,
+    },
+  ],
+};
 
 /** #255: the firewall of a PC with no Dante leg (PP): every profile off. */
 const FIREWALL_OFF = {
@@ -108,6 +133,7 @@ const holds = (over: Partial<EnvironmentStatus> = {}): EnvironmentStatus => ({
   antivirus_on: [],
   firewall: FIREWALL_OFF,
   audio: audioHolds(),
+  two_networks: NO_DANTE_LEG,
   problems: [],
   read_errors: [],
   checked_at_ms: 1791608681366,
@@ -401,15 +427,65 @@ test.describe("production environment gate (#233)", () => {
     const env = holds({
       audio: audioHolds({
         power: { scheme_guid: null, scheme_name: null, core_parking_min_cores_pct: 50 },
-        dante: { installed: null },
-        notes: [DVS_NOTE, PARKING_NOTE],
+        notes: [SCHEME_NOTE, PARKING_NOTE],
       }),
     });
     expect(environmentFailures(env)).toEqual([]);
-    expect(environmentNotes(holds())).toEqual([DVS_NOTE]);
-    expect(environmentNotes(env)).toEqual([DVS_NOTE, PARKING_NOTE]);
+    expect(environmentNotes(holds())).toEqual([SCHEME_NOTE]);
+    expect(environmentNotes(env)).toEqual([SCHEME_NOTE, PARKING_NOTE]);
     expect(environmentNotes(undefined)).toEqual([]);
     expect(environmentNotes(holds({ audio: undefined }))).toEqual([]);
+  });
+
+  test("#255 item D: SNV's two networks hold and every fact of §6 1-3 is checked", () => {
+    expect(environmentFailures(holds({ firewall: FIREWALL_DSTACK, two_networks: SNV_TWO_NETWORKS }))).toEqual([]);
+    const snv = (over: Partial<TwoNetworks>) =>
+      environmentFailures(holds({ firewall: FIREWALL_DSTACK, two_networks: { ...SNV_TWO_NETWORKS, ...over } }));
+    const leg = SNV_TWO_NETWORKS.legs![0];
+    const withLeg = (over: object) => snv({ legs: [{ ...leg, ...over }] });
+    expect(snv({ physical_enabled: ["Ethernet 4", "Ethernet"] })).toEqual([
+      'two_networks.physical_enabled is ["Ethernet 4","Ethernet"], not exactly one adapter',
+    ]);
+    expect(snv({ physical_up: [] })).toEqual(['two_networks.physical_up is [], not ["Ethernet 4"]']);
+    expect(snv({ physical_enabled: null })).toEqual([
+      "two_networks.physical_enabled is null, not exactly one adapter",
+    ]);
+    expect(snv({ default_routes: ["Ethernet 4", "Dante70"] })).toEqual([
+      'two_networks.default_routes is ["Ethernet 4","Dante70"], not exactly one',
+      "two_networks.legs[10.77.7.107]: a default route goes through Dante70",
+    ]);
+    expect(snv({ default_routes: ["Dante70"] })).toEqual([
+      "two_networks.legs[10.77.7.107]: a default route goes through Dante70",
+    ]);
+    expect(withLeg({ nic: null })).toEqual(["two_networks.legs[10.77.7.107].nic is null: no interface holds it"]);
+    expect(withLeg({ gateways: ["10.77.7.1"] })).toEqual([
+      'two_networks.legs[10.77.7.107].gateways is ["10.77.7.1"], not []',
+    ]);
+    expect(withLeg({ metric: 25, automatic_metric: true, dns_registration: true })).toEqual([
+      "two_networks.legs[10.77.7.107].metric is 25, not 900",
+      "two_networks.legs[10.77.7.107].automatic_metric is true, not false",
+      "two_networks.legs[10.77.7.107].dns_registration is true, not false",
+    ]);
+    expect(withLeg({ netbios_options: null, file_sharing_bound: true, client_bound: null })).toEqual([
+      "two_networks.legs[10.77.7.107].netbios_options is null, not 2",
+      "two_networks.legs[10.77.7.107].file_sharing_bound is true, not false",
+      "two_networks.legs[10.77.7.107].client_bound is null, not false",
+    ]);
+    expect(snv({ legs: [] })).toEqual(["two_networks.legs has 0, not 1"]);
+  });
+
+  test("#255 item D: no Dante leg is not judged; missing or unread facts fail", () => {
+    // PP: two physical adapters on and no Dante output: nothing judged.
+    expect(environmentFailures(holds())).toEqual([]);
+    expect(environmentFailures(holds({ two_networks: null }))).toEqual([
+      "two_networks is missing (a server without #255 item D?)",
+    ]);
+    const old = holds();
+    delete old.two_networks;
+    expect(environmentFailures(old)).toEqual(["two_networks is missing (a server without #255 item D?)"]);
+    expect(environmentFailures(holds({ two_networks: { ...NO_DANTE_LEG, dante_ips: null } }))).toEqual([
+      "two_networks.dante_ips is null, not a list",
+    ]);
   });
 
   test("the gate waits for the first check", () => {

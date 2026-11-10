@@ -373,11 +373,10 @@ fn an_mmcss_value_that_cannot_be_read_is_one_problem_first() {
 #[test]
 fn a_production_profile_holds() {
     assert_eq!(problems(&production_example()), Vec::<EnvProblem>::new());
-    // The report-only facts are never a problem: no SoundGrid, no DVS, no
-    // power scheme read, core parking on.
+    // The report-only facts are never a problem: no SoundGrid, no power
+    // scheme read, core parking on.
     let snv = AudioFacts {
         soundgrid: SoundGridFacts::NotInstalled,
-        dante: DanteFacts::default(),
         power: PowerFacts {
             core_parking_min_cores: Some(10),
             ..PowerFacts::default()
@@ -577,12 +576,6 @@ fn the_profile_is_shown_with_its_notes() {
     assert_eq!(p.soundgrid, Some(SoundGridState::Found));
     assert_eq!(p.soundgrid_port_mac.as_deref(), Some("6c2408e59c91"));
     assert_eq!(p.soundgrid_nic, Some(nic_view(&sg_nic())));
-    assert_eq!(p.dante.installed, Some(true));
-    assert_eq!(p.dante.interface_address.as_deref(), Some("6c1ff773c7d9"));
-    assert_eq!(p.dante.interface_name.as_deref(), Some("Ethernet 4"));
-    let dvs = p.dante.nic.clone().unwrap();
-    assert_eq!(dvs.name.as_deref(), Some("Ethernet 4"));
-    assert_eq!(dvs.driver_model, Some(DriverModel::NetAdapterCx));
     assert_eq!(p.windows_update.no_auto_update, Some(true));
     assert_eq!(p.windows_update.drivers_excluded, Some(true));
     assert_eq!(p.mmcss.system_responsiveness, Some(0));
@@ -598,13 +591,8 @@ fn the_profile_is_shown_with_its_notes() {
     );
     assert_eq!(p.power.scheme_name.as_deref(), Some("High performance"));
     assert_eq!(p.power.core_parking_min_cores_pct, Some(100));
-    assert_eq!(
-        p.notes,
-        [
-            "sieťová karta Dante (DVS) „Ethernet 4“ beží na ovládači NetAdapterCx (vplyv sa ešte \
-          meria)"
-        ]
-    );
+    // #255 item D: no note on Dante Virtual Soundcard's adapter any more.
+    assert_eq!(p.notes, Vec::<String>::new());
     // The driver exclusion missing is a problem now (#255 lane 2), no note.
     let snv_before_setup = view(&AudioFacts {
         drivers_excluded: Some(false),
@@ -615,13 +603,12 @@ fn the_profile_is_shown_with_its_notes() {
         snv_before_setup.windows_update.drivers_excluded,
         Some(false)
     );
-    // Nothing read: every report-only fact is a note (DVS, the scheme, core
+    // Nothing read: every report-only fact is a note (the scheme, core
     // parking), SoundGrid unreadable.
     let nothing = view(&AudioFacts::default());
     assert_eq!(nothing.soundgrid, Some(SoundGridState::Unreadable));
     assert_eq!(nothing.soundgrid_nic, None);
-    assert_eq!(nothing.dante.nic, None);
-    assert_eq!(nothing.notes.len(), 3);
+    assert_eq!(nothing.notes.len(), 2);
 }
 
 /// #255: SoundGrid's state on the status, with the port's MAC when one was

@@ -19,11 +19,14 @@
 //! (`note`) and holds. The vocabulary (codes, Slovak texts, the wire shape)
 //! is `sp_core::prod_env`.
 //!
-//! #255 adds the production PC's audio profile ([`audio`]): the adapters the
-//! SoundGrid Protocol is bound to on an NDIS driver with Waves' settings,
-//! Windows Update's automatic updates off, MMCSS set for Pro Audio; the
-//! Dante adapter, the driver exclusion and power are reported only.
+//! #255 adds the production PC's audio profile ([`audio`]): the adapter the
+//! SoundGrid driver uses on an NDIS driver with Waves' settings, Windows
+//! Update's automatic updates and driver installs off, MMCSS set for Pro
+//! Audio; power is reported only. #255 item D: a PC with a Dante leg (an
+//! enabled Dante output's `ip`) follows dstack's two-network standard §6
+//! items 1–3 ([`network`]).
 
+use std::net::Ipv4Addr;
 use std::sync::{LazyLock, RwLock};
 use std::time::Duration;
 
@@ -101,6 +104,8 @@ pub struct EnvFacts {
     pub firewall_rules: Option<firewall::BlockRules>,
     /// #255: the audio profile (`audio::read::read_audio`).
     pub audio: audio::AudioFacts,
+    /// #255 item D: the two-network facts (`network::read`).
+    pub network: network::NetworkFacts,
     /// Why a fact could not be read.
     pub read_errors: Vec<String>,
 }
@@ -268,6 +273,7 @@ pub fn status_of(check: &Check, now_ms: i64) -> (EnvironmentStatus, Vec<EnvProbl
             block_rules_outside_group: facts.firewall_rules.as_ref().map(|r| r.outside.clone()),
         },
         audio: audio::view(&facts.audio),
+        two_networks: Some(network::view(&facts.network)),
         problems: v.problems.iter().map(EnvProblem::view).collect(),
         read_errors: facts.read_errors.clone(),
         checked_at_ms: Some(now_ms),
@@ -442,13 +448,14 @@ impl<T: Send + 'static> Reader<T> {
 
 /// The Windows reads: the registry directly, WMI through the bounded reader.
 pub struct Platform {
-    direct: fn() -> DirectRead,
+    /// The direct reads, for the Dante outputs' addresses.
+    direct: fn(&[Ipv4Addr]) -> DirectRead,
     wmi: Reader<WmiRead>,
 }
 
 impl Platform {
     /// The reads `direct` (at each check) and `wmi` (bounded).
-    pub fn new(direct: fn() -> DirectRead, wmi: fn() -> WmiRead) -> Self {
+    pub fn new(direct: fn(&[Ipv4Addr]) -> DirectRead, wmi: fn() -> WmiRead) -> Self {
         Self {
             direct,
             wmi: Reader::new(wmi),
@@ -457,15 +464,40 @@ impl Platform {
 }
 
 /// This check's input: the facts on Windows (WMI within `bound`, the
-/// registry as read now), none elsewhere.
-pub async fn next_check(platform: Option<&mut Platform>, bound: Duration) -> Check {
+/// registry as read now, the two-network facts for the enabled Dante
+/// outputs' addresses `dante`, or why those could not be read), none
+/// elsewhere.
+pub async fn next_check(
+    platform: Option<&mut Platform>,
+    bound: Duration,
+    dante: Result<Vec<Ipv4Addr>, String>,
+) -> Check {
     let Some(platform) = platform else {
         return Check::NotWindows;
     };
     let wmi = platform.wmi.next(bound).await;
-    match tokio::task::spawn_blocking(platform.direct).await {
-        Ok(direct) => Check::Read(facts_from(&direct, &wmi)),
+    let direct = platform.direct;
+    let ips = dante.clone().unwrap_or_default();
+    match tokio::task::spawn_blocking(move || direct(&ips)).await {
+        Ok(direct) => {
+            let mut facts = facts_from(&direct, &wmi);
+            if let Err(why) = dante {
+                facts.network.dante_ips = None;
+                facts.read_errors.push(why);
+            }
+            Check::Read(facts)
+        }
         Err(e) => Check::Read(EnvFacts::unread(format!("the registry check failed: {e}"))),
+    }
+}
+
+/// The enabled Dante outputs' addresses (`dante_guard::dante_ips`), or why
+/// the audio outputs could not be read.
+#[cfg_attr(test, mutants::skip)] // glue: the DB read; the rule is `dante_guard::dante_ips`
+async fn dante_ips(pool: &sqlx::SqlitePool) -> Result<Vec<Ipv4Addr>, String> {
+    match crate::playback::audio_out_config::load(pool).await {
+        Ok(settings) => Ok(crate::dante_guard::dante_ips(&settings.entries)),
+        Err(e) => Err(format!("the audio outputs could not be read: {e}")),
     }
 }
 
@@ -484,16 +516,18 @@ fn platform() -> Option<Platform> {
 }
 
 /// Checks the box at once and every [`CHECK_EVERY`], publishing into
-/// [`global`], until the shutdown.
+/// [`global`], until the shutdown. #255 item D: the enabled Dante outputs
+/// are read from `pool` at each check.
 #[cfg_attr(test, mutants::skip)] // the loop; `apply`, `next_check` and `Reader` are tested
-pub async fn run(mut shutdown: tokio::sync::broadcast::Receiver<()>) {
+pub async fn run(pool: sqlx::SqlitePool, mut shutdown: tokio::sync::broadcast::Receiver<()>) {
     let mut platform = platform();
     let mut reporter = Reporter::default();
     let mut tick = tokio::time::interval(CHECK_EVERY);
     loop {
         tokio::select! {
             _ = tick.tick() => {
-                let check = next_check(platform.as_mut(), READ_BOUND).await;
+                let dante = dante_ips(&pool).await;
+                let check = next_check(platform.as_mut(), READ_BOUND, dante).await;
                 apply(global(), &mut reporter, &check, chrono::Utc::now().timestamp_millis());
             }
             _ = shutdown.recv() => break,
@@ -509,6 +543,9 @@ pub mod audio;
 
 #[path = "prod_env_firewall.rs"]
 pub mod firewall;
+
+#[path = "prod_env_network.rs"]
+pub mod network;
 pub use read::{
     AvProduct, DefenderRow, DirectRead, FirewallRow, RegDword, RegString, ServiceRead, WmiRead,
     active_firewall, defender_realtime, facts_from, firewall_from_registry,

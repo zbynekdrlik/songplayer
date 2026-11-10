@@ -155,8 +155,7 @@ const MMCSS = {
   code: "mmcss:system_responsiveness",
   text_sk: "MMCSS: SystemResponsiveness je 20 (má byť 0)",
 };
-const DVS_NOTE =
-  "sieťová karta Dante (DVS) „Ethernet 4“ beží na ovládači NetAdapterCx (vplyv sa ešte meria)";
+const SCHEME_NOTE = "aktívny plán napájania je úsporný: Balanced";
 // #255 lane 2: the Windows Update driver exclusion is a gate now, no note;
 // core parking stays report-only.
 const PARKING_NOTE = "parkovanie jadier je zapnuté (minimum 50 % jadier)";
@@ -213,7 +212,7 @@ test("#255: report-only notes are a grey segment and the box still holds", async
       problems: [],
       audio: {
         soundgrid: "not_installed",
-        notes: [DVS_NOTE, PARKING_NOTE],
+        notes: [SCHEME_NOTE, PARKING_NOTE],
         power: {
           scheme_guid: "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c",
           scheme_name: "High performance",
@@ -232,15 +231,15 @@ test("#255: report-only notes are a grey segment and the box still holds", async
   await expect(notes).toHaveClass(/health-off/);
   await expect(notes).toHaveAttribute(
     "title",
-    `Len hlásené, nie je to chyba (#255): ${DVS_NOTE}; ${PARKING_NOTE}. Plán napájania: High performance ` +
+    `Len hlásené, nie je to chyba (#255): ${SCHEME_NOTE}; ${PARKING_NOTE}. Plán napájania: High performance ` +
       "(8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c).",
   );
   // One note left: the count follows at the next 10 s poll.
   await request.post("/__mock/environment", {
-    data: { note: null, ok: true, problems: [], audio: { notes: [DVS_NOTE] } },
+    data: { note: null, ok: true, problems: [], audio: { notes: [SCHEME_NOTE] } },
   });
   await expect(notes).toHaveText("Profil PC: 1 poznámka", { timeout: 15000 });
-  await expect(notes).toHaveAttribute("title", `Len hlásené, nie je to chyba (#255): ${DVS_NOTE}.`);
+  await expect(notes).toHaveAttribute("title", `Len hlásené, nie je to chyba (#255): ${SCHEME_NOTE}.`);
   // None: the segment goes.
   await request.post("/__mock/environment-reset");
   await expect(page.getByTestId("health-environment-notes")).toHaveCount(0, { timeout: 15000 });
