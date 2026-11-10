@@ -47,7 +47,7 @@ impl Cidr {
     /// The network of `ip` under `prefix`; `None` for a prefix over 32.
     pub fn new(ip: Ipv4Addr, prefix: u8) -> Option<Cidr> {
         (prefix <= 32).then(|| Cidr {
-            net: Ipv4Addr::from(u32::from(ip) & mask(32)),
+            net: Ipv4Addr::from(u32::from(ip) & mask(prefix)),
             prefix,
         })
     }

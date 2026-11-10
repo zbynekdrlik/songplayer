@@ -1,6 +1,8 @@
 ---
 paths:
   - "crates/sp-server/src/mdns.rs"
+  - "crates/sp-server/src/dante_guard*.rs"
+  - "crates/sp-server/src/remote/session_tests_dante.rs"
 ---
 
 # LAN `sp.local` mDNS advertisement (#51)
@@ -62,9 +64,8 @@ reused: `sp_ndi::network_ready::is_real_ipv4` is `pub(crate)` + Windows-only).
   (`MdnsRegistrar::pin_interface`: `disable_interface(All)` then
   `enable_interface(Addr(ip))`; mdns-sd applies its selections in order, the
   last match wins), so nothing is announced on the Dante leg.
-- The standard's next step (dstack, 10.11.2026): a process that is both a
-  Dante device and a LAN service binds its LAN services (HTTP 8920, facade
-  4456) to the LAN address + 127.0.0.1 only — tracked on #255.
+- The standard's next step (dstack, 10.11.2026): the LAN services refuse
+  what arrives on the Dante leg — the Dante guard below (#255 item C).
 - Live check: `/api/v1/status` `lan_ip` = the LAN address; from dev1
   `avahi-browse -rpt _http._tcp` shows no SongPlayer record on the Dante VLAN
   interface (`enp38s0.70`).
@@ -91,3 +92,39 @@ reduced to `String` in the trait so the fake needn't construct an
   sp.local` from the box AND a phone on the LAN with internet dropped, then
   open `http://sp.local:8920`. The routes_tests + e2e only prove the
   wiring/plumbing.
+
+## The Dante guard: LAN services refuse the Dante leg (#255 item C)
+
+ROZHODNUTÉ (dstack, the two-network standard's owner, 10.11.2026; #255):
+HTTP `:8920` and the remote facade `:4456` keep listening on `0.0.0.0`
+(a bind to the LAN address breaks when it changes) and DROP, unread and
+unanswered, every accepted connection whose LOCAL address
+(`TcpStream::local_addr`) is in a Dante subnet. The app must be safe with
+the firewall off; dstack155's TCP-in block is only the second line.
+
+- **The set** (`dante_guard.rs`, pure): env `DANTE_SUBNET` (one IPv4 CIDR
+  or a comma list, read ONCE at start; one bad item = the whole value
+  ignored with one WARN) PLUS, always, the subnet of each enabled
+  `type: dante` output's `ip`, its prefix from the host interface that
+  holds that address (`if_addrs` `prefixlen`; an address no interface holds
+  adds nothing). Neither = nothing refused. An IPv4-mapped IPv6 local
+  address counts as its IPv4 one.
+- **Live** (`dante_guard_live.rs`): one process-wide `DanteGuard`
+  (`global()`), refreshed every 10 s by `start` (spawned in `lib.rs`; the
+  audio outputs through `audio_out_config::load`, the interfaces through
+  `if_addrs`; a failed read keeps the set, an INFO when it changes).
+  HTTP serves through `GuardedListener` (an axum 0.8 `serve::Listener`
+  over `TcpListener` whose `accept` loops past refused streams); the
+  facade's accept loop asks the same guard (`remote::serve_guarded`;
+  `serve` passes `global()`).
+- **Visible:** `GET /api/v1/status` `dante_refusals {http, remote}` (counts
+  since the start); one WARN per minute per listener naming the peer and
+  the local address (`warn_due`).
+- **Tests:** pure in `dante_guard_tests.rs`; real sockets on 127.0.0.1 in
+  `dante_guard_live_tests.rs` (axum) and `remote/session_tests_dante.rs`
+  (the facade). The refused set is written `127.0.0.1/8` — an address and
+  its prefix, as an interface gives it — so the network's host bits must
+  be cleared for the test to refuse (the RED kept them).
+- **Live check (box):** from a Dante-leg host `curl http://<dante ip>:8920`
+  gets the connection closed with no answer and `dante_refusals.http` +1;
+  the LAN address is unaffected.
