@@ -132,6 +132,7 @@ fn every_reason_says_dante_and_an_unknown_code_reads_as_such() {
         "held",
         "parked",
         "no_clock",
+        "clock_off_rate",
     ] {
         let text = dante_reason_sk(code);
         assert!(text.contains("Dante"), "{code}: {text}");

@@ -20,7 +20,9 @@
 //!   `overflow` (frames) and the host going down (`host_down`, a state) are
 //!   losses; `late_callback`, `fast_callback` and `overload` are risks.
 //!   Gated in while the output runs (`state` `running`): its start-up, a
-//!   driver that opens, a `no_clock` wait are no fault.
+//!   driver that opens, a `no_clock` or `clock_off_rate` wait (#229: a
+//!   card found off its rate, its silent proof reading `opening`) are no
+//!   fault.
 //! - `loop:<id>`, an ASIO output whose loop check ran: each `mismatch`,
 //!   `dropout`, `slip` event (loss, its frames), `no_return` (a state, a
 //!   risk: the check cannot tell), and the `checked` / `blind` meters;

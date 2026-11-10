@@ -892,6 +892,87 @@ own callback thread and has two slots of cushion):
     wait ends it, the reopen a fresh open; a reopen during the wait logs
     its stale blocks at DEBUG; a clock reopen keeps the closed run's
     counters, review round 11).
+- **a card that ticks far off its driver's rate** (#229, the owner's
+  ruling 9.11.2026: PP's SoundGrid server is off on purpose outside
+  services, and SongPlayer must wait calmly on it — no hard re-centres, no
+  ledger losses; the main session's option H, comment after 6780869565).
+  Measured on PP: Waves SoundGrid with its network off opens at 44 100 Hz /
+  1024 frames (96 000 Hz with it on), calls back every 23.2 ms and takes
+  ~2.9 % (~29 000 ppm) more than its rate — ~100× the servo's ±300 ppm,
+  so the floor spliced silence in every second. Now (`asio_state::RateWatch`,
+  pure, `asio_state_tests_rate.rs`; the worker's side in the child module
+  `asio_out_rate.rs`, `asio_out.rs` being at its cap):
+  - every run compares the frames the card took with the clock in
+    back-to-back windows of max(10 s, 500 driver buffers)
+    (`rate_window_100ns`: one buffer stays under 0.2 % of a window; PP's
+    1024 / 44.1 kHz = 11.6 s), from a quarter second of ticks after the
+    run's tick base (`rate_settled`: the open's first callbacks never weigh
+    in); a read at the window's start instant keeps it, one that goes back
+    starts it again; over 1 %
+    off (`OFF_RATE_PPM`, `consumed_ppm`) is no usable clock;
+  - a gap in the card's callbacks (a driver stall, under the 2 s stall
+    watch) is no rate (review round 2: a 1 s stall across a window's edge
+    read short in BOTH windows and stopped a healthy playing card):
+    `RateWatch::track`, called at every rate step, starts the windows and
+    the strikes again when the card moves after more than 100 ms or three
+    buffers (`rate_gap_limit_100ns`) without a callback. While a stall
+    lasts it cannot be told from a slow card, so a window closing inside
+    it is still judged (a silent proof's one strike; a playing run's first
+    strike, which the gap then clears);
+  - an open at the network's rate PLAYS AT ONCE, as before (a healthy
+    card's run is unchanged: every older pin held); there the verdict
+    needs two off windows in a row (`OFF_RATE_STRIKES_PLAYING`: a driver
+    stall straddling a window's edge clears the strikes, below), then
+    `waiting`, reason
+    `clock_off_rate` ("karta neberie zvuk svojou frekvenciou — hodiny sa
+    nedajú použiť (napr. SoundGrid bez siete)"; Dante: "zariadenie Dante
+    neberie zvuk …"), ONE WARN, and the driver is closed and opened again
+    at once (its primed ring would drain into underruns) to wait silently;
+  - a SILENT open feeds nothing (no priming, so no underrun is counted, no
+    servo, no re-centre) until ONE window proves the rate: a reopen at the
+    rate and buffer the card was found off at, or an open at a rate other
+    than `audio_network_rate` (the `rate_note` condition; the outputs task
+    passes the network's rate to an ASIO output only,
+    `AsioOut::with_network_rate`, carried in `AsioSpec::network_rate`
+    across the host's pipe — a Dante output has none and never proves
+    silently). It reads `opening` while it proves, then `running` (one
+    INFO; the next block primes), or `waiting` `clock_off_rate` (the WARN
+    once per wait), the driver kept open and opened again 60 s after its
+    open (`reopen_for_clock`, the `no_clock` cycle, decided by the wait
+    alone: a card found off is always a silent run; a DEBUG,
+    `clock_waits`, never a reset, a backoff or a fault);
+  - a silent proof decides on ONE window, a playing run on two (review
+    round 1): the error budget of a healthy card is ~0.4 % (one buffer at
+    each window edge, 2/500) + ≤ 0.33 % (a date step's remainder, ≤ one
+    slot per 10 s) + a late callback at an edge; a false verdict there
+    costs only a 60 s calm wait of a card that is silent anyway (one off
+    the network's rate), while a playing card's false verdict would cut
+    live audio, hence its second strike;
+  - the cost, named (review round 1): at the network's rate an off-rate
+    card plays ~20.5 s (two windows) before the verdict, ~1 hard re-centre
+    a second meanwhile (ledger losses), once per output build; a card off
+    the network's rate is silent for ≥ 10.25 s (up to ~23 s at 2048 /
+    44.1 kHz) after every open, a reopen after a stall or reset included;
+  - a silent run takes its tick base at its first step
+    (`Run::clock_base`; the priming keeps a base already taken), so a
+    burst at the open then nothing is still `no_clock`;
+  - an open at another rate or buffer than the one the card was found off
+    at is a fresh open (SoundGrid's network back: 96 kHz runs at once);
+  - the ledger records nothing of the wait (`out:<id>` is gated in only
+    while running), and the live gate counts a `clock_off_rate` output
+    like a `no_clock` one (`waitingForClock`);
+  - known limit: the network's rate is read when the output is built; an
+    ASIO output is not rebuilt on a network-rate change (`build_rate` 0),
+    so it keeps the old rate for the silent-proof choice until its entry
+    changes or SongPlayer restarts;
+  - tests: `asio_out_tests_rate.rs` (PP's case at ±29 000 ppm from the
+    first open: opening, waiting from block 358, reopened at blocks 1800 /
+    3602 / 5404 / 7206, no fault, no block sent, WARNs: the buffer's note +
+    one; a reopen at 96 kHz runs at once; a 48 kHz card on a 96 kHz
+    network proves itself in 10 s then runs; ±29 000 ppm at the network's
+    rate caught at block 611, nothing moving after it; ±300 and ±9 000 ppm
+    run on for 80 s; a 1 s callback stall across a window's edge plays on;
+    only an ASIO output carries the network's rate).
 - close: a reset request or a buffer-size change (answered 0: never
   resized live), a rate change of 1 Hz or more (`sampleRateDidChange(0)` =
   a lost clock, code `clock_lost`, "ovládač stratil hodinový signál": a

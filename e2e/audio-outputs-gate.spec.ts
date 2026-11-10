@@ -230,6 +230,16 @@ test.describe("ASIO gate (#233)", () => {
     expect(ids([lv1(10), dvs(10)])).toEqual([]);
   });
 
+  // #229 (the owner's ruling, 9.11.2026): PP's SoundGrid with its network
+  // off takes audio ~2.9 % off its rate; the output waits calmly, reason
+  // `clock_off_rate`, like a driver with no clock: named, never measured.
+  test("an output whose card runs off its rate waits like one with no clock", () => {
+    const offRate = dvs(10, { id: "out-2", state: "waiting" }, { reason_code: "clock_off_rate" });
+    const running = dvs(10, {}, { reason_code: "clock_off_rate" });
+    expect(waitingForClock([lv1(10), offRate, running]).map((o) => o.id)).toEqual(["out-2"]);
+    expect(gatedAsioOutputs([lv1(10), offRate, running]).map((o) => o.id)).toEqual(["out-3"]);
+  });
+
   // #233 review round 1: an entry's delay (up to 2 s) is part of its
   // latency, so the bound is a second ABOVE the delay, not a second flat.
   test("the latency bound is a second above the entry's delay", () => {
