@@ -499,7 +499,8 @@ impl AsioWorker {
                 info!(
                     id = %out.id,
                     driver = %out.driver,
-                    "asio output: the driver gives a clock now - running"
+                    proving = run.proving,
+                    "asio output: the driver gives a clock now (proving: its card's rate is measured first)"
                 );
                 let (state, reason) = rate::run_state(self.off_rate, run.proving);
                 out.update(|l| {

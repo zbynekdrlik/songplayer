@@ -931,6 +931,18 @@ own callback thread and has two slots of cushion):
     open (`reopen_for_clock`, the `no_clock` cycle, decided by the wait
     alone: a card found off is always a silent run; a DEBUG,
     `clock_waits`, never a reset, a backoff or a fault);
+  - a silent proof decides on ONE window, a playing run on two (review
+    round 1): the error budget of a healthy card is ~0.4 % (one buffer at
+    each window edge, 2/500) + ≤ 0.33 % (a date step's remainder, ≤ one
+    slot per 10 s) + a late callback at an edge; a false verdict there
+    costs only a 60 s calm wait of a card that is silent anyway (one off
+    the network's rate), while a playing card's false verdict would cut
+    live audio, hence its second strike;
+  - the cost, named (review round 1): at the network's rate an off-rate
+    card plays ~20.5 s (two windows) before the verdict, ~1 hard re-centre
+    a second meanwhile (ledger losses), once per output build; a card off
+    the network's rate is silent for ≥ 10.25 s (up to ~23 s at 2048 /
+    44.1 kHz) after every open, a reopen after a stall or reset included;
   - a silent run takes its tick base at its first step
     (`Run::clock_base`; the priming keeps a base already taken), so a
     burst at the open then nothing is still `no_clock`;

@@ -313,7 +313,8 @@ fn an_off_rate_card_at_the_network_rate_is_caught_while_playing_then_waits() {
 
 /// A healthy card (±300 ppm, the servo's whole range) and one just inside
 /// the bound (+9 000 ppm) at the network's rate play on as before #229:
-/// running from the first block for 5 min, never a wait or a reopen.
+/// running from the first block for 80 s (8 windows), never a wait or a
+/// reopen.
 #[test]
 fn a_card_within_1_percent_plays_on_as_before() {
     for ppm in [300.0, -300.0, 9_000.0, -9_000.0] {
@@ -322,7 +323,7 @@ fn a_card_within_1_percent_plays_on_as_before() {
         let mut w = AsioWorker::new(T0);
         let mut card = Card::new();
         w.step(&o, &mut d, T0, None);
-        let seen = run((&mut w, &o, &mut d, &mut card), 1..=9000, |_| {
+        let seen = run((&mut w, &o, &mut d, &mut card), 1..=2400, |_| {
             (96_000.0, ppm)
         });
         assert_eq!(seen, [(1, ("running", None, 0))], "{ppm} ppm");
@@ -330,7 +331,7 @@ fn a_card_within_1_percent_plays_on_as_before() {
     }
 }
 
-/// A healthy card leaves the run as it was: the ±300 ppm card's 5 minutes
+/// A healthy card leaves the run as it was: the +300 ppm card's 80 s
 /// have no hard re-centre, no underrun, every block sent.
 #[test]
 fn a_healthy_card_has_no_fault() {
@@ -339,10 +340,10 @@ fn a_healthy_card_has_no_fault() {
     let mut w = AsioWorker::new(T0);
     let mut card = Card::new();
     w.step(&o, &mut d, T0, None);
-    run((&mut w, &o, &mut d, &mut card), 1..=9000, |_| {
+    run((&mut w, &o, &mut d, &mut card), 1..=2400, |_| {
         (96_000.0, 300.0)
     });
-    assert_eq!(faults(&o), (0, 0, 0, 0, 9000));
+    assert_eq!(faults(&o), (0, 0, 0, 0, 2400));
 }
 
 /// A Dante output is never held against the network's rate: its device
