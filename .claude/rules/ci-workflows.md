@@ -622,9 +622,10 @@ already verified `$resp.version -eq VERSION`) publishes it as a job output
 `deployed_version`; the E2E step reads
 `${{ needs.deploy-resolume.outputs.deployed_version }}`.
 
-**A `gh run rerun --failed` of only the E2E job DOES restart SongPlayer**
+**A `gh run rerun --failed` of only the E2E job MAY restart SongPlayer**
 (10.11.2026, run 42817514184 attempt 2: Spout quiesce 14:14:45Z, new process
-14:14:56Z, the Dante device ~20 s off for iem-mixer's receivers). Never
+14:14:56Z, the Dante device ~20 s off for iem-mixer's receivers); the
+re-run of run 42875220593 at 18:55Z (8 min after its deploy) did not. Never
 announce "no restart" for an E2E re-run: send the restart heads-up to
 camera-box, wall-bridge, dstack and iemmixer with times like a deploy, and
 never re-run it inside a peer's measurement window (dstack's A/B windows on
