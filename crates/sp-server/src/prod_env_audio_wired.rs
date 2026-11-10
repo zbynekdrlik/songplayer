@@ -60,7 +60,7 @@ pub const RTL8156_DEVICE: &str = r"USB\VID_0BDA&PID_8156";
 /// resolume-snv (`Get-NetAdapterAdvancedProperty`); its driver offers them,
 /// so a missing one is a problem (`Get-ProdPcRtl8156Values`, the same pairs:
 /// a test compares them).
-pub const RTL8156_VALUES: [(&str, u32); 2] = [("PendingTransmits", 3), ("TransmitBufferLen", 18)];
+pub const RTL8156_VALUES: [(&str, u32); 2] = [("PendingTransmits", 8), ("TransmitBufferLen", 64)];
 
 /// Whether a device instance id is an RTL8156's (ASCII case ignored).
 pub fn is_rtl8156(device_instance: &str) -> bool {

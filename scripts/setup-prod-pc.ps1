@@ -49,7 +49,11 @@
 #      hides them, and its INF deletes them at every install), the
 #      where-present ones 0 where they exist, PnPCapabilities with 0x08, then
 #      ONE restart. The effect of a value a driver hides is not provable from
-#      Windows.
+#      Windows. A Realtek RTL8156 (USB\VID_0BDA&PID_8156, "Realtek Gaming
+#      USB 2.5GbE Family Controller") also gets "Transmit URBs"
+#      (PendingTransmits) 8 and "Transmit Buffers" (TransmitBufferLen) 64
+#      through its driver (issue 255 / 285, dstack's receiver A/B of
+#      10.11.2026).
 # Not here: the NIC driver swap (lane 3), a radio (a PC may use it on purpose),
 # CPU reservation (unmeasured), the Windows edition.
 #
@@ -294,6 +298,29 @@ function Get-ProdPcEveryNicValuesWherePresent {
     return @('*InterruptModeration', 'GreenEthernet', 'PowerSavingMode', '*PowerSavingMode')
 }
 
+# A Realtek RTL8156 USB 2.5GbE adapter: its PnP device id starts with this
+# hardware id (resolume-snv's 'Ethernet 4': USB\VID_0BDA&PID_8156\<serial>).
+function Test-ProdPcRtl8156 {
+    param([string]$PnpDeviceId)
+    $id = $PnpDeviceId.Trim().ToUpperInvariant()
+    $prefix = 'USB\VID_0BDA&PID_8156'
+    if (-not $id.StartsWith($prefix, [System.StringComparison]::Ordinal)) { return $false }
+    $rest = $id.Substring($prefix.Length)
+    return ($rest -eq '' -or $rest.StartsWith('\') -or $rest.StartsWith('&'))
+}
+
+# The RTL8156's own values (issue 255 / 285, dstack's receiver A/B of
+# 10.11.2026: "Transmit URBs" 3 -> 8 and "Transmit Buffers" 18 -> 64 took the
+# receivers' reorders from ~9/h to ~3/h and the FOH card's peak from 9.6 to
+# 4.7 ms), by the keywords its driver names them (read live on resolume-snv
+# with Get-NetAdapterAdvancedProperty). Its driver offers them, so they are
+# set through it (Set-NetAdapterAdvancedProperty checks the value's range);
+# SongPlayer's check gates the same pairs (prod_env_audio_wired.rs).
+function Get-ProdPcRtl8156Values {
+    [pscustomobject]@{ Keyword = 'PendingTransmits'; Wanted = '8' }
+    [pscustomobject]@{ Keyword = 'TransmitBufferLen'; Wanted = '64' }
+}
+
 # Whether a registry fact holds what a want sets: a DWORD of that value (a
 # value of another type does not), or a string that reads the same with
 # case and padding ignored (lane 1's rule for Scheduling Category).
@@ -476,12 +503,19 @@ function Add-ProdPcEveryNicReview {
             if ($null -ne $number -and $number -eq 0) { continue }
             $Actions.Add((New-ProdPcAction -Area 'nic' -Name $keyword -Current $value -Wanted '0' -Reason $why -Kind 'nic_value' -Target $target))
         }
-        if ($taken.ContainsKey('PnPCapabilities')) { continue }
         $pnp = Get-ProdPcField $settings 'PnPCapabilities'
         $pnpWanted = Get-PnPCapabilitiesWanted $pnp
-        if ($null -ne $pnpWanted) {
+        if ($null -ne $pnpWanted -and -not $taken.ContainsKey('PnPCapabilities')) {
             $current = if ($null -eq $pnp) { '(none)' } else { ([string]$pnp).Trim() }
             $Actions.Add((New-ProdPcAction -Area 'nic' -Name 'PnPCapabilities' -Current $current -Wanted $pnpWanted -Reason $why -Kind 'nic_pnp' -Target $target))
+        }
+        if (-not (Test-ProdPcRtl8156 ([string](Get-ProdPcField $adapter 'pnp_device_id')))) { continue }
+        foreach ($own in @(Get-ProdPcRtl8156Values)) {
+            $present = $null -ne (Find-ProdPcMember -Object $settings -Name $own.Keyword)
+            $value = if ($present) { ([string](Get-ProdPcField $settings $own.Keyword)).Trim() } else { '(none)' }
+            $number = if ($present) { ConvertTo-ProdPcUInt32 $value } else { $null }
+            if ($null -ne $number -and $number -eq [uint32]$own.Wanted) { continue }
+            $Actions.Add((New-ProdPcAction -Area 'nic' -Name $own.Keyword -Current $value -Wanted $own.Wanted -Reason "the RTL8156's transmit queue: dstack's receiver A/B of 10.11.2026 (issue 255 / 285)" -Kind 'nic_advanced' -Target $target))
         }
     }
 }
@@ -733,7 +767,7 @@ function Read-ProdPcNicSettings {
     $names = @($key.GetValueNames())
     $keywords = New-Object System.Collections.Generic.List[string]
     foreach ($group in @(Get-ProdPcNicGroups)) { foreach ($keyword in $group.Keywords) { $keywords.Add($keyword) } }
-    foreach ($keyword in @(Get-ProdPcEveryNicValues) + @(Get-ProdPcEveryNicValuesWherePresent)) {
+    foreach ($keyword in @(Get-ProdPcEveryNicValues) + @(Get-ProdPcEveryNicValuesWherePresent) + @(Get-ProdPcRtl8156Values | ForEach-Object { $_.Keyword })) {
         if (-not $keywords.Contains($keyword)) { $keywords.Add($keyword) }
     }
     $keywords.Add('PnPCapabilities')
@@ -785,6 +819,7 @@ function Read-ProdPcAdapters {
             status = [string]$adapter.Status
             mac = [string]$adapter.MacAddress
             permanent_mac = [string]$adapter.PermanentAddress
+            pnp_device_id = [string]$adapter.PnPDeviceID
             class_key = $keyPath
             settings = $settings
         }
@@ -1017,6 +1052,7 @@ function Invoke-ProdPcAction {
     switch ($Action.Kind) {
         'registry' { Set-ProdPcRegistryValue -Path $Action.Path -Name $Action.Name -Type $Action.Type -Value $Action.Wanted }
         'nic_keyword' { Set-NetAdapterAdvancedProperty -Name $Action.Adapter -RegistryKeyword $Action.Name -RegistryValue ([string]$Action.Wanted) -NoRestart }
+        'nic_advanced' { Set-NetAdapterAdvancedProperty -Name $Action.Adapter -RegistryKeyword $Action.Name -RegistryValue ([string]$Action.Wanted) -NoRestart }
         'nic_value' { Set-ProdPcRegistryValue -Path $Action.Path -Name $Action.Name -Type 'String' -Value $Action.Wanted }
         'nic_pnp' { Set-ProdPcRegistryValue -Path $Action.Path -Name 'PnPCapabilities' -Type 'DWord' -Value $Action.Wanted }
         'power' {
