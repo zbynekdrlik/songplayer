@@ -400,6 +400,25 @@ jobs:
         run: |
           printf 'Acquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAcquire::Retries "3";\n' \
             | sudo tee /etc/apt/apt.conf.d/99-ci-network-timeouts
+      # 11.11.2026 (run 43034979480, twice): the runner's own mirror
+      # azure.archive.ubuntu.com did not resolve, and apt's `mirror+file`
+      # list held only Azure entries, so every package fetch failed. apt's
+      # mirror method moves to the next listed mirror on a failed fetch, so
+      # archive.ubuntu.com is appended as the fallback; the check below
+      # fails the step if the list still has no non-Azure mirror.
+      - name: A fallback apt mirror
+        run: |
+          set -euo pipefail
+          list=/etc/apt/apt-mirrors.txt
+          if [ -f "$list" ]; then
+            echo "apt mirrors before:"; cat "$list"
+            grep -q '^http://archive.ubuntu.com/ubuntu/' "$list" \
+              || echo 'http://archive.ubuntu.com/ubuntu/	priority:9' | sudo tee -a "$list" > /dev/null
+            echo "apt mirrors after:"; cat "$list"
+            grep -q '^http://archive.ubuntu.com/ubuntu/' "$list"
+          else
+            echo "no $list on this runner image: apt uses its sources directly"
+          fi
       - name: Install Playwright browsers
         run: cd e2e && npx playwright install chromium --with-deps
       - name: Install Google Chrome (H.264/AAC for the #178 preview MSE E2E)
