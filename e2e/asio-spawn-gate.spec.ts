@@ -77,11 +77,19 @@ test.describe("ASIO spawn gate (#233)", () => {
     noClock.asio!.reason_code = "no_clock";
     const reopening = asio("out-6", 9, 9, { state: "waiting" });
     const off = asio("out-4", 1, 1, { enabled: false, state: "disabled" });
-    expect(spawnReady([vban, offRate, asio("out-3", 0, 0)]), "PP: SoundGrid off, Dante running").toBe(2);
+    expect(spawnReady([vban, offRate, asio("out-3", 0, 0)], true), "PP: SoundGrid off, Dante running").toBe(2);
     expect(spawnCounters([vban, offRate, asio("out-3", 0, 0)]).map((c) => c.id)).toEqual(["out-3"]);
-    expect(spawnReady([offRate, noClock])).toBe(2);
-    expect(spawnReady([reopening, off, vban]), "another wait or a disabled entry is not ready").toBe(0);
-    expect(spawnReady([])).toBe(0);
+    expect(spawnReady([offRate, noClock], true)).toBe(2);
+    expect(spawnReady([reopening, off, vban], true), "another wait or a disabled entry is not ready").toBe(0);
+    expect(spawnReady([], true)).toBe(0);
+  });
+
+  // #229 review F1: without SP_ASIO_CLOCK_WAIT_OK a calm wait is not ready.
+  test("a calm clock wait is not ready for the spawn on a box that does not allow it", () => {
+    const noClock = asio("out-4", 1, 1, { state: "waiting" });
+    noClock.asio!.reason_code = "no_clock";
+    expect(spawnReady([noClock, vban], false)).toBe(0);
+    expect(spawnReady([asio("out-2", 0, 0), noClock], false)).toBe(1);
   });
 
   test("an undisturbed output passes", () => {
