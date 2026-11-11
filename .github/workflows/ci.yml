@@ -375,10 +375,9 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     needs: [build-wasm]
-    # The job takes ~9 min. Its browser install runs `apt-get update`, and on
-    # 7.10.2026 an Ubuntu mirror stalled it for 70 min (main run 37670589944)
-    # until it was cancelled by hand; with no bound it would have held the
-    # release for GitHub's 6 h default. A stall now fails the job.
+    # The job takes ~9 min. On 7.10.2026 an Ubuntu mirror stalled its old
+    # apt-based browser install for 70 min (main run 37670589944); with no
+    # bound it would have held the release for GitHub's 6 h default.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -392,37 +391,24 @@ jobs:
           path: dist/
       - name: Install E2E dependencies
         run: cd e2e && npm ci
-      # `--with-deps` runs apt-get. On 7.10.2026 its `apt-get update` stalled
-      # on an Ubuntu mirror twice in a row (70 min, then 28 min+) with apt's
-      # defaults; explicit 30 s network timeouts and 3 retries make a stalled
-      # fetch fail over to a retry instead of waiting out the job bound.
-      - name: Bound apt's network waits
-        run: |
-          printf 'Acquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAcquire::Retries "3";\n' \
-            | sudo tee /etc/apt/apt.conf.d/99-ci-network-timeouts
-      # 11.11.2026 (run 43034979480, twice): the runner's own mirror
-      # azure.archive.ubuntu.com did not resolve, and apt's `mirror+file`
-      # list held only Azure entries, so every package fetch failed. apt's
-      # mirror method moves to the next listed mirror on a failed fetch, so
-      # archive.ubuntu.com is appended as the fallback; the check below
-      # fails the step if the list still has no non-Azure mirror.
-      - name: A fallback apt mirror
+      # 11.11.2026 (runs 43034979480 x2, 43040260824): the runner's Ubuntu
+      # archive did not resolve (azure.archive.ubuntu.com; archive.ubuntu.com
+      # is routed to it on the runner too), so `--with-deps` / the Chrome
+      # .deb could install nothing — the fourth apt stall since 7.10. The
+      # job needs no apt at all: ubuntu-latest ships Google Chrome and with
+      # it every system library Chromium loads, so only Playwright's own
+      # Chromium build is downloaded (from Playwright's CDN, not apt) and the
+      # preinstalled Chrome is used as the `chrome` channel.
+      - name: Install Playwright browsers
+        run: cd e2e && npx playwright install chromium
+      - name: Google Chrome (H.264/AAC for the #178 preview MSE E2E)
         run: |
           set -euo pipefail
-          list=/etc/apt/apt-mirrors.txt
-          if [ -f "$list" ]; then
-            echo "apt mirrors before:"; cat "$list"
-            grep -q '^http://archive.ubuntu.com/ubuntu/' "$list" \
-              || echo 'http://archive.ubuntu.com/ubuntu/	priority:9' | sudo tee -a "$list" > /dev/null
-            echo "apt mirrors after:"; cat "$list"
-            grep -q '^http://archive.ubuntu.com/ubuntu/' "$list"
+          if [ -x /opt/google/chrome/chrome ]; then
+            /opt/google/chrome/chrome --version
           else
-            echo "no $list on this runner image: apt uses its sources directly"
+            cd e2e && npx playwright install chrome
           fi
-      - name: Install Playwright browsers
-        run: cd e2e && npx playwright install chromium --with-deps
-      - name: Install Google Chrome (H.264/AAC for the #178 preview MSE E2E)
-        run: cd e2e && npx playwright install chrome
       - name: Start mock API
         run: cd e2e && node mock-api.mjs &
       - name: Wait for mock API
