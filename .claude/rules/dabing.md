@@ -44,7 +44,8 @@ stems worker's manual bucket — D3 uses it).
   `lyrics_manual_priority` to 1 (so the chain's inputs jump their queues, spec
   §4). Un-requesting sets `dub_status='none'`, `dub_requested=0`, and LEAVES the
   priority flags (the video may still want stems/lyrics).
-- `list_dub_videos(pool)` — `dub_requested=1`, newest first
+- `list_dub_videos(pool)` — `dub_requested=1` and still in its YouTube
+  playlist (`removed_at IS NULL`, #303), newest first
   (`dub_requested_at DESC, id DESC`).
 - `set_dub_mix_ratio(pool, id, ratio)` — clamps to `0.0..=1.0` (NaN → 1.0),
   persists, returns the clamped value.

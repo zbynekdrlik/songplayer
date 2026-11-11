@@ -47,8 +47,8 @@ async fn dabing_playlist_id(pool: &sqlx::SqlitePool) -> Result<Option<i64>, sqlx
         .await
 }
 
-/// `GET /api/v1/dabing` — the Dabing playlist id + every dub-requested video,
-/// newest request first.
+/// `GET /api/v1/dabing` — the Dabing playlist id + every dub-requested video
+/// still in its YouTube playlist (#303), newest request first.
 pub async fn get_dabing(State(state): State<AppState>) -> impl IntoResponse {
     let playlist_id = match dabing_playlist_id(&state.pool).await {
         Ok(pid) => pid,
