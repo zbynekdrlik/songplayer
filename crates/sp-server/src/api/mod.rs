@@ -4,6 +4,7 @@ pub mod ai;
 pub mod audio; // #233: GET /api/v1/audio/asio-drivers (the ASIO driver list)
 pub mod audio_faults; // #257: GET /api/v1/audio/faults (the audio fault ledger)
 pub mod dabing; // #180 dubbing D1
+pub mod dabing_probe; // #232 unit 2: POST /api/v1/dabing/probe (the live Live Translate gate)
 pub mod diag; // #223 S0: POST /api/v1/diag/decode-bench
 pub mod live;
 pub mod lyrics;
@@ -79,6 +80,11 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         .route(
             "/api/v1/dabing/import",
             axum::routing::post(dabing::import_dabing),
+        )
+        // #232 unit 2: one short real Gemini Live Translate dub (the post-deploy gate)
+        .route(
+            "/api/v1/dabing/probe",
+            axum::routing::post(dabing_probe::probe),
         )
         .route(
             "/api/v1/videos/{id}/dub",

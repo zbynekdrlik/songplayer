@@ -574,10 +574,21 @@ impl DubWorker {
     /// assembly) and `win_replace.py` (the round-F2 POSIX rename of the
     /// finished dub). Returns the worker script path.
     async fn ensure_script(&self) -> anyhow::Result<PathBuf> {
-        let scripts = embedded_tool_scripts();
-        crate::embedded_scripts::materialise(&self.tools_dir, &scripts, "dub_worker").await?;
+        materialise_scripts(&self.tools_dir).await?;
         Ok(self.script_path.clone())
     }
+}
+
+/// Write the dub tool scripts ([`embedded_tool_scripts`]) into `tools_dir`
+/// through the shared `embedded_scripts::materialise` (only the stale ones are
+/// rewritten) and return the worker script's path. The worker
+/// (`DubWorker::ensure_script`) and the live probe (#232 unit 2,
+/// `dabing::probe`) both ship them through here, so the probe runs exactly the
+/// scripts a dub runs.
+pub(crate) async fn materialise_scripts(tools_dir: &Path) -> anyhow::Result<PathBuf> {
+    let scripts = embedded_tool_scripts();
+    crate::embedded_scripts::materialise(tools_dir, &scripts, "dub_worker").await?;
+    Ok(tools_dir.join(scripts[0].0))
 }
 
 #[cfg(test)]
