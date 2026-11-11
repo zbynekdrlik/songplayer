@@ -18,7 +18,7 @@ use std::path::Path;
 use std::process::Stdio;
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tracing::{debug, info, warn};
 
@@ -26,8 +26,9 @@ use crate::lyrics::heavy_plan::HeavyStepPlan;
 
 /// The continuous-session stats the child reports (its `session` object) — the
 /// numbers the box acceptance reads. Every field is optional so a missing one
-/// never fails a finished dub.
-#[derive(Debug, Clone, Default, Deserialize)]
+/// never fails a finished dub. The live probe (#232 unit 2) answers them as
+/// they came.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DubSessionStats {
     #[serde(default)]
     pub connections: Option<u32>,
