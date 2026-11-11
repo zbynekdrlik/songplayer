@@ -596,10 +596,57 @@ app.delete("/api/v1/playlists/:id/items/:vid", (req, res) => {
   res.status(204).end();
 });
 
-app.post("/api/v1/playlists/:id/play-video", (_req, res) => {
-  // No-op for the mock — the WS interval already streams NowPlaying
-  // updates, so the dashboard sees activity without us replaying.
+// Every play-video the dashboard sent, in order (`GET /__mock/play-video-calls`,
+// cleared by `/__mock/dabing-reset`).
+let playVideoCalls = [];
+app.post("/api/v1/playlists/:id/play-video", (req, res) => {
+  const playlist_id = Number(req.params.id);
+  const video_id = Number(req.body && req.body.video_id);
+  playVideoCalls.push({ playlist_id, video_id });
+  // #300: the Dabing playlist plays every video of the Dabing section (the
+  // server's `models_dabing::dabing_video_membership`), whatever playlist the
+  // video belongs to, and refuses any other (404). It is played OFF program,
+  // so the dashboard is told what the server's engine tells it: the pipeline
+  // decodes (`WaitingForScene` + transport `Playing`) and its song.
+  if (playlist_id === DABING_PLAYLIST_ID) {
+    const row = dubRows.find((r) => r.video_id === video_id);
+    if (!row) {
+      res.status(404).json({ error: "video not in playlist" });
+      return;
+    }
+    const state = JSON.stringify({
+      type: "PlaybackStateChanged",
+      data: {
+        playlist_id,
+        state: "WaitingForScene",
+        mode: "Continuous",
+        transport: "Playing",
+      },
+    });
+    const song = JSON.stringify({
+      type: "NowPlaying",
+      data: {
+        playlist_id,
+        video_id,
+        song: row.title,
+        artist: "",
+        position_ms: 0,
+        duration_ms: 200000,
+      },
+    });
+    for (const ws of wsClients) {
+      sendLive(ws, state);
+      sendLive(ws, song);
+    }
+    res.status(204).end();
+    return;
+  }
+  // Any other playlist: a no-op for the mock — the WS interval already streams
+  // NowPlaying updates, so the dashboard sees activity without us replaying.
   res.status(204).end();
+});
+app.get("/__mock/play-video-calls", (_req, res) => {
+  res.json({ calls: playVideoCalls });
 });
 
 app.post("/__mock/live-reset", (_req, res) => {
@@ -1504,7 +1551,8 @@ app.post("/__mock/dabing-add", (req, res) => {
   const dub_status = b.dub_status ?? "ready";
   const row = {
     video_id,
-    playlist_id: DABING_PLAYLIST_ID,
+    // #300: a video toggled for dubbing in another playlist keeps that one.
+    playlist_id: b.playlist_id ?? DABING_PLAYLIST_ID,
     title: b.title ?? `Dabing ${video_id}`,
     dub_status,
     dub_error: b.dub_error ?? null,
@@ -1522,6 +1570,7 @@ app.post("/__mock/dabing-add", (req, res) => {
 app.post("/__mock/dabing-reset", (_req, res) => {
   dubRows = [];
   nextDubId = 9000;
+  playVideoCalls = [];
   res.json({ ok: true });
 });
 

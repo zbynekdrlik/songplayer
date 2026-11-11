@@ -73,7 +73,45 @@ test("pasting a URL adds a queued row and ▶ dispatches play (#180/#194)", asyn
   );
   await row.locator('[data-testid="song-row-play"]').click();
   const req = await postPromise;
-  expect(req.url()).toMatch(/\/play-video$/);
+  // #300: the play goes to the Dabing playlist (the mock's id 500).
+  expect(req.url()).toMatch(/\/api\/v1\/playlists\/500\/play-video$/);
+});
+
+test("▶ on a song of another playlist plays it on the Dabing output, shown in its Player (#300)", async ({
+  page,
+  request,
+}) => {
+  // A video toggled for dubbing in Worship (playlist 1) keeps playlist 1 as its
+  // own; the Dabing page lists it like its own imports.
+  await request.post("/__mock/dabing-add", {
+    data: {
+      video_id: 4242,
+      playlist_id: 1,
+      title: "Kázeň z Worship",
+      dub_status: "ready",
+    },
+  });
+
+  await page.goto("/dabing");
+  const player = page.locator(".dabing-page").getByTestId("player");
+  await expect(player).toBeVisible({ timeout: 15000 });
+  const row = page.locator(
+    '[data-testid="dabing-list"] [data-testid="song-row"][data-video-id="4242"]',
+  );
+  await expect(row).toBeVisible({ timeout: 5000 });
+
+  await row.getByTestId("song-row-play").click();
+
+  // The page's own Player (the Dabing output) shows the song it now plays.
+  await expect(player.getByTestId("player-title")).toContainText(
+    "Kázeň z Worship",
+    { timeout: 5000 },
+  );
+  // Exactly one play went out, to the Dabing playlist — never to the video's
+  // own playlist (Worship) or any other: no other playlist starts or changes.
+  const calls = (await (await request.get("/__mock/play-video-calls")).json())
+    .calls;
+  expect(calls).toEqual([{ playlist_id: 500, video_id: 4242 }]);
 });
 
 test("a dub-ready video WITHOUT stems renders the dub chip hotový (#183 round 2/#194)", async ({
