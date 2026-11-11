@@ -874,6 +874,12 @@ impl super::PlaybackEngine {
             .map(|r| Arc::new(r) as Arc<dyn sp_ndi::NdiReceiveBackend>);
         #[cfg(not(windows))]
         let receive: Option<Arc<dyn sp_ndi::NdiReceiveBackend>> = None;
+        #[cfg(windows)]
+        let ndi_lib = self.ndi_backend.as_ref().map(|b| b.lib().clone());
+        #[cfg(not(windows))]
+        let ndi_lib = None;
+        // #305 item 3: is SP-program discoverable (one long-lived finder).
+        super::ndi_discover::start(ndi_lib, bus.max().ndi.discover.clone(), shutdown);
         crate::playback::ndi_input::start_ndi_input(
             self.pool.clone(),
             bus.clone(),

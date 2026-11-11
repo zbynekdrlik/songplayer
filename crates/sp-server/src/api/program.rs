@@ -114,7 +114,8 @@ pub struct ProgramResponse {
     pub program: ProgramStatus,
     /// #221 B4 step 6: SP-program's degraded reason — a source is on
     /// program and nothing receives `SP-program` (`null` otherwise, and
-    /// before the sender polled its receivers).
+    /// before the sender polled its receivers); #305 item 3: else
+    /// "SP-program not discoverable on the network" (`ndi.discoverable`).
     pub degraded_reason: Option<&'static str>,
     /// #233: every audio output, in list order.
     pub outputs: Vec<OutputStatus>,
@@ -190,7 +191,10 @@ impl ProgramResponse {
     ) -> Self {
         let health = &program.health;
         let polled = health.receivers_polled.then_some(health.connections);
-        let degraded_reason = program_degraded_reason(program.source, polled);
+        // #305 item 3: the receiver reason first, else "not discoverable".
+        let ndi = bus.max().ndi_status();
+        let degraded_reason = program_degraded_reason(program.source, polled)
+            .or_else(|| ndi.discoverable.degraded_reason());
         Self {
             program,
             degraded_reason,
@@ -201,7 +205,7 @@ impl ProgramResponse {
             input: bus.input().status(&stored.input),
             remote: bus.remote().status(&stored.remote, &bus.on_air_now()),
             max: bus.max().status(),
-            ndi: bus.max().ndi_status(),
+            ndi,
             gpu: bus.max().gpu_status(),
             cut_refused,
             burn_on: bus.item().burn_on(),
