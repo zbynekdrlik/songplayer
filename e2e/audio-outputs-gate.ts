@@ -103,6 +103,41 @@ export function waitingForClock(list: OutputStatus[]): OutputStatus[] {
   );
 }
 
+/** What the live gate counts against SP_ASIO_OUTPUTS_EXPECTED (#229). */
+export interface AsioCount {
+  /** The outputs counted toward SP_ASIO_OUTPUTS_EXPECTED. */
+  counted: number;
+  /** The ids the gate measures (`gatedAsioOutputs`): each must run. */
+  measured: string[];
+  /** The ids in a calm wait for their driver's clock (`waitingForClock`),
+   *  with the wait's code: counted, named, never measured. */
+  waiting: string[];
+}
+
+/**
+ * The count the live gate compares with SP_ASIO_OUTPUTS_EXPECTED (#229,
+ * ROZHODNUTÉ 11.11.2026): every enabled ASIO / Dante output. One in a calm
+ * clock wait (`no_clock`, `clock_off_rate`: its device or network is off,
+ * e.g. PP's SoundGrid outside services) is an enabled output behaving
+ * correctly, so it counts, is named and is not measured; every other one is
+ * measured and must run (a waiting one with another reason fails at the
+ * running poll). A disabled entry, a VBAN output and a missing output count
+ * nothing.
+ */
+export function asioCount(list: OutputStatus[]): AsioCount {
+  const measured = gatedAsioOutputs(list).map((o) => o.id);
+  const waiting = waitingForClock(list).map((o) => `${o.id} (${o.asio?.reason_code})`);
+  return { counted: measured.length, measured, waiting };
+}
+
+/** The count poll's value: the count when it is the expected one, else the
+ *  count with the measured and the waiting outputs named. */
+export function asioCountReading(list: OutputStatus[], expected: number): number | string {
+  const c = asioCount(list);
+  if (c.counted === expected) return c.counted;
+  return `${c.counted} (measured: ${c.measured.join(", ") || "none"}; waiting for a clock: ${c.waiting.join(", ") || "none"})`;
+}
+
 /** Why an ASIO output's minute (two reads of `outputs[i]`) fails. */
 export function asioGateFailures(first: OutputStatus, second: OutputStatus): string[] {
   const f: string[] = [];
