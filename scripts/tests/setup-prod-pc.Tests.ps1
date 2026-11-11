@@ -471,6 +471,7 @@ Describe 'Get-ProdPcPlan: every wired adapter (issue 285, the owner''s rule)' {
         $settings = [pscustomobject]@{ PendingTransmits = '3'; TransmitBufferLen = '18' }
         $facts = Read-Fixture 'fresh'
         $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(New-Adapter 'Ethernet 4' '0014' -Settings $settings -PnpDeviceId $script:Rtl8156) -Force
+        $facts | Add-Member -NotePropertyName dante_leg -NotePropertyValue $true -Force
         $own = Get-Rtl8156Actions $facts
         @($own | ForEach-Object { "$($_.Name) $($_.Current) $($_.Wanted)" }) | Should -Be @('PendingTransmits 3 8', 'TransmitBufferLen 18 64')
         $own[0].Adapter | Should -BeExactly 'Ethernet 4'
@@ -483,6 +484,7 @@ Describe 'Get-ProdPcPlan: every wired adapter (issue 285, the owner''s rule)' {
         $settings = [pscustomobject]@{ PendingTransmits = '8'; TransmitBufferLen = '64' }
         $facts = Read-Fixture 'fresh'
         $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(New-Adapter 'Ethernet 4' '0014' -Settings $settings -PnpDeviceId $script:Rtl8156) -Force
+        $facts | Add-Member -NotePropertyName dante_leg -NotePropertyValue $true -Force
         Get-Rtl8156Actions $facts | Should -HaveCount 0
         $settings.PSObject.Properties.Remove('TransmitBufferLen')
         $settings.PendingTransmits = '128'
@@ -496,6 +498,7 @@ Describe 'Get-ProdPcPlan: every wired adapter (issue 285, the owner''s rule)' {
             (New-Adapter 'Dante' '0014' -Settings $settings),
             (New-Adapter 'NoId' '0015' -Settings $settings -PnpDeviceId '')
         ) -Force
+        $facts | Add-Member -NotePropertyName dante_leg -NotePropertyValue $true -Force
         Get-Rtl8156Actions $facts | Should -HaveCount 0
         @(Get-NicActions $facts | Where-Object { $_.Name -in @('PendingTransmits', 'TransmitBufferLen') }) | Should -HaveCount 0
     }
@@ -509,6 +512,7 @@ Describe 'Get-ProdPcPlan: every wired adapter (issue 285, the owner''s rule)' {
         $copy | Add-Member -NotePropertyName status -NotePropertyValue 'Up' -Force
         $copy | Add-Member -NotePropertyName pnp_device_id -NotePropertyValue $script:Rtl8156 -Force
         $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @($copy) -Force
+        $facts | Add-Member -NotePropertyName dante_leg -NotePropertyValue $true -Force
         @(Get-ProdPcPlan -Facts $facts | Where-Object { $_.Name -eq 'PnPCapabilities' }) | Should -HaveCount 1
         @(Get-Rtl8156Actions $facts | ForEach-Object { $_.Name }) | Should -Be @('PendingTransmits', 'TransmitBufferLen')
     }
@@ -517,11 +521,119 @@ Describe 'Get-ProdPcPlan: every wired adapter (issue 285, the owner''s rule)' {
         $settings = [pscustomobject]@{ PendingTransmits = '3' }
         $facts = Read-Fixture 'fresh'
         $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(New-Adapter 'Ethernet 4' '0014' -Settings $settings -PnpDeviceId $script:Rtl8156) -Force
+        $facts | Add-Member -NotePropertyName dante_leg -NotePropertyValue $true -Force
         $facts = Copy-Facts $facts
         $own = Get-Rtl8156Actions $facts
         $own | Should -HaveCount 2
         Set-FactsAsApplied -Facts $facts -Actions $own
         Get-Rtl8156Actions (Copy-Facts $facts) | Should -HaveCount 0
+    }
+
+    It 'knows a Dante leg only by the facts'' dante_leg true' {
+        foreach ($case in @(@($true, $true), @($false, $false), @('true', $false), @($null, $false))) {
+            $facts = [pscustomobject]@{ dante_leg = $case[0] }
+            Test-ProdPcDanteLeg $facts | Should -Be $case[1] -Because "$($case[0])"
+        }
+        Test-ProdPcDanteLeg ([pscustomobject]@{}) | Should -BeFalse
+    }
+
+    # PP (issue 255, deploy run 42981086181, 11.11.2026): its 'Ethernet 4' is an
+    # RTL8156 on driver 11.4.211.2022, which offers neither keyword, and PP
+    # has no Dante leg: the values are dstack's Dante-TX tuning, so nothing.
+    It 'leaves an RTL8156 alone on a PC with no Dante leg (PP: its driver offers neither keyword)' {
+        $facts = Read-Fixture 'pp'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(New-Adapter 'Ethernet 4' '0014' -PnpDeviceId 'USB\VID_0BDA&PID_8156\4F1300131B') -Force
+        $facts.adapters[0] | Add-Member -NotePropertyName driver_keywords -NotePropertyValue @('*FlowControl', 'PendingReceives', 'ReceiveBufferLen') -Force
+        foreach ($read in @($facts, (Copy-Facts $facts))) {
+            Get-Rtl8156Actions $read | Should -HaveCount 0
+            @(Get-NicActions $read | Where-Object { $_.Name -in @('PendingTransmits', 'TransmitBufferLen') }) | Should -HaveCount 0
+            @(Get-ProdPcBlockers -Facts $read | Where-Object { $_.Code -like 'wired_nic*' }) | Should -HaveCount 0
+        }
+        $facts | Add-Member -NotePropertyName dante_leg -NotePropertyValue $false -Force
+        Get-Rtl8156Actions $facts | Should -HaveCount 0
+    }
+
+    It 'sets only what the driver offers on the adapter carrying the Dante leg, and passes a keyword it lacks' {
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName dante_leg -NotePropertyValue $true -Force
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(New-Adapter 'Ethernet 4' '0014' -PnpDeviceId $script:Rtl8156) -Force
+        $facts.adapters[0] | Add-Member -NotePropertyName driver_keywords -NotePropertyValue @('pendingtransmits', 'PendingReceives') -Force
+        foreach ($read in @($facts, (Copy-Facts $facts))) {
+            @(Get-Rtl8156Actions $read | ForEach-Object { "$($_.Name) $($_.Current) $($_.Wanted)" }) | Should -Be @('PendingTransmits (none) 8')
+            @(Get-ProdPcBlockers -Facts $read | Where-Object { $_.Code -like 'wired_nic*' }) | Should -HaveCount 0
+        }
+        # A value the registry holds is set through the driver as before.
+        $facts.adapters[0].settings | Add-Member -NotePropertyName TransmitBufferLen -NotePropertyValue '18' -Force
+        @(Get-Rtl8156Actions $facts | ForEach-Object { $_.Name }) | Should -Be @('PendingTransmits', 'TransmitBufferLen')
+    }
+
+    It 'sets the transmit values only on the adapter carrying the Dante leg' {
+        $settings = [pscustomobject]@{ PendingTransmits = '3'; TransmitBufferLen = '18' }
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName dante_leg -NotePropertyValue $true -Force
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(
+            (New-Adapter 'Ethernet 4' '0014' -Settings $settings -PnpDeviceId $script:Rtl8156),
+            (New-Adapter 'Ethernet 5' '0015' -Status 'Disconnected' -Settings ($settings | ConvertTo-Json | ConvertFrom-Json) -PnpDeviceId 'USB\VID_0BDA&PID_8156\2')
+        ) -Force
+        Get-ProdPcDanteCarrier $facts | Should -BeExactly '0014'
+        @(Get-Rtl8156Actions $facts | ForEach-Object { "$($_.AdapterGuid) $($_.Name)" }) | Should -Be @('0014 PendingTransmits', '0014 TransmitBufferLen')
+        # Two adapters up: which one carries the leg is not known, none is set.
+        $facts.adapters[1].status = 'Up'
+        Get-ProdPcDanteCarrier $facts | Should -BeNullOrEmpty
+        Get-Rtl8156Actions $facts | Should -HaveCount 0
+        # The leg's own adapter (a native NIC named Dante70) carries it.
+        $facts.adapters[1].name = 'Dante70'
+        Get-ProdPcDanteCarrier $facts | Should -BeExactly '0015'
+        @(Get-Rtl8156Actions $facts | ForEach-Object { $_.AdapterGuid }) | Should -Be @('0015', '0015')
+        # No leg: none.
+        $facts.dante_leg = $false
+        Get-ProdPcDanteCarrier $facts | Should -BeNullOrEmpty
+    }
+
+    # PP as read on 11.11.2026 (issue 255, deploy run 42981086181): no Dante
+    # output and no Dante70, soundgrid-pcie (Realtek PCIe, rt640x64)
+    # Disconnected, 'Ethernet 4' an RTL8156 on driver 11.4.211.2022 without
+    # PendingTransmits / TransmitBufferLen, Up (its LAN, the default route),
+    # Wi-Fi Disconnected, every firewall profile off. Dante is only one audio
+    # path (the owner): nothing of Dante, the VLAN or the two networks acts.
+    It 'plans nothing and blocks nothing on PP (no Dante leg)' {
+        $facts = Read-Fixture 'pp'
+        $zero = [ordered]@{}
+        foreach ($k in $script:Always) { $zero[$k] = '0' }
+        $zero['PnPCapabilities'] = '24'
+        $sg = $facts.soundgrid.adapters[0] | ConvertTo-Json -Depth 5 | ConvertFrom-Json
+        $sg | Add-Member -NotePropertyName media -NotePropertyValue '802.3' -Force
+        $sg | Add-Member -NotePropertyName status -NotePropertyValue 'Disconnected' -Force
+        $sg | Add-Member -NotePropertyName pnp_device_id -NotePropertyValue 'PCI\VEN_10EC&DEV_8168&SUBSYS_0' -Force
+        foreach ($k in $script:Always) { $sg.settings | Add-Member -NotePropertyName $k -NotePropertyValue '0' -Force }
+        $usb = New-Adapter 'Ethernet 4' '{0B5E0000-0000-4000-8000-000000000002}' -Settings ([pscustomobject]$zero) -PnpDeviceId 'USB\VID_0BDA&PID_8156\4F1300131B'
+        $usb | Add-Member -NotePropertyName driver_keywords -NotePropertyValue @('*FlowControl', '*EEE', 'PendingReceives', 'ReceiveBufferLen') -Force
+        $wifi = New-Adapter 'Wi-Fi' '{F1000000-0000-4000-8000-000000000003}' -Media 'Native 802.11' -Status 'Disconnected'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @($sg, $usb, $wifi) -Force
+        $facts | Add-Member -NotePropertyName dante_leg -NotePropertyValue $false -Force
+        foreach ($read in @($facts, (Copy-Facts $facts))) {
+            Get-ProdPcDanteCarrier $read | Should -BeNullOrEmpty
+            @(Get-ProdPcPlan -Facts $read) | Should -HaveCount 0
+            @(Get-ProdPcBlockers -Facts $read) | Should -HaveCount 0
+        }
+        # Even with the driver's keyword list unread, nothing of Dante acts.
+        $usb.PSObject.Properties.Remove('driver_keywords')
+        @(Get-ProdPcPlan -Facts $facts) | Should -HaveCount 0
+    }
+
+    It 'reads a Dante leg only from a Dante70 that is there and on' {
+        foreach ($case in @(
+                @('Up', $true), @('Disconnected', $true), @('Not Present', $false), @('Disabled', $false))) {
+            $script:Status = $case[0]
+            function Get-NetAdapter {
+                param([switch]$IncludeHidden)
+                [pscustomobject]@{ Name = 'Ethernet 4'; Status = 'Up' }
+                [pscustomobject]@{ Name = 'Dante70'; Status = $script:Status }
+            }
+            Read-ProdPcDanteLeg | Should -Be $case[1] -Because $case[0]
+        }
+        function Get-NetAdapter { param([switch]$IncludeHidden) [pscustomobject]@{ Name = 'Ethernet 4'; Status = 'Up' } }
+        Read-ProdPcDanteLeg | Should -BeFalse
     }
 
     It 'applies an RTL8156 value through the driver, never around it' {

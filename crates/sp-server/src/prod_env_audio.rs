@@ -355,8 +355,9 @@ pub fn soundgrid_problems(soundgrid: &SoundGridFacts) -> Vec<EnvProblem> {
 }
 
 /// The audio profile's problems, in order: SoundGrid, Windows Update,
-/// MMCSS, every wired adapter. The report-only facts are never one.
-pub fn problems(audio: &AudioFacts) -> Vec<EnvProblem> {
+/// MMCSS, every wired adapter (`carriers`: the adapters carrying a Dante
+/// leg, `network::leg_carriers`). The report-only facts are never one.
+pub fn problems(audio: &AudioFacts, carriers: &[String]) -> Vec<EnvProblem> {
     let mut problems = soundgrid_problems(&audio.soundgrid);
     // Windows Update: one "cannot be read" for either policy, then each
     // policy that is not set.
@@ -371,7 +372,11 @@ pub fn problems(audio: &AudioFacts) -> Vec<EnvProblem> {
     }
     problems.extend(mmcss_problems(&audio.mmcss));
     let judged = soundgrid_judged(&audio.soundgrid);
-    problems.extend(read::wired::problems_besides(&audio.wired_nics, &judged));
+    problems.extend(read::wired::problems_besides(
+        &audio.wired_nics,
+        &judged,
+        carriers,
+    ));
     problems
 }
 
@@ -426,8 +431,9 @@ pub fn nic_view(nic: &NicFacts) -> NicView {
     }
 }
 
-/// The audio profile on the status, with its report-only notes.
-pub fn view(audio: &AudioFacts) -> AudioProfile {
+/// The audio profile on the status, with its report-only notes
+/// (`carriers`: as [`problems`]).
+pub fn view(audio: &AudioFacts, carriers: &[String]) -> AudioProfile {
     let (state, port_mac, nic) = match &audio.soundgrid {
         SoundGridFacts::NotInstalled => (SoundGridState::NotInstalled, None, None),
         SoundGridFacts::Unreadable => (SoundGridState::Unreadable, None, None),
@@ -456,10 +462,11 @@ pub fn view(audio: &AudioFacts) -> AudioProfile {
             scheme_name: audio.power.scheme_name.clone(),
             core_parking_min_cores_pct: audio.power.core_parking_min_cores,
         },
-        wired_nics: audio
-            .wired_nics
-            .as_ref()
-            .map(|nics| nics.iter().map(read::wired::view).collect()),
+        wired_nics: audio.wired_nics.as_ref().map(|nics| {
+            nics.iter()
+                .map(|nic| read::wired::view_on(nic, carriers))
+                .collect()
+        }),
         notes: Vec::new(),
     };
     profile.notes = notes(&profile);

@@ -60,7 +60,40 @@ pub const RTL8156_DEVICE: &str = r"USB\VID_0BDA&PID_8156";
 /// resolume-snv (`Get-NetAdapterAdvancedProperty`); its driver offers them,
 /// so a missing one is a problem (`Get-ProdPcRtl8156Values`, the same pairs:
 /// a test compares them).
+///
+/// #255 (11.11.2026, the owner: Dante is one audio path, a PC without it
+/// passes clean; dstack two-networks §6, dstack PR 179): judged only on an
+/// adapter that carries a Dante leg ([`judged`]), and a value its driver does
+/// not offer passes ([`WiredValue::offered`]). PP has no leg, and its
+/// RTL8156's driver 11.4.211.2022 offers neither keyword.
 pub const RTL8156_VALUES: [(&str, u32); 2] = [("PendingTransmits", 8), ("TransmitBufferLen", 64)];
+
+/// Whether a keyword is one of the RTL8156's own values.
+fn is_rtl8156_value(keyword: &str) -> bool {
+    RTL8156_VALUES.iter().any(|(k, _)| *k == keyword)
+}
+
+/// Whether an adapter carries a Dante leg: its connection name is one of
+/// `carriers` (`network::leg_carriers`; trimmed, ASCII case ignored).
+pub fn carries_a_leg(nic: &WiredNicFacts, carriers: &[String]) -> bool {
+    nic.name.as_deref().is_some_and(|name| {
+        carriers
+            .iter()
+            .any(|c| c.trim().eq_ignore_ascii_case(name.trim()))
+    })
+}
+
+/// Whether a value is judged on an adapter: the RTL8156's own values only
+/// on one that carries a Dante leg (#255), every other value everywhere.
+pub fn judged(nic: &WiredNicFacts, keyword: &str, carriers: &[String]) -> bool {
+    !is_rtl8156_value(keyword) || carries_a_leg(nic, carriers)
+}
+
+/// Whether the driver offers a keyword, from its `Ndi\Params` subkeys
+/// (`None`: not read, taken as offered).
+fn offered_by(params: Option<&[String]>, keyword: &str) -> bool {
+    params.is_none_or(|names| names.iter().any(|n| n.trim().eq_ignore_ascii_case(keyword)))
+}
 
 /// Whether a device instance id is an RTL8156's (ASCII case ignored).
 pub fn is_rtl8156(device_instance: &str) -> bool {
@@ -86,6 +119,12 @@ pub const PNP_CAPABILITIES: &str = "PnPCapabilities";
 pub struct WiredValue {
     pub keyword: &'static str,
     pub value: Reading<String>,
+    /// #255: the adapter's driver offers it (its class key's `Ndi\Params`
+    /// lists it); read for the RTL8156's values only, `true` for the rest
+    /// (written to the class key whether offered or not) and when the list
+    /// could not be read. A value the driver does not offer and the
+    /// registry lacks passes (dstack PR 179).
+    pub offered: bool,
 }
 
 /// One wired adapter as read.
@@ -130,6 +169,7 @@ pub fn verdict(value: &WiredValue) -> Verdict {
     let text = match &value.value {
         Reading::Unread => return Verdict::Unread,
         Reading::Absent if WHERE_PRESENT.contains(&value.keyword) => return Verdict::Holds,
+        Reading::Absent if !value.offered => return Verdict::Holds,
         Reading::Absent => return Verdict::Missing,
         Reading::Value(text) => text.trim(),
     };
@@ -176,6 +216,9 @@ fn wired_nic(reg: &dyn RegistryRead, guid: &str, errors: &mut Vec<String>) -> Wi
     }
     let rtl8156 = nic.device.as_deref().is_some_and(is_rtl8156);
     let own: &[(&'static str, u32)] = if rtl8156 { &RTL8156_VALUES } else { &[] };
+    let params = rtl8156
+        .then(|| reg.subkeys(&format!(r"{key}\Ndi\Params")).ok())
+        .flatten();
     nic.values = ALWAYS
         .iter()
         .chain(WHERE_PRESENT.iter())
@@ -183,6 +226,7 @@ fn wired_nic(reg: &dyn RegistryRead, guid: &str, errors: &mut Vec<String>) -> Wi
         .chain(own.iter().map(|(keyword, _)| keyword))
         .map(|&keyword| WiredValue {
             keyword,
+            offered: !is_rtl8156_value(keyword) || offered_by(params.as_deref(), keyword),
             value: reading_of(reg.value(&key, keyword)).unwrap_or_else(|code| {
                 errors.push(format!(
                     "the network adapter {guid}'s {keyword} could not be read (error {code})"
@@ -225,18 +269,14 @@ pub fn wired_nics(
     )
 }
 
-/// The problems of every wired adapter: one "cannot be read" per adapter,
-/// then each value in the order read.
-pub fn problems(nics: &Option<Vec<WiredNicFacts>>) -> Vec<EnvProblem> {
-    problems_besides(nics, &[])
-}
-
 /// The problems, leaving out each `(guid, keyword)` another check already
 /// judges on that adapter (the SoundGrid adapter's own settings), so one
-/// wrong value is named once.
+/// wrong value is named once, and each value not [`judged`] there (the
+/// RTL8156's off the adapters in `carriers`).
 pub fn problems_besides(
     nics: &Option<Vec<WiredNicFacts>>,
-    judged: &[(String, String)],
+    elsewhere: &[(String, String)],
+    carriers: &[String],
 ) -> Vec<EnvProblem> {
     let Some(nics) = nics else {
         return vec![EnvProblem::Unreadable(Unreadable::WiredNics)];
@@ -244,8 +284,12 @@ pub fn problems_besides(
     let mut problems = Vec::new();
     for nic in nics {
         let name = nic.label();
-        let verdicts: Vec<(&str, Verdict)> =
-            nic.values.iter().map(|v| (v.keyword, verdict(v))).collect();
+        let verdicts: Vec<(&str, Verdict)> = nic
+            .values
+            .iter()
+            .filter(|v| judged(nic, v.keyword, carriers))
+            .map(|v| (v.keyword, verdict(v)))
+            .collect();
         if nic.values.is_empty()
             || nic.device.is_none()
             || verdicts.iter().any(|(_, v)| *v == Verdict::Unread)
@@ -253,10 +297,10 @@ pub fn problems_besides(
             problems.push(EnvProblem::WiredNicUnreadable { nic: name.clone() });
         }
         for (keyword, verdict) in verdicts {
-            let elsewhere = judged
+            let judged_elsewhere = elsewhere
                 .iter()
                 .any(|(g, k)| g.eq_ignore_ascii_case(&nic.guid) && k.eq_ignore_ascii_case(keyword));
-            if elsewhere {
+            if judged_elsewhere {
                 continue;
             }
             let value = match verdict {
@@ -274,9 +318,15 @@ pub fn problems_besides(
     problems
 }
 
-/// One adapter on the status. `ok` is `None` while anything is unread.
-pub fn view(nic: &WiredNicFacts) -> WiredNicView {
-    let verdicts: Vec<Verdict> = nic.values.iter().map(verdict).collect();
+/// One adapter on the status: the values [`judged`] there (`carriers`).
+/// `ok` is `None` while anything is unread.
+pub fn view_on(nic: &WiredNicFacts, carriers: &[String]) -> WiredNicView {
+    let shown: Vec<&WiredValue> = nic
+        .values
+        .iter()
+        .filter(|v| judged(nic, v.keyword, carriers))
+        .collect();
+    let verdicts: Vec<Verdict> = shown.iter().map(|v| verdict(v)).collect();
     let ok = if nic.values.is_empty() || nic.device.is_none() || verdicts.contains(&Verdict::Unread)
     {
         None
@@ -287,8 +337,7 @@ pub fn view(nic: &WiredNicFacts) -> WiredNicView {
         guid: nic.guid.clone(),
         name: nic.name.clone(),
         description: nic.description.clone(),
-        values: nic
-            .values
+        values: shown
             .iter()
             .zip(verdicts)
             .map(|(v, verdict)| WiredValueView {
@@ -311,6 +360,7 @@ pub fn example(guid: &str, name: &str) -> WiredNicFacts {
     let zero = |keyword| WiredValue {
         keyword,
         value: Reading::Value("0".to_string()),
+        offered: true,
     };
     WiredNicFacts {
         guid: guid.to_string(),
@@ -324,6 +374,7 @@ pub fn example(guid: &str, name: &str) -> WiredNicFacts {
             .chain([WiredValue {
                 keyword: PNP_CAPABILITIES,
                 value: Reading::Value("24".to_string()),
+                offered: true,
             }])
             .collect(),
     }

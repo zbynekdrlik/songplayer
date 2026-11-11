@@ -45,6 +45,24 @@ fn dante_box() -> Fake {
     reg
 }
 
+/// The problems of every wired adapter: one "cannot be read" per adapter,
+/// then each value in the order read; every adapter taken as carrying a
+/// Dante leg (the tests' resolume-snv: each value judged).
+fn problems(nics: &Option<Vec<WiredNicFacts>>) -> Vec<EnvProblem> {
+    let carriers: Vec<String> = nics
+        .iter()
+        .flatten()
+        .filter_map(|n| n.name.clone())
+        .collect();
+    problems_besides(nics, &[], &carriers)
+}
+
+/// One adapter on the status, every adapter taken as carrying a Dante leg
+/// (the tests').
+fn view(nic: &WiredNicFacts) -> WiredNicView {
+    view_on(nic, &nic.name.clone().into_iter().collect::<Vec<_>>())
+}
+
 fn read(reg: &Fake) -> Option<Vec<WiredNicFacts>> {
     wired_nics(reg, &Ok(vec![wired_row(GUID)]), &mut Vec::new())
 }
@@ -272,11 +290,13 @@ fn a_check_reads_every_wired_adapter_into_the_gate() {
     );
     assert_eq!(facts.wired_nics.as_ref().map(Vec::len), Some(1));
     assert!(
-        crate::prod_env::audio::problems(&facts).contains(&value_problem("*EEE", Some("1"))),
+        crate::prod_env::audio::problems(&facts, &[]).contains(&value_problem("*EEE", Some("1"))),
         "{:?}",
-        crate::prod_env::audio::problems(&facts)
+        crate::prod_env::audio::problems(&facts, &[])
     );
-    let shown = crate::prod_env::audio::view(&facts).wired_nics.unwrap();
+    let shown = crate::prod_env::audio::view(&facts, &[])
+        .wired_nics
+        .unwrap();
     assert_eq!(shown[0].ok, Some(false));
     assert_eq!(shown[0].name.as_deref(), Some("Dante"));
 }
@@ -454,4 +474,71 @@ fn the_rtl8156_rule_is_the_setup_scripts() {
         let pair = format!("[pscustomobject]@{{ Keyword = '{keyword}'; Wanted = '{value}' }}");
         assert!(script.contains(&pair), "{pair}");
     }
+    // #255: only on the adapter carrying the Dante leg, only where the
+    // driver offers the keyword.
+    for function in [
+        "function Get-ProdPcDanteCarrier",
+        "function Test-ProdPcDriverOffers",
+    ] {
+        assert!(script.contains(function), "{function}");
+    }
+}
+
+/// #255 (the owner, 11.11.2026; dstack two-networks §6, dstack PR 179): the
+/// RTL8156's transmit values are judged only on the adapter carrying a
+/// Dante leg. Off it (PP, no leg) they are neither a problem nor shown.
+#[test]
+fn an_rtl8156_off_the_dante_leg_is_not_judged() {
+    let nics = read(&rtl8156_box());
+    let nic = &nics.as_ref().unwrap()[0];
+    for carriers in [vec![], vec!["Ethernet 4".to_string()]] {
+        assert_eq!(problems_besides(&nics, &[], &carriers), []);
+        let shown = view_on(nic, &carriers);
+        assert_eq!(shown.ok, Some(true));
+        assert_eq!(shown.values.len(), 13, "the 2 RTL8156 values left out");
+    }
+    let on_the_leg = [" dante ".to_string()];
+    assert_eq!(
+        problems_besides(&nics, &[], &on_the_leg),
+        [
+            value_problem("PendingTransmits", Some("3")),
+            value_problem("TransmitBufferLen", Some("18")),
+        ]
+    );
+    assert_eq!(view_on(nic, &on_the_leg).values.len(), 15);
+    assert!(carries_a_leg(nic, &on_the_leg));
+    assert!(!judged(nic, "PendingTransmits", &[]));
+    assert!(judged(nic, "*EEE", &[]));
+}
+
+/// PP's driver 11.4.211.2022 offers neither keyword (no `Ndi\Params`
+/// entry): even on a leg that passes; one it offers and the registry lacks
+/// is named.
+#[test]
+fn a_transmit_value_the_driver_does_not_offer_passes() {
+    let mut reg = rtl8156_box();
+    reg.set(&class_key("0014"), "PendingTransmits", RegValue::Absent);
+    reg.set(&class_key("0014"), "TransmitBufferLen", RegValue::Absent);
+    let params = format!(r"{}\Ndi\Params", class_key("0014"));
+    reg.subkeys_of(
+        &params,
+        Ok(vec!["PendingReceives".to_string(), "*EEE".to_string()]),
+    );
+    let nics = read(&reg);
+    assert_eq!(problems(&nics), []);
+    assert_eq!(view(&nics.unwrap()[0]).ok, Some(true));
+    reg.subkeys_of(
+        &params,
+        Ok(vec![
+            "PendingReceives".to_string(),
+            " pendingtransmits".to_string(),
+        ]),
+    );
+    assert_eq!(
+        problems(&read(&reg)),
+        [value_problem("PendingTransmits", None)]
+    );
+    // The list unread: taken as offered.
+    reg.subkeys_of(&params, Err(5));
+    assert_eq!(problems(&read(&reg)).len(), 2);
 }

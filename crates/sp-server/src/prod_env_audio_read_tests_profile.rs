@@ -297,8 +297,8 @@ fn pp_s_profile_reads_as_its_facts_and_holds() {
             errors: Vec::new(),
         }
     );
-    assert!(problems(&facts).is_empty());
-    assert_eq!(view(&facts).notes, Vec::<String>::new());
+    assert!(problems(&facts, &[]).is_empty());
+    assert_eq!(view(&facts, &[]).notes, Vec::<String>::new());
 }
 
 /// SNV: no SoundGrid (its preferences, if any, are never read for a port),
@@ -328,8 +328,8 @@ fn snv_s_profile_fails_only_on_the_driver_exclusion_until_the_setup_sets_it() {
     assert!(before.errors.is_empty(), "{:?}", before.errors);
     assert_eq!(before.soundgrid, SoundGridFacts::NotInstalled);
     assert_eq!(before.drivers_excluded, Some(false));
-    assert_eq!(problems(&before), [EnvProblem::DriversNotExcluded]);
-    assert_eq!(view(&before).notes.len(), 0);
+    assert_eq!(problems(&before, &[]), [EnvProblem::DriversNotExcluded]);
+    assert_eq!(view(&before, &[]).notes.len(), 0);
     reg.set(
         WINDOWS_UPDATE,
         "ExcludeWUDriversInQualityUpdate",
@@ -337,8 +337,8 @@ fn snv_s_profile_fails_only_on_the_driver_exclusion_until_the_setup_sets_it() {
     );
     let after = read(&reg);
     assert_eq!(after.drivers_excluded, Some(true));
-    assert!(problems(&after).is_empty());
-    assert_eq!(view(&after).notes.len(), 0);
+    assert!(problems(&after, &[]).is_empty());
+    assert_eq!(view(&after, &[]).notes.len(), 0);
 }
 
 #[test]

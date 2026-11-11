@@ -372,7 +372,10 @@ fn an_mmcss_value_that_cannot_be_read_is_one_problem_first() {
 
 #[test]
 fn a_production_profile_holds() {
-    assert_eq!(problems(&production_example()), Vec::<EnvProblem>::new());
+    assert_eq!(
+        problems(&production_example(), &[]),
+        Vec::<EnvProblem>::new()
+    );
     // The report-only facts are never a problem: no SoundGrid, no power
     // scheme read, core parking on.
     let snv = AudioFacts {
@@ -383,7 +386,7 @@ fn a_production_profile_holds() {
         },
         ..production_example()
     };
-    assert_eq!(problems(&snv), Vec::<EnvProblem>::new());
+    assert_eq!(problems(&snv, &[]), Vec::<EnvProblem>::new());
 }
 
 /// #255 lane 2: both Windows Update policies gate. Either one not read is
@@ -392,11 +395,14 @@ fn a_production_profile_holds() {
 #[test]
 fn windows_update_s_two_policies_gate() {
     let wu = |no_auto_update: Option<bool>, drivers_excluded: Option<bool>| {
-        problems(&AudioFacts {
-            no_auto_update,
-            drivers_excluded,
-            ..production_example()
-        })
+        problems(
+            &AudioFacts {
+                no_auto_update,
+                drivers_excluded,
+                ..production_example()
+            },
+            &[],
+        )
     };
     let unread = EnvProblem::Unreadable(Unreadable::WindowsUpdate);
     assert_eq!(wu(Some(true), Some(true)), Vec::<EnvProblem>::new());
@@ -423,7 +429,7 @@ fn windows_update_s_two_policies_gate() {
 fn the_profile_names_every_problem_in_order() {
     let nothing = AudioFacts::default();
     assert_eq!(
-        problems(&nothing),
+        problems(&nothing, &[]),
         [
             EnvProblem::Unreadable(Unreadable::SoundGrid),
             EnvProblem::Unreadable(Unreadable::WindowsUpdate),
@@ -443,7 +449,7 @@ fn the_profile_names_every_problem_in_order() {
     bad.drivers_excluded = Some(false);
     bad.mmcss.pro_audio_priority = Reading::Value(1);
     assert_eq!(
-        problems(&bad),
+        problems(&bad, &[]),
         [
             EnvProblem::SoundGridNicNetAdapterCx {
                 nic: "soundgrid-pcie".to_string()
@@ -496,7 +502,7 @@ fn soundgrid_s_problems_follow_its_state() {
             soundgrid,
             ..production_example()
         };
-        assert_eq!(problems(&audio), expected);
+        assert_eq!(problems(&audio, &[]), expected);
     }
     assert_eq!(SoundGridFacts::default(), SoundGridFacts::Unreadable);
 }
@@ -572,7 +578,7 @@ fn an_adapter_shows_each_setting_and_whether_all_hold() {
 #[test]
 fn the_profile_is_shown_with_its_notes() {
     let audio = production_example();
-    let p = view(&audio);
+    let p = view(&audio, &[]);
     assert_eq!(p.soundgrid, Some(SoundGridState::Found));
     assert_eq!(p.soundgrid_port_mac.as_deref(), Some("6c2408e59c91"));
     assert_eq!(p.soundgrid_nic, Some(nic_view(&sg_nic())));
@@ -594,10 +600,13 @@ fn the_profile_is_shown_with_its_notes() {
     // #255 item D: no note on Dante Virtual Soundcard's adapter any more.
     assert_eq!(p.notes, Vec::<String>::new());
     // The driver exclusion missing is a problem now (#255 lane 2), no note.
-    let snv_before_setup = view(&AudioFacts {
-        drivers_excluded: Some(false),
-        ..production_example()
-    });
+    let snv_before_setup = view(
+        &AudioFacts {
+            drivers_excluded: Some(false),
+            ..production_example()
+        },
+        &[],
+    );
     assert_eq!(snv_before_setup.notes, p.notes);
     assert_eq!(
         snv_before_setup.windows_update.drivers_excluded,
@@ -605,7 +614,7 @@ fn the_profile_is_shown_with_its_notes() {
     );
     // Nothing read: every report-only fact is a note (the scheme, core
     // parking), SoundGrid unreadable.
-    let nothing = view(&AudioFacts::default());
+    let nothing = view(&AudioFacts::default(), &[]);
     assert_eq!(nothing.soundgrid, Some(SoundGridState::Unreadable));
     assert_eq!(nothing.soundgrid_nic, None);
     assert_eq!(nothing.notes.len(), 2);
@@ -616,10 +625,13 @@ fn the_profile_is_shown_with_its_notes() {
 #[test]
 fn soundgrid_is_shown_by_its_state_port_and_adapter() {
     let shown = |soundgrid: SoundGridFacts| {
-        let p = view(&AudioFacts {
-            soundgrid,
-            ..production_example()
-        });
+        let p = view(
+            &AudioFacts {
+                soundgrid,
+                ..production_example()
+            },
+            &[],
+        );
         (p.soundgrid, p.soundgrid_port_mac, p.soundgrid_nic)
     };
     assert_eq!(
@@ -677,7 +689,7 @@ fn a_soundgrid_value_is_named_once() {
             v.value = Reading::Value("1".to_string());
         }
     }
-    let codes: Vec<String> = problems(&audio).iter().map(EnvProblem::code).collect();
+    let codes: Vec<String> = problems(&audio, &[]).iter().map(EnvProblem::code).collect();
     assert_eq!(codes, ["soundgrid_nic_setting:flow_control"], "{codes:?}");
     // Another adapter's same value is still named.
     let other = audio
@@ -692,7 +704,7 @@ fn a_soundgrid_value_is_named_once() {
             v.value = Reading::Value("1".to_string());
         }
     }
-    let codes: Vec<String> = problems(&audio).iter().map(EnvProblem::code).collect();
+    let codes: Vec<String> = problems(&audio, &[]).iter().map(EnvProblem::code).collect();
     assert_eq!(
         codes,
         [

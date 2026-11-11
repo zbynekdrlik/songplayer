@@ -414,3 +414,12 @@ Each step reads only the facts it needs; a needed fact that failed =
 - **The two layers are the operator's design and stay** (owner, ROZHODNUTÉ 6229662077). They ran on cg OBS's NDI before Spout (Arena's own backups, comment 6231237165). Any fix of the two-read effect is SongPlayer's.
 - **The levels come in waves lasting hours:** 436 jumps back with an independent Spout sender and no load on 16.10 morning, 2–6 with MAX on 18.10 morning. Compare arms only interleaved, never across hours.
 - **Re-measured 30.10.2026 behind the wall-bridge (#272 comment 6528349890):** since 29.10 the wall is driven by wall-bridge outside the Windows desktop, so the 18.10 desktop (dxcam) numbers are history; the reference is now Arena's own output read over Spout (`wall_frames.py --spout "Arena - Screen 2"`, what the post-deploy gate reads, the picture after the bridge is not verified). Interleaved, 3 rounds × 40 s per arm: Spout `SP-program-MAX` 16 uneven boundaries in total, NDI `SP-program` 709 (wall-25: 2/2/0 vs 27/455/169), 0 jumps back on both. Same direction as 18.10: Spout stays. SNV's NewLevel deck clips are on Spout `SP-program-MAX` again since 30.10 ~18:26 (owner, comment 6529038315).
+
+## Starting Arena through the remoteos MCP: set it to Normal right after (#272, 11.11.2026)
+
+The MCP shell on resolume-snv runs at BelowNormal, and a process started
+through its `App` tool (or `Start-Process` in its `Shell`) inherits that
+class. Arena relaunched that way after the #294 crash ran BelowNormal for
+10 hours. Right after such a launch:
+`(Get-Process Arena).PriorityClass = 'Normal'` — the class an operator
+launch gives it; this undoes our own side effect, it is not a priority choice.

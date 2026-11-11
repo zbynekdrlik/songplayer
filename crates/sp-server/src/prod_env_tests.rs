@@ -512,7 +512,7 @@ fn the_status_carries_every_fact_and_problem() {
                 dstack_group_rules: Some(2),
                 block_rules_outside_group: Some(vec!["Block X".to_string()]),
             },
-            audio: audio::view(&audio::production_example()),
+            audio: audio::view(&audio::production_example(), &[]),
             two_networks: Some(network::view(&network::NetworkFacts {
                 default_routes: Some(vec![12, 30]),
                 ..network::snv_example()
@@ -735,3 +735,6 @@ async fn both_routes_answer_the_published_status() {
     assert_eq!(status["environment"], expected);
     global().publish(EnvironmentStatus::default());
 }
+
+#[path = "prod_env_tests_pp.rs"]
+mod pp;

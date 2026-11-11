@@ -26,7 +26,7 @@ pub struct DanteFigures {
     pub pump_overruns: u64,
 }
 
-const CLOCK_TIP: &str = "Hodiny siete Dante: SongPlayer ich číta z dantesync. Bez nich zariadenie ostáva ohlásené v sieti, ale neposiela zvuk.";
+const CLOCK_TIP: &str = "Hodiny siete Dante: SongPlayer ich číta z dsync. Bez nich zariadenie ostáva ohlásené v sieti, ale neposiela zvuk.";
 const FLOWS_TIP: &str =
     "Koľko prúdov zvuku odoberá zariadenie v sieti Dante (nastavuje sa v Dante Controlleri).";
 const LATE_TIP: &str = "Najväčšie oneskorenie paketu pri odchode a najdlhšie jedno odoslanie, odkedy výstup beží. Musí ostať hlboko pod latenciou zariadenia.";
@@ -148,7 +148,7 @@ pub fn dante_reason_sk(code: &str) -> &'static str {
         "stalled" => "zariadenie Dante neodpovedá",
         "held" => "predchádzajúci výstup ešte neuvoľnil zariadenie Dante",
         "parked" => "zariadenie Dante zamrzlo — pomôže len reštart SongPlayera",
-        "no_clock" => "zariadenie Dante nemá hodiny — dantesync nebeží alebo v sieti nie je PTP",
+        "no_clock" => "zariadenie Dante nemá hodiny — dsync nebeží alebo v sieti nie je PTP",
         "clock_off_rate" => {
             "zariadenie Dante neberie zvuk svojou frekvenciou — hodiny sa nedajú použiť"
         }

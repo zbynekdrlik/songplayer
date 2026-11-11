@@ -65,7 +65,7 @@ pub struct PipelineHealthSnapshot {
     pub degraded_reason: Option<String>,
     /// dantesync-derived clock health (#146). The same box-wide value is
     /// stamped onto every pipeline's snapshot; `clock_ok` gates the genlock
-    /// lock-state. Defaults to `no dantesync` until the poller reports.
+    /// lock-state. Defaults to `no dsync` until the poller reports.
     pub clock: ClockHealth,
     /// Boundary-paced emission telemetry (#147), filled from the `Pacer`
     /// (pacing is the only path since #221 lane 3).

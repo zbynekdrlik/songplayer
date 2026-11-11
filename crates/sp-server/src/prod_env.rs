@@ -210,7 +210,10 @@ pub fn verdict(facts: &EnvFacts) -> EnvVerdict {
         }
     }
     problems.extend(firewall::problems(facts));
-    problems.extend(audio::problems(&facts.audio));
+    problems.extend(audio::problems(
+        &facts.audio,
+        &network::leg_carriers(&facts.network),
+    ));
     problems.extend(network::problems(&facts.network));
     EnvVerdict {
         ok: problems.is_empty(),
@@ -273,7 +276,7 @@ pub fn status_of(check: &Check, now_ms: i64) -> (EnvironmentStatus, Vec<EnvProbl
             dstack_group_rules: facts.firewall_rules.as_ref().map(|r| r.in_group),
             block_rules_outside_group: facts.firewall_rules.as_ref().map(|r| r.outside.clone()),
         },
-        audio: audio::view(&facts.audio),
+        audio: audio::view(&facts.audio, &network::leg_carriers(&facts.network)),
         two_networks: Some(network::view(&facts.network)),
         problems: v.problems.iter().map(EnvProblem::view).collect(),
         read_errors: facts.read_errors.clone(),
