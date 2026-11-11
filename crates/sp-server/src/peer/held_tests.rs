@@ -258,6 +258,12 @@ async fn another_audio_with_no_song_of_the_peers_to_take_is_held() {
     assert_eq!(lyrics_state(&pp, id).await, (0, 0, true));
     assert!(pp.ex.board.snapshot("pp").is_empty());
     assert_eq!(json_at(&pp), None);
+    let kept = std::fs::read(&audio).unwrap();
+    assert_eq!(
+        kept,
+        crate::peer::rig::bytes(3_000, 9),
+        "this node's audio stays"
+    );
 }
 
 /// A peer's copy that cannot be taken now (this node's audio cannot be

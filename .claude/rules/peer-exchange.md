@@ -811,12 +811,20 @@ wait for a peer that has the song", below).
     audio = the plan's `peer_audio`, else held) fetched as sha-checked
     parts, swapped under `SONG_FILES` over the names the row records (the
     names never change, so no rename / re-link of the set; the old files
-    linked as `<name>.peer-old` — never `.prev`, the video upgrade's
-    rollback source — until the placed sizes match the catalog, put back
-    on any failure, a placed video back into its part); then
+    linked under their first free set-aside name `<name>.replaced`
+    (`cache::free_set_aside_name`, never `.prev`, the video upgrade's
+    rollback source: a leftover is the self-heal's WARN and the sweep's
+    30-day `replaced`) until the placed sizes match the catalog, put back
+    on any failure, a placed video back into its part); held as well
+    while the row's files changed since the fetch began (names AND each
+    file's size / mtime: an upgrade or repair in place) or a stems
+    separation of the song runs (`stems::progress::in_flight`, its
+    `mark_stems_done` would record old-audio stems); then
     `record_origins` (video + audio), the audio's `peer_hashes` entry (the
-    catalog's sha at the placed size / mtime), `format::record(None)`, and
-    this node's stems of the OLD audio deleted, their stem records
+    catalog's sha at the placed size / mtime), `format::record(None)`, the
+    V35 upgrade record of the replaced video cleared (no rollback puts the
+    old video back), and this node's stems of the OLD audio deleted with
+    its `{yt}_stemsep` resume dir, their stem records
     forgotten and every row of that audio that recorded them
     `requeue_lost_stems` (the stems job then takes the peer's: the same
     audio now). The hook then takes the copy in the SAME pick

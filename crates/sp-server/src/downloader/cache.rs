@@ -577,6 +577,14 @@ fn set_aside_name<O: FileOps>(path: &Path, ops: &O) -> std::io::Result<PathBuf> 
     )))
 }
 
+/// [`set_aside_name`] on the real filesystem: the first free `<name>.replaced`
+/// / `<name>.N.replaced` of `path` (#304: the peer's song swap sets the old
+/// pair aside under it, so a leftover is reported by the startup self-heal
+/// and swept by `cache_sweep` like any other set-aside file).
+pub fn free_set_aside_name(path: &Path) -> std::io::Result<PathBuf> {
+    set_aside_name(path, &RealFs)
+}
+
 /// The `n`-th set-aside name of `path`: `<name>.replaced` for 1, else
 /// `<name>.<n>.replaced`.
 fn numbered_aside_name(path: &Path, n: u32) -> PathBuf {

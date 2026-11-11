@@ -12,17 +12,24 @@
 //! under `cache::SONG_FILES` over the names the row records: the names do
 //! not change (the title stays), so every file named after the audio keeps
 //! its name and no rename / re-link of the set is needed. The old files are
-//! kept as `<name>.peer-old` links until the placed files are verified (their
-//! sizes, the catalog's) and are put back on any failure (a name a player
-//! holds: the parts stay for the next pick, no transfer). Then the pair's
+//! kept as set-aside links (`<name>.replaced`, `cache::free_set_aside_name`:
+//! a leftover is WARNed by the startup self-heal and swept after 30 days, like
+//! a unit move's) until the placed files are verified (their sizes, the
+//! catalog's) and are put back on any failure (a name a player holds: the
+//! parts stay for the next pick, no transfer). The swap is held while a
+//! stems separation of the song runs (it would record stems of the old
+//! audio over the new one), and when the row's files changed since the
+//! fetch began (a video upgrade or repair replaced one in place). Then the pair's
 //! origin is recorded (`peer_fetches`, as a fetched download records it) with
 //! the audio's hash (`peer_hashes`), so the audio guard vouches for it from
 //! now on: the swap never repeats for the same audio, only after the peer
 //! itself replaced its song (one transfer per change). This node's stems of
-//! the OLD audio are deleted and the rows that recorded them asked again
-//! (`requeue_lost_stems`): the stems job then takes the peer's (the same
-//! audio now) or separates the new audio here. Every failure is the hold it
-//! was before (30 min, no attempt).
+//! the OLD audio are deleted with its separation's resume dir (`{yt}_stemsep`)
+//! and the rows that recorded them asked again (`requeue_lost_stems`): the
+//! stems job then takes the peer's (the same audio now) or separates the new
+//! audio here. The video upgrade's record (V35) is cleared on the rows of the
+//! replaced video, so no rollback puts this node's old video back over the
+//! peer's. Every failure is the hold it was before (30 min, no attempt).
 
 use std::path::{Path, PathBuf};
 
@@ -37,10 +44,7 @@ use super::hasher::stat;
 use super::kind::{ArtifactKind, Job};
 use super::wire::{Artifact, now_ms};
 use crate::db::models_peer::{self, HashEntry};
-use crate::downloader::cache::SONG_FILES;
-
-/// The suffix of an old song file kept while the peer's takes its name.
-const OLD_SUFFIX: &str = ".peer-old";
+use crate::downloader::cache::{SONG_FILES, free_set_aside_name};
 
 /// A song's video and audio files.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,18 +53,23 @@ pub(crate) struct Pair {
     pub(crate) audio: PathBuf,
 }
 
+/// The row's recorded pair and each file's `(size, mtime_ms)` when it was
+/// read: a file replaced in place under the same name (the video upgrade,
+/// the repair) reads as a change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Recorded {
+    pub(crate) pair: Pair,
+    pub(crate) stats: (FileStat, FileStat),
+}
+
+/// A file's `(size, mtime_ms)`, `None` when it cannot be read.
+pub(crate) type FileStat = Option<(i64, i64)>;
+
 /// The peer's video and audio artifacts of a song.
 #[derive(Debug, Clone)]
 struct PeerPair {
     video: Artifact,
     audio: Artifact,
-}
-
-/// `file`'s name while the peer's file takes it: `<name>.peer-old`.
-pub(crate) fn old_path(file: &Path) -> PathBuf {
-    let mut name = file.as_os_str().to_os_string();
-    name.push(OLD_SUFFIX);
-    PathBuf::from(name)
 }
 
 impl Exchange {
@@ -82,7 +91,7 @@ impl Exchange {
                 return Some(self.hold(job, video_id, youtube_id).await);
             }
         };
-        let Some(own) = self.recorded_pair(video_id).await else {
+        let Some(own) = self.recorded(video_id).await else {
             debug!(
                 video_id,
                 youtube_id, "exchange: the row records no song pair - held"
@@ -143,6 +152,13 @@ impl Exchange {
         Ok(PeerPair { video, audio })
     }
 
+    /// Row `video_id`'s recorded pair with its files' stats now.
+    async fn recorded(&self, video_id: i64) -> Option<Recorded> {
+        let pair = self.recorded_pair(video_id).await?;
+        let stats = (stat(&pair.video).await, stat(&pair.audio).await);
+        Some(Recorded { pair, stats })
+    }
+
     /// Row `video_id`'s recorded video and audio, both named.
     async fn recorded_pair(&self, video_id: i64) -> Option<Pair> {
         let row: Option<(Option<String>, Option<String>)> =
@@ -169,22 +185,31 @@ impl Exchange {
         Ok(Pair { video, audio })
     }
 
-    /// Under `SONG_FILES`: the row must still record `own`; the parts take
+    /// Under `SONG_FILES`: the row must still record `own` as it was (names
+    /// and files) and no stems separation of the song may run; the parts take
     /// its names ([`replace_pair`]), then the origin, the audio's hash, the
-    /// format and the old audio's stems are dealt with (the module doc).
+    /// format, the upgrade record and the old audio's stems are dealt with
+    /// (the module doc).
     async fn swap_song(
         &self,
         video_id: i64,
         youtube_id: &str,
         peer: &str,
-        own: &Pair,
+        own: &Recorded,
         parts: &Pair,
         pair: &PeerPair,
     ) -> Result<(), String> {
         let _files = SONG_FILES.lock().await;
-        if self.recorded_pair(video_id).await.as_ref() != Some(own) {
+        if self.recorded(video_id).await.as_ref() != Some(own) {
             return Err("the row's files changed meanwhile".into());
         }
+        if self
+            .stems_run_on(youtube_id, crate::stems::progress::in_flight())
+            .await
+        {
+            return Err("a stems separation of the song runs".into());
+        }
+        let own = &own.pair;
         replace_pair(own, parts, (pair.video.size, pair.audio.size))?;
         self.record_origins(youtube_id, peer, &[pair.video.clone(), pair.audio.clone()])
             .await;
@@ -194,8 +219,47 @@ impl Exchange {
         if let Err(e) = crate::downloader::format::record(&self.pool, video_id, None).await {
             warn!(youtube_id, %e, "exchange: forgetting the replaced files' video format failed");
         }
+        self.forget_upgrade(youtube_id, &own.video).await;
         self.drop_old_stems(youtube_id, &own.audio).await;
         Ok(())
+    }
+
+    /// Whether the stems separation in flight (`in_flight`, a row id:
+    /// `stems::progress::in_flight`) is of a row of `youtube_id`. An
+    /// unreadable row counts as one (the swap waits for the next pick).
+    pub(crate) async fn stems_run_on(&self, youtube_id: &str, in_flight: Option<i64>) -> bool {
+        let Some(id) = in_flight else {
+            return false;
+        };
+        let of: Result<Option<String>, _> =
+            sqlx::query_scalar("SELECT youtube_id FROM videos WHERE id = ?")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await;
+        match of {
+            Ok(of) => of.as_deref() == Some(youtube_id),
+            Err(e) => {
+                warn!(youtube_id, video_id = id, %e, "exchange: reading the stems job's row failed");
+                true
+            }
+        }
+    }
+
+    /// #223 S12: the replaced video's upgrade record (V35) described this
+    /// node's own file; cleared on every row recording it, so a rollback
+    /// never puts that file's `.prev` back over the peer's video.
+    async fn forget_upgrade(&self, youtube_id: &str, video: &Path) {
+        let cleared = sqlx::query(
+            "UPDATE videos SET video_upgrade_cap = NULL, video_upgrade_state = NULL, \
+             video_upgrade_at = NULL WHERE youtube_id = ? AND file_path = ?",
+        )
+        .bind(youtube_id)
+        .bind(path_key(video))
+        .execute(&self.pool)
+        .await;
+        if let Err(e) = cleared {
+            warn!(youtube_id, %e, "exchange: clearing the replaced video's upgrade record failed");
+        }
     }
 
     /// The placed audio's hash is the catalog's (the part was checked
@@ -218,12 +282,20 @@ impl Exchange {
     }
 
     /// The stems named after `audio` were separated from the audio it
-    /// replaced: deleted, their peer records forgotten, and every row of
+    /// replaced: deleted with the separation's resume dir (its segments are
+    /// of the old audio), their peer records forgotten, and every row of
     /// `youtube_id` that recorded them asked again.
     async fn drop_old_stems(&self, youtube_id: &str, audio: &Path) {
         let (vocals, instrumental) = crate::stems::stem_paths(audio);
         for stem in [&vocals, &instrumental] {
             remove_quietly(stem);
+        }
+        let resume = audio
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(format!("{youtube_id}_stemsep"));
+        if let Err(e) = gone(std::fs::remove_dir_all(&resume)) {
+            warn!(dir = %resume.display(), %e, "exchange: the old audio's stems resume dir was not removed");
         }
         let stems = [ArtifactKind::StemVocals, ArtifactKind::StemInstrumental];
         if let Err(e) = models_peer::forget_fetches(&self.pool, youtube_id, &stems).await {
@@ -248,17 +320,30 @@ impl Exchange {
     }
 }
 
-/// The file half of the swap: each of `own` linked as `<name>.peer-old`,
+/// The file half of the swap: each of `own` linked under its first free
+/// set-aside name (`<name>.replaced`, never one a leftover holds),
 /// `parts` renamed over `own`, the placed files' sizes checked against
 /// `sizes` (video, audio), then the links removed. On any failure the old
 /// files are back under their names (a placed video goes back into its
 /// part, so the next pick transfers nothing) and the reason is returned.
 pub(crate) fn replace_pair(own: &Pair, parts: &Pair, sizes: (u64, u64)) -> Result<(), String> {
-    let old = Pair {
-        video: old_path(&own.video),
-        audio: old_path(&own.audio),
+    let aside = |file: &Path| {
+        free_set_aside_name(file)
+            .map_err(|e| format!("a set-aside name of {}: {e}", file.display()))
     };
-    link_old(&own.video, &old.video)?;
+    let old_video = aside(&own.video)?;
+    link_old(&own.video, &old_video)?;
+    let old_audio = match aside(&own.audio) {
+        Ok(name) => name,
+        Err(e) => {
+            remove_quietly(&old_video);
+            return Err(e);
+        }
+    };
+    let old = Pair {
+        video: old_video,
+        audio: old_audio,
+    };
     if let Err(e) = link_old(&own.audio, &old.audio) {
         remove_quietly(&old.video);
         return Err(e);
@@ -272,7 +357,9 @@ pub(crate) fn replace_pair(own: &Pair, parts: &Pair, sizes: (u64, u64)) -> Resul
         return Err(format!("the video's name: {e}"));
     }
     if let Err(e) = std::fs::rename(&parts.audio, &own.audio) {
-        let _ = std::fs::rename(&own.video, &parts.video);
+        if let Err(back) = std::fs::rename(&own.video, &parts.video) {
+            warn!(part = %parts.video.display(), %back, "exchange: the placed video could not go back into its part (it is transferred again)");
+        }
         restore(&old.video, &own.video);
         remove_quietly(&old.audio);
         return Err(format!("the audio's name: {e}"));
@@ -287,9 +374,8 @@ pub(crate) fn replace_pair(own: &Pair, parts: &Pair, sizes: (u64, u64)) -> Resul
     Ok(())
 }
 
-/// `file` linked as `old` (a stale `old` removed first).
+/// `file` linked as `old` (a free name).
 fn link_old(file: &Path, old: &Path) -> Result<(), String> {
-    gone(std::fs::remove_file(old)).map_err(|e| format!("the stale {}: {e}", old.display()))?;
     std::fs::hard_link(file, old).map_err(|e| format!("the link {}: {e}", old.display()))
 }
 

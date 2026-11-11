@@ -124,7 +124,7 @@ async fn a_held_lyrics_job_takes_the_peers_song_and_then_its_lyrics() {
             .unwrap()
             .is_some()
     );
-    assert_eq!(files_ending(pp.cache(), ".peer-old"), 0, "no old copy left");
+    assert_eq!(files_ending(pp.cache(), ".replaced"), 0, "no old copy left");
     assert!(pp.ex.board.snapshot("pp").is_empty(), "nothing runs here");
 }
 
@@ -194,7 +194,7 @@ fn replace_pair_places_both_and_keeps_no_old_copy() {
     assert_eq!(std::fs::read(&own.video).unwrap(), bytes(2_000, 1));
     assert_eq!(std::fs::read(&own.audio).unwrap(), song_audio());
     assert!(!parts.video.exists() && !parts.audio.exists());
-    assert_eq!(files_ending(dir.path(), ".peer-old"), 0);
+    assert_eq!(files_ending(dir.path(), ".replaced"), 0);
 }
 
 /// The audio cannot take its name (here: its part is gone): the old video
@@ -210,7 +210,7 @@ fn replace_pair_puts_the_old_song_back_when_the_audio_cannot_take_its_name() {
     assert_eq!(std::fs::read(&own.video).unwrap(), own_video());
     assert_eq!(std::fs::read(&own.audio).unwrap(), own_audio());
     assert_eq!(std::fs::read(&parts.video).unwrap(), bytes(2_000, 1));
-    assert_eq!(files_ending(dir.path(), ".peer-old"), 0);
+    assert_eq!(files_ending(dir.path(), ".replaced"), 0);
 }
 
 /// A placed file of another size than the catalog's: the old pair is back.
@@ -223,7 +223,7 @@ fn replace_pair_puts_the_old_song_back_when_a_size_is_not_the_catalogs() {
         assert!(err.contains("size"), "{err}");
         assert_eq!(std::fs::read(&own.video).unwrap(), own_video());
         assert_eq!(std::fs::read(&own.audio).unwrap(), own_audio());
-        assert_eq!(files_ending(dir.path(), ".peer-old"), 0);
+        assert_eq!(files_ending(dir.path(), ".replaced"), 0);
     }
 }
 
@@ -238,18 +238,26 @@ fn replace_pair_changes_nothing_when_the_video_cannot_take_its_name() {
     assert_eq!(std::fs::read(&own.video).unwrap(), own_video());
     assert_eq!(std::fs::read(&own.audio).unwrap(), own_audio());
     assert_eq!(std::fs::read(&parts.audio).unwrap(), song_audio());
-    assert_eq!(files_ending(dir.path(), ".peer-old"), 0);
+    assert_eq!(files_ending(dir.path(), ".replaced"), 0);
 }
 
-/// A stale link from a crashed swap is replaced, never an error.
+/// A set-aside file left by an earlier unit move is never overwritten (it
+/// may be the only copy of a file): the swap takes the next free name.
 #[test]
-fn replace_pair_replaces_a_stale_old_copy() {
+fn replace_pair_never_overwrites_a_set_aside_leftover() {
     let dir = tempfile::tempdir().unwrap();
     let (own, parts) = files(dir.path());
-    std::fs::write(super::old_path(&own.audio), b"stale").unwrap();
+    let mut leftover = own.audio.clone().into_os_string();
+    leftover.push(".replaced");
+    std::fs::write(&leftover, b"leftover").unwrap();
     super::replace_pair(&own, &parts, (2_000, 3_000)).unwrap();
     assert_eq!(std::fs::read(&own.audio).unwrap(), song_audio());
-    assert_eq!(files_ending(dir.path(), ".peer-old"), 0);
+    assert_eq!(std::fs::read(&leftover).unwrap(), b"leftover");
+    assert_eq!(
+        files_ending(dir.path(), ".replaced"),
+        1,
+        "only the leftover"
+    );
 }
 
 /// The placed audio's hash is the catalog's, stored as the hasher would:
@@ -300,4 +308,178 @@ fn gone_forgives_only_a_missing_file() {
     assert!(super::gone(Err(Error::from(ErrorKind::NotFound))).is_ok());
     let denied = super::gone(Err(Error::from(ErrorKind::PermissionDenied)));
     assert_eq!(denied.unwrap_err().kind(), ErrorKind::PermissionDenied);
+}
+
+/// `path`'s mtime set to a fixed instant long ago: a later write or a
+/// rename of another file over the name shows as another mtime.
+fn mark(path: &Path) -> std::time::SystemTime {
+    let at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
+    std::fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(at)
+        .unwrap();
+    at
+}
+
+fn mtime(path: &Path) -> std::time::SystemTime {
+    std::fs::metadata(path).unwrap().modified().unwrap()
+}
+
+/// The parts kept in PP's peer dir.
+fn parts(pp: &TestNode) -> Vec<PathBuf> {
+    let dir = pp.cache().join(crate::peer::fetch::PARTS_DIR);
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut parts: Vec<PathBuf> = entries.filter_map(Result::ok).map(|e| e.path()).collect();
+    parts.sort();
+    parts
+}
+
+/// Once swapped, the song here IS the peer's: a later pick of the same
+/// song swaps nothing again (the record vouches for the audio).
+#[tokio::test]
+async fn a_swapped_song_is_never_swapped_again() {
+    let (_snv, pp, id, (video, audio)) = pp_downloaded_itself(false).await;
+    let row = lyrics_row(&pp, id).await;
+    assert!(matches!(
+        crate::peer::lyrics::first(Some(&pp.ex), &row).await,
+        PeerStep::Done
+    ));
+    let at = mark(&video);
+    sqlx::query("UPDATE videos SET has_lyrics = 0 WHERE id = ?")
+        .bind(id)
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    let row = lyrics_row(&pp, id).await;
+    let again = crate::peer::lyrics::first(Some(&pp.ex), &row).await;
+    assert!(!matches!(again, PeerStep::Deferred));
+    assert_eq!(mtime(&video), at, "the video was not replaced again");
+    assert_eq!(std::fs::read(&audio).unwrap(), song_audio());
+    assert!(parts(&pp).is_empty(), "nothing transferred again");
+}
+
+/// A name the swap cannot take (here: a directory where the video was, as a
+/// file a player holds open refuses its name on Windows): held, this node's
+/// audio untouched, the parts kept; the next pick takes them with no
+/// transfer.
+#[tokio::test]
+async fn a_refused_name_keeps_the_parts_and_the_next_pick_transfers_nothing() {
+    let (_snv, pp, id, (video, audio)) = pp_downloaded_itself(false).await;
+    std::fs::remove_file(&video).unwrap();
+    std::fs::create_dir(&video).unwrap();
+    let row = lyrics_row(&pp, id).await;
+    let step = crate::peer::lyrics::first(Some(&pp.ex), &row).await;
+    assert!(matches!(step, PeerStep::Deferred), "held");
+    assert_eq!(std::fs::read(&audio).unwrap(), own_audio());
+    assert_eq!(fetch_record(pp.pool(), YT, "audio").await.unwrap(), None);
+    let kept = parts(&pp);
+    assert_eq!(kept.len(), 2, "both parts kept: {kept:?}");
+    let at = mark(&kept[0]);
+    assert_eq!(mark(&kept[1]), at);
+    std::fs::remove_dir(&video).unwrap();
+    std::fs::write(&video, own_video()).unwrap();
+    let step = crate::peer::lyrics::first(Some(&pp.ex), &row).await;
+    assert!(matches!(step, PeerStep::Done));
+    assert_eq!(std::fs::read(&audio).unwrap(), song_audio());
+    assert_eq!(mtime(&video), at, "the kept video part placed");
+    assert_eq!(mtime(&audio), at, "the kept audio part placed");
+    assert_eq!(files_ending(pp.cache(), ".replaced"), 0);
+}
+
+/// The peer's plan for the song, its audio as `peer_audio`.
+async fn plan_of(snv: &TestNode, pp: &TestNode) -> crate::peer::FetchPlan {
+    let peer = snv.as_peer(SNV_KEY);
+    let catalog = pp.ex.client.catalog(&peer).await.unwrap();
+    let audio = crate::peer::decide::listed_audio(&catalog, YT).cloned();
+    crate::peer::FetchPlan {
+        peer,
+        artifacts: Vec::new(),
+        peer_audio: audio,
+    }
+}
+
+/// A peer whose listed song's audio is not the one its copy was made from
+/// (its catalog moved between two reads): held, nothing transferred.
+#[tokio::test]
+async fn a_peer_audio_other_than_the_copys_is_held_with_nothing_transferred() {
+    let (snv, pp, id, (_, audio)) = pp_downloaded_itself(false).await;
+    let mut plan = plan_of(&snv, &pp).await;
+    plan.peer_audio.as_mut().unwrap().sha256 = "0".repeat(64);
+    let step = pp
+        .ex
+        .take_peers_song(crate::peer::kind::Job::Lyrics, &plan, id, YT)
+        .await;
+    assert!(matches!(step, Some(PeerStep::Deferred)));
+    assert_eq!(std::fs::read(&audio).unwrap(), own_audio());
+    assert!(parts(&pp).is_empty(), "nothing transferred");
+}
+
+/// The row's video replaced in place after the fetch began (the video
+/// upgrade or the repair keep its name): the swap refuses, nothing placed.
+#[tokio::test]
+async fn a_video_replaced_in_place_meanwhile_stops_the_swap() {
+    let (snv, pp, id, (video, audio)) = pp_downloaded_itself(false).await;
+    let plan = plan_of(&snv, &pp).await;
+    let own = pp.ex.recorded(id).await.unwrap();
+    let pair = pp.ex.peers_pair(&plan, YT).await.unwrap();
+    let fetched = pp.ex.fetch_pair(&plan, &pair).await.unwrap();
+    std::fs::write(&video, bytes(2_500, 4)).unwrap();
+    let err = pp
+        .ex
+        .swap_song(id, YT, "snv", &own, &fetched, &pair)
+        .await
+        .unwrap_err();
+    assert!(err.contains("changed"), "{err}");
+    assert_eq!(std::fs::read(&video).unwrap(), bytes(2_500, 4));
+    assert_eq!(std::fs::read(&audio).unwrap(), own_audio());
+    assert_eq!(fetch_record(pp.pool(), YT, "audio").await.unwrap(), None);
+}
+
+/// A stems separation in flight holds the swap only when it is of a row of
+/// this song (`stems::progress::in_flight`, passed in: the cell is global).
+#[tokio::test]
+async fn a_stems_run_of_the_song_holds_the_swap() {
+    let (_snv, pp, id, _) = pp_downloaded_itself(false).await;
+    let other = pp.add_video("bbbbbbbbbbb").await;
+    assert!(pp.ex.stems_run_on(YT, Some(id)).await);
+    assert!(!pp.ex.stems_run_on(YT, Some(other)).await);
+    assert!(!pp.ex.stems_run_on(YT, Some(id + 1_000)).await);
+    assert!(!pp.ex.stems_run_on(YT, None).await);
+}
+
+/// The swap forgets the replaced video's upgrade record and the old audio's
+/// stems resume dir, so neither a rollback nor a resumed separation brings
+/// this node's old song back.
+#[tokio::test]
+async fn the_upgrade_record_and_the_stems_resume_dir_of_the_old_song_go() {
+    let (_snv, pp, id, _) = pp_downloaded_itself(false).await;
+    sqlx::query(
+        "UPDATE videos SET video_upgrade_cap = 2160, video_upgrade_state = 'upgraded', \
+         video_upgrade_at = 5 WHERE id = ?",
+    )
+    .bind(id)
+    .execute(pp.pool())
+    .await
+    .unwrap();
+    let resume = pp.cache().join(format!("{YT}_stemsep"));
+    std::fs::create_dir_all(&resume).unwrap();
+    std::fs::write(resume.join("seg_000.flac"), b"old").unwrap();
+    let row = lyrics_row(&pp, id).await;
+    assert!(matches!(
+        crate::peer::lyrics::first(Some(&pp.ex), &row).await,
+        PeerStep::Done
+    ));
+    let upgrade: (Option<i64>, Option<String>, Option<i64>) = sqlx::query_as(
+        "SELECT video_upgrade_cap, video_upgrade_state, video_upgrade_at FROM videos WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_one(pp.pool())
+    .await
+    .unwrap();
+    assert_eq!(upgrade, (None, None, None));
+    assert!(!resume.exists(), "the old audio's segments go");
 }
