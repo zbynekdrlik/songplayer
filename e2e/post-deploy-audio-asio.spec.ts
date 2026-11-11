@@ -49,7 +49,6 @@ import {
   asioCount,
   asioCountReading,
   asioGateFailures,
-  gatedAsioOutputs,
   type OutputStatus,
 } from "./audio-outputs-gate";
 import {
@@ -113,18 +112,18 @@ test.describe("ASIO output (#233)", () => {
   }) => {
     test.setTimeout(240_000);
     expect(Number.isInteger(EXPECTED) && EXPECTED >= 0, "SP_ASIO_OUTPUTS_EXPECTED").toBe(true);
-    // A failed read is no count (never zero outputs: with EXPECTED "0" a
-    // broken API would pass), so the poll reads -1 then and tries again.
-    const enabledAsio = async () => {
-      const list = await readOutputs(request);
-      return list === null ? null : gatedAsioOutputs(list);
-    };
     // The count (#229: an output in a calm clock wait counts, unmeasured),
     // or, when it is off, the count with the measured and the waiting
-    // outputs named.
+    // outputs named. A failed read is no count (never zero outputs: with
+    // EXPECTED "0" a broken API would pass), so the poll reads -1 then and
+    // tries again. The list the count came from is kept: the outputs the
+    // test measures are taken from that same read.
+    let countedList: OutputStatus[] = [];
     const counted = async () => {
       const list = await readOutputs(request);
-      return list === null ? -1 : asioCountReading(list, EXPECTED);
+      if (list === null) return -1;
+      countedList = list;
+      return asioCountReading(list, EXPECTED);
     };
     await expect
       .poll(counted, {
@@ -132,16 +131,12 @@ test.describe("ASIO output (#233)", () => {
         timeout: 20_000,
       })
       .toBe(EXPECTED);
-    const listed = await readOutputs(request);
-    expect(listed, "GET /api/v1/program").not.toBeNull();
-    const count = asioCount(listed as OutputStatus[]);
+    const count = asioCount(countedList);
     console.log(
       `[#233 asio] counted ${count.counted}: measured ${JSON.stringify(count.measured)}, ` +
         `waiting for a clock (not measured) ${JSON.stringify(count.waiting)}`,
     );
-    const enabled = await enabledAsio();
-    expect(enabled, "GET /api/v1/program").not.toBeNull();
-    const ids = (enabled as OutputStatus[]).map((o) => o.id);
+    const ids = count.measured;
     if (ids.length === 0) {
       faultWindowStart = await openFaultWindow(request);
       return;
@@ -188,7 +183,7 @@ test.describe("ASIO output (#233)", () => {
       return list === null ? -1 : spawnReady(list);
     };
     await expect
-      .poll(ready, { message: "the gated ASIO outputs run before the spawn", timeout: 30_000 })
+      .poll(ready, { message: "the ASIO outputs run, or wait calmly for a clock, before the spawn", timeout: 30_000 })
       .toBe(EXPECTED);
     const first = await readOutputs(request);
     expect(first, "GET /api/v1/program").not.toBeNull();
