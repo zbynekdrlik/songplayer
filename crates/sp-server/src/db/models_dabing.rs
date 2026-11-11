@@ -105,9 +105,9 @@ pub struct DubRow {
     /// `dub_voice_ref_path` column. `None` until the worker resolves one.
     pub dub_voice: Option<String>,
     /// #300: the row's ▶ can play it on the Dabing playlist — downloaded
-    /// (`normalized`) and still in its YouTube playlist (`removed_at` NULL),
-    /// exactly what `dabing_video_membership` admits for a listed row (every
-    /// listed row is dub-requested). Otherwise the gate answers 409 / 404.
+    /// (`normalized`), exactly what `dabing_video_membership` admits for a
+    /// listed row (every listed row is dub-requested and, #303, still in its
+    /// YouTube playlist). Otherwise the gate answers 409.
     pub playable: bool,
 }
 
@@ -136,7 +136,7 @@ fn row_to_dub_row(r: &sqlx::sqlite::SqliteRow) -> DubRow {
 
 const DUB_ROW_SELECT: &str = "SELECT id, playlist_id, title, song, dub_status, \
      dub_error, dub_file_path, stem_status, has_lyrics, \
-     dub_voice_ref_path, (normalized = 1 AND removed_at IS NULL) AS playable \
+     dub_voice_ref_path, (normalized = 1) AS playable \
      FROM videos";
 
 /// Set (or clear) the dub request on a video. Requesting flips `dub_requested`
@@ -173,12 +173,13 @@ pub async fn set_dub_requested(
     Ok(res.rows_affected())
 }
 
-/// Every dub-requested video, newest request first (`dub_requested_at DESC`,
-/// tie-broken by `id DESC` so a batch added in the same millisecond stays
-/// deterministic), for the Dabing section list.
+/// Every dub-requested video still in its YouTube playlist (#303, #260's
+/// `removed_at` mark: a song that left it is never listed), newest request
+/// first (`dub_requested_at DESC`, tie-broken by `id DESC` so a batch added in
+/// the same millisecond stays deterministic), for the Dabing section list.
 pub async fn list_dub_videos(pool: &SqlitePool) -> Result<Vec<DubRow>, sqlx::Error> {
     let rows = sqlx::query(&format!(
-        "{DUB_ROW_SELECT} WHERE dub_requested = 1 \
+        "{DUB_ROW_SELECT} WHERE dub_requested = 1 AND removed_at IS NULL \
          ORDER BY dub_requested_at DESC, id DESC"
     ))
     .fetch_all(pool)

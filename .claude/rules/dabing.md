@@ -100,8 +100,9 @@ video toggled for dubbing elsewhere keeps its playlist, maybe the one on
 program). The server's `post_play_video` admits on a `dabing` playlist every
 video of the Dabing section (`models_dabing::dabing_video_membership`: its own
 imports + every dub-requested video, `removed_at IS NULL`; not normalized → 409,
-else 404); `DubRow.playable` (normalized, not removed) disables the ▶ of a row
-the gate refuses; Loop's remembered song on the Dabing playlist takes a
+else 404); `DubRow.playable` (normalized) disables the ▶ of a row the gate
+refuses; a song that left its YouTube playlist is not listed at all
+(`list_dub_videos`: `removed_at IS NULL`, #303); Loop's remembered song on the Dabing playlist takes a
 dub-requested song of another playlist too (`loop_memory::remembered`). The
 mock (`e2e/mock-api.mjs`) mirrors it: 404 / 409 as text, the off-program state +
 NowPlaying for playlist 500, every call in `/__mock/play-video-calls`.
