@@ -3,7 +3,8 @@
 The external services SongPlayer calls, what for, which model, which
 setting holds the credential, and which post-deploy gate checks each one
 live (#232; the owner's rule of 29.9.2026: every external provider and
-model gets a live check). Verified on 10.10.2026 against the code, the
+model gets a live check). Verified on 10.10.2026 (the metadata model and
+the Live Translate gate on 11.11.2026) against the code, the
 settings on SNV and PP and Gemini's model list. Never print a key: read
 key NAMES only.
 
@@ -12,9 +13,9 @@ key NAMES only.
 | Provider | Used for | Model | Credential (setting) | Live gate |
 |---|---|---|---|---|
 | Claude through CLIProxyAPI (port 18787, an OAuth credential the proxy holds) | metadata (first), lyrics text cleanup, translation EN→SK, the description extraction, each song's Spotify track id (`spotify_resolver`, once per song) | `claude-opus-5-5` (`sp_core::config::DEFAULT_AI_MODEL`) | none in SongPlayer's DB | ci.yml "Verify AI proxy healthy and not churning": a real completion with the model SongPlayer sends, and no newer `claude-opus-*` listed |
-| Google Gemini | metadata fallback (after Claude) | `gemini-3.1-pro-preview` (the stored `gemini_model`, newest Gemini Pro on 10.10.2026; SNV and PP store it, so a new `DEFAULT_GEMINI_MODEL` reaches them only through a settings PATCH) | `gemini_api_key` (a list; one key per request) | `e2e/post-deploy-metadata.spec.ts` (`POST /api/v1/metadata/probe`) |
+| Google Gemini | metadata fallback (after Claude) | `gemini-3.8-flash` (`sp_core::config::DEFAULT_GEMINI_MODEL` and the stored `gemini_model` on SNV and PP since 15.10.2026: `gemini-3.1-pro-preview` ran past the provider's 90 s bound with grounding; a new default reaches a box only through a settings PATCH) | `gemini_api_key` (a list; one key per request) | `e2e/post-deploy-metadata.spec.ts` (`POST /api/v1/metadata/probe`) |
 | Google Gemini | lyrics: the one transcript per song (base tier and the reference gate) | `gemini-3.5-transcribe` (`g35t_client::MODEL_SLUG`) | `gemini_api_key` | `e2e/post-deploy-g35t.spec.ts` (`POST /api/v1/lyrics/g35t/probe`) |
-| Google Gemini Live | dabing (Slovak dub) | `gemini-3.5-live-translate-preview` (`dub_model`, `DEFAULT_DUB_MODEL`) | `gemini_api_key` (the first key) | none yet: #232 unit 2 |
+| Google Gemini Live | dabing (Slovak dub) | `gemini-3.5-live-translate-preview` (`dub_model`, `DEFAULT_DUB_MODEL`) | `gemini_api_key` (the first key) | `e2e/post-deploy-dub-live.spec.ts` (`POST /api/v1/dabing/probe`: 20 s of a downloaded song through the dub worker's own child and session, with `dub_model` / `dub_voice`; the dub must hold sound and a Slovak line; SNV only, PP has paid AI off) |
 
 ## Free lyrics sources
 

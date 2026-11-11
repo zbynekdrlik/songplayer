@@ -2,6 +2,9 @@
 paths:
   - crates/sp-server/src/db/models_dabing.rs
   - crates/sp-server/src/api/dabing.rs
+  - crates/sp-server/src/api/dabing_probe.rs
+  - e2e/post-deploy-dub-live.spec.ts
+  - e2e/dub-live-gate*.ts
   - crates/sp-server/src/api/routes_import.rs
   - crates/sp-server/src/startup_dabing.rs
   - crates/sp-server/src/dabing/**
@@ -753,6 +756,45 @@ session stats), `sp-core config` (keys, defaults, `dub_voice_label`),
 `subtitles_tests.rs::one_continuous_session_chunk_builds_a_monotonic_bilingual_track`.
 Trap: the staging secret-scan blocks a test literal `secret="…"` — the fake runner
 takes `redact_word=`.
+
+## The live gate (#232 unit 2, design 6807882928)
+
+`POST /api/v1/dabing/probe` (`api/dabing_probe.rs` → `dabing/probe.rs::run_probe`)
+dubs ONE 20 s clip from the box through the worker's own child call
+(`child::run_live_translate`, the scripts `worker::materialise_scripts` ships,
+`bootstrap::ensure_genai`), with `dub_model_from` / `dub_voice_from` of the
+settings and the first `paid_ai::gemini_keys` key. Never give the probe its own
+child, args or session.
+
+- The clip: the lowest `videos.id` with `normalized = 1`, its audio on disk,
+  outside the test item and the songs that left their playlist
+  (`db::queue_row!`); the input by `dub_input_audio` (`source` `vocal_stem` /
+  `audio`); 20 s from the first served lyrics line (`g35t_probe::first_line_start`),
+  else from 30 s; cut to a 16-bit WAV by the app's ffmpeg in a temp dir. The pick
+  and the cut hold `cache::SONG_FILES`, the cut bounded at 15 s.
+- The dub, its transcripts, its `_dub_events.jsonl` and its work dir stay in that
+  temp dir (dropped after). NOT under the heavy slot (network-bound; a gate must
+  not wait behind stems), plan `HeavyStepPlan::cpu_idle()`. The scripts + SDK
+  check + child are bounded at 240 s (`DUB_TIMEOUT`), the read-back at 15 s.
+- The answer `{ok, model, voice, youtube_id, start_ms, clip_ms, source,
+  elapsed_ms, dub_ms, dub_rms_dbfs, sk_lines, sample, session, error}`: the dub is
+  read back by ffmpeg as 16 kHz mono f32 (`measure_args`, `level_of`),
+  `sk_lines` / `sample` are the subtitle builder's own lines
+  (`transcripts_to_track`). `ok` = the child finished, RMS ≥ −45 dBFS
+  (`MIN_DUB_RMS_DBFS`), ≥ 1 Slovak line (`verdict`). Every error text is put on one
+  line, redacted with the keys, then cut (`finish` through
+  `gemini_api::body_excerpt`).
+- 409 (nothing sent) while paid AI is off, with no key, no venv python, no song or
+  no ffmpeg; 200 once it ran.
+- `e2e/post-deploy-dub-live.spec.ts` (SNV only; PP's config lists its specs and
+  leaves it out) gates through the pure `e2e/dub-live-gate.ts`
+  (`dubLiveGateFailures(status, probe)`), unit-tested by the mock-suite
+  `e2e/dub-live-gate.spec.ts`. The model is not pinned (a setting); the spec logs
+  the answer.
+- `cut_clip` / `measure_dub` / `ffmpeg_output` / `run_dub` / `read_back` and the
+  route are `mutants::skip` glue; every decision is in a tested pure fn.
+- UNVERIFIED until the first SNV run: the real session's time for a 20 s clip
+  (expected ~20 s streaming + ≤ 8 s drain + the loudness passes, well under 240 s).
 
 ## Upgrade path (the ONLY sanctioned change to this frozen path)
 When a newer Live Translate model ships: set `dub_model` (Nastavenia → Dabing →
