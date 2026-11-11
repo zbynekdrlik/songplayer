@@ -537,12 +537,16 @@ spec's `afterAll` / `afterEach` restore start the start playlist's NEXT
 song, whether it was playing or paused (11.11.2026: `sp-fast` paused and
 silent before run 43106123548, playing after it; camera-box's
 program-audio sampler read SP-program at -38..-50 dBFS and its release
-E2E refused). So the E2E job records SP-program's source and its
-playlist's transport right after its first lease wait ("Record
-SP-program's playlist transport", `scripts/program_transport.py save`,
-the box's Python, `$env:RUNNER_TEMP\sp-program-start.json`) and, as its
-last box step (`!cancelled()` and the record taken: after a failed suite
-too), pauses that playlist again when it did not play at the record, is
+E2E refused). A restart starts SP-program's playlist playing as well
+(dev run 43111838795: a record taken in the E2E job, after the deploy's
+restart, read `Playing` and put nothing back). So the DEPLOY job records
+SP-program's source and its playlist's transport before it stops
+SongPlayer ("Record SP-program's playlist transport", right after the
+runner's auto-start delivery; `scripts/program_transport.py save`, the
+box's Python; the JSON goes out as the job output `program_start`; no
+answer = a warning and no record) and the E2E job, as its last box step
+(`!cancelled()` and a record there: after a failed suite too), writes it
+to a file and pauses that playlist again when it did not play at the record, is
 still the program's source and plays now, then reads the pause back
 within 10 s or fails (`restore`). An operator's cut or play meanwhile is
 kept. Tests: `scripts/tests/test_program_transport.py` (Eval Checks; the

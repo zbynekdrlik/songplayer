@@ -1073,6 +1073,7 @@ jobs:
     # older run / a moved ref).
     outputs:
       deployed_version: ${{ steps.healthcheck.outputs.deployed_version }}
+      program_start: ${{ steps.program_start.outputs.program_start }}
     steps:
       - uses: actions/checkout@v4
 
@@ -1181,6 +1182,26 @@ jobs:
             Write-Error "FAIL: scripts/runner-autostart.ps1 exited $code - the runner's auto-start is not delivered (see its lines above); SongPlayer was not stopped"
             exit 1
           }
+
+      # #308: a restart starts SP-program's playlist playing, and the E2E
+      # job's restore cuts re-kick it too. Record SP-program's playlist and
+      # its transport BEFORE this job stops SongPlayer; the E2E job's last
+      # step pauses it again when it did not play here (camera-box's rig
+      # needs SP-program silent, 11.11.2026). No answer (SongPlayer down) =
+      # no record, a warning, and nothing put back.
+      - name: Record SP-program's playlist transport (#308)
+        id: program_start
+        shell: powershell
+        run: |
+          $py = "C:\Program Files\Python312\python.exe"
+          $file = "$env:RUNNER_TEMP\sp-program-start.json"
+          & $py scripts\program_transport.py save $file
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::warning::SP-program's start state could not be read (exit $LASTEXITCODE): nothing to put back after the E2E job"
+            exit 0
+          }
+          $json = (Get-Content -Path $file -Raw).Trim()
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "program_start=$json"
 
       - name: Deploy SongPlayer
         id: deploy
@@ -1420,22 +1441,6 @@ jobs:
           }
           if ($code -ne 0) {
             Write-Error "FAIL: the rig-lease gate itself failed (exit $code)"
-            exit 1
-          }
-
-      # #308: the title check and every post-deploy spec restore SP-program's
-      # start scene with a cut, and a cut re-kicks a playlist (it starts its
-      # next song even when it was paused). Record SP-program's playlist and
-      # its transport now; the job's last step pauses it again when it did
-      # not play here (camera-box's rig needs SP-program silent, 11.11.2026).
-      - name: Record SP-program's playlist transport (#308)
-        id: program_start
-        shell: powershell
-        run: |
-          $py = "C:\Program Files\Python312\python.exe"
-          & $py scripts\program_transport.py save "$env:RUNNER_TEMP\sp-program-start.json"
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "FAIL: SP-program's start state could not be read (exit $LASTEXITCODE)"
             exit 1
           }
 
@@ -2669,11 +2674,15 @@ jobs:
       # paused again; an operator's cut or play meanwhile is kept). Runs
       # after a failed suite too.
       - name: Put SP-program's playlist transport back (#308)
-        if: ${{ !cancelled() && steps.program_start.outcome == 'success' }}
+        if: ${{ !cancelled() && needs.deploy-resolume.outputs.program_start != '' }}
         shell: powershell
+        env:
+          PROGRAM_START: ${{ needs.deploy-resolume.outputs.program_start }}
         run: |
           $py = "C:\Program Files\Python312\python.exe"
-          & $py scripts\program_transport.py restore "$env:RUNNER_TEMP\sp-program-start.json"
+          $file = "$env:RUNNER_TEMP\sp-program-start.json"
+          Set-Content -Path $file -Value $env:PROGRAM_START -NoNewline -Encoding ascii
+          & $py scripts\program_transport.py restore $file
           if ($LASTEXITCODE -ne 0) {
             Write-Error "FAIL: SP-program's playlist transport was not put back (exit $LASTEXITCODE)"
             exit 1
