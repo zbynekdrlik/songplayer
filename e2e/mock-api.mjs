@@ -2406,9 +2406,11 @@ function mockAsioOutput(e, network) {
   };
 }
 // #285: a Dante entry as the server lists it: the ASIO worker's line, its
-// `type`, and the stack's figures while it runs.
-function mockDanteOutput(e, network) {
-  const line = mockAsioOutput({ ...e, asio: { driver: e.dante.device, channels: [0, 1] } }, network);
+// `type`, and the stack's figures while it runs. The worker hands the device
+// the program's 48 kHz whatever the network's rate (dlink converts on the
+// device, #285 step 2), so its rate is 48 kHz.
+function mockDanteOutput(e) {
+  const line = mockAsioOutput({ ...e, asio: { driver: e.dante.device, channels: [0, 1] } }, 48000);
   const dante = {
     clock_ready: true,
     live_flows: 1,
@@ -2427,7 +2429,7 @@ function mockOutputs() {
   const network = Number(settings.audio_network_rate || 48000);
   return list.map((e) => {
     if (e.type === "asio") return mockAsioOutput(e, network);
-    if (e.type === "dante") return mockDanteOutput(e, network);
+    if (e.type === "dante") return mockDanteOutput(e);
     const rate = e.rate === "network" || e.rate === undefined ? network : Number(e.rate);
     const enabled = e.enabled !== false;
     const held = enabled ? vbanHeld.get(e.id) : undefined;

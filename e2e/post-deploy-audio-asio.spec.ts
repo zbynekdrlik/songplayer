@@ -16,7 +16,10 @@
  *    (#233 review round 2: the owner's fault, a faded skip or insert),
  *    |ppm| <= 300 and a latency (`asioGateFailures`). Every output is measured over the SAME
  *    minute, so the gate's time does not grow with the number of outputs
- *    (up to 4, `MAX_ASIO_OUTPUTS`).
+ *    (up to 4, `MAX_ASIO_OUTPUTS`). A native Dante output (#285) is also
+ *    judged on its stack's figures over that minute (`danteGateFailures`):
+ *    its clock ready at both reads, a receiver's flow, packets sent, none
+ *    2 ms or more late, no pump late / missed / overrun.
  *
  * 3. #233 (the spawn finding): a child process SongPlayer spawns (one yt-dlp,
  *    `POST /api/v1/youtube/probe`; skipped when no output runs, every
@@ -49,6 +52,7 @@ import {
   asioCount,
   asioCountReading,
   asioGateFailures,
+  danteGateFailures,
   type OutputStatus,
 } from "./audio-outputs-gate";
 import {
@@ -175,6 +179,9 @@ test.describe("ASIO output (#233)", () => {
       console.log(`[#233 asio] second: ${JSON.stringify(second)}`);
       if (second.note) console.log(`[#233 asio] note: ${second.note}`);
       expect(asioGateFailures(f, second), `ASIO output ${f.id}`).toEqual([]);
+      // #285: a native Dante output's stack figures over the same minute
+      // (none for any other output).
+      expect(danteGateFailures(f, second), `Dante output ${f.id}`).toEqual([]);
     }
   });
 

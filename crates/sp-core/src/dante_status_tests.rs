@@ -8,7 +8,7 @@ fn figures() -> AsioFigures {
         latency_ms: 76.5,
         underruns: 2,
         hard_recentres: 1,
-        driver_rate: 96_000,
+        driver_rate: 48_000,
         rate_ppm: 1.5,
         locked: true,
         ppm: -0.5,
@@ -49,7 +49,7 @@ fn no_chip_of_a_dante_output_speaks_of_a_card_or_a_driver() {
     let f = figures();
     let chips = [
         dante_state_chips("beží", &f, Some(&dante())),
-        dante_resampling_chips(&f),
+        dante_resampling_chips(&f, 96_000),
     ]
     .concat();
     assert!(chips.len() >= 10);
@@ -62,8 +62,56 @@ fn no_chip_of_a_dante_output_speaks_of_a_card_or_a_driver() {
 }
 
 #[test]
+fn the_conversion_names_the_network_rate_the_device_converts_to() {
+    let chips = dante_resampling_chips(&figures(), 96_000);
+    let c = chips.iter().find(|c| c.key == "asio-conversion").unwrap();
+    assert_eq!(c.text, "48 → 96 kHz (prevádza zariadenie Dante)");
+    assert_eq!(c.title.as_deref(), Some(CONVERSION_TIP));
+    assert_eq!(chips[0].key, "asio-conversion", "the chip keeps its place");
+    assert_eq!(
+        text_of(
+            &dante_resampling_chips(&figures(), 44_100),
+            "asio-conversion"
+        ),
+        "48 → 44,1 kHz (prevádza zariadenie Dante)"
+    );
+    // The worker's own rate (always the program's for a Dante output) does
+    // not name the conversion: the device's network rate does.
+    let at_96 = AsioFigures {
+        driver_rate: 96_000,
+        ..figures()
+    };
+    assert_eq!(
+        text_of(&dante_resampling_chips(&at_96, 48_000), "asio-conversion"),
+        "48 kHz bez prevodu"
+    );
+    let at_48 = dante_resampling_chips(&figures(), 48_000);
+    let c = at_48.iter().find(|c| c.key == "asio-conversion").unwrap();
+    assert_eq!(c.text, "48 kHz bez prevodu");
+    // A network at the program's rate converts nothing: the tooltip says so.
+    assert_eq!(c.title.as_deref(), Some(NO_CONVERSION_TIP));
+}
+
+#[test]
+fn only_the_conversion_chip_changes_with_the_network_rate() {
+    let at_48 = dante_resampling_chips(&figures(), 48_000);
+    let at_96 = dante_resampling_chips(&figures(), 96_000);
+    assert_eq!(at_48.len(), at_96.len());
+    for (a, b) in at_48.iter().zip(&at_96) {
+        assert_eq!(a.key, b.key);
+        if a.key != "asio-conversion" {
+            assert_eq!(a, b);
+        }
+    }
+    assert_eq!(
+        text_of(&at_96, "asio-correction"),
+        "korekcia −0,5 ppm (uberá vzorky)"
+    );
+}
+
+#[test]
 fn the_card_line_names_the_network() {
-    let chips = dante_resampling_chips(&figures());
+    let chips = dante_resampling_chips(&figures(), 96_000);
     assert_eq!(
         text_of(&chips, "asio-card"),
         "sieť Dante +1,5 ppm voči SongPlayeru (odhad zamknutý)"
@@ -73,7 +121,7 @@ fn the_card_line_names_the_network() {
         ..figures()
     };
     assert_eq!(
-        text_of(&dante_resampling_chips(&measuring), "asio-card"),
+        text_of(&dante_resampling_chips(&measuring, 96_000), "asio-card"),
         "sieť Dante voči SongPlayeru: odhad sa ešte meria"
     );
 }

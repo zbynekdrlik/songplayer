@@ -6,8 +6,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::asio_resampling::{
-    AsioFigures, Chip, asio_resampling_chips, asio_state_chips, tenths_sk,
+    AsioFigures, Chip, asio_resampling_chips, asio_state_chips, khz_sk, tenths_sk,
 };
+use crate::audio_outputs::PROGRAM_RATE;
 
 /// `outputs[i].dante`: dstack's status line, its TX flows summed.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -30,11 +31,13 @@ const CLOCK_TIP: &str = "Hodiny siete Dante: SongPlayer ich číta z dsync. Bez 
 const FLOWS_TIP: &str =
     "Koľko prúdov zvuku odoberá zariadenie v sieti Dante (nastavuje sa v Dante Controlleri).";
 const LATE_TIP: &str = "Najväčšie oneskorenie paketu pri odchode a najdlhšie jedno odoslanie, odkedy výstup beží. Musí ostať hlboko pod latenciou zariadenia.";
+const CONVERSION_TIP: &str = "Prevod frekvencie: program SongPlayera má 48 kHz a SongPlayer ho tak posiela zariadeniu Dante; na frekvenciu siete ho prevádza zariadenie Dante samo, pevným pomerom na hodinách siete. SongPlayer len plynulo dorovnáva rozdiel hodín (korekcia).";
+const NO_CONVERSION_TIP: &str = "Prevod frekvencie: program SongPlayera aj sieť Dante bežia na 48 kHz, nič sa neprevádza. SongPlayer len plynulo dorovnáva rozdiel hodín (korekcia).";
 const PUMP_TIP: &str = "Bloky zvuku, ktoré vlákno zariadenia spracovalo neskoro, vynechalo alebo nestihlo, odkedy výstup beží.";
 
 /// The ASIO chips' phrases for a card or a driver, as a Dante output's, whole
 /// so the grammar holds (`karta` is feminine, `zariadenie` neuter).
-const WORDS: [(&str, &str); 12] = [
+const WORDS: [(&str, &str); 11] = [
     ("výstup z karty", "výstup do siete Dante"),
     (
         "vlastné oneskorenie ovládača",
@@ -50,10 +53,6 @@ const WORDS: [(&str, &str); 12] = [
         "Koľkokrát zariadenie Dante požiadalo",
     ),
     ("ovládač sa nezatvára", "zariadenie sa nezatvára"),
-    (
-        "karta (ovládač ASIO) beží na svojej frekvencii",
-        "zariadenie Dante beží na frekvencii siete",
-    ),
     ("hodiny karty", "hodiny siete Dante"),
     ("s kartou", "so sieťou Dante"),
     (
@@ -132,9 +131,34 @@ pub fn dante_state_chips(state: &str, f: &AsioFigures, d: Option<&DanteFigures>)
     chips
 }
 
-/// The second line: the ASIO worker's resampling, in a Dante output's words.
-pub fn dante_resampling_chips(f: &AsioFigures) -> Vec<Chip> {
+/// The conversion chip of a Dante output: the worker hands the device the
+/// program's 48 kHz and dlink converts it to the entry's effective network
+/// rate `network_hz` on the device's clock (#285 step 2), so the chip names
+/// the network's rate, never the worker's (always the program's).
+fn conversion(network_hz: u32) -> Chip {
+    let program = khz_sk(PROGRAM_RATE);
+    if network_hz == PROGRAM_RATE {
+        let text = format!("{program} kHz bez prevodu");
+        return chip("asio-conversion", text, NO_CONVERSION_TIP);
+    }
+    let text = format!(
+        "{program} → {} kHz (prevádza zariadenie Dante)",
+        khz_sk(network_hz)
+    );
+    chip("asio-conversion", text, CONVERSION_TIP)
+}
+
+/// The second line: the ASIO worker's resampling, in a Dante output's words,
+/// its conversion chip naming the network rate `network_hz` the device
+/// converts to.
+pub fn dante_resampling_chips(f: &AsioFigures, network_hz: u32) -> Vec<Chip> {
     worded(asio_resampling_chips(f))
+        .into_iter()
+        .map(|c| match c.key {
+            "asio-conversion" => conversion(network_hz),
+            _ => c,
+        })
+        .collect()
 }
 
 /// The Slovak reason of a waiting Dante output, by the worker's stable code.

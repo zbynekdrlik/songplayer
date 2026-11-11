@@ -1617,8 +1617,9 @@ difference with its UTC time.
   (`Config::split().tx_path_ns`: dlink's budget is the app's TOTAL, the Dante
   latency, the margin and the converter's delay inside it; 15 ms since v0.6.28,
   10 ms in v0.6.22-27: P 8.36 ms, W 6 ms, a 0.64 ms half-band converter, after
-  P 4.01 ms left a receiver 137 late packets in 1 h 50 min). The dashboard's ASIO chip then reads
-  "48 kHz bez prevodu" for this output although dlink converts. Step 3 (dstack
+  P 4.01 ms left a receiver 137 late packets in 1 h 50 min). The worker's own
+  rate is therefore 48 kHz (`outputs[i].rate` / `asio.driver_rate`); the
+  dashboard's conversion chip names the device's conversion instead (below). Step 3 (dstack
   v0.6.25): `asrc_servo.rs` and `asrc.rs` are adapters over dstack-resample's
   `asrc::Controller` and `Converter::drifting` (lane 2's section above; dstack v0.6.15 aligned
   the priming, the stall and the underrun fold with ours); sp-asrc is deleted. `RingProcess`
@@ -1650,7 +1651,51 @@ difference with its UTC time.
 - The dashboard's texts: `dante_status.rs` rewrites the ASIO chips by whole
   phrases (`karta` is feminine, `zariadenie` neuter: a word swap broke the
   grammar), and a test keeps `karta` / `ovládač` / `ASIO` out. A
-  changed ASIO tooltip can need a new phrase there. Chip keys stay `asio-*`.
+  changed ASIO tooltip can need a new phrase there. Chip keys stay `asio-*`
+  (#285 design 6809328088, item 3: the dashboard's tests and the mock key on
+  them; only the words change).
+- **The conversion chip names the network rate** (#285, design 6809328088
+  item 2): the worker hands dlink 48 kHz, so `asio_resampling_chips` alone
+  read "48 kHz bez prevodu" while dlink converts on the device's clock.
+  `dante_resampling_chips(f, network_hz)` replaces the `asio-conversion`
+  chip whole (its own `CONVERSION_TIP`, no phrase rewrite): "48 → 96 kHz
+  (prevádza zariadenie Dante)", "48 kHz bez prevodu" at a 48 kHz network
+  (its own tooltip, `NO_CONVERSION_TIP`: nothing is converted),
+  kHz the Slovak way (`khz_sk`: "44,1"). `network_hz` = the entry's
+  effective rate (`audio_outputs::effective_rate`: `"network"` → the
+  server's `audio_network_rate` from `GET /api/v1/program`, else its Hz),
+  read in sp-ui `audio_outputs_dante.rs::resampling_line` (which also holds
+  `running_asio`: `audio_outputs.rs` is at the cap). It reads the row's
+  entry, not the saved one; a Dante row has no rate control, so an
+  unsaved edit cannot change it. The mock's Dante output
+  runs at 48 kHz like the server's; specs "a running Dante output reads as
+  Dante…" (96 kHz) and "a Dante output on a 48 kHz network converts
+  nothing" in `settings-audio-outputs.spec.ts`; pins in
+  `dante_status_tests.rs`.
+- **The live gate on the stack's figures** (#285, design 6809328088 item
+  1; `e2e/audio-outputs-gate.ts::danteGateFailures`, unit-tested in
+  `audio-outputs-gate.spec.ts`, called in `post-deploy-audio-asio.spec.ts`
+  next to `asioGateFailures` over the SAME minute and its two reads): for a
+  `type: dante` output only (any other: no failure), FOH's own per-window
+  rule — `clock_ready` true at both reads, `live_flows` ≥ 1 at the second
+  (a receiver, FOH, holds a flow), the `late_bins` sum grew (packets went
+  out; a device rebuilt in the minute counts from 0 and fails here), the
+  LAST TWO `late_bins` did not grow (dstack's `media::tx::LATE_EDGES_NS`
+  250 µs / 0.5 / 1 / 2 / 5 ms: bins 4 and 5 are packets 2 ms or more
+  late; bins that change length between the reads fail), `pump_late` /
+  `pump_missed` / `pump_overruns` +0. No `dante` on a running Dante output
+  fails naming the read. NOT gated: `late_max_us` / `send_max_us` (maxima
+  since the start: a start-up spike would fail every deploy). Each failure
+  names the output, the figure and both reads. In effect at SNV only (PP
+  has no Dante output). **Open (#285 comment 6809562378, the main
+  session decides): `pump_late` is gated as the design says, but dstack
+  counts EVERY block the pump runs one block or more behind its due time
+  (`stream.rs` `Due::Run { late }`), and the ledger leaves it out because
+  38 % of the blocks wake one block behind while FOH reads late 0
+  (`audio-faults.md`): if that still holds on resolume-snv, the gate
+  fails every SNV deploy.** `pump_overruns` (a block whose own work took
+  longer than its period) is gated too, although the ledger reads it as a
+  risk only; no live minute of it was read for this lane.
 - Tests run the real stack on `ClockSource::System` (a test receiver over UDP,
   `ONE_DEVICE`: each binds the Dante ports). Not proven yet: Windows media
   threads at load, real PTP, a real receiver, Dante Controller.

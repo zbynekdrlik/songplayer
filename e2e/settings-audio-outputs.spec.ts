@@ -1096,6 +1096,23 @@ test("a running Dante output reads as Dante, with the stack's figures (#285)", a
   await expect(row).not.toContainText("karta");
   await expect(row).not.toContainText("ovládač");
   await expect(chip(page, "asio-card")).not.toHaveAttribute("title", /kart/);
+  // #285: the device converts the program's 48 kHz to the network's rate,
+  // although the worker itself hands it 48 kHz.
+  await expect(chip(page, "asio-conversion")).toHaveText("48 → 96 kHz (prevádza zariadenie Dante)");
+  await expect(chip(page, "asio-conversion")).toHaveAttribute("title", /zariadenie Dante/);
+  await expect(chip(page, "asio-conversion")).not.toHaveAttribute("title", /kart|ovládač|ASIO/);
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+test("a Dante output on a 48 kHz network converts nothing (#285)", async ({ page, request }) => {
+  const seeded = await request.patch("/api/v1/settings", {
+    data: { audio_outputs: DANTE_ENTRY, audio_network_rate: "48000" },
+  });
+  expect(seeded.status()).toBe(204);
+  await openSettings(page);
+  await expect(chip(page, "asio-conversion")).toHaveText("48 kHz bez prevodu", { timeout: 10000 });
+  await expect(chip(page, "asio-conversion")).toHaveAttribute("title", /nič sa neprevádza/);
+  expect(realConsoleErrors()).toEqual([]);
 });
 
 test("a waiting Dante output says why, in Dante's words (#285)", async ({ page, request }) => {

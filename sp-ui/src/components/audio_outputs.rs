@@ -71,7 +71,7 @@ use sp_core::dante_status::{DanteFigures, dante_state_chips, dante_waiting_text}
 #[path = "audio_outputs_dante.rs"]
 mod dante_fields;
 
-use dante_fields::{DanteFields, resampling_line};
+use dante_fields::{DanteFields, resampling_line, running_asio};
 #[path = "audio_outputs_latency.rs"]
 mod latency;
 use latency::LowLatencySwitch;
@@ -177,13 +177,6 @@ fn asio_figures(o: &OutputLive, a: &AsioLive) -> AsioFigures {
     }
 }
 
-/// The output `id` when it is an ASIO output that runs: its figures.
-fn running_asio(live: &ProgramOutputs, id: &str) -> Option<AsioFigures> {
-    let o = live.outputs.iter().find(|o| o.id == id)?;
-    let a = o.asio.as_ref()?;
-    (o.state == "running").then(|| asio_figures(o, a))
-}
-
 /// A row's state line as chips: a running ASIO output's figures (each with
 /// its tooltip), else the one state text (the row's tooltip shows through).
 fn state_chips(live: &ProgramOutputs, id: &str, saved: bool) -> Vec<Chip> {
@@ -232,6 +225,9 @@ struct AsioDriverList {
 pub struct ProgramOutputs {
     #[serde(default)]
     pub outputs: Vec<OutputLive>,
+    /// The rate a `"network"` entry runs at (#285: a Dante row's conversion).
+    #[serde(default)]
+    pub audio_network_rate: u32,
     /// The stored entries the server does not run, each naming its id.
     #[serde(default)]
     pub outputs_problems: Vec<String>,
@@ -709,7 +705,7 @@ fn OutputRow(
             <Show when=move || kind.get() == Some(OutputType::Dante)>
                 <DanteFields id=id entries=entries />
             </Show>
-            <LiveState id=id live=live saved_ids=saved_ids />
+            <LiveState id=id live=live saved_ids=saved_ids entries=entries />
             <button
                 type="button"
                 data-testid="audio-output-remove"
@@ -975,6 +971,7 @@ fn LiveState(
     id: StoredValue<String>,
     live: RwSignal<ProgramOutputs>,
     saved_ids: Memo<Vec<String>>,
+    entries: RwSignal<Vec<OutputEntry>>,
 ) -> impl IntoView {
     view! {
         <span
@@ -992,7 +989,7 @@ fn LiveState(
         // line (empty otherwise).
         <div class="audio-output-resampling" data-testid="audio-output-resampling">
             {move || {
-                chips_view(resampling_line(&live.get(), &id.get_value()))
+                chips_view(resampling_line(&live.get(), entries, &id.get_value()))
             }}
         </div>
     }

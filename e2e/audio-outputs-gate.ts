@@ -34,6 +34,69 @@ export interface OutputStatus {
   asio?: AsioTelemetry;
   /** A running driver off the network's rate or with a long buffer. */
   note?: string;
+  /** #285: a running native Dante output's stack figures. */
+  dante?: DanteTelemetry;
+}
+
+/**
+ * `outputs[i].dante` (`sp_core::dante_status::DanteFigures`, dstack's status
+ * line with its TX flows summed). `late_bins` counts packets by how late they
+ * left past their due time, at dstack's `LATE_EDGES_NS`: under 0.25, 0.5, 1,
+ * 2 and 5 ms, then 5 ms or more — the last two bins are the packets 2 ms or
+ * more late.
+ */
+export interface DanteTelemetry {
+  clock_ready: boolean;
+  live_flows: number;
+  late_bins: number[];
+  late_max_us: number;
+  send_max_us: number;
+  pump_late: number;
+  pump_missed: number;
+  pump_overruns: number;
+}
+
+/** How many of `late_bins`' last bins are "late" (2 ms or more). */
+export const DANTE_LATE_TOP_BINS = 2;
+
+/**
+ * Why a native Dante output's minute fails on the stack's own figures (#285,
+ * design 6809328088): the FOH console's per-window rule. Only a `type: dante`
+ * output is judged (anything else: no failure). At both reads the media clock
+ * runs; at the second a receiver holds a flow (FOH); the packets sent grew
+ * (the `late_bins` sum); no packet 2 ms or more late (the last two bins) and
+ * no pump late / missed / overrun in the minute. `late_max_us` is NOT gated:
+ * it is a since-start maximum, so a start-up spike would fail every deploy.
+ * Each failure names the figure and both reads.
+ */
+export function danteGateFailures(first: OutputStatus, second: OutputStatus): string[] {
+  if (second.type !== "dante") return [];
+  const a = first.dante;
+  const b = second.dante;
+  if (!a || !b) {
+    const missing = [!a && "first", !b && "second"].filter(Boolean).join(" and ");
+    return [`Dante output ${second.id}: no Dante figures (outputs[i].dante) at the ${missing} read`];
+  }
+  const f: string[] = [];
+  const at = `Dante output ${second.id}`;
+  if (!a.clock_ready || !b.clock_ready) {
+    f.push(`${at}: clock_ready ${a.clock_ready} -> ${b.clock_ready}, want true at both reads`);
+  }
+  if (!(b.live_flows >= 1)) f.push(`${at}: live_flows ${a.live_flows} -> ${b.live_flows}, want at least 1`);
+  const sum = (bins: number[]) => bins.reduce((s, n) => s + n, 0);
+  if (!(sum(b.late_bins) > sum(a.late_bins))) {
+    f.push(`${at}: packets sent (late_bins sum) ${sum(a.late_bins)} -> ${sum(b.late_bins)}, want growth`);
+  }
+  const top = (bins: number[]) => sum(bins.slice(-DANTE_LATE_TOP_BINS));
+  if (b.late_bins.length !== a.late_bins.length || b.late_bins.length < DANTE_LATE_TOP_BINS) {
+    f.push(`${at}: late_bins ${JSON.stringify(a.late_bins)} -> ${JSON.stringify(b.late_bins)}, want the same bins at both reads`);
+  } else if (top(b.late_bins) > top(a.late_bins)) {
+    f.push(`${at}: packets 2 ms or more late (last two late_bins) ${top(a.late_bins)} -> ${top(b.late_bins)}`);
+  }
+  for (const k of ["pump_late", "pump_missed", "pump_overruns"] as const) {
+    if (b[k] > a[k]) f.push(`${at}: ${k} ${a[k]} -> ${b[k]}`);
+  }
+  return f;
 }
 
 /** `outputs[i].asio` (the fields the gate reads). */
