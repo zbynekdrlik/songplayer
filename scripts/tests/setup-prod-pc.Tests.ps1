@@ -621,6 +621,21 @@ Describe 'Get-ProdPcPlan: every wired adapter (issue 285, the owner''s rule)' {
         @(Get-ProdPcPlan -Facts $facts) | Should -HaveCount 0
     }
 
+    It 'reads a Dante leg only from a Dante70 that is there and on' {
+        foreach ($case in @(
+                @('Up', $true), @('Disconnected', $true), @('Not Present', $false), @('Disabled', $false))) {
+            $script:Status = $case[0]
+            function Get-NetAdapter {
+                param([switch]$IncludeHidden)
+                [pscustomobject]@{ Name = 'Ethernet 4'; Status = 'Up' }
+                [pscustomobject]@{ Name = 'Dante70'; Status = $script:Status }
+            }
+            Read-ProdPcDanteLeg | Should -Be $case[1] -Because $case[0]
+        }
+        function Get-NetAdapter { param([switch]$IncludeHidden) [pscustomobject]@{ Name = 'Ethernet 4'; Status = 'Up' } }
+        Read-ProdPcDanteLeg | Should -BeFalse
+    }
+
     It 'applies an RTL8156 value through the driver, never around it' {
         $script:Set = @()
         function Set-NetAdapterAdvancedProperty {

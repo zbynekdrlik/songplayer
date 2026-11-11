@@ -45,6 +45,24 @@ fn dante_box() -> Fake {
     reg
 }
 
+/// The problems of every wired adapter: one "cannot be read" per adapter,
+/// then each value in the order read; every adapter taken as carrying a
+/// Dante leg (the tests' resolume-snv: each value judged).
+fn problems(nics: &Option<Vec<WiredNicFacts>>) -> Vec<EnvProblem> {
+    let carriers: Vec<String> = nics
+        .iter()
+        .flatten()
+        .filter_map(|n| n.name.clone())
+        .collect();
+    problems_besides(nics, &[], &carriers)
+}
+
+/// One adapter on the status, every adapter taken as carrying a Dante leg
+/// (the tests').
+fn view(nic: &WiredNicFacts) -> WiredNicView {
+    view_on(nic, &nic.name.clone().into_iter().collect::<Vec<_>>())
+}
+
 fn read(reg: &Fake) -> Option<Vec<WiredNicFacts>> {
     wired_nics(reg, &Ok(vec![wired_row(GUID)]), &mut Vec::new())
 }

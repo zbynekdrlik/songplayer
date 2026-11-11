@@ -888,9 +888,16 @@ function Read-ProdPcDriverKeywords {
     return , @((Get-Item -LiteralPath $params).GetSubKeyNames())
 }
 
-# Whether the Dante leg's adapter Dante70 is present (Test-ProdPcDanteLeg).
+# Whether the Dante leg's adapter Dante70 is there (Test-ProdPcDanteLeg): a
+# leftover one (Not Present, a removed VLAN) or one turned off is no leg.
+# dstack's standard names the leg Dante70 (its firewall group is bound to it);
+# a Dante output on an adapter named otherwise gets no RTL8156 values from
+# this script, while SongPlayer's gate (the output's address) still names them.
 function Read-ProdPcDanteLeg {
-    return (@(Get-NetAdapter -IncludeHidden | Where-Object { $_.Name -eq 'Dante70' }).Count -gt 0)
+    $legs = @(Get-NetAdapter -IncludeHidden | Where-Object {
+            [string]$_.Name -eq 'Dante70' -and [string]$_.Status -notin @('Not Present', 'Disabled')
+        })
+    return ($legs.Count -gt 0)
 }
 
 # A user's roaming AppData by SID: the user's own shell folder when the

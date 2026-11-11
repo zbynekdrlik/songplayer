@@ -269,19 +269,6 @@ pub fn wired_nics(
     )
 }
 
-/// The problems of every wired adapter: one "cannot be read" per adapter,
-/// then each value in the order read; every adapter taken as carrying a
-/// Dante leg (the tests' resolume-snv: each value judged).
-#[cfg(test)]
-pub fn problems(nics: &Option<Vec<WiredNicFacts>>) -> Vec<EnvProblem> {
-    let carriers: Vec<String> = nics
-        .iter()
-        .flatten()
-        .filter_map(|n| n.name.clone())
-        .collect();
-    problems_besides(nics, &[], &carriers)
-}
-
 /// The problems, leaving out each `(guid, keyword)` another check already
 /// judges on that adapter (the SoundGrid adapter's own settings), so one
 /// wrong value is named once, and each value not [`judged`] there (the
@@ -329,13 +316,6 @@ pub fn problems_besides(
         }
     }
     problems
-}
-
-/// One adapter on the status, every adapter taken as carrying a Dante leg
-/// (the tests').
-#[cfg(test)]
-pub fn view(nic: &WiredNicFacts) -> WiredNicView {
-    view_on(nic, &nic.name.clone().into_iter().collect::<Vec<_>>())
 }
 
 /// One adapter on the status: the values [`judged`] there (`carriers`).

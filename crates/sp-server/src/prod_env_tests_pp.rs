@@ -12,7 +12,7 @@
 use sp_core::prod_env::EnvProblem;
 
 use super::super::audio::Reading;
-use super::super::audio::read::wired::{WiredNicFacts, WiredValue};
+use super::super::audio::read::wired::{RTL8156_VALUES, WiredNicFacts, WiredValue};
 use super::super::network::{self, Holder, NetIf, NetworkFacts, PhysicalNic};
 use super::super::{Check, EnvFacts, status_of, verdict};
 
@@ -109,11 +109,11 @@ fn pp_with_no_dante_leg_holds_whatever_its_rtl8156_lacks() {
 
 /// The same RTL8156 at the wrong values with no leg: still nothing.
 #[test]
-fn pp_s_rtl8156_at_its_drivers_values_is_not_judged_with_no_leg() {
+fn pp_s_rtl8156_at_wrong_values_is_not_judged_with_no_leg() {
     let mut facts = pp();
     facts.audio.wired_nics.as_mut().unwrap()[1]
         .values
-        .truncate(13);
+        .retain(|v| !RTL8156_VALUES.iter().any(|(k, _)| *k == v.keyword));
     with_rtl8156(&mut facts, Reading::Value("3".to_string()), true);
     assert!(verdict(&facts).ok);
 }
