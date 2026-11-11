@@ -27,7 +27,7 @@ use super::wire::{Artifact, is_sha256_hex};
 use crate::downloader::cache::is_valid_video_id;
 
 /// #307: at most this many verified parts are remembered.
-pub(crate) const MAX_VERIFIED: usize = 0;
+pub(crate) const MAX_VERIFIED: usize = 256;
 
 /// #307: a part this client hashed and found to be its artifact.
 #[derive(Debug)]

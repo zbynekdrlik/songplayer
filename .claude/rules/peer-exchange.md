@@ -405,7 +405,11 @@ wait for a peer that has the song", below).
   and fetch one job's artifacts from ONE peer (`FetchPlan` = one peer):
   two fetches of the same video and kind from two peers would drop each
   other's part. A failed adoption keeps a verified part: the next attempt
-  re-hashes it locally and does not transfer it again.
+  does not transfer it again, and does not hash it again either while its
+  size and mtime are the ones this process verified (#307,
+  `PeerClient::verified`, in memory, at most 256 parts, then it starts
+  over; `part_hashes` counts the real hashes); a changed or unknown part
+  is hashed as before.
 - The Cloudflare Access service token for PP is MAIN SESSION OPS (plan task
   5.3 step 8, pending the owner on 7.10.2026, #229 comment 6031719797):
   until it exists the probe of `https://sp.newlevel.media` answers
@@ -727,7 +731,7 @@ wait for a peer that has the song", below).
   video share files by name (#136), so a final name may hold another row's
   file: the VIDEO is renamed first, and when it cannot take its name (that
   row's video open in a player) nothing is touched and both verified parts
-  stay for the next ask (re-hashed, no transfer); when the audio then cannot
+  stay for the next ask (no transfer; not hashed again while unchanged, #307); when the audio then cannot
   take its name, a video this attempt placed goes back into its part, a
   video that was there stays.
 - `Exchange::run_here` drops the parts of the job's needed kinds
