@@ -152,3 +152,43 @@ def test_main_usage_and_both_commands(tmp_path, capsys):
 def test_a_health_answer_that_is_no_list_is_refused():
     with pytest.raises(ValueError):
         pt.transport_of({"rows": []}, 7)
+
+
+def _steps(job: str) -> list[str]:
+    """The step names of `job` in ci.yml, in order (a line scan: the
+    workflow is parsed by GitHub, not by this test)."""
+    text = (
+        Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml"
+    ).read_text()
+    lines = text.splitlines()
+    start = lines.index(f"  {job}:")
+    names = []
+    for line in lines[start + 1 :]:
+        if (
+            line.startswith("  ")
+            and not line.startswith("   ")
+            and line.strip().endswith(":")
+        ):
+            break
+        if line.strip().startswith("- name:"):
+            names.append(line.strip()[len("- name:") :].strip())
+    return names
+
+
+def test_the_record_is_taken_in_the_deploy_job_before_its_stop():
+    """The deploy's own restart plays SP-program's playlist (dev run
+    43111838795: recorded `Playing` in the E2E job after it), so the record
+    must be read before the deploy stops SongPlayer."""
+    deploy = _steps("deploy-resolume")
+    record = "Record SP-program's playlist transport (#308)"
+    assert record in deploy
+    assert deploy.index(record) < deploy.index("Deploy SongPlayer")
+    assert record not in _steps("e2e-resolume")
+
+
+def test_the_restore_reads_the_deploy_jobs_record():
+    text = (
+        Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml"
+    ).read_text()
+    assert "program_start: ${{ steps.program_start.outputs.program_start }}" in text
+    assert "needs.deploy-resolume.outputs.program_start" in text
