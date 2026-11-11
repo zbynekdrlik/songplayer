@@ -1687,15 +1687,12 @@ difference with its UTC time.
   fails naming the read. NOT gated: `late_max_us` / `send_max_us` (maxima
   since the start: a start-up spike would fail every deploy). Each failure
   names the output, the figure and both reads. In effect at SNV only (PP
-  has no Dante output). **Open (#285 comment 6809562378, the main
-  session decides): `pump_late` is gated as the design says, but dstack
-  counts EVERY block the pump runs one block or more behind its due time
-  (`stream.rs` `Due::Run { late }`), and the ledger leaves it out because
-  38 % of the blocks wake one block behind while FOH reads late 0
-  (`audio-faults.md`): if that still holds on resolume-snv, the gate
-  fails every SNV deploy.** `pump_overruns` (a block whose own work took
-  longer than its period) is gated too, although the ledger reads it as a
-  risk only; no live minute of it was read for this lane.
+  has no Dante output). `pump_late` stays gated (ROZHODNUTÉ on #285,
+  measured 11.11.2026 23:28-23:29Z on out-4, dstack v0.6.72: `pump_late`,
+  `pump_missed`, `pump_overruns` all 0 since the restart and +0 over the
+  window, the two >= 2 ms bins unchanged at 2 / 0; the "38 % one block
+  behind" of `audio-faults.md` was read before v0.6.57's MMCSS move). A
+  red on it is decided again from that run's own reads.
 - Tests run the real stack on `ClockSource::System` (a test receiver over UDP,
   `ONE_DEVICE`: each binds the Dante ports). Not proven yet: Windows media
   threads at load, real PTP, a real receiver, Dante Controller.
