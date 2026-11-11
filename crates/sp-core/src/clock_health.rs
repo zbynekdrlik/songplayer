@@ -7,7 +7,7 @@
 //! tokio I/O, and re-exports these types.
 //!
 //! `clock_ok = is_locked && mode ∈ {LOCK, NANO}`. A missing/unreachable
-//! endpoint yields `clock_ok = false` with reason `"no dantesync"` and MUST
+//! endpoint yields `clock_ok = false` with reason `"no dsync"` and MUST
 //! never block playback (contract §4).
 
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ pub struct ClockHealth {
     pub ntp_age_s: Option<i64>,
     /// `is_locked && mode ∈ {LOCK, NANO}` — the CLOCK-OK precondition.
     pub clock_ok: bool,
-    /// Human reason when `!clock_ok` (e.g. `"no dantesync"`).
+    /// Human reason when `!clock_ok` (e.g. `"no dsync"`).
     pub reason: Option<String>,
     /// RFC-3339 timestamp of the poll that produced this value; `None` for the
     /// default/never-polled state.
@@ -52,7 +52,7 @@ pub struct DantesyncStatus {
 }
 
 /// Pure reduction of a dantesync payload to [`ClockHealth`]. `None` (endpoint
-/// missing/unreachable/unparseable) → not ok, reason `"no dantesync"`.
+/// missing/unreachable/unparseable) → not ok, reason `"no dsync"`.
 pub fn evaluate(payload: Option<&DantesyncStatus>) -> ClockHealth {
     match payload {
         None => ClockHealth {
@@ -62,7 +62,7 @@ pub fn evaluate(payload: Option<&DantesyncStatus>) -> ClockHealth {
             ntp_failed: None,
             ntp_age_s: None,
             clock_ok: false,
-            reason: Some("no dantesync".to_string()),
+            reason: Some("no dsync".to_string()),
             sampled_at: None,
         },
         Some(s) => {

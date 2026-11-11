@@ -306,7 +306,7 @@ pub struct PlaybackEngine {
     ndi_health_registry: std::sync::Arc<crate::playback::ndi_health::NdiHealthRegistry>,
     /// Shared dantesync clock health (#146). Written by the clock-health
     /// poller (spawned in `lib.rs::start`); read when building each NDI health
-    /// snapshot. Defaults to `no dantesync` until a handle is injected.
+    /// snapshot. Defaults to `no dsync` until a handle is injected.
     clock_health: std::sync::Arc<std::sync::RwLock<crate::playback::clock_health::ClockHealth>>,
     /// Per-pipeline genlock lock-state event windows (#149, Lane 1). One 60 s
     /// ring of cumulative pacing counters per playlist, pushed at each
@@ -415,7 +415,7 @@ impl PlaybackEngine {
 
     /// Inject the shared dantesync clock-health handle written by the poller
     /// spawned in `lib.rs::start` (#146). Until this is called, snapshots
-    /// carry the default `no dantesync` health.
+    /// carry the default `no dsync` health.
     pub fn set_clock_health(
         &mut self,
         handle: std::sync::Arc<std::sync::RwLock<crate::playback::clock_health::ClockHealth>>,

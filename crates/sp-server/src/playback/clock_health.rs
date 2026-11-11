@@ -8,7 +8,7 @@
 //! thin reqwest/tokio I/O glue.
 //!
 //! `clock_ok = is_locked && mode ∈ {LOCK, NANO}`. A missing/unreachable
-//! endpoint yields `clock_ok = false` with reason `"no dantesync"` and MUST
+//! endpoint yields `clock_ok = false` with reason `"no dsync"` and MUST
 //! never block playback (contract §4).
 
 use std::sync::{Arc, RwLock};
@@ -23,7 +23,7 @@ pub use sp_core::clock_health::{ClockHealth, DantesyncStatus, evaluate};
 pub const DANTESYNC_STATUS_URL_DEFAULT: &str = "http://127.0.0.1:8898/status";
 
 /// Poll the dantesync endpoint once (500 ms timeout). Never returns an error —
-/// any failure maps to the `"no dantesync"` health so playback never blocks.
+/// any failure maps to the `"no dsync"` health so playback never blocks.
 ///
 /// mutants::skip — network I/O only exercised against a live dantesync
 /// endpoint; the reduction it wraps ([`evaluate`]) is unit-tested.
@@ -46,7 +46,7 @@ async fn poll_once(client: &reqwest::Client, url: &str) -> ClockHealth {
     health
 }
 
-/// Spawn the 1 Hz dantesync poller. Writes the latest [`ClockHealth`] into
+/// Spawn the 1 Hz dsync poller. Writes the latest [`ClockHealth`] into
 /// `shared` and logs only on `clock_ok` state changes (INFO on recovery into
 /// ok, WARN on loss; never every tick). Exits on the shutdown broadcast.
 ///
@@ -63,7 +63,7 @@ pub fn spawn_clock_health_poller(
         let mut ticker = tokio::time::interval(Duration::from_secs(1));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut last_ok: Option<bool> = None;
-        info!(%url, "clock-health: dantesync poller started");
+        info!(%url, "clock-health: dsync poller started");
         loop {
             tokio::select! {
                 _ = shutdown.recv() => {

@@ -46,14 +46,14 @@ fn evaluate_unlocked_nano_is_not_ok() {
 fn evaluate_none_is_not_ok_with_no_dantesync_reason() {
     let h = evaluate(None);
     assert!(!h.clock_ok);
-    assert_eq!(h.reason.as_deref(), Some("no dantesync"));
+    assert_eq!(h.reason.as_deref(), Some("no dsync"));
 }
 
 #[test]
 fn default_clock_health_is_no_dantesync() {
     let h = ClockHealth::default();
     assert!(!h.clock_ok);
-    assert_eq!(h.reason.as_deref(), Some("no dantesync"));
+    assert_eq!(h.reason.as_deref(), Some("no dsync"));
 }
 
 /// Parse the exact live payload sample recorded in the contract digest §D

@@ -273,7 +273,7 @@ pub async fn start(
 
     // 3b'. dantesync clock health (#146). Shared handle: the 1 Hz poller writes
     // it, the playback engine reads it into every NDI health snapshot. Never
-    // blocks playback — a missing endpoint just reads `no dantesync`.
+    // blocks playback — a missing endpoint just reads `no dsync`.
     let clock_health = Arc::new(std::sync::RwLock::new(
         playback::clock_health::ClockHealth::default(),
     ));

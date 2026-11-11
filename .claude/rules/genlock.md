@@ -62,7 +62,7 @@ delivery to the program bus; `SP-program`'s own NDI submit is timed on
   instant of a late or catch-up emit); never `SYNTHESIZE` (it was only on
   the deleted SDK-clocked standby BGRA black).
 - `clock_ok = is_locked && mode ∈ {LOCK, NANO}` from dantesync
-  `127.0.0.1:8898/status`; unreachable → `no dantesync`, never blocks playback.
+  `127.0.0.1:8898/status`; unreachable → `no dsync`, never blocks playback.
 - Acceptance is on the RECEIVER (`genlock-fifo audit … locked=1`, camera-box
   #1300), never our own counters. Open questions go to camera-box#1294.
 - Pacing (#147) runs on the exact-rational 100 ns grid: sleep target from
