@@ -2406,9 +2406,11 @@ function mockAsioOutput(e, network) {
   };
 }
 // #285: a Dante entry as the server lists it: the ASIO worker's line, its
-// `type`, and the stack's figures while it runs.
+// `type`, and the stack's figures while it runs. The worker hands the device
+// the program's 48 kHz whatever the network's rate (dlink converts on the
+// device, #285 step 2), so its rate is 48 kHz.
 function mockDanteOutput(e, network) {
-  const line = mockAsioOutput({ ...e, asio: { driver: e.dante.device, channels: [0, 1] } }, network);
+  const line = mockAsioOutput({ ...e, asio: { driver: e.dante.device, channels: [0, 1] } }, 48000);
   const dante = {
     clock_ready: true,
     live_flows: 1,

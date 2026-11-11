@@ -1,17 +1,34 @@
 //! The Dante row of Nastavenia "Zvukové výstupy" (#285).
 
 use leptos::prelude::*;
-use sp_core::asio_resampling::{Chip, asio_resampling_chips};
-use sp_core::audio_outputs::OutputEntry;
+use sp_core::asio_resampling::{AsioFigures, Chip, asio_resampling_chips};
+use sp_core::audio_outputs::{OutputEntry, effective_rate};
 use sp_core::dante_status::dante_resampling_chips;
 
-use super::{ProgramOutputs, edit, read, running_asio};
+use super::{ProgramOutputs, asio_figures, edit, read};
 
-/// A running ASIO or Dante output's resampling line, empty otherwise.
-pub(super) fn resampling_line(live: &ProgramOutputs, id: &str) -> Vec<Chip> {
+/// The output `id` when it is an ASIO (or Dante) output that runs: its
+/// figures.
+pub(super) fn running_asio(live: &ProgramOutputs, id: &str) -> Option<AsioFigures> {
+    let o = live.outputs.iter().find(|o| o.id == id)?;
+    let a = o.asio.as_ref()?;
+    (o.state == "running").then(|| asio_figures(o, a))
+}
+
+/// A running ASIO or Dante output's resampling line, empty otherwise. A
+/// Dante row names the rate its device converts to: the entry's effective
+/// rate against the network rate the server applied (#285).
+pub(super) fn resampling_line(
+    live: &ProgramOutputs,
+    entries: RwSignal<Vec<OutputEntry>>,
+    id: &str,
+) -> Vec<Chip> {
     let dante = live.outputs.iter().any(|o| o.id == id && o.kind == "dante");
     match running_asio(live, id) {
-        Some(f) if dante => dante_resampling_chips(&f),
+        Some(f) if dante => {
+            let rate = read(entries, id, |e| e.rate);
+            dante_resampling_chips(&f, effective_rate(rate, live.audio_network_rate))
+        }
         Some(f) => asio_resampling_chips(&f),
         None => Vec::new(),
     }
