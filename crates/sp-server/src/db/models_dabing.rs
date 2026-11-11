@@ -179,6 +179,26 @@ pub async fn list_dub_videos(pool: &SqlitePool) -> Result<Vec<DubRow>, sqlx::Err
     Ok(rows.iter().map(row_to_dub_row).collect())
 }
 
+/// Whether `video_id` may play on the Dabing playlist `playlist_id` (#300):
+/// `Some(normalized)` for a video of the Dabing section — imported into the
+/// Dabing playlist itself, or dub-requested from any playlist — that has not
+/// left its YouTube playlist; `None` for any other video. The Dabing page's ▶
+/// plays every row on the Dabing output, never on the video's own playlist.
+pub async fn dabing_video_membership(
+    pool: &SqlitePool,
+    playlist_id: i64,
+    video_id: i64,
+) -> Result<Option<bool>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT normalized FROM videos WHERE id = ? AND removed_at IS NULL \
+         AND (playlist_id = ? OR dub_requested = 1)",
+    )
+    .bind(video_id)
+    .bind(playlist_id)
+    .fetch_optional(pool)
+    .await
+}
+
 /// Persist the resolved dub voice for a video (#184 round C). The voice name is
 /// stored in the EXISTING nullable `dub_voice_ref_path` TEXT column — REPURPOSED
 /// as the voice name (it was dead plumbing from the abandoned clone lane, so no

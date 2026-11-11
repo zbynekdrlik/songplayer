@@ -172,7 +172,9 @@ pub struct PlayVideoRequest {
 // validating (a) the playlist exists and (b) the video is playable on it.
 // Validation branches on playlist kind (#134): 'custom' playlists (ytlive)
 // require the video to be a member of the playlist_items set list — same
-// as before. Any other kind (today only 'youtube') instead requires the
+// as before. The 'dabing' playlist takes every video of the Dabing section
+// (#300: its own imports and every dub-requested video, normalized). Any
+// other kind (today only 'youtube') instead requires the
 // video to belong to the playlist directly via videos.playlist_id AND be
 // normalized — those playlists have no set-list concept, they just have
 // cached videos. Matches the 404/409 status code discipline of the sibling
@@ -208,6 +210,31 @@ pub async fn post_play_video(
                 }
                 Err(e) => {
                     warn!(playlist_id, video_id = req.video_id, %e, "post_play_video: position lookup failed");
+                    return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+                }
+            }
+        }
+        Some("dabing") => {
+            // #300: the Dabing page's ▶ plays every row of the Dabing section
+            // on the Dabing output, whatever playlist the video belongs to
+            // (a video toggled for dubbing elsewhere keeps its own playlist).
+            let m = crate::db::models_dabing::dabing_video_membership(
+                &state.pool,
+                playlist_id,
+                req.video_id,
+            )
+            .await;
+            match m {
+                Ok(Some(true)) => {}
+                Ok(Some(false)) => {
+                    return (StatusCode::CONFLICT, "video not normalized").into_response();
+                }
+                Ok(None) => {
+                    return (StatusCode::NOT_FOUND, "video not in the Dabing section")
+                        .into_response();
+                }
+                Err(e) => {
+                    warn!(playlist_id, video_id = req.video_id, %e, "post_play_video: dabing lookup failed");
                     return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
                 }
             }

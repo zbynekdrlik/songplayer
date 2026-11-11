@@ -2,7 +2,8 @@
 //! every dub-requested video newest-first (from `store.dabing`) as the shared
 //! `SongRow`: the dub chip (with the engine-chain `stiahnuté → dabing → titulky
 //! → pripravené` folded into its tooltip), the text chip, and the primary play
-//! action that plays the video on its own playlist output.
+//! action that plays the video on the page's own output, the Dabing playlist
+//! (#300: never on the video's own playlist, which may be the one on program).
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -72,6 +73,7 @@ fn chain_detail(chain_state: &str, dub_error: Option<&str>, with_stems: bool) ->
 pub fn DabingList() -> impl IntoView {
     let store = expect_context::<crate::store::DashboardStore>();
     let dabing = store.dabing;
+    let dabing_pid = store.dabing_playlist_id;
 
     view! {
         <div class="dabing-list" data-testid="dabing-list">
@@ -101,7 +103,6 @@ pub fn DabingList() -> impl IntoView {
                                     )
                                 }
                                 children=move |row| {
-                                    let playlist_id = row.playlist_id;
                                     let video_id = row.video_id;
                                     let title = row.title.clone();
                                     let with_stems = shows_stems_step(row.stem_status.as_deref());
@@ -118,7 +119,13 @@ pub fn DabingList() -> impl IntoView {
                                         ),
                                         ChipView::new(text_chip(row.lyrics_present, false, false)),
                                     ];
+                                    // #300: the Dabing output plays it, shown by
+                                    // this page's Player; no id yet = no play.
                                     let on_play = Callback::new(move |_| {
+                                        let Some(Some(playlist_id)) = dabing_pid
+                                            .try_get_untracked() else {
+                                            return;
+                                        };
                                         spawn_local(async move {
                                             let _ = api::post_live_play_video(
                                                     playlist_id,
