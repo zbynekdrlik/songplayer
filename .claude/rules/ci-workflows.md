@@ -623,10 +623,14 @@ already verified `$resp.version -eq VERSION`) publishes it as a job output
 `${{ needs.deploy-resolume.outputs.deployed_version }}`.
 
 **A main push (release merge) reaches its resolume-snv deploy in ~26 min**
-(release 0.88.0, 11.11.2026: merge 03:30:12Z → deploy 03:56:19Z; a dev push
-with ~27 mutation shards took ~75 min to its deploy). Promise a peer a
-restart window from these numbers, never from a guess: the 0.88.0 restart
-landed inside iemmixer's gate window after a "≥ 45 min" promise.
+(release 0.88.0, 11.11.2026: merge 03:30:12Z → deploy 03:56:19Z). A dev
+push can deploy in ~15 min (11.11.2026: pushed 07:11Z, deployed 07:26Z):
+the Gate waits for every mutation shard, so a push with many shards takes
+longer, but the floor is ~15 min. So a
+restart heads-up to a peer announces from the PUSH time with the shortest
+observed delay (~15 min), never from a guess and never a longer "≥ N min"
+promise: the 0.88.0 restart landed inside iemmixer's gate window after a
+"≥ 45 min" one.
 
 **A `gh run rerun --failed` of only the E2E job MAY restart SongPlayer**
 (10.11.2026, run 42817514184 attempt 2: Spout quiesce 14:14:45Z, new process
