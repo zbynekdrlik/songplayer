@@ -100,6 +100,7 @@ pub fn DabingList() -> impl IntoView {
                                         r.stem_status.clone(),
                                         r.lyrics_present,
                                         r.dub_voice.clone(),
+                                        r.playable,
                                     )
                                 }
                                 children=move |row| {
@@ -107,6 +108,7 @@ pub fn DabingList() -> impl IntoView {
                                     let title = row.title.clone();
                                     let with_stems = shows_stems_step(row.stem_status.as_deref());
                                     let voice = row.dub_voice.clone();
+                                    let playable = row.playable;
                                     let detail = chain_detail(
                                         &row.chain_state,
                                         row.dub_error.as_deref(),
@@ -122,8 +124,9 @@ pub fn DabingList() -> impl IntoView {
                                     // #300: the Dabing output plays it, shown by
                                     // this page's Player; no id yet = no play.
                                     let on_play = Callback::new(move |_| {
-                                        let Some(Some(playlist_id)) = dabing_pid
-                                            .try_get_untracked() else {
+                                        let Some(playlist_id) = dabing_pid
+                                            .try_get_untracked()
+                                            .flatten() else {
                                             return;
                                         };
                                         spawn_local(async move {
@@ -141,7 +144,7 @@ pub fn DabingList() -> impl IntoView {
                                             title=title
                                             chips=chips
                                             on_play=on_play
-                                            play_ready=true
+                                            play_ready=playable
                                         >
                                             {voice
                                                 .filter(|v| !v.is_empty())

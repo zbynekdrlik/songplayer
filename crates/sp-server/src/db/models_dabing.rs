@@ -104,6 +104,11 @@ pub struct DubRow {
     /// The pinned dub voice (#184 round C), read from the repurposed
     /// `dub_voice_ref_path` column. `None` until the worker resolves one.
     pub dub_voice: Option<String>,
+    /// #300: the row's ▶ can play it on the Dabing playlist — downloaded
+    /// (`normalized`) and still in its YouTube playlist (`removed_at` NULL),
+    /// exactly what `dabing_video_membership` admits for a listed row (every
+    /// listed row is dub-requested). Otherwise the gate answers 409 / 404.
+    pub playable: bool,
 }
 
 /// Build a [`DubRow`] from a selected `videos` row (shared by every query here).
@@ -125,12 +130,14 @@ fn row_to_dub_row(r: &sqlx::sqlite::SqliteRow) -> DubRow {
         lyrics_present,
         chain_state: chain_state.to_string(),
         dub_voice: r.get("dub_voice_ref_path"),
+        playable: r.get::<i64, _>("playable") != 0,
     }
 }
 
 const DUB_ROW_SELECT: &str = "SELECT id, playlist_id, title, song, dub_status, \
      dub_error, dub_file_path, stem_status, has_lyrics, \
-     dub_voice_ref_path FROM videos";
+     dub_voice_ref_path, (normalized = 1 AND removed_at IS NULL) AS playable \
+     FROM videos";
 
 /// Set (or clear) the dub request on a video. Requesting flips `dub_requested`
 /// on, moves `dub_status` to `'queued'`, clears an earlier `dub_error` (the

@@ -114,6 +114,38 @@ test("▶ on a song of another playlist plays it on the Dabing output, shown in 
   expect(calls).toEqual([{ playlist_id: 500, video_id: 4242 }]);
 });
 
+test("a row the Dabing output cannot play yet has its ▶ disabled and sends nothing (#300)", async ({
+  page,
+  request,
+}) => {
+  // Not downloaded yet: the server's play-video gate answers 409 for it, so
+  // the row must not offer a ▶ that silently does nothing.
+  await request.post("/__mock/dabing-add", {
+    data: { video_id: 4343, playlist_id: 1, title: "Ešte sa sťahuje", playable: false },
+  });
+  await request.post("/__mock/dabing-add", {
+    data: { video_id: 4344, title: "Hotová", playable: true },
+  });
+
+  await page.goto("/dabing");
+  const list = page.locator('[data-testid="dabing-list"]');
+  const waiting = list.locator('[data-testid="song-row"][data-video-id="4343"]');
+  const ready = list.locator('[data-testid="song-row"][data-video-id="4344"]');
+  await expect(waiting).toBeVisible({ timeout: 15000 });
+  await expect(waiting.getByTestId("song-row-play")).toBeDisabled();
+  await expect(waiting.getByTestId("song-row-play")).toHaveAttribute(
+    "title",
+    "Ešte nespracované — nedá sa prehrať",
+  );
+  await expect(ready.getByTestId("song-row-play")).toBeEnabled();
+
+  await waiting.getByTestId("song-row-play").click({ force: true });
+  await ready.getByTestId("song-row-play").click();
+  await expect
+    .poll(async () => (await (await request.get("/__mock/play-video-calls")).json()).calls)
+    .toEqual([{ playlist_id: 500, video_id: 4344 }]);
+});
+
 test("a dub-ready video WITHOUT stems renders the dub chip hotový (#183 round 2/#194)", async ({
   page,
   request,

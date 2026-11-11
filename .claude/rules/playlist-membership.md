@@ -54,7 +54,9 @@ once, kept a year, then deleted with its files.
   rotation restart), Loop's remembered song
   after a restart (`loop_memory::remembered`), a play-video by id
   (`models_membership::video_playlist_membership` → 404 "video not in
-  playlist", the engine told nothing).
+  playlist", the engine told nothing; on the Dabing playlist
+  `models_dabing::dabing_video_membership` → 404 "video not in the Dabing
+  section", #300).
 - **Listed:** `GET /api/v1/playlists/{id}/videos` (`get_videos_for_playlist`;
   its only production caller). The UI needs no field: the row is simply
   not there.

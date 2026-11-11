@@ -605,24 +605,22 @@ app.post("/api/v1/playlists/:id/play-video", (req, res) => {
   playVideoCalls.push({ playlist_id, video_id });
   // #300: the Dabing playlist plays every video of the Dabing section (the
   // server's `models_dabing::dabing_video_membership`), whatever playlist the
-  // video belongs to, and refuses any other (404). It is played OFF program,
-  // so the dashboard is told what the server's engine tells it: the pipeline
-  // decodes (`WaitingForScene` + transport `Playing`) and its song.
+  // video belongs to, and refuses any other (404); a row not downloaded yet
+  // answers 409, as the server's. It is played OFF program, so the dashboard
+  // is told what the server's engine tells it: the pipeline decodes
+  // (`WaitingForScene` + transport `Playing`) and its song.
   if (playlist_id === DABING_PLAYLIST_ID) {
     const row = dubRows.find((r) => r.video_id === video_id);
     if (!row) {
-      res.status(404).json({ error: "video not in playlist" });
+      res.status(404).type("text/plain").send("video not in the Dabing section");
       return;
     }
-    const state = JSON.stringify({
-      type: "PlaybackStateChanged",
-      data: {
-        playlist_id,
-        state: "WaitingForScene",
-        mode: "Continuous",
-        transport: "Playing",
-      },
-    });
+    if (!row.playable) {
+      res.status(409).type("text/plain").send("video not normalized");
+      return;
+    }
+    playingOffAir.add(playlist_id);
+    broadcastPlaybackState(playlist_id, "WaitingForScene", "Playing");
     const song = JSON.stringify({
       type: "NowPlaying",
       data: {
@@ -634,10 +632,7 @@ app.post("/api/v1/playlists/:id/play-video", (req, res) => {
         duration_ms: 200000,
       },
     });
-    for (const ws of wsClients) {
-      sendLive(ws, state);
-      sendLive(ws, song);
-    }
+    for (const ws of wsClients) sendLive(ws, song);
     res.status(204).end();
     return;
   }
@@ -1499,6 +1494,8 @@ app.post("/api/v1/dabing/import", (req, res) => {
     lyrics_present: false,
     chain_state: "queued",
     dub_voice: null,
+    // The mock has no download worker: a pasted video is playable at once.
+    playable: true,
   };
   // Newest first.
   dubRows.unshift(row);
@@ -1528,6 +1525,7 @@ app.patch("/api/v1/videos/:id/dub", (req, res) => {
         lyrics_present: false,
         chain_state: chainStateFor("queued"),
         dub_voice: null,
+        playable: true,
       });
     }
   } else {
@@ -1562,6 +1560,8 @@ app.post("/__mock/dabing-add", (req, res) => {
     lyrics_present: !!b.lyrics_present,
     chain_state: b.chain_state ?? chainStateFor(dub_status),
     dub_voice: b.dub_voice ?? null,
+    // #300: false = not downloaded yet (the server's gate answers 409).
+    playable: b.playable ?? true,
   };
   dubRows.unshift(row);
   res.status(201).json(row);

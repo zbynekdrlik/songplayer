@@ -84,6 +84,10 @@ pub struct DubRow {
     /// `dub_voice_ref_path` column. `None` until the worker resolves one.
     #[serde(default)]
     pub dub_voice: Option<String>,
+    /// #300: the ▶ can play it on the Dabing playlist (downloaded, not
+    /// removed); the server's play-video gate refuses it otherwise.
+    #[serde(default)]
+    pub playable: bool,
 }
 
 /// Outcome of the most recent POST /api/v1/lyrics/reprocess (any flavor).

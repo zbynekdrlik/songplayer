@@ -93,8 +93,18 @@ paste field (`POST /api/v1/dabing/import`) + a 2 s poll filling
 `store.dabing: RwSignal<Vec<DubRow>>` (page-owned loop, `try_get_untracked` on the
 cancel flag per `sp-ui-frontend.md`). `components/dabing_list.rs` renders rows
 newest-first with the glyph row `stiahnuté → stemy → prepis → preklad → dabing →
-pripravené` (or `chyba: <krok>`) + a **Prehrať** button (reuses
-`api::post_live_play_video` — it already accepts any playlist id).
+pripravené` (or `chyba: <krok>`) + a **Prehrať** button. #300: the ▶ plays
+EVERY row on the Dabing playlist (`store.dabing_playlist_id`, the id the page's
+Player shows; no id yet = no request), never on the row's own `playlist_id` (a
+video toggled for dubbing elsewhere keeps its playlist, maybe the one on
+program). The server's `post_play_video` admits on a `dabing` playlist every
+video of the Dabing section (`models_dabing::dabing_video_membership`: its own
+imports + every dub-requested video, `removed_at IS NULL`; not normalized → 409,
+else 404); `DubRow.playable` (normalized, not removed) disables the ▶ of a row
+the gate refuses; Loop's remembered song on the Dabing playlist takes a
+dub-requested song of another playlist too (`loop_memory::remembered`). The
+mock (`e2e/mock-api.mjs`) mirrors it: 404 / 409 as text, the off-program state +
+NowPlaying for playlist 500, every call in `/__mock/play-video-calls`.
 `components/dub_toggle.rs` is the per-row Dabing toggle placed in `video_list.rs`
 (any playlist). The `videos` list payload gains `dub_requested` + `dub_status`
 (additive, `#[serde(default)]`, populated in `db::models::row_to_video`).

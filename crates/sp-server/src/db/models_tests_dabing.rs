@@ -625,3 +625,43 @@ async fn requesting_a_dub_clears_an_earlier_error() {
     assert_eq!(col_str(&pool, id, "dub_status").await, "queued");
     assert_eq!(col_opt_str(&pool, id, "dub_error").await, None);
 }
+
+/// #300: a listed row is playable on the Dabing playlist exactly while the
+/// play-video gate admits it there: downloaded and still in its YouTube
+/// playlist. The Dabing page disables the ▶ of every other row.
+#[tokio::test]
+async fn list_dub_videos_row_says_whether_the_dabing_playlist_can_play_it() {
+    let pool = setup().await;
+    let id = insert_video(&pool, "vp", "Playable").await;
+    set_dub_requested(&pool, id, true).await.unwrap();
+    let playable = |pool: SqlitePool| async move {
+        let rows = list_dub_videos(&pool).await.unwrap();
+        let gate = dabing_video_membership(&pool, 7, id).await.unwrap();
+        (rows[0].playable, gate)
+    };
+    assert_eq!(
+        playable(pool.clone()).await,
+        (false, Some(false)),
+        "not downloaded"
+    );
+    sqlx::query("UPDATE videos SET normalized = 1 WHERE id = ?")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        playable(pool.clone()).await,
+        (true, Some(true)),
+        "downloaded"
+    );
+    sqlx::query("UPDATE videos SET removed_at = 1 WHERE id = ?")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        playable(pool.clone()).await,
+        (false, None),
+        "left its playlist"
+    );
+}

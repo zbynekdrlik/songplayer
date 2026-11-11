@@ -619,7 +619,7 @@ async fn dabing_playlist_refuses_a_dub_requested_video_that_left_its_playlist() 
 }
 
 #[tokio::test]
-async fn dabing_playlist_plays_its_own_import_even_when_no_longer_dub_requested() {
+async fn dabing_playlist_plays_its_own_import_that_is_not_dub_requested() {
     let (pool, _, _, _) = setup().await;
     let dabing = dabing_playlist(&pool).await;
     let own = crate::db::models::upsert_video(&pool, dabing, "own", Some("Own"))
