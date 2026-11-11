@@ -68,13 +68,12 @@ export const MAX_PPM = 300;
 export const LATENCY_OVER_DELAY_MS = 1000;
 
 /**
- * The ASIO outputs the gate counts and measures: the enabled ones, except
- * one waiting for its driver's clock (reason `no_clock`). The owner's
- * ruling, #233, 8.10.2026: at PP, DVS opens but gives no clock while PP's
- * network has no Dante PTP clock; the output waits calmly and is not
- * expected to run, so a box expecting no ASIO output does not fail on it.
- * A box that expects one (SNV, "1") still fails when its DVS gives no
- * clock: the count is then 0.
+ * The ASIO outputs the gate measures: the enabled ones, except one in a
+ * calm wait for its driver's clock (`waitingForClock`). The owner's ruling,
+ * #233, 8.10.2026: at PP, DVS opens but gives no clock while PP's network
+ * has no Dante PTP clock; the output waits calmly and is not expected to
+ * run. Since #229 (11.11.2026) such an output still counts toward
+ * SP_ASIO_OUTPUTS_EXPECTED (`asioCount`), named and unmeasured.
  */
 export function gatedAsioOutputs(list: OutputStatus[]): OutputStatus[] {
   const waiting = waitingForClock(list);
@@ -127,7 +126,7 @@ export interface AsioCount {
 export function asioCount(list: OutputStatus[]): AsioCount {
   const measured = gatedAsioOutputs(list).map((o) => o.id);
   const waiting = waitingForClock(list).map((o) => `${o.id} (${o.asio?.reason_code})`);
-  return { counted: measured.length, measured, waiting };
+  return { counted: measured.length + waiting.length, measured, waiting };
 }
 
 /** The count poll's value: the count when it is the expected one, else the

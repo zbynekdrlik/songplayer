@@ -23,8 +23,9 @@
  * gate comes later, once PP records.
  *
  * The scenes come from `pp-scenes.ts` (the playlist scene from SongPlayer's
- * own catalog; the manual scene = cg OBS's own program scene unless the repo
- * variable PP_MANUAL_SCENE names one). `afterAll` puts SP-program back on its
+ * own catalog; the manual scene = the repo variable PP_MANUAL_SCENE when cg
+ * OBS has it, else cg OBS's own program scene when it is a manual one, else
+ * the first manual scene in cg OBS's list, logged with why). `afterAll` puts SP-program back on its
  * start source with a dashboard cut (it tells cg OBS nothing) only while the
  * program is still what the gate left (`programRestoreTarget`), and cg OBS
  * back on its own only when the manual press moved it and it is still there
@@ -365,7 +366,7 @@ test.describe("PP's program through the facade (#229)", () => {
       playlistNames: playlistNames(rows),
     });
     if ("error" in pick) throw new Error(pick.error);
-    console.log(`[#229 pp] manual scene: ${pick.scene} (cg OBS on "${cgNow}")`);
+    console.log(`[#229 pp] manual scene: "${pick.scene}" — ${pick.why} (cg OBS on "${cgNow}")`);
 
     // The press forwards the scene to cg OBS first: recorded before it, so a
     // press that fails half-way is still put back.

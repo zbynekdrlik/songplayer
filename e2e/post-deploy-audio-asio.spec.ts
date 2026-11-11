@@ -6,11 +6,12 @@
  *    (SP_ASIO_OUTPUTS_EXPECTED > 0) has Dante Virtual Soundcard among them,
  *    by its exact name. A box with none expected is not asked for DVS
  *    (#233 release review).
- * 2. Exactly SP_ASIO_OUTPUTS_EXPECTED enabled ASIO outputs exist that are
- *    not waiting for their driver's clock (`gatedAsioOutputs`: PP's DVS waits
- *    calmly while PP has no Dante PTP clock, the owner's ruling, #233,
- *    8.10.2026; ci.yml / deploy-pp.yml: "1" at SNV, "1" at PP since its DVS
- *    has a clock, 9.10.2026), and each one runs, then holds a minute of program blocks at
+ * 2. Exactly SP_ASIO_OUTPUTS_EXPECTED enabled ASIO outputs exist
+ *    (`asioCount`; ci.yml / deploy-pp.yml: "1" at SNV, "2" at PP). One in a
+ *    calm wait for its driver's clock (`no_clock` / `clock_off_rate`: its
+ *    device or network is off, e.g. PP's SoundGrid outside services; #229,
+ *    ROZHODNUTÉ 11.11.2026) counts, is named in the log and is not measured;
+ *    every other one (`gatedAsioOutputs`) runs, then holds a minute of program blocks at
  *    its driver's rate with no underrun, no reopen, no hard re-centre
  *    (#233 review round 2: the owner's fault, a faded skip or insert),
  *    |ppm| <= 300 and a latency (`asioGateFailures`). Every output is measured over the SAME
@@ -18,7 +19,8 @@
  *    (up to 4, `MAX_ASIO_OUTPUTS`).
  *
  * 3. #233 (the spawn finding): a child process SongPlayer spawns (one yt-dlp,
- *    `POST /api/v1/youtube/probe`) moves no gated ASIO output's `resyncs` or
+ *    `POST /api/v1/youtube/probe`; skipped when no output runs, every
+ *    expected one in a calm clock wait) moves no running ASIO output's `resyncs` or
  *    `hard_recentres`, and no output stops or restarts: every ASIO output
  *    runs in the ASIO host process `sp-audio-host`, which spawns nothing
  *    (`asio-spawn-gate.ts`, unit-tested in the mock suite).

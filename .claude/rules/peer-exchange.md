@@ -515,15 +515,19 @@ wait for a peer that has the song", below).
     (`manualCutLanded`: source -1, cut for that scene, `cg_forward ok`; a
     scene name is compared as the server records it, its first 64
     characters, `recordedScene`). The
-    scene (`pickManualScene`) is the repo variable `PP_MANUAL_SCENE` when set
-    (a manual cg OBS scene, else the test fails saying why), else the scene
-    cg OBS already has on program (nothing changes on cg OBS). Never
+    scene (`pickManualScene`, #229 ROZHODNUTÉ 11.11.2026) is the repo
+    variable `PP_MANUAL_SCENE` when cg OBS has it (it must then be a manual
+    scene, else the test fails saying why), else the scene cg OBS already
+    has on program when that is a manual scene (nothing changes on cg OBS),
+    else the first manual scene in cg OBS's list; the pick and why are
+    logged (`[#229 pp] manual scene: "<scene>" — <why> (cg OBS on
+    "<scene>")`), so a renamed or deleted `PP_MANUAL_SCENE` (PP's `test`,
+    gone by 11.11.2026, run 43001397048) no longer fails the deploy. Never
     `Blank` in any case (#245: a facade press of it is SongPlayer's own
     black, source -2, cg OBS told nothing, so it can never land as "OBS
     manuál" even when cg OBS has a scene of that name; PP's variable said
-    `Blank` until 12.10.2026 and its gate polled 15 s for nothing). When cg OBS's
-    program is not a manual scene, the test fails naming `PP_MANUAL_SCENE`:
-    the gate never picks another cg OBS scene by itself. The spec reads cg
+    `Blank` until 12.10.2026 and its gate polled 15 s for nothing). Only a
+    cg OBS with no manual scene at all fails, naming its scenes. The spec reads cg
     OBS on `OBS_WS_URL` (:4455). Precondition (nothing checks it): that
     scene must not itself show `SP-program` (an NDI `… (SP-program)`
     source), or cutting to "OBS manuál" loops the program into itself on
