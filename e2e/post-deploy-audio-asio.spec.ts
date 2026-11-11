@@ -61,6 +61,10 @@ import {
 import { expectNoLossSince, fileStartOrNull, openFaultWindow } from "./audio-faults-read";
 
 const EXPECTED = Number(process.env.SP_ASIO_OUTPUTS_EXPECTED ?? "0");
+/** #229 review F1: whether an output in a calm clock wait counts toward
+ *  EXPECTED — "1" only in deploy-pp.yml (PP's SoundGrid network is off
+ *  outside services); on resolume-snv a Dante / DVS output with no clock fails. */
+const CLOCK_WAIT_OK = process.env.SP_ASIO_CLOCK_WAIT_OK === "1";
 
 /** #257: where this file's audio window opened (the server's clock), one
  * settle after its outputs run; `null` until then. */
@@ -123,7 +127,7 @@ test.describe("ASIO output (#233)", () => {
       const list = await readOutputs(request);
       if (list === null) return -1;
       countedList = list;
-      return asioCountReading(list, EXPECTED);
+      return asioCountReading(list, EXPECTED, CLOCK_WAIT_OK);
     };
     await expect
       .poll(counted, {
@@ -131,7 +135,7 @@ test.describe("ASIO output (#233)", () => {
         timeout: 20_000,
       })
       .toBe(EXPECTED);
-    const count = asioCount(countedList);
+    const count = asioCount(countedList, CLOCK_WAIT_OK);
     console.log(
       `[#233 asio] counted ${count.counted}: measured ${JSON.stringify(count.measured)}, ` +
         `waiting for a clock (not measured) ${JSON.stringify(count.waiting)}`,
@@ -180,7 +184,7 @@ test.describe("ASIO output (#233)", () => {
     // strictly (a failed read is no count).
     const ready = async () => {
       const list = await readOutputs(request);
-      return list === null ? -1 : spawnReady(list);
+      return list === null ? -1 : spawnReady(list, CLOCK_WAIT_OK);
     };
     await expect
       .poll(ready, { message: "the ASIO outputs run, or wait calmly for a clock, before the spawn", timeout: 30_000 })

@@ -1201,7 +1201,9 @@ outputs (`asioCount`, #229 ROZHODNUTÉ 11.11.2026; PP "2" since 11.10.2026:
 out-2 Waves SoundGrid + out-3 Dante, SNV "1"; ci.yml / deploy-pp.yml). An
 output in a calm wait for its driver's clock (`waitingForClock`: `no_clock`
 or `clock_off_rate` — its device or network is off, PP's SoundGrid outside
-services, run 43001397048) is an enabled output behaving correctly: it
+services, run 43001397048) is an enabled output behaving correctly: on a
+box with `SP_ASIO_CLOCK_WAIT_OK` "1" (deploy-pp.yml ONLY; review F1: on
+resolume-snv a Dante / DVS output with no clock is a fault and fails) it
 COUNTS, is named in the log (`[#233 asio] counted 2: measured ["out-3"],
 waiting for a clock (not measured) ["out-2 (clock_off_rate)"]`) and is
 NOT measured; a count that is off reads `asioCountReading`'s

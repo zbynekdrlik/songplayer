@@ -122,17 +122,22 @@ export interface AsioCount {
  * measured and must run (a waiting one with another reason fails at the
  * running poll). A disabled entry, a VBAN output and a missing output count
  * nothing.
+ *
+ * `clockWaitOk` (env SP_ASIO_CLOCK_WAIT_OK, set by deploy-pp.yml alone,
+ * review F1): only there does a calm wait count. On resolume-snv a DVS or
+ * native Dante output with no clock is a fault: it counts nothing, is still
+ * named, and the deploy fails.
  */
-export function asioCount(list: OutputStatus[]): AsioCount {
+export function asioCount(list: OutputStatus[], clockWaitOk: boolean): AsioCount {
   const measured = gatedAsioOutputs(list).map((o) => o.id);
   const waiting = waitingForClock(list).map((o) => `${o.id} (${o.asio?.reason_code})`);
-  return { counted: measured.length + waiting.length, measured, waiting };
+  return { counted: measured.length + (clockWaitOk ? waiting.length : 0), measured, waiting };
 }
 
 /** The count poll's value: the count when it is the expected one, else the
  *  count with the measured and the waiting outputs named. */
-export function asioCountReading(list: OutputStatus[], expected: number): number | string {
-  const c = asioCount(list);
+export function asioCountReading(list: OutputStatus[], expected: number, clockWaitOk: boolean): number | string {
+  const c = asioCount(list, clockWaitOk);
   if (c.counted === expected) return c.counted;
   return `${c.counted} (measured: ${c.measured.join(", ") || "none"}; waiting for a clock: ${c.waiting.join(", ") || "none"})`;
 }

@@ -60,9 +60,10 @@ export function spawnCounters(list: OutputStatus[]): SpawnCounters[] {
 /** The outputs ready for the spawn test, compared with
  * SP_ASIO_OUTPUTS_EXPECTED (#229): the gated ones that run
  * (`spawnCounters`) plus the ones in a calm wait for their driver's clock,
- * which count (`asioCount`) but are not watched across the spawn. */
-export function spawnReady(list: OutputStatus[]): number {
-  return spawnCounters(list).length + waitingForClock(list).length;
+ * which count (`asioCount`, only where `clockWaitOk`) but are not watched
+ * across the spawn. */
+export function spawnReady(list: OutputStatus[], clockWaitOk: boolean): number {
+  return spawnCounters(list).length + (clockWaitOk ? waitingForClock(list).length : 0);
 }
 
 /** Why the spawn disturbed an output: its resyncs or hard re-centres grew,
