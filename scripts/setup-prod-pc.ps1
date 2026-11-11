@@ -53,7 +53,10 @@
 #      USB 2.5GbE Family Controller") also gets "Transmit URBs"
 #      (PendingTransmits) 8 and "Transmit Buffers" (TransmitBufferLen) 64
 #      through its driver (issue 255 / 285, dstack's receiver A/B of
-#      10.11.2026).
+#      10.11.2026), only on the adapter that carries a Dante leg and only
+#      where its driver offers the keyword (issue 255, 11.11.2026; dstack
+#      docs/two-networks.md section 6, PR 179): a PC with no Dante leg (PP)
+#      and a driver without the keyword pass, nothing is set.
 # Not here: the NIC driver swap (lane 3), a radio (a PC may use it on purpose),
 # CPU reservation (unmeasured), the Windows edition.
 #
@@ -321,6 +324,48 @@ function Get-ProdPcRtl8156Values {
     [pscustomobject]@{ Keyword = 'TransmitBufferLen'; Wanted = '64' }
 }
 
+# Whether this PC has a Dante leg: the facts' dante_leg, read as the Dante
+# network adapter Dante70 being present (dstack's two-network standard: the
+# leg its firewall group dstack155 is bound to). The RTL8156's transmit
+# values are dstack's Dante-TX tuning, so they apply only there (issue 255,
+# 11.11.2026, the owner: Dante is one audio path, a PC without it passes
+# clean; PP has no Dante leg, and its RTL8156 driver 11.4.211.2022 offers
+# neither keyword). SongPlayer's own check asks the same of an enabled Dante
+# output (prod_env_network.rs leg_carriers). Facts with no dante_leg (an
+# older capture) read as no leg.
+function Test-ProdPcDanteLeg {
+    param($Facts)
+    $leg = Get-ProdPcField $Facts 'dante_leg'
+    return ($leg -is [bool] -and $leg)
+}
+
+# The GUID of the physical adapter that carries the Dante leg ($null with no
+# leg, or none found): the leg's own adapter (one named Dante70), else,
+# behind the Dante70 VLAN, the one physical adapter that is Up (dstack's
+# standard: a PC with a Dante leg has exactly one). SongPlayer's own check
+# picks the same adapter (prod_env_network.rs leg_carriers).
+function Get-ProdPcDanteCarrier {
+    param($Facts)
+    if (-not (Test-ProdPcDanteLeg $Facts)) { return $null }
+    $adapters = @(Get-ProdPcList $Facts 'adapters')
+    $own = @($adapters | Where-Object { [string](Get-ProdPcField $_ 'name') -eq 'Dante70' })
+    if ($own.Count -eq 1) { return [string](Get-ProdPcField $own[0] 'guid') }
+    $up = @($adapters | Where-Object { [string](Get-ProdPcField $_ 'status') -eq 'Up' })
+    if ($up.Count -eq 1) { return [string](Get-ProdPcField $up[0] 'guid') }
+    return $null
+}
+
+# Whether an adapter's driver offers a keyword: an entry of its class key's
+# Ndi\Params (the adapter's driver_keywords). Not read (null, an older
+# capture): taken as offered, so setting it through the driver reports its
+# own error. A driver that does not offer it passes (dstack, PR 179).
+function Test-ProdPcDriverOffers {
+    param($Adapter, [string]$Keyword)
+    $member = Find-ProdPcMember -Object $Adapter -Name 'driver_keywords'
+    if ($null -eq $member -or $null -eq $member.Value) { return $true }
+    return (@($member.Value | Where-Object { [string]$_ -eq $Keyword }).Count -gt 0)
+}
+
 # Whether a registry fact holds what a want sets: a DWORD of that value (a
 # value of another type does not), or a string that reads the same with
 # case and padding ignored (lane 1's rule for Scheduling Category).
@@ -472,6 +517,7 @@ function Add-ProdPcSoundGridReview {
 function Add-ProdPcEveryNicReview {
     param($Facts, $Actions, $Blockers)
     $why = 'every network adapter is configured: no power saving (the owner, issue 285)'
+    $carrier = Get-ProdPcDanteCarrier $Facts
     foreach ($adapter in @(Get-ProdPcList $Facts 'adapters')) {
         if ([string](Get-ProdPcField $adapter 'media') -ne '802.3') { continue }
         if ([string](Get-ProdPcField $adapter 'status') -in @('Disabled', 'Not Present')) { continue }
@@ -509,9 +555,11 @@ function Add-ProdPcEveryNicReview {
             $current = if ($null -eq $pnp) { '(none)' } else { ([string]$pnp).Trim() }
             $Actions.Add((New-ProdPcAction -Area 'nic' -Name 'PnPCapabilities' -Current $current -Wanted $pnpWanted -Reason $why -Kind 'nic_pnp' -Target $target))
         }
+        if ($guid -ne $carrier) { continue }
         if (-not (Test-ProdPcRtl8156 ([string](Get-ProdPcField $adapter 'pnp_device_id')))) { continue }
         foreach ($own in @(Get-ProdPcRtl8156Values)) {
             $present = $null -ne (Find-ProdPcMember -Object $settings -Name $own.Keyword)
+            if (-not $present -and -not (Test-ProdPcDriverOffers -Adapter $adapter -Keyword $own.Keyword)) { continue }
             $value = if ($present) { ([string](Get-ProdPcField $settings $own.Keyword)).Trim() } else { '(none)' }
             $number = if ($present) { ConvertTo-ProdPcUInt32 $value } else { $null }
             if ($null -ne $number -and $number -eq [uint32]$own.Wanted) { continue }
@@ -810,7 +858,11 @@ function Read-ProdPcAdapters {
         $guid = [string]$adapter.InterfaceGuid
         $keyPath = $instances[$guid.ToUpperInvariant()]
         $settings = $null
-        if ($null -ne $keyPath) { $settings = Read-ProdPcNicSettings -KeyPath $keyPath }
+        $driverKeywords = $null
+        if ($null -ne $keyPath) {
+            $settings = Read-ProdPcNicSettings -KeyPath $keyPath
+            $driverKeywords = Read-ProdPcDriverKeywords -KeyPath $keyPath
+        }
         [pscustomobject][ordered]@{
             name = [string]$adapter.Name
             guid = $guid
@@ -822,8 +874,23 @@ function Read-ProdPcAdapters {
             pnp_device_id = [string]$adapter.PnPDeviceID
             class_key = $keyPath
             settings = $settings
+            driver_keywords = $driverKeywords
         }
     }
+}
+
+# The keywords an adapter's driver offers: its class key's Ndi\Params
+# subkeys (what Get-NetAdapterAdvancedProperty lists), $null with no such key.
+function Read-ProdPcDriverKeywords {
+    param([string]$KeyPath)
+    $params = Join-Path $KeyPath 'Ndi\Params'
+    if (-not (Test-Path -LiteralPath $params)) { return $null }
+    return , @((Get-Item -LiteralPath $params).GetSubKeyNames())
+}
+
+# Whether the Dante leg's adapter Dante70 is present (Test-ProdPcDanteLeg).
+function Read-ProdPcDanteLeg {
+    return (@(Get-NetAdapter -IncludeHidden | Where-Object { $_.Name -eq 'Dante70' }).Count -gt 0)
 }
 
 # A user's roaming AppData by SID: the user's own shell folder when the
@@ -1013,6 +1080,7 @@ function Read-ProdPcFacts {
         registry = $registry.ToArray()
         soundgrid = Read-ProdPcSoundGrid
         adapters = @(Read-ProdPcAdapters)
+        dante_leg = Read-ProdPcDanteLeg
         power = Read-ProdPcPower
         defender = Read-ProdPcDefender
         firewall = Read-ProdPcFirewall

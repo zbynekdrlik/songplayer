@@ -86,18 +86,13 @@ pub fn carries_a_leg(nic: &WiredNicFacts, carriers: &[String]) -> bool {
 /// Whether a value is judged on an adapter: the RTL8156's own values only
 /// on one that carries a Dante leg (#255), every other value everywhere.
 pub fn judged(nic: &WiredNicFacts, keyword: &str, carriers: &[String]) -> bool {
-    !is_rtl8156_value(keyword) || carries_a_leg(nic, carriers) || RTL8156_ON_EVERY_ADAPTER
+    !is_rtl8156_value(keyword) || carries_a_leg(nic, carriers)
 }
-
-/// RED (#255): the RTL8156's values judged on every adapter, as before.
-const RTL8156_ON_EVERY_ADAPTER: bool = true;
 
 /// Whether the driver offers a keyword, from its `Ndi\Params` subkeys
 /// (`None`: not read, taken as offered).
 fn offered_by(params: Option<&[String]>, keyword: &str) -> bool {
-    params.is_none_or(|names| {
-        !names.is_empty() || names.iter().any(|n| n.trim().eq_ignore_ascii_case(keyword))
-    })
+    params.is_none_or(|names| names.iter().any(|n| n.trim().eq_ignore_ascii_case(keyword)))
 }
 
 /// Whether a device instance id is an RTL8156's (ASCII case ignored).
