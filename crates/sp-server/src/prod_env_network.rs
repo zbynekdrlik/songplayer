@@ -558,6 +558,38 @@ fn leg_problems(leg: &LegFacts, f: &NetworkFacts) -> Vec<NetProblem> {
     problems
 }
 
+/// #255: the adapters that carry a Dante leg, by name (dstack
+/// two-networks §6, dstack PR 179: a NIC value tuned for Dante applies
+/// only there): each leg's own interface (a native NIC holding the
+/// address) and, behind a VLAN, the one physical adapter turned on and
+/// connected (§6.1: a PC with a leg has exactly one; with more, which one
+/// carries it is not known and none is added). Empty with no Dante leg or
+/// the outputs unread (PP: the owner's ruling of 11.11.2026, Dante is one
+/// audio path and a PC without it passes clean).
+pub fn leg_carriers(f: &NetworkFacts) -> Vec<String> {
+    if !f.dante_ips.as_ref().is_some_and(|ips| !ips.is_empty()) {
+        return Vec::new();
+    }
+    let mut names: Vec<String> = f
+        .legs
+        .iter()
+        .filter_map(|leg| match &leg.holder {
+            Holder::Interface(nic) => Some(nic.alias.clone()),
+            Holder::Unread | Holder::Nobody => None,
+        })
+        .collect();
+    if let Some(physical) = &f.physical
+        && let [one] = physical
+            .iter()
+            .filter(|n| n.enabled && n.up)
+            .collect::<Vec<_>>()
+            .as_slice()
+    {
+        names.push(one.name.clone());
+    }
+    names
+}
+
 /// Every two-network problem, in order (each once): the outputs unread;
 /// else nothing with no Dante leg; else §6.1, §6.2, then each leg.
 pub fn problems(f: &NetworkFacts) -> Vec<EnvProblem> {
