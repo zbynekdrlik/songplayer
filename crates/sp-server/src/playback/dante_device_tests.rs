@@ -303,7 +303,8 @@ fn the_device_serves_a_receiver_the_rings_audio() {
     let ip = routed_ipv4();
     let p = params(dir.path(), ip);
     let latency = u32::try_from(p.latency_frames()).unwrap();
-    let mut device = DanteDevice::new(p);
+    let link = DanteLink::default();
+    let mut device = DanteDevice::linked(p, link.clone());
     let opened = device.open("", [0, 1]).expect("the device set up");
     // The worker writes 48 kHz: the 128-frame device block is 64 of its frames.
     assert_eq!(opened.rate, 48_000.0);
@@ -347,7 +348,18 @@ fn the_device_serves_a_receiver_the_rings_audio() {
             tx.push(0.5).unwrap();
             tx.push(-0.25).unwrap();
         }
-        let n = audio.recv(&mut buf).expect("audio from the device");
+        // #302: a read that times out names what the stack did meanwhile
+        // (its clock, the flows a receiver holds, the packets it sent by
+        // lateness, the pump), so a one-off on a CI runner can be told.
+        let n = match audio.recv(&mut buf) {
+            Ok(n) => n,
+            Err(e) => panic!(
+                "audio from the device: {e} after {:?} (granted at 0; consumed {} frames; stack: {:?})",
+                start.elapsed(),
+                device.consumed_frames(),
+                link.figures()
+            ),
+        };
         packet::read_frames(&buf[..n], 2, 3, |_, slot, x| {
             let x = x >> 8;
             left |= slot == 0 && (x - (1 << 22)).abs() < 8;
