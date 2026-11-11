@@ -1197,14 +1197,19 @@ pins the holds on Linux.
 subset): DVS is registered — checked only when `SP_ASIO_OUTPUTS_EXPECTED`
 is over 0 (release review: a box expected to run none need not have DVS);
 exactly `SP_ASIO_OUTPUTS_EXPECTED` enabled ASIO
-outputs that are not waiting for their driver's clock (`gatedAsioOutputs`:
-an output waiting with reason `no_clock` is neither counted nor measured,
-so a box whose DVS entry is enabled while its network has no Dante PTP
-clock does not fail on it at "0" (PP's value while it had none); PP — "2"
-since 11.10.2026: out-2 Waves SoundGrid + out-3 Dante, both enabled — and
-SNV — "1" — still fail when a gated driver gives no clock, the
-count then 0, and the poll names the waiting outputs (`waitingForClock`:
-"0 (waiting for a clock: out-2)"); ci.yml / deploy-pp.yml), each running, then a minute (1 800 blocks) at its
+outputs (`asioCount`, #229 ROZHODNUTÉ 11.11.2026; PP "2" since 11.10.2026:
+out-2 Waves SoundGrid + out-3 Dante, SNV "1"; ci.yml / deploy-pp.yml). An
+output in a calm wait for its driver's clock (`waitingForClock`: `no_clock`
+or `clock_off_rate` — its device or network is off, PP's SoundGrid outside
+services, run 43001397048) is an enabled output behaving correctly: on a
+box with `SP_ASIO_CLOCK_WAIT_OK` "1" (deploy-pp.yml ONLY; review F1: on
+resolume-snv a Dante / DVS output with no clock is a fault and fails) it
+COUNTS, is named in the log (`[#233 asio] counted 2: measured ["out-3"],
+waiting for a clock (not measured) ["out-2 (clock_off_rate)"]`) and is
+NOT measured; a count that is off reads `asioCountReading`'s
+"1 (measured: …; waiting for a clock: …)". Any other state of a
+measured output (`gatedAsioOutputs`), a missing output, resets /
+underruns / hard re-centres still fail. Each measured output runs, then a minute (1 800 blocks) at its
 driver's rate with no underrun, no reopen, no hard re-centre (review
 round 2), |ppm| ≤ 300 and a latency
 over 0 and under the entry's delay + 1 s (`asioGateFailures`, unit-tested
@@ -1440,7 +1445,9 @@ reading it running at 96 kHz Int32LSB.
 **The live gate** (`e2e/post-deploy-audio-asio.spec.ts`, SNV and PP, third
 test; the decision in `e2e/asio-spawn-gate.ts`, unit-tested in the mock
 suite by `asio-spawn-gate.spec.ts`): every gated ASIO output running
-(`spawnCounters`: enabled, not waiting for a clock, running), its
+(`spawnCounters`: enabled, not waiting for a clock, running; with the
+calm-waiting ones they make `SP_ASIO_OUTPUTS_EXPECTED`, `spawnReady`, #229,
+and with none running the probe is skipped), its
 `resyncs` + `hard_recentres` + `blocks_sent` read, `POST
 /api/v1/youtube/probe` (one SongPlayer-spawned yt-dlp, 200 whatever
 YouTube answers; it FAILS when the answer says yt-dlp is not ready yet,

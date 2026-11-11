@@ -99,19 +99,41 @@ test.describe("PP's manual scene (#229)", () => {
 
   test("by default the scene cg OBS already has on program", () => {
     const pick = pickManualScene({ configured: "", cgProgram: "Svedectvo", scenes, playlistNames: names });
-    expect(pick).toEqual({ scene: "Svedectvo" });
+    expect(pick).toEqual({ scene: "Svedectvo", why: "cg OBS's program scene" });
   });
 
-  test("cg OBS on a playlist's, the probe's, Blank or an unlisted scene: no guess, PP_MANUAL_SCENE is named", () => {
-    // Pressing some other cg OBS scene would change what PP's wall shows.
+  // #229 (owner 12.10.2026 "pick any"; 11.11.2026 a design that fails when an
+  // optional thing is absent is a failure): with cg OBS on no manual scene the
+  // gate takes the first manual scene in cg OBS's list, never a playlist's,
+  // the probe's, OBS manual or Blank.
+  test("cg OBS on a playlist's, the probe's, Blank or an unlisted scene: the first manual scene in the list", () => {
     for (const cgProgram of ["SP-Slow", AV_PROBE_SCENE, OBS_MANUAL, "Blank", "gone"]) {
       const pick = pickManualScene({ configured: "", cgProgram, scenes, playlistNames: names });
       expect(pick, cgProgram).toEqual({
-        error:
-          `cg OBS's program scene "${cgProgram}" is not a manual scene: set the repo variable ` +
-          "PP_MANUAL_SCENE to the manual scene the PP gate may press",
+        scene: "Svedectvo",
+        why: `cg OBS's program scene "${cgProgram}" is not a manual scene; the first manual scene in cg OBS's list`,
       });
     }
+    const pick = pickManualScene({
+      configured: "",
+      cgProgram: "Blank",
+      scenes: ["sp-slow", "Blank", AV_PROBE_SCENE, OBS_MANUAL, "trailer", "Svedectvo"],
+      playlistNames: names,
+    });
+    expect(pick, "the list's order decides").toEqual({
+      scene: "trailer",
+      why: `cg OBS's program scene "Blank" is not a manual scene; the first manual scene in cg OBS's list`,
+    });
+  });
+
+  test("cg OBS with no manual scene at all fails, naming its scenes", () => {
+    const only = ["Blank", "sp-slow", AV_PROBE_SCENE, OBS_MANUAL];
+    const pick = pickManualScene({ configured: "", cgProgram: "Blank", scenes: only, playlistNames: names });
+    expect(pick).toEqual({
+      error:
+        `cg OBS has no manual scene (each is a playlist's, the A/V probe's, "${OBS_MANUAL}" or ` +
+        `SongPlayer's "Blank"): ${JSON.stringify(only)}`,
+    });
   });
 
   test("PP_MANUAL_SCENE wins when it is a manual cg OBS scene", () => {
@@ -121,7 +143,7 @@ test.describe("PP's manual scene (#229)", () => {
       scenes,
       playlistNames: names,
     });
-    expect(pick).toEqual({ scene: "trailer" });
+    expect(pick).toEqual({ scene: "trailer", why: "PP_MANUAL_SCENE" });
   });
 
   test("Blank in any case is SongPlayer's own scene, never a manual one (#245)", () => {
@@ -136,10 +158,23 @@ test.describe("PP's manual scene (#229)", () => {
     }
   });
 
-  test("a PP_MANUAL_SCENE cg OBS does not have fails", () => {
+  // #229 (PP deploy 43001397048): PP_MANUAL_SCENE "test" was gone from PP's
+  // cg OBS; an operator renaming or deleting a scene must not fail the deploy.
+  test("a PP_MANUAL_SCENE cg OBS does not have falls back to cg OBS's program scene", () => {
+    const pick = pickManualScene({ configured: "test", cgProgram: "trailer", scenes, playlistNames: names });
+    expect(pick).toEqual({
+      scene: "trailer",
+      why: `PP_MANUAL_SCENE "test" is not one of cg OBS's scenes; cg OBS's program scene`,
+    });
+  });
+
+  test("a PP_MANUAL_SCENE cg OBS does not have, cg OBS on Blank: the first manual scene in the list", () => {
     const pick = pickManualScene({ configured: "Nope", cgProgram: "Blank", scenes, playlistNames: names });
     expect(pick).toEqual({
-      error: `PP_MANUAL_SCENE "Nope" is not one of cg OBS's scenes ${JSON.stringify(scenes)}`,
+      scene: "Svedectvo",
+      why:
+        `PP_MANUAL_SCENE "Nope" is not one of cg OBS's scenes; cg OBS's program scene "Blank" is not a ` +
+        "manual scene; the first manual scene in cg OBS's list",
     });
   });
 
@@ -154,7 +189,7 @@ test.describe("PP's manual scene (#229)", () => {
 
   test("a blank PP_MANUAL_SCENE is unset", () => {
     const pick = pickManualScene({ configured: "  ", cgProgram: "Svedectvo", scenes, playlistNames: names });
-    expect(pick).toEqual({ scene: "Svedectvo" });
+    expect(pick).toEqual({ scene: "Svedectvo", why: "cg OBS's program scene" });
   });
 });
 

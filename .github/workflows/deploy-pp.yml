@@ -392,6 +392,11 @@ jobs:
           # (e2e/post-deploy-audio-asio.spec.ts): since 11.10.2026 two,
           # out-2 Waves SoundGrid and out-3 Dante, both enabled.
           SP_ASIO_OUTPUTS_EXPECTED: "2"
+          # #229: PP's SoundGrid network is off outside services, so out-2
+          # waits calmly for a clock (clock_off_rate): counted, named, not
+          # measured. Never set on resolume-snv (a Dante/DVS clock loss there
+          # is a fault).
+          SP_ASIO_CLOCK_WAIT_OK: "1"
         run: |
           if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
             Write-Error "FAIL: Node.js (npm) is not installed at PP - the post-deploy suite needs it"

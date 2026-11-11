@@ -9,10 +9,17 @@
  *   `sp-*` scene of its own. The catalog (`playback/scene_catalog.rs`): an
  *   ACTIVE playlist's `ndi_output_name`, ASCII-lowercased, is its scene; a
  *   blank one, or one another active playlist shares, names none.
- * - The MANUAL scene is the scene cg OBS already has on program: pressing it
- *   cuts SP-program to "OBS manuál" and leaves what cg OBS shows as it is.
- *   The repo variable `PP_MANUAL_SCENE` overrides it. The gate never guesses
- *   another cg OBS scene: that would change what PP's wall shows. A manual
+ * - The MANUAL scene (`pickManualScene`, #229 ROZHODNUTÉ 11.11.2026, under
+ *   the owner's "pick any scene, I don't care at this phase", 12.10.2026, and
+ *   "a design that fails when an optional thing is absent is a failure",
+ *   11.11.2026): the repo variable `PP_MANUAL_SCENE` when cg OBS has it;
+ *   else the scene cg OBS already has on program when that is a manual scene
+ *   (pressing it cuts SP-program to "OBS manuál" and leaves what cg OBS shows
+ *   as it is); else the first manual scene in cg OBS's list. The choice and
+ *   why are logged, so an operator renaming or deleting a scene never fails
+ *   the deploy. A configured scene that exists but is not a manual one still
+ *   fails, and so does a cg OBS with no manual scene at all. The gate puts cg
+ *   OBS back afterwards (`cgRestoreTarget`). A manual
  *   scene that itself shows `SP-program` would loop the program into itself
  *   once it is on "OBS manuál"; nothing here can see that (a precondition,
  *   `peer-exchange.md` "PP deploy").
@@ -120,33 +127,46 @@ export function isManualScene(scene: string, playlistNames: Set<string>): boolea
 }
 
 /**
- * The manual scene the gate presses: `PP_MANUAL_SCENE` when set (it must be
- * one of cg OBS's scenes and a manual one, `isManualScene`), else cg OBS's
- * own program scene when that is a manual scene. Anything else is an error
- * naming `PP_MANUAL_SCENE`: the gate never picks another cg OBS scene by
- * itself.
+ * The manual scene the gate presses, and why (#229, ROZHODNUTÉ 11.11.2026):
+ *
+ * 1. `PP_MANUAL_SCENE` (trimmed; blank = unset) when it is one of cg OBS's
+ *    scenes — it must then be a manual one (`isManualScene`), else an error;
+ * 2. else cg OBS's own program scene when it is listed and a manual scene;
+ * 3. else the first manual scene in cg OBS's list (its order);
+ * 4. else an error naming cg OBS's scenes.
+ *
+ * A `PP_MANUAL_SCENE` cg OBS does not have (an operator renamed or deleted
+ * it) is named in `why` and falls through to 2.
  */
-export function pickManualScene(o: ManualSceneInput): { scene: string } | { error: string } {
+export function pickManualScene(o: ManualSceneInput): { scene: string; why: string } | { error: string } {
   const manual = (s: string) => isManualScene(s, o.playlistNames);
   const configured = o.configured.trim();
+  let missing = "";
   if (configured !== "") {
-    if (!o.scenes.includes(configured)) {
-      return {
-        error: `PP_MANUAL_SCENE "${configured}" is not one of cg OBS's scenes ${JSON.stringify(o.scenes)}`,
-      };
+    if (o.scenes.includes(configured)) {
+      if (!manual(configured)) {
+        return {
+          error: `PP_MANUAL_SCENE "${configured}" is not a manual scene (a playlist's, the A/V probe's, "${OBS_MANUAL}" or SongPlayer's "Blank")`,
+        };
+      }
+      return { scene: configured, why: "PP_MANUAL_SCENE" };
     }
-    if (!manual(configured)) {
-      return {
-        error: `PP_MANUAL_SCENE "${configured}" is not a manual scene (a playlist's, the A/V probe's, "${OBS_MANUAL}" or SongPlayer's "Blank")`,
-      };
-    }
-    return { scene: configured };
+    missing = `PP_MANUAL_SCENE "${configured}" is not one of cg OBS's scenes; `;
   }
-  if (o.scenes.includes(o.cgProgram) && manual(o.cgProgram)) return { scene: o.cgProgram };
+  if (o.scenes.includes(o.cgProgram) && manual(o.cgProgram)) {
+    return { scene: o.cgProgram, why: `${missing}cg OBS's program scene` };
+  }
+  const first = o.scenes.find(manual);
+  if (first !== undefined) {
+    return {
+      scene: first,
+      why: `${missing}cg OBS's program scene "${o.cgProgram}" is not a manual scene; the first manual scene in cg OBS's list`,
+    };
+  }
   return {
     error:
-      `cg OBS's program scene "${o.cgProgram}" is not a manual scene: set the repo variable ` +
-      "PP_MANUAL_SCENE to the manual scene the PP gate may press",
+      `${missing}cg OBS has no manual scene (each is a playlist's, the A/V probe's, "${OBS_MANUAL}" or ` +
+      `SongPlayer's "Blank"): ${JSON.stringify(o.scenes)}`,
   };
 }
 

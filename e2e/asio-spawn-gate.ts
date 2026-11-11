@@ -17,7 +17,7 @@
  * `asio-spawn-gate.spec.ts`).
  */
 
-import { gatedAsioOutputs, type OutputStatus } from "./audio-outputs-gate";
+import { gatedAsioOutputs, waitingForClock, type OutputStatus } from "./audio-outputs-gate";
 
 /** How long the gate waits after the spawn before it reads again, ms: the
  * host reports every 500 ms, and a resync the spawn caused came within
@@ -55,6 +55,15 @@ export function spawnCounters(list: OutputStatus[]): SpawnCounters[] {
       hard_recentres: o.asio?.hard_recentres ?? 0,
       blocks_sent: o.blocks_sent,
     }));
+}
+
+/** The outputs ready for the spawn test, compared with
+ * SP_ASIO_OUTPUTS_EXPECTED (#229): the gated ones that run
+ * (`spawnCounters`) plus the ones in a calm wait for their driver's clock,
+ * which count (`asioCount`, only where `clockWaitOk`) but are not watched
+ * across the spawn. */
+export function spawnReady(list: OutputStatus[], clockWaitOk: boolean): number {
+  return spawnCounters(list).length + (clockWaitOk ? waitingForClock(list).length : 0);
 }
 
 /** Why the spawn disturbed an output: its resyncs or hard re-centres grew,

@@ -5,6 +5,8 @@ import {
   lv1PathFailures,
   gatedAsioOutputs,
   waitingForClock,
+  asioCount,
+  asioCountReading,
   parseVbanHeader,
   receiverFailures,
   type AsioTelemetry,
@@ -238,6 +240,62 @@ test.describe("ASIO gate (#233)", () => {
     const running = dvs(10, {}, { reason_code: "clock_off_rate" });
     expect(waitingForClock([lv1(10), offRate, running]).map((o) => o.id)).toEqual(["out-2"]);
     expect(gatedAsioOutputs([lv1(10), offRate, running]).map((o) => o.id)).toEqual(["out-3"]);
+  });
+
+  // #229 (ROZHODNUTÉ 11.11.2026, PP deploy 43001397048): an output in a calm
+  // clock wait is an enabled output behaving correctly while its device or
+  // network is off: it counts toward SP_ASIO_OUTPUTS_EXPECTED, is named and is
+  // not measured; the running ones are measured as before.
+  test("an output in a calm clock wait counts toward the expected outputs, unmeasured", () => {
+    const offRate = dvs(10, { id: "out-2", state: "waiting" }, { reason_code: "clock_off_rate" });
+    const noClock = dvs(10, { id: "out-5", state: "waiting" }, { reason_code: "no_clock" });
+    const pp = [lv1(10), offRate, dvs(10)];
+    expect(asioCount(pp, true), "PP: SoundGrid off, Dante running").toEqual({
+      counted: 2,
+      measured: ["out-3"],
+      waiting: ["out-2 (clock_off_rate)"],
+    });
+    expect(asioCountReading(pp, 2, true)).toBe(2);
+    expect(asioCount([offRate, noClock], true)).toEqual({
+      counted: 2,
+      measured: [],
+      waiting: ["out-2 (clock_off_rate)", "out-5 (no_clock)"],
+    });
+  });
+
+  test("any other output state, a disabled entry or a missing output still fails the count", () => {
+    const offRate = dvs(10, { id: "out-2", state: "waiting" }, { reason_code: "clock_off_rate" });
+    const reset = dvs(10, { id: "out-6", state: "waiting" }, { reason_code: "reset" });
+    const off = dvs(10, { id: "out-4", enabled: false, state: "disabled" });
+    // A waiting output with another reason is measured: the running poll fails on it.
+    expect(asioCount([reset, offRate], true)).toEqual({
+      counted: 2,
+      measured: ["out-6"],
+      waiting: ["out-2 (clock_off_rate)"],
+    });
+    expect(asioCount([lv1(10), off, offRate], true).counted, "a disabled entry counts nothing").toBe(1);
+    expect(asioCountReading([lv1(10), offRate], 2, true), "out-3 missing").toBe(
+      "1 (measured: none; waiting for a clock: out-2 (clock_off_rate))",
+    );
+    expect(asioCountReading([dvs(10)], 2, true)).toBe("1 (measured: out-3; waiting for a clock: none)");
+  });
+
+  // #229 review F1 (11.11.2026): the calm wait counts only on a box that
+  // allows it (SP_ASIO_CLOCK_WAIT_OK, set by deploy-pp.yml alone: PP's
+  // SoundGrid network is off outside services). On resolume-snv a DVS or
+  // native Dante output with no clock is a fault: it counts nothing, is still
+  // named, and the deploy fails.
+  test("a calm clock wait counts nothing on a box that does not allow it", () => {
+    const noClock = dvs(10, { id: "out-4", state: "waiting" }, { reason_code: "no_clock" });
+    expect(asioCount([noClock], false)).toEqual({
+      counted: 0,
+      measured: [],
+      waiting: ["out-4 (no_clock)"],
+    });
+    expect(asioCountReading([noClock], 1, false)).toBe(
+      "0 (measured: none; waiting for a clock: out-4 (no_clock))",
+    );
+    expect(asioCountReading([dvs(10)], 1, false)).toBe(1);
   });
 
   // #233 review round 1: an entry's delay (up to 2 s) is part of its

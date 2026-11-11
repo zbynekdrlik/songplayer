@@ -6,11 +6,12 @@
  *    (SP_ASIO_OUTPUTS_EXPECTED > 0) has Dante Virtual Soundcard among them,
  *    by its exact name. A box with none expected is not asked for DVS
  *    (#233 release review).
- * 2. Exactly SP_ASIO_OUTPUTS_EXPECTED enabled ASIO outputs exist that are
- *    not waiting for their driver's clock (`gatedAsioOutputs`: PP's DVS waits
- *    calmly while PP has no Dante PTP clock, the owner's ruling, #233,
- *    8.10.2026; ci.yml / deploy-pp.yml: "1" at SNV, "1" at PP since its DVS
- *    has a clock, 9.10.2026), and each one runs, then holds a minute of program blocks at
+ * 2. Exactly SP_ASIO_OUTPUTS_EXPECTED enabled ASIO outputs exist
+ *    (`asioCount`; ci.yml / deploy-pp.yml: "1" at SNV, "2" at PP). One in a
+ *    calm wait for its driver's clock (`no_clock` / `clock_off_rate`: its
+ *    device or network is off, e.g. PP's SoundGrid outside services; #229,
+ *    ROZHODNUTÉ 11.11.2026) counts, is named in the log and is not measured;
+ *    every other one (`gatedAsioOutputs`) runs, then holds a minute of program blocks at
  *    its driver's rate with no underrun, no reopen, no hard re-centre
  *    (#233 review round 2: the owner's fault, a faded skip or insert),
  *    |ppm| <= 300 and a latency (`asioGateFailures`). Every output is measured over the SAME
@@ -18,7 +19,8 @@
  *    (up to 4, `MAX_ASIO_OUTPUTS`).
  *
  * 3. #233 (the spawn finding): a child process SongPlayer spawns (one yt-dlp,
- *    `POST /api/v1/youtube/probe`) moves no gated ASIO output's `resyncs` or
+ *    `POST /api/v1/youtube/probe`; skipped when no output runs, every
+ *    expected one in a calm clock wait) moves no running ASIO output's `resyncs` or
  *    `hard_recentres`, and no output stops or restarts: every ASIO output
  *    runs in the ASIO host process `sp-audio-host`, which spawns nothing
  *    (`asio-spawn-gate.ts`, unit-tested in the mock suite).
@@ -44,9 +46,9 @@ import { test, expect, type APIRequestContext } from "@playwright/test";
 import {
   DVS_DRIVER,
   WINDOW_BLOCKS,
+  asioCount,
+  asioCountReading,
   asioGateFailures,
-  gatedAsioOutputs,
-  waitingForClock,
   type OutputStatus,
 } from "./audio-outputs-gate";
 import {
@@ -54,10 +56,15 @@ import {
   probeSpawnFailures,
   spawnCounters,
   spawnDisturbances,
+  spawnReady,
 } from "./asio-spawn-gate";
 import { expectNoLossSince, fileStartOrNull, openFaultWindow } from "./audio-faults-read";
 
 const EXPECTED = Number(process.env.SP_ASIO_OUTPUTS_EXPECTED ?? "0");
+/** #229 review F1: whether an output in a calm clock wait counts toward
+ *  EXPECTED — "1" only in deploy-pp.yml (PP's SoundGrid network is off
+ *  outside services); on resolume-snv a Dante / DVS output with no clock fails. */
+const CLOCK_WAIT_OK = process.env.SP_ASIO_CLOCK_WAIT_OK === "1";
 
 /** #257: where this file's audio window opened (the server's clock), one
  * settle after its outputs run; `null` until then. */
@@ -109,31 +116,31 @@ test.describe("ASIO output (#233)", () => {
   }) => {
     test.setTimeout(240_000);
     expect(Number.isInteger(EXPECTED) && EXPECTED >= 0, "SP_ASIO_OUTPUTS_EXPECTED").toBe(true);
-    // A failed read is no count (never zero outputs: with EXPECTED "0" a
-    // broken API would pass), so the poll reads -1 then and tries again.
-    const enabledAsio = async () => {
-      const list = await readOutputs(request);
-      return list === null ? null : gatedAsioOutputs(list);
-    };
-    // The count, or (when it is off and an output waits for its driver's
-    // clock) the count with those outputs named, so a box expecting one
-    // says that its DVS has no clock rather than that it has no output.
-    const gatedCount = async () => {
+    // The count (#229: an output in a calm clock wait counts, unmeasured),
+    // or, when it is off, the count with the measured and the waiting
+    // outputs named. A failed read is no count (never zero outputs: with
+    // EXPECTED "0" a broken API would pass), so the poll reads -1 then and
+    // tries again. The list the count came from is kept: the outputs the
+    // test measures are taken from that same read.
+    let countedList: OutputStatus[] = [];
+    const counted = async () => {
       const list = await readOutputs(request);
       if (list === null) return -1;
-      const n = gatedAsioOutputs(list).length;
-      const waiting = waitingForClock(list).map((o) => o.id);
-      return n !== EXPECTED && waiting.length > 0 ? `${n} (waiting for a clock: ${waiting.join(", ")})` : n;
+      countedList = list;
+      return asioCountReading(list, EXPECTED, CLOCK_WAIT_OK);
     };
     await expect
-      .poll(gatedCount, {
+      .poll(counted, {
         message: "enabled ASIO outputs (SP_ASIO_OUTPUTS_EXPECTED)",
         timeout: 20_000,
       })
       .toBe(EXPECTED);
-    const enabled = await enabledAsio();
-    expect(enabled, "GET /api/v1/program").not.toBeNull();
-    const ids = (enabled as OutputStatus[]).map((o) => o.id);
+    const count = asioCount(countedList, CLOCK_WAIT_OK);
+    console.log(
+      `[#233 asio] counted ${count.counted}: measured ${JSON.stringify(count.measured)}, ` +
+        `waiting for a clock (not measured) ${JSON.stringify(count.waiting)}`,
+    );
+    const ids = count.measured;
     if (ids.length === 0) {
       faultWindowStart = await openFaultWindow(request);
       return;
@@ -173,19 +180,21 @@ test.describe("ASIO output (#233)", () => {
 
   test("a child process SongPlayer spawns disturbs no ASIO output (#233)", async ({ request }) => {
     test.setTimeout(240_000);
-    // Every gated output running, read strictly (a failed read is no count).
-    const running = async () => {
+    // Every gated output running or in a calm clock wait (#229), read
+    // strictly (a failed read is no count).
+    const ready = async () => {
       const list = await readOutputs(request);
-      return list === null ? -1 : spawnCounters(list).length;
+      return list === null ? -1 : spawnReady(list, CLOCK_WAIT_OK);
     };
     await expect
-      .poll(running, { message: "the gated ASIO outputs run before the spawn", timeout: 30_000 })
+      .poll(ready, { message: "the ASIO outputs run, or wait calmly for a clock, before the spawn", timeout: 30_000 })
       .toBe(EXPECTED);
-    if (EXPECTED === 0) return;
     const first = await readOutputs(request);
     expect(first, "GET /api/v1/program").not.toBeNull();
     const before = spawnCounters(first as OutputStatus[]);
     console.log(`[#233 spawn] before: ${JSON.stringify(before)}`);
+    // Only the running outputs are watched across the spawn.
+    if (before.length === 0) return;
     // One yt-dlp, spawned by SongPlayer (the probe answers 200 whatever
     // YouTube says: the spawn is what the gate needs — unless yt-dlp is not
     // installed yet, when SongPlayer spawned nothing and the gate proves
