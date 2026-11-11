@@ -6,11 +6,13 @@
 //!
 //! The owner's rule: a production PC runs Windows LTSC or Windows IoT
 //! Enterprise (his ruling of 11.10.2026), with Windows Defender's real-time
-//! protection and every firewall profile OFF. Nothing may scan or filter what
-//! SongPlayer launches: on PP every Defender scan of a launched yt-dlp made
+//! protection OFF. Nothing may scan what SongPlayer launches: on PP every
+//! Defender scan of a launched yt-dlp made
 //! the Waves SoundGrid driver resync (A/B/A, kernel trace). sp-server's
 //! `prod_env` reads the facts and decides; this module only names the outcome
-//! (WASM-safe: the dashboard shows it).
+//! (WASM-safe: the dashboard shows it). The firewall: every profile off, or
+//! (a PC with a Dante leg) dstack's standard ([`firewall`], #255, the owner's
+//! ruling on dstack#155, 10.11.2026).
 //!
 //! #255 adds the production PC's audio profile ([`audio`]): the network
 //! adapter the SoundGrid driver uses (its chosen port) runs an NDIS driver
@@ -25,7 +27,15 @@ use crate::health::HealthTone;
 #[path = "prod_env_audio.rs"]
 pub mod audio;
 
+#[path = "prod_env_firewall.rs"]
+pub mod firewall;
+
+#[path = "prod_env_network.rs"]
+pub mod network;
+
 use audio::{AudioProfile, MmcssSetting, NicSetting};
+use firewall::{DSTACK_GROUP, DSTACK_GROUP_RULES, FirewallDefaults, FirewallMode};
+use network::{NetProblem, TwoNetworksView};
 
 /// A Windows Firewall profile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,6 +79,11 @@ pub enum Unreadable {
     /// The antivirus products the Security Center lists.
     Antivirus,
     Firewall(FirewallProfile),
+    /// #255 (dstack#155): a profile that is on has no default actions in
+    /// the active store.
+    FirewallDefaults(FirewallProfile),
+    /// #255 (dstack#155): the enabled Block rules could not be listed.
+    FirewallRules,
     /// #255: SoundGrid (the service, its driver's chosen port, the
     /// interfaces).
     SoundGrid,
@@ -77,6 +92,8 @@ pub enum Unreadable {
     WindowsUpdate,
     /// #255: MMCSS's system profile.
     Mmcss,
+    /// #285: the wired adapters could not be listed.
+    WiredNics,
 }
 
 /// One way a box is not a production environment.
@@ -87,6 +104,11 @@ pub enum EnvProblem {
     EditionNotAllowed { edition: String, build: Option<u32> },
     /// Windows Defender's real-time protection is on.
     DefenderRealtimeOn,
+    /// Another of Defender's protections is on, as Defender's own status
+    /// reports it (#255): `behavior_monitoring`, `ioav`, `on_access`. A
+    /// security-intelligence update turned them back on while real-time
+    /// stayed off (resolume-snv, 7.11.2026).
+    DefenderProtectionOn(String),
     /// Windows Defender runs in a mode that still scans files while another
     /// product leads (`AMRunningMode`: passive, EDR block, side-by-side
     /// passive).
@@ -94,8 +116,24 @@ pub enum EnvProblem {
     /// Another antivirus product is on (its name, as the Security Center
     /// lists it).
     AntivirusOn(String),
-    /// A firewall profile is on.
+    /// A firewall profile is on, and nothing on the box follows dstack's
+    /// standard (no rule of the group, no default Allow): neither of the
+    /// two accepted states (#255, dstack#155).
     FirewallOn(FirewallProfile),
+    /// #255: dstack's standard is set up, but this profile is off (it wants
+    /// every profile on).
+    FirewallOff(FirewallProfile),
+    /// #255: dstack's standard is set up, but this profile's default
+    /// actions are not both Allow.
+    FirewallDefaultBlock {
+        profile: FirewallProfile,
+        defaults: FirewallDefaults,
+    },
+    /// #255: enabled Block rules outside the group (their names).
+    FirewallBlockOutsideGroup(Vec<String>),
+    /// #255: the group does not hold exactly its enabled Block rules (how
+    /// many it holds).
+    FirewallGroupIncomplete { rules: u32 },
     /// #255: SoundGrid is installed and its driver has no port chosen (no
     /// preferences, no or an empty `LocalLanPort`).
     SoundGridPortUnset,
@@ -114,6 +152,16 @@ pub enum EnvProblem {
     },
     /// #255: a SoundGrid adapter's driver or a setting could not be read.
     SoundGridNicUnreadable { nic: String },
+    /// #285: a wired adapter's value is not the production one: as read, or
+    /// `None` when a value it must have is not there (the deploy's
+    /// `scripts/setup-prod-pc.ps1` writes it; a driver's INF deletes it).
+    WiredNicValue {
+        nic: String,
+        keyword: String,
+        value: Option<String>,
+    },
+    /// #285: a wired adapter's values could not be read.
+    WiredNicUnreadable { nic: String },
     /// #255: Windows Update's automatic updates are not off
     /// (`NoAutoUpdate` is not 1).
     AutoUpdateOn,
@@ -128,6 +176,9 @@ pub enum EnvProblem {
         setting: MmcssSetting,
         value: Option<String>,
     },
+    /// #255 item D: a PC with a Dante leg does not follow dstack's
+    /// two-network standard §6 items 1–3 ([`network`]).
+    Network(NetProblem),
     /// A fact could not be read, so the box cannot be verified.
     Unreadable(Unreadable),
 }
@@ -140,9 +191,16 @@ impl EnvProblem {
         match self {
             Self::EditionNotAllowed { .. } => "edition_not_allowed".to_string(),
             Self::DefenderRealtimeOn => "defender_realtime_on".to_string(),
+            Self::DefenderProtectionOn(name) => format!("defender_protection_on:{name}"),
             Self::DefenderPassive(_) => "defender_passive_mode".to_string(),
             Self::AntivirusOn(_) => "antivirus_on".to_string(),
             Self::FirewallOn(p) => format!("firewall_on:{}", p.name()),
+            Self::FirewallOff(p) => format!("firewall_off:{}", p.name()),
+            Self::FirewallDefaultBlock { profile, .. } => {
+                format!("firewall_default_block:{}", profile.name())
+            }
+            Self::FirewallBlockOutsideGroup(_) => "firewall_block_outside_group".to_string(),
+            Self::FirewallGroupIncomplete { .. } => "firewall_group_incomplete".to_string(),
             Self::SoundGridPortUnset => "soundgrid_port_unset".to_string(),
             Self::SoundGridPortMissing { .. } => "soundgrid_port_missing".to_string(),
             Self::SoundGridNicNetAdapterCx { .. } => "soundgrid_nic_netadaptercx".to_string(),
@@ -150,9 +208,12 @@ impl EnvProblem {
                 format!("soundgrid_nic_setting:{}", setting.name())
             }
             Self::SoundGridNicUnreadable { .. } => "unreadable:soundgrid_nic".to_string(),
+            Self::WiredNicValue { keyword, .. } => format!("wired_nic_value:{keyword}"),
+            Self::WiredNicUnreadable { .. } => "unreadable:wired_nic".to_string(),
             Self::AutoUpdateOn => "windows_auto_update_on".to_string(),
             Self::DriversNotExcluded => "windows_update_drivers_on".to_string(),
             Self::Mmcss { setting, .. } => format!("mmcss:{}", setting.name()),
+            Self::Network(p) => p.code(),
             Self::Unreadable(Unreadable::Edition) => "unreadable:edition".to_string(),
             Self::Unreadable(Unreadable::Build) => "unreadable:build".to_string(),
             Self::Unreadable(Unreadable::Defender) => "unreadable:defender".to_string(),
@@ -160,9 +221,14 @@ impl EnvProblem {
             Self::Unreadable(Unreadable::Firewall(p)) => {
                 format!("unreadable:firewall:{}", p.name())
             }
+            Self::Unreadable(Unreadable::FirewallDefaults(p)) => {
+                format!("unreadable:firewall_defaults:{}", p.name())
+            }
+            Self::Unreadable(Unreadable::FirewallRules) => "unreadable:firewall_rules".to_string(),
             Self::Unreadable(Unreadable::SoundGrid) => "unreadable:soundgrid".to_string(),
             Self::Unreadable(Unreadable::WindowsUpdate) => "unreadable:windows_update".to_string(),
             Self::Unreadable(Unreadable::Mmcss) => "unreadable:mmcss".to_string(),
+            Self::Unreadable(Unreadable::WiredNics) => "unreadable:wired_nics".to_string(),
         }
     }
 
@@ -179,11 +245,44 @@ impl EnvProblem {
             Self::DefenderRealtimeOn => {
                 "ochrana Windows Defender v reálnom čase je zapnutá".to_string()
             }
+            Self::DefenderProtectionOn(name) => {
+                let what = match name.as_str() {
+                    "behavior_monitoring" => "sledovanie správania",
+                    "ioav" => "kontrola stiahnutých súborov (IOAV)",
+                    "on_access" => "kontrola súborov pri prístupe",
+                    other => other,
+                };
+                format!("ochrana Windows Defender „{what}“ je zapnutá")
+            }
             Self::DefenderPassive(mode) => {
                 format!("Windows Defender beží v režime „{mode}“ a súbory stále kontroluje")
             }
             Self::AntivirusOn(name) => format!("antivírus „{name}“ je zapnutý"),
-            Self::FirewallOn(p) => format!("brána firewall je zapnutá ({} profil)", p.name_sk()),
+            Self::FirewallOn(p) => format!(
+                "brána firewall je zapnutá ({} profil) a nie je nastavená podľa štandardu dstack \
+                 (skupina pravidiel {DSTACK_GROUP})",
+                p.name_sk()
+            ),
+            Self::FirewallOff(p) => format!(
+                "brána firewall je vypnutá ({} profil), hoci štandard dstack je nastavený — \
+                 má byť zapnutá vo všetkých profiloch",
+                p.name_sk()
+            ),
+            Self::FirewallDefaultBlock { profile, defaults } => format!(
+                "brána firewall ({} profil): predvolená akcia má byť povoliť (prichádzajúce: {}, \
+                 odchádzajúce: {})",
+                profile.name_sk(),
+                firewall::action_sk(defaults.inbound),
+                firewall::action_sk(defaults.outbound)
+            ),
+            Self::FirewallBlockOutsideGroup(names) => format!(
+                "brána firewall má zapnuté blokovacie pravidlá mimo skupiny {DSTACK_GROUP}: {}",
+                firewall::names_sk(names)
+            ),
+            Self::FirewallGroupIncomplete { rules } => format!(
+                "skupina pravidiel {DSTACK_GROUP} má {rules} zapnutých blokovacích pravidiel \
+                 (má ich mať {DSTACK_GROUP_RULES})"
+            ),
             Self::SoundGridPortUnset => {
                 "SoundGrid nemá zvolený sieťový port — nastav ho v SoundGrid \
                  Studio / ovládači"
@@ -216,6 +315,24 @@ impl EnvProblem {
             Self::SoundGridNicUnreadable { nic } => format!(
                 "ovládač alebo nastavenia sieťovej karty SoundGrid „{nic}“ sa nepodarilo zistiť"
             ),
+            Self::WiredNicValue {
+                nic,
+                keyword,
+                value: Some(value),
+            } => format!(
+                "sieťová karta „{nic}“: nastavenie „{keyword}“ nie je produkčné (je {value})"
+            ),
+            Self::WiredNicValue {
+                nic,
+                keyword,
+                value: None,
+            } => format!(
+                "sieťová karta „{nic}“: hodnota „{keyword}“ v registri chýba (ovládač ju mohol \
+                 pri inštalácii zmazať, najbližší deploy ju zapíše)"
+            ),
+            Self::WiredNicUnreadable { nic } => {
+                format!("nastavenia sieťovej karty „{nic}“ sa nepodarilo zistiť")
+            }
             Self::AutoUpdateOn => {
                 "automatické aktualizácie Windows nie sú vypnuté (NoAutoUpdate)".to_string()
             }
@@ -240,6 +357,7 @@ impl EnvProblem {
                 setting.label(),
                 setting.wanted()
             ),
+            Self::Network(p) => p.text_sk(),
             Self::Unreadable(Unreadable::Edition) => {
                 "edíciu Windows sa nepodarilo zistiť".to_string()
             }
@@ -256,6 +374,13 @@ impl EnvProblem {
                 "stav brány firewall ({} profil) sa nepodarilo zistiť",
                 p.name_sk()
             ),
+            Self::Unreadable(Unreadable::FirewallDefaults(p)) => format!(
+                "predvolené akcie brány firewall ({} profil) sa nepodarilo zistiť",
+                p.name_sk()
+            ),
+            Self::Unreadable(Unreadable::FirewallRules) => {
+                "blokovacie pravidlá brány firewall sa nepodarilo zistiť".to_string()
+            }
             Self::Unreadable(Unreadable::SoundGrid) => {
                 "väzby protokolu SoundGrid na sieťové karty sa nepodarilo zistiť".to_string()
             }
@@ -264,6 +389,9 @@ impl EnvProblem {
             }
             Self::Unreadable(Unreadable::Mmcss) => {
                 "nastavenia MMCSS sa nepodarilo zistiť".to_string()
+            }
+            Self::Unreadable(Unreadable::WiredNics) => {
+                "zoznam sieťových kariet sa nepodarilo zistiť".to_string()
             }
         }
     }
@@ -284,7 +412,9 @@ pub struct ProblemView {
     pub text_sk: String,
 }
 
-/// Each firewall profile: on, off, or `None` when it could not be read.
+/// Each firewall profile: on, off, or `None` when it could not be read;
+/// #255 (dstack#155): which accepted state the firewall is in and the facts
+/// dstack's standard is judged by.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FirewallState {
     #[serde(default)]
@@ -293,6 +423,20 @@ pub struct FirewallState {
     pub private: Option<bool>,
     #[serde(default)]
     pub public: Option<bool>,
+    /// `off`, `dstack155` or `other` (`None`: a profile was not read).
+    #[serde(default)]
+    pub mode: Option<FirewallMode>,
+    /// Each profile's default actions (domain, private, public; `None`: not
+    /// read).
+    #[serde(default)]
+    pub defaults: [Option<FirewallDefaults>; 3],
+    /// The enabled Block rules of the group `dstack155` (`None`: not read).
+    #[serde(default)]
+    pub dstack_group_rules: Option<u32>,
+    /// The enabled Block rules outside that group, by name (`None`: not
+    /// read).
+    #[serde(default)]
+    pub block_rules_outside_group: Option<Vec<String>>,
 }
 
 /// The production environment as `GET /api/v1/status.environment` and
@@ -331,6 +475,10 @@ pub struct EnvironmentStatus {
     /// Windows Defender runs in a passive / EDR block mode (still scans).
     #[serde(default)]
     pub defender_passive: Option<bool>,
+    /// Defender's other protections that are on (#255: `behavior_monitoring`,
+    /// `ioav`, `on_access`; `[]`: none; `None`: not read).
+    #[serde(default)]
+    pub defender_protections_on: Option<Vec<String>>,
     /// Windows Defender's running mode (`AMRunningMode`), for the operator.
     #[serde(default)]
     pub defender_mode: Option<String>,
@@ -345,10 +493,15 @@ pub struct EnvironmentStatus {
     /// Each firewall profile.
     #[serde(default)]
     pub firewall: FirewallState,
-    /// #255: the production PC's audio profile (the SoundGrid and Dante
-    /// adapters, Windows Update, MMCSS, power) and its report-only notes.
+    /// #255: the production PC's audio profile (the SoundGrid adapter,
+    /// Windows Update, MMCSS, the wired adapters, power) and its report-only
+    /// notes.
     #[serde(default)]
     pub audio: AudioProfile,
+    /// #255 item D: the two-network facts (`None`: not checked here, or an
+    /// older server).
+    #[serde(default)]
+    pub two_networks: Option<TwoNetworksView>,
     /// Every problem, in a fixed order: the edition, Defender, the firewall's
     /// domain, private and public profile, then the audio profile's.
     #[serde(default)]
@@ -379,10 +532,13 @@ pub fn marker(status: &EnvironmentStatus) -> &'static str {
 /// What the health bar's tooltip says before the problems.
 pub const RULE_SK: &str = "Produkčný počítač musí bežať na Windows LTSC alebo Windows 11 IoT \
      Enterprise, s vypnutou ochranou Windows Defender v reálnom čase (ani v pasívnom režime), \
-     bez iného antivírusu a s vypnutou bránou firewall — nič nesmie kontrolovať ani filtrovať programy, ktoré SongPlayer spúšťa. \
+     bez iného antivírusu — nič nesmie kontrolovať programy, ktoré SongPlayer spúšťa. \
+     Brána firewall je vypnutá vo všetkých profiloch, alebo (počítač so sieťou Dante) zapnutá vo všetkých \
+     podľa štandardu dstack: predvolene všetko povolené a blokuje len skupina pravidiel dstack155. \
      Sieťová karta, ktorú má ovládač SoundGrid zvolenú ako port, beží na ovládači NDIS s vypnutým moderovaním \
      prerušení, riadením toku a úsporou energie, automatické aktualizácie Windows sú vypnuté a MMCSS je nastavené \
-     pre Pro Audio.";
+     pre Pro Audio. Počítač so sieťou Dante má zapnutú jednu fyzickú sieťovú kartu, jednu predvolenú trasu cez LAN \
+     a sieť Dante bez brány, s metrikou 900, bez registrácie v DNS, bez NetBIOS, zdieľania a klienta siete.";
 
 /// The health bar's segment, shown only while a check names a problem:
 /// `Prostredie: <the first problem>` (and ` (+N)` for N more), red, with the

@@ -6,21 +6,26 @@
 //!
 //! - [`read_direct`], at each check: the edition, the build and the
 //!   firewall's policy and local values from the registry (`RegGetValueW`),
-//!   the WinDefend service's state from the service manager, and the #255
-//!   audio profile (`prod_env_audio_win.rs`);
+//!   the WinDefend service's state from the service manager, the #255
+//!   audio profile (`prod_env_audio_win.rs`) and the #255 item D
+//!   two-network facts (`prod_env_network_win.rs`);
 //! - [`read_wmi`], behind the bounded reader: Defender's status
 //!   (`root\Microsoft\Windows\Defender` `MSFT_MpComputerStatus`), the
 //!   firewall's effective state (`root\StandardCimv2`
 //!   `MSFT_NetFirewallProfile` in the active policy store) and the registered
-//!   antivirus products (`root\SecurityCenter2` `AntiVirusProduct`), over
-//!   COM on a thread of its own.
+//!   antivirus products (`root\SecurityCenter2` `AntiVirusProduct`) and
+//!   #255 item D's adapter bindings (`root\StandardCimv2`
+//!   `MSFT_NetAdapterBindingSettingData`) and adapters (`MSFT_NetAdapter`),
+//!   over COM on a thread of its own.
 //!
 //! Every decision on what was read is `prod_env_read.rs`'s, tested on Linux;
 //! this file only reads. Not compiled on the Linux runner, so every fn is
 //! `mutants::skip`.
 
+use super::network::{AdapterRow, BindingRow};
 use super::read::{
-    AvProduct, DefenderRow, DirectRead, FirewallRow, RegDword, RegString, ServiceRead, WmiRead,
+    AvProduct, DefenderRow, DirectRead, FirewallRow, FirewallRuleRow, RegDword, RegString,
+    ServiceRead, WmiRead,
 };
 
 /// The Windows version key (`EditionID`, `ProductName`, `CurrentBuildNumber`).
@@ -54,9 +59,10 @@ const MAX_ROWS: usize = 64;
 /// E_FAIL: the WMI thread could not be started or ended in a panic.
 const E_FAIL: i32 = 0x8000_4005_u32 as i32;
 
-/// The registry and the service manager, read at each check.
+/// The registry and the service manager, read at each check; the
+/// two-network facts for the Dante outputs' addresses `dante_ips`.
 #[cfg_attr(test, mutants::skip)] // Windows glue, not compiled on the Linux runner
-pub fn read_direct() -> DirectRead {
+pub fn read_direct(dante_ips: &[std::net::Ipv4Addr]) -> DirectRead {
     DirectRead {
         edition_id: reg_string(CURRENT_VERSION, "EditionID"),
         product_name: reg_string(CURRENT_VERSION, "ProductName"),
@@ -66,6 +72,7 @@ pub fn read_direct() -> DirectRead {
         firewall_local: LOCAL_FIREWALL.map(|key| reg_dword(key, "EnableFirewall")),
         defender_service: read_service("WinDefend"),
         audio: super::audio::win::read_audio(),
+        network: super::network::win::read_network(dante_ips),
     }
 }
 
@@ -261,7 +268,10 @@ fn wmi_in_own_apartment() -> WmiRead {
     WmiRead {
         defender: query_defender(&locator).map_err(|e| e.code().0),
         firewall: query_firewall(&locator).map_err(|e| e.code().0),
+        firewall_rules: query_firewall_rules(&locator).map_err(|e| e.code().0),
         antivirus: query_antivirus(&locator).map_err(|e| e.code().0),
+        bindings: query_bindings(&locator).map_err(|e| e.code().0),
+        adapters: query_adapters(&locator).map_err(|e| e.code().0),
     }
 }
 
@@ -414,7 +424,8 @@ fn query_defender(
     let services = connect(locator, r"ROOT\Microsoft\Windows\Defender")?;
     let found = rows(
         &services,
-        "SELECT RealTimeProtectionEnabled, AMRunningMode, AntivirusEnabled \
+        "SELECT RealTimeProtectionEnabled, AMRunningMode, AntivirusEnabled, \
+         BehaviorMonitorEnabled, IoavProtectionEnabled, OnAccessProtectionEnabled \
          FROM MSFT_MpComputerStatus",
         None,
     )?;
@@ -422,30 +433,40 @@ fn query_defender(
         realtime: bool_of(row, "RealTimeProtectionEnabled"),
         mode: string_of(row, "AMRunningMode"),
         antivirus_enabled: bool_of(row, "AntivirusEnabled"),
+        behavior_monitor: bool_of(row, "BehaviorMonitorEnabled"),
+        ioav: bool_of(row, "IoavProtectionEnabled"),
+        on_access: bool_of(row, "OnAccessProtectionEnabled"),
     }))
 }
 
-/// The firewall profiles as they apply now: the active policy store (the
-/// local settings merged with every group policy), through the
-/// `PolicyStore` context value the NetSecurity provider reads.
+/// The `PolicyStore = "ActiveStore"` context the NetSecurity provider reads:
+/// the local settings merged with every group policy.
 #[cfg_attr(test, mutants::skip)] // Windows glue
-fn query_firewall(
-    locator: &windows::Win32::System::Wmi::IWbemLocator,
-) -> windows::core::Result<Vec<FirewallRow>> {
+fn active_store() -> windows::core::Result<windows::Win32::System::Wmi::IWbemContext> {
     use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
     use windows::Win32::System::Wmi::{IWbemContext, WbemContext};
     use windows::core::{VARIANT, w};
 
-    let services = connect(locator, r"ROOT\StandardCimv2")?;
     // SAFETY: COM is initialized on this thread; the value outlives the call.
-    let context: IWbemContext = unsafe {
+    unsafe {
         let context: IWbemContext = CoCreateInstance(&WbemContext, None, CLSCTX_INPROC_SERVER)?;
         context.SetValue(w!("PolicyStore"), 0, &VARIANT::from("ActiveStore"))?;
-        context
-    };
+        Ok(context)
+    }
+}
+
+/// The firewall profiles as they apply now (the active policy store), with
+/// their default actions (#255).
+#[cfg_attr(test, mutants::skip)] // Windows glue
+fn query_firewall(
+    locator: &windows::Win32::System::Wmi::IWbemLocator,
+) -> windows::core::Result<Vec<FirewallRow>> {
+    let services = connect(locator, r"ROOT\StandardCimv2")?;
+    let context = active_store()?;
     let found = rows(
         &services,
-        "SELECT Name, Enabled FROM MSFT_NetFirewallProfile",
+        "SELECT Name, Enabled, DefaultInboundAction, DefaultOutboundAction \
+         FROM MSFT_NetFirewallProfile",
         Some(&context),
     )?;
     Ok(found
@@ -453,6 +474,33 @@ fn query_firewall(
         .map(|row| FirewallRow {
             name: string_of(row, "Name").unwrap_or_default(),
             enabled: u32_of(row, "Enabled"),
+            default_inbound: u32_of(row, "DefaultInboundAction"),
+            default_outbound: u32_of(row, "DefaultOutboundAction"),
+        })
+        .collect())
+}
+
+/// #255 (dstack#155): the active store's enabled Block rules (`Action` 4
+/// Block, `Enabled` 1 true), at most `MAX_ROWS` (dstack's group is 14).
+#[cfg_attr(test, mutants::skip)] // Windows glue
+fn query_firewall_rules(
+    locator: &windows::Win32::System::Wmi::IWbemLocator,
+) -> windows::core::Result<Vec<FirewallRuleRow>> {
+    let services = connect(locator, r"ROOT\StandardCimv2")?;
+    let context = active_store()?;
+    let found = rows(
+        &services,
+        "SELECT InstanceID, DisplayName, RuleGroup, DisplayGroup FROM MSFT_NetFirewallRule \
+         WHERE Action = 4 AND Enabled = 1",
+        Some(&context),
+    )?;
+    Ok(found
+        .iter()
+        .map(|row| FirewallRuleRow {
+            id: string_of(row, "InstanceID").unwrap_or_default(),
+            display_name: string_of(row, "DisplayName"),
+            rule_group: string_of(row, "RuleGroup"),
+            display_group: string_of(row, "DisplayGroup"),
         })
         .collect())
 }
@@ -475,6 +523,61 @@ fn query_antivirus(
             name: string_of(row, "displayName").unwrap_or_default(),
             guid: string_of(row, "instanceGuid").unwrap_or_default(),
             state: u32_of(row, "productState"),
+        })
+        .collect())
+}
+
+/// #255 item D: every adapter's File and Printer Sharing (`ms_server`) and
+/// Client for Microsoft Networks (`ms_msclient`) binding, as
+/// `Get-NetAdapterBinding` reads them (at most `MAX_ROWS`: two per adapter;
+/// a leg whose rows did not fit reads as unreadable, never as unbound).
+#[cfg_attr(test, mutants::skip)] // Windows glue
+fn query_bindings(
+    locator: &windows::Win32::System::Wmi::IWbemLocator,
+) -> windows::core::Result<Vec<BindingRow>> {
+    let services = connect(locator, r"ROOT\StandardCimv2")?;
+    let found = rows(
+        &services,
+        "SELECT Name, ComponentID, Enabled FROM MSFT_NetAdapterBindingSettingData \
+         WHERE ComponentID = 'ms_server' OR ComponentID = 'ms_msclient'",
+        None,
+    )?;
+    Ok(found
+        .iter()
+        .map(|row| BindingRow {
+            name: string_of(row, "Name"),
+            component: string_of(row, "ComponentID"),
+            enabled: bool_of(row, "Enabled"),
+        })
+        .collect())
+}
+
+/// #255 item D: every adapter `Get-NetAdapter` lists (`MSFT_NetAdapter`),
+/// for §6.1's physical ones. A list that filled `MAX_ROWS` may have lost
+/// rows (one of them a physical adapter turned on), so it is an error,
+/// never a short list.
+#[cfg_attr(test, mutants::skip)] // Windows glue
+fn query_adapters(
+    locator: &windows::Win32::System::Wmi::IWbemLocator,
+) -> windows::core::Result<Vec<AdapterRow>> {
+    let services = connect(locator, r"ROOT\StandardCimv2")?;
+    let found = rows(
+        &services,
+        "SELECT Name, ConnectorPresent, Virtual, State, InterfaceOperationalStatus \
+         FROM MSFT_NetAdapter",
+        None,
+    )?;
+    if found.len() >= MAX_ROWS {
+        return Err(windows::core::Error::from(windows::core::HRESULT(E_FAIL)));
+    }
+    Ok(found
+        .iter()
+        .map(|row| AdapterRow {
+            name: string_of(row, "Name"),
+            connector_present: bool_of(row, "ConnectorPresent"),
+            is_virtual: bool_of(row, "Virtual"),
+            state: u32_of(row, "State"),
+            oper: u32_of(row, "InterfaceOperationalStatus"),
         })
         .collect())
 }

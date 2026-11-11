@@ -29,7 +29,7 @@
 #   4. Power: the ACTIVE scheme's processor core parking minimum
 #      (SUB_PROCESSOR CPMINCORES, AC) = 100 %, never another scheme (Waves'
 #      guide; PP Bitsum Highest Performance 100, SNV High performance 100).
-#   5. Defender and the firewall (issue 233: Defender's scan of every
+#   5. Defender (issue 233: Defender's scan of every
 #      process SongPlayer launched made SoundGrid resync, A/B/A on PP), as
 #      PP and SNV were set on 11.10.2026: Set-MpPreference
 #      DisableRealtimeMonitoring / DisableBehaviorMonitoring /
@@ -37,11 +37,24 @@
 #      (off), SubmitSamplesConsent 2 (never send); the policy keys
 #      HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection
 #      Disable{RealtimeMonitoring,BehaviorMonitoring,OnAccessProtection,
-#      ScanOnRealtimeEnable,IOAVProtection} = 1; every firewall profile off
-#      (Set-NetFirewallProfile). Tamper Protection blocks the Defender
+#      ScanOnRealtimeEnable,IOAVProtection} = 1. The firewall is never
+#      changed (issue 255, dstack#155, 10.11.2026): every profile off (a PC
+#      with no Dante leg) or dstack's two-network standard holds, anything
+#      else is a blocker. Tamper Protection blocks the Defender
 #      changes: it is turned off by hand in Windows Security (Virus & threat
 #      protection > Manage settings), and this script says so and fails.
-# Not here: the NIC driver swap (lane 3), the Dante adapter (report only),
+#   6. Every wired adapter, USB ones included (issue 285, the owner's rule of
+#      7.11.2026), not disabled: the power-saving values written as REG_SZ "0"
+#      in its class key whether its driver offers them or not (a USB driver
+#      hides them, and its INF deletes them at every install), the
+#      where-present ones 0 where they exist, PnPCapabilities with 0x08, then
+#      ONE restart. The effect of a value a driver hides is not provable from
+#      Windows. A Realtek RTL8156 (USB\VID_0BDA&PID_8156, "Realtek Gaming
+#      USB 2.5GbE Family Controller") also gets "Transmit URBs"
+#      (PendingTransmits) 8 and "Transmit Buffers" (TransmitBufferLen) 64
+#      through its driver (issue 255 / 285, dstack's receiver A/B of
+#      10.11.2026).
+# Not here: the NIC driver swap (lane 3), a radio (a PC may use it on purpose),
 # CPU reservation (unmeasured), the Windows edition.
 #
 # How it works: READ the facts into one plain object, PLAN (Get-ProdPcPlan,
@@ -275,6 +288,39 @@ function Get-ProdPcNicGroups {
     [pscustomobject]@{ Setting = 'gigalite'; Keywords = @('GigaLite'); Required = $false; Reason = $why }
 }
 
+# Every wired adapter's values (issue 285): always written, offered or not.
+function Get-ProdPcEveryNicValues {
+    return @('*FlowControl', '*EEE', 'EEE', 'EnableGreenEthernet', 'AdvancedEEE', 'EnableExtraPowerSaving', 'GigaLite', '*SelectiveSuspend')
+}
+
+# ...and those turned off only where the adapter has them.
+function Get-ProdPcEveryNicValuesWherePresent {
+    return @('*InterruptModeration', 'GreenEthernet', 'PowerSavingMode', '*PowerSavingMode')
+}
+
+# A Realtek RTL8156 USB 2.5GbE adapter: its PnP device id starts with this
+# hardware id (resolume-snv's 'Ethernet 4': USB\VID_0BDA&PID_8156\<serial>).
+function Test-ProdPcRtl8156 {
+    param([string]$PnpDeviceId)
+    $id = $PnpDeviceId.Trim().ToUpperInvariant()
+    $prefix = 'USB\VID_0BDA&PID_8156'
+    if (-not $id.StartsWith($prefix, [System.StringComparison]::Ordinal)) { return $false }
+    $rest = $id.Substring($prefix.Length)
+    return ($rest -eq '' -or $rest.StartsWith('\') -or $rest.StartsWith('&'))
+}
+
+# The RTL8156's own values (issue 255 / 285, dstack's receiver A/B of
+# 10.11.2026: "Transmit URBs" 3 -> 8 and "Transmit Buffers" 18 -> 64 took the
+# receivers' reorders from ~9/h to ~3/h and the FOH card's peak from 9.6 to
+# 4.7 ms), by the keywords its driver names them (read live on resolume-snv
+# with Get-NetAdapterAdvancedProperty). Its driver offers them, so they are
+# set through it (Set-NetAdapterAdvancedProperty checks the value's range);
+# SongPlayer's check gates the same pairs (prod_env_audio_wired.rs).
+function Get-ProdPcRtl8156Values {
+    [pscustomobject]@{ Keyword = 'PendingTransmits'; Wanted = '8' }
+    [pscustomobject]@{ Keyword = 'TransmitBufferLen'; Wanted = '64' }
+}
+
 # Whether a registry fact holds what a want sets: a DWORD of that value (a
 # value of another type does not), or a string that reads the same with
 # case and padding ignored (lane 1's rule for Scheduling Category).
@@ -329,8 +375,8 @@ function New-ProdPcAction {
 # Something the script cannot do for the operator: a code (lane 1's
 # problem code where there is one) and its text.
 function New-ProdPcBlocker {
-    param([string]$Code, [string]$Text)
-    return [pscustomobject]@{ Code = $Code; Text = $Text }
+    param([string]$Code, [string]$Text, [string]$AdapterGuid = '', [string]$Keyword = '')
+    return [pscustomobject]@{ Code = $Code; Text = $Text; AdapterGuid = $AdapterGuid; Keyword = $Keyword }
 }
 
 # The adapters with a MAC: those whose current address is it, else those
@@ -402,7 +448,7 @@ function Add-ProdPcSoundGridReview {
         }
         if ($null -eq $keyword) {
             if ($group.Required) {
-                $Blockers.Add((New-ProdPcBlocker "soundgrid_nic_setting:$($group.Setting)" "sietova karta SoundGrid '$name': nastavenie $($group.Keywords[0]) chyba - its driver does not offer it, so it cannot be turned off"))
+                $Blockers.Add((New-ProdPcBlocker "soundgrid_nic_setting:$($group.Setting)" "sietova karta SoundGrid '$name': nastavenie $($group.Keywords[0]) chyba - its driver does not offer it, so it cannot be turned off" -AdapterGuid $guid -Keyword $group.Keywords[0]))
             }
             continue
         }
@@ -416,6 +462,159 @@ function Add-ProdPcSoundGridReview {
     if ($null -ne $pnpWanted) {
         $current = if ($null -eq $pnp) { '(none)' } else { ([string]$pnp).Trim() }
         $Actions.Add((New-ProdPcAction -Area 'soundgrid_nic' -Name 'PnPCapabilities' -Current $current -Wanted $pnpWanted -Reason "Windows must never turn the SoundGrid adapter off (Waves' guide)" -Kind 'nic_pnp' -Target $target))
+    }
+}
+
+# Every wired adapter's actions and blockers (issue 285). What the SoundGrid
+# review already acts on is not acted on twice, and a keyword it blocked on
+# (its driver lacks a required one) is never written around. An adapter that
+# is disabled or not present (unplugged) is left alone, as the gate does.
+function Add-ProdPcEveryNicReview {
+    param($Facts, $Actions, $Blockers)
+    $why = 'every network adapter is configured: no power saving (the owner, issue 285)'
+    foreach ($adapter in @(Get-ProdPcList $Facts 'adapters')) {
+        if ([string](Get-ProdPcField $adapter 'media') -ne '802.3') { continue }
+        if ([string](Get-ProdPcField $adapter 'status') -in @('Disabled', 'Not Present')) { continue }
+        $name = [string](Get-ProdPcField $adapter 'name')
+        $guid = [string](Get-ProdPcField $adapter 'guid')
+        $settings = Get-ProdPcField $adapter 'settings'
+        $classKey = Get-ProdPcField $adapter 'class_key'
+        if ($null -eq $settings -or $null -eq $classKey) {
+            $Blockers.Add((New-ProdPcBlocker 'unreadable:wired_nic' "the adapter '$name' ($guid) has no instance in the network class"))
+            continue
+        }
+        $target = @{ Adapter = $name; AdapterGuid = $guid; Path = $classKey; Type = 'String' }
+        $taken = @{}
+        foreach ($action in $Actions) {
+            if ($action.AdapterGuid -eq $guid) { $taken[$action.Name] = $true }
+        }
+        foreach ($blocker in $Blockers) {
+            if ($blocker.AdapterGuid -eq $guid -and $blocker.Keyword) { $taken[$blocker.Keyword] = $true }
+        }
+        $names = @(Get-ProdPcEveryNicValues)
+        foreach ($keyword in @(Get-ProdPcEveryNicValuesWherePresent)) {
+            if ($null -ne (Find-ProdPcMember -Object $settings -Name $keyword)) { $names += $keyword }
+        }
+        foreach ($keyword in $names) {
+            if ($taken.ContainsKey($keyword)) { continue }
+            $present = $null -ne (Find-ProdPcMember -Object $settings -Name $keyword)
+            $value = if ($present) { ([string](Get-ProdPcField $settings $keyword)).Trim() } else { '(none)' }
+            $number = if ($present) { ConvertTo-ProdPcUInt32 $value } else { $null }
+            if ($null -ne $number -and $number -eq 0) { continue }
+            $Actions.Add((New-ProdPcAction -Area 'nic' -Name $keyword -Current $value -Wanted '0' -Reason $why -Kind 'nic_value' -Target $target))
+        }
+        $pnp = Get-ProdPcField $settings 'PnPCapabilities'
+        $pnpWanted = Get-PnPCapabilitiesWanted $pnp
+        if ($null -ne $pnpWanted -and -not $taken.ContainsKey('PnPCapabilities')) {
+            $current = if ($null -eq $pnp) { '(none)' } else { ([string]$pnp).Trim() }
+            $Actions.Add((New-ProdPcAction -Area 'nic' -Name 'PnPCapabilities' -Current $current -Wanted $pnpWanted -Reason $why -Kind 'nic_pnp' -Target $target))
+        }
+        if (-not (Test-ProdPcRtl8156 ([string](Get-ProdPcField $adapter 'pnp_device_id')))) { continue }
+        foreach ($own in @(Get-ProdPcRtl8156Values)) {
+            $present = $null -ne (Find-ProdPcMember -Object $settings -Name $own.Keyword)
+            $value = if ($present) { ([string](Get-ProdPcField $settings $own.Keyword)).Trim() } else { '(none)' }
+            $number = if ($present) { ConvertTo-ProdPcUInt32 $value } else { $null }
+            if ($null -ne $number -and $number -eq [uint32]$own.Wanted) { continue }
+            $Actions.Add((New-ProdPcAction -Area 'nic' -Name $own.Keyword -Current $value -Wanted $own.Wanted -Reason "the RTL8156's transmit queue: dstack's receiver A/B of 10.11.2026 (issue 255 / 285)" -Kind 'nic_advanced' -Target $target))
+        }
+    }
+}
+
+# The firewall (issue 255, dstack#155, the owner's ruling of 10.11.2026):
+# dstack's two-network standard (dstack docs/two-networks.md section 3)
+# replaces issue 233's "every profile off" on a PC with a Dante leg. Two
+# states hold: every profile off (a PC with no Dante leg), or dstack's
+# standard: every profile on, its default actions Allow, every enabled Block
+# rule in the group dstack155, which holds exactly 14 enabled Block rules,
+# each bound to the Dante leg (InterfaceAlias Dante70), none naming
+# SongPlayer.exe. This script NEVER turns a profile off and never makes the
+# group (dstack does): anything else is a blocker naming what differs. The
+# same "attempted" rule as SongPlayer's own check (prod_env_firewall.rs): a
+# profile on with no group rule and no default Allow is a firewall that is
+# simply on (firewall_on), nothing more.
+# (The group's name, its 14 rules and the leg's alias are written as
+# literals: the tests load only this file's functions.)
+
+# Whether a rule of the facts' block_rules belongs to dstack's group.
+function Test-ProdPcDstackRule {
+    param($Rule)
+    foreach ($field in @('group', 'display_group')) {
+        $value = [string](Get-ProdPcField $Rule $field)
+        if ($value.Trim() -eq 'dstack155') { return $true }
+    }
+    return $false
+}
+
+# A profile's two default actions, both Allow.
+function Test-ProdPcFirewallAllows {
+    param($Defaults, [string]$ProfileName)
+    $profileDefaults = Get-ProdPcField $Defaults $ProfileName
+    return ([string](Get-ProdPcField $profileDefaults 'inbound') -eq 'Allow' -and [string](Get-ProdPcField $profileDefaults 'outbound') -eq 'Allow')
+}
+
+function Add-ProdPcFirewallReview {
+    param($Facts, $Blockers)
+    $firewall = Get-ProdPcField $Facts 'firewall'
+    $on = @()
+    $off = @()
+    $unread = $false
+    foreach ($profileName in @('Domain', 'Private', 'Public')) {
+        $enabled = Get-ProdPcField $firewall $profileName
+        if ($enabled -is [bool]) {
+            if ($enabled) { $on += $profileName } else { $off += $profileName }
+        } else {
+            $unread = $true
+            $shown = if ($null -eq $enabled) { '(unread)' } else { "$enabled" }
+            $Blockers.Add((New-ProdPcBlocker "unreadable:firewall:$($profileName.ToLower())" "the $profileName firewall profile reads $shown in the active store"))
+        }
+    }
+    if ($unread -or $on.Count -eq 0) { return }
+    $standard = Get-ProdPcField $Facts 'firewall_standard'
+    if ($null -eq $standard) {
+        $Blockers.Add((New-ProdPcBlocker 'unreadable:firewall_rules' "a firewall profile is on and its rules were not read (no firewall_standard in the facts)"))
+        return
+    }
+    $defaults = Get-ProdPcField $standard 'defaults'
+    $groupRules = @(Get-ProdPcList $standard 'group_rules')
+    $blockRules = @(Get-ProdPcList $standard 'block_rules')
+    $allowing = @($on | Where-Object { Test-ProdPcFirewallAllows -Defaults $defaults -ProfileName $_ })
+    if ($groupRules.Count -eq 0 -and $allowing.Count -eq 0) {
+        foreach ($profileName in $on) {
+            $Blockers.Add((New-ProdPcBlocker "firewall_on:$($profileName.ToLower())" "brana firewall je zapnuta ($profileName) a nie je nastavena podla standardu dstack (skupina pravidiel dstack155) - this script never turns a profile off: either every profile off (a PC with no Dante leg) or dstack's standard (dstack creates its group)"))
+        }
+        return
+    }
+    foreach ($profileName in @('Domain', 'Private', 'Public')) {
+        if ($off -contains $profileName) {
+            $Blockers.Add((New-ProdPcBlocker "firewall_off:$($profileName.ToLower())" "the $profileName firewall profile is off while dstack's standard is set up: it wants every profile on (this script never changes a profile)"))
+        } elseif (-not (Test-ProdPcFirewallAllows -Defaults $defaults -ProfileName $profileName)) {
+            $profileDefaults = Get-ProdPcField $defaults $profileName
+            $Blockers.Add((New-ProdPcBlocker "firewall_default_block:$($profileName.ToLower())" "the $profileName firewall profile's default actions are inbound $(Get-ProdPcField $profileDefaults 'inbound'), outbound $(Get-ProdPcField $profileDefaults 'outbound'): dstack's standard wants Allow both ways"))
+        }
+    }
+    $outside = @($blockRules | Where-Object { -not (Test-ProdPcDstackRule $_) } | ForEach-Object {
+            $name = [string](Get-ProdPcField $_ 'display_name')
+            if ($name -eq '') { [string](Get-ProdPcField $_ 'name') } else { $name }
+        })
+    if ($outside.Count -gt 0) {
+        $Blockers.Add((New-ProdPcBlocker 'firewall_block_outside_group' "enabled Block rules outside the group dstack155: $($outside -join ', ')"))
+    }
+    $groupBlocks = @($groupRules | Where-Object { $true -eq (Get-ProdPcField $_ 'enabled') -and [string](Get-ProdPcField $_ 'action') -eq 'Block' })
+    if ($groupBlocks.Count -ne 14 -or $groupBlocks.Count -ne $groupRules.Count) {
+        $Blockers.Add((New-ProdPcBlocker 'firewall_group_incomplete' "the group dstack155 holds $($groupRules.Count) rule(s), $($groupBlocks.Count) of them enabled Block: dstack's standard wants exactly 14, all enabled Block"))
+    }
+    $unbound = @($groupRules | Where-Object {
+            $aliases = @(Get-ProdPcList $_ 'interface_alias')
+            -not ($aliases.Count -eq 1 -and [string]$aliases[0] -eq 'Dante70')
+        } | ForEach-Object { [string](Get-ProdPcField $_ 'name') })
+    if ($unbound.Count -gt 0) {
+        $Blockers.Add((New-ProdPcBlocker 'firewall_group_interface' "rules of the group dstack155 not bound to the Dante leg (Dante70) alone: $($unbound -join ', ')"))
+    }
+    $songplayer = @($groupRules | Where-Object {
+            @(Get-ProdPcList $_ 'programs' | Where-Object { ([string]$_ -split '[\\/]')[-1] -eq 'SongPlayer.exe' }).Count -gt 0
+        } | ForEach-Object { [string](Get-ProdPcField $_ 'name') })
+    if ($songplayer.Count -gt 0) {
+        $Blockers.Add((New-ProdPcBlocker 'firewall_group_songplayer' "rules of the group dstack155 name SongPlayer.exe (it holds the native Dante device): $($songplayer -join ', ')"))
     }
 }
 
@@ -476,13 +675,8 @@ function Get-ProdPcReview {
         $blockers.Add((New-ProdPcBlocker 'defender_realtime_on' $text))
     }
 
-    $firewall = Get-ProdPcField $Facts 'firewall'
-    foreach ($profileName in @('Domain', 'Private', 'Public')) {
-        $enabled = Get-ProdPcField $firewall $profileName
-        if ($enabled -is [bool] -and -not $enabled) { continue }
-        $current = if ($enabled -is [bool]) { 'on' } elseif ($null -eq $enabled) { '(unread)' } else { "$enabled" }
-        $actions.Add((New-ProdPcAction -Area 'firewall' -Name $profileName -Current $current -Wanted 'off' -Reason 'the production rule: firewall off (issue 233, the owner, 11.10.2026)' -Kind 'firewall'))
-    }
+    Add-ProdPcFirewallReview -Facts $Facts -Blockers $blockers
+    Add-ProdPcEveryNicReview -Facts $Facts -Actions $actions -Blockers $blockers
     return [pscustomobject]@{ Actions = $actions.ToArray(); Blockers = $blockers.ToArray() }
 }
 
@@ -573,6 +767,9 @@ function Read-ProdPcNicSettings {
     $names = @($key.GetValueNames())
     $keywords = New-Object System.Collections.Generic.List[string]
     foreach ($group in @(Get-ProdPcNicGroups)) { foreach ($keyword in $group.Keywords) { $keywords.Add($keyword) } }
+    foreach ($keyword in @(Get-ProdPcEveryNicValues) + @(Get-ProdPcEveryNicValuesWherePresent) + @(Get-ProdPcRtl8156Values | ForEach-Object { $_.Keyword })) {
+        if (-not $keywords.Contains($keyword)) { $keywords.Add($keyword) }
+    }
     $keywords.Add('PnPCapabilities')
     $settings = [ordered]@{}
     foreach ($keyword in $keywords) {
@@ -618,8 +815,11 @@ function Read-ProdPcAdapters {
             name = [string]$adapter.Name
             guid = $guid
             description = [string]$adapter.InterfaceDescription
+            media = [string]$adapter.PhysicalMediaType
+            status = [string]$adapter.Status
             mac = [string]$adapter.MacAddress
             permanent_mac = [string]$adapter.PermanentAddress
+            pnp_device_id = [string]$adapter.PnPDeviceID
             class_key = $keyPath
             settings = $settings
         }
@@ -748,6 +948,54 @@ function Read-ProdPcFirewall {
     return $firewall
 }
 
+# Get-NetFirewallRule's own "nothing matches" (an ObjectNotFound error) is
+# no failure; any other error is.
+function Get-ProdPcFirewallRules {
+    param([hashtable]$Filter)
+    $found = @(Get-NetFirewallRule @Filter -PolicyStore ActiveStore -ErrorAction SilentlyContinue -ErrorVariable ruleErrors)
+    foreach ($ruleError in @($ruleErrors)) {
+        if ([string]$ruleError.CategoryInfo.Category -ne 'ObjectNotFound') { throw $ruleError }
+    }
+    return $found
+}
+
+# Issue 255 (dstack#155): the facts dstack's standard is judged by, from the
+# ACTIVE store: each profile's default actions, every enabled Block rule
+# (name and group), and every rule of dstack's group with its interface and
+# program filters. Read only: creating the group is dstack's job.
+function Read-ProdPcFirewallStandard {
+    $defaults = [ordered]@{}
+    foreach ($fwProfile in @(Get-NetFirewallProfile -PolicyStore ActiveStore)) {
+        $defaults[[string]$fwProfile.Name] = [ordered]@{
+            inbound = [string]$fwProfile.DefaultInboundAction
+            outbound = [string]$fwProfile.DefaultOutboundAction
+        }
+    }
+    $blockRules = New-Object System.Collections.Generic.List[object]
+    foreach ($rule in @(Get-ProdPcFirewallRules @{ Enabled = 'True'; Action = 'Block' })) {
+        $blockRules.Add([ordered]@{
+                name = [string]$rule.Name
+                display_name = [string]$rule.DisplayName
+                group = [string]$rule.Group
+                display_group = [string]$rule.DisplayGroup
+            })
+    }
+    $groupRules = New-Object System.Collections.Generic.List[object]
+    foreach ($rule in @(Get-ProdPcFirewallRules @{ Group = 'dstack155' })) {
+        $interfaces = @(@($rule | Get-NetFirewallInterfaceFilter) | ForEach-Object { @($_.InterfaceAlias) } | ForEach-Object { [string]$_ })
+        $programs = @(@($rule | Get-NetFirewallApplicationFilter) | ForEach-Object { [string]$_.Program })
+        $groupRules.Add([ordered]@{
+                name = [string]$rule.Name
+                display_name = [string]$rule.DisplayName
+                enabled = ([string]$rule.Enabled -eq 'True')
+                action = [string]$rule.Action
+                interface_alias = $interfaces
+                programs = $programs
+            })
+    }
+    return [ordered]@{ defaults = $defaults; block_rules = $blockRules.ToArray(); group_rules = $groupRules.ToArray() }
+}
+
 # Every fact the plan needs, read from this PC, in the same shape as a
 # -FactsJson file (a JSON round trip: the plan always reads that shape).
 function Read-ProdPcFacts {
@@ -764,9 +1012,11 @@ function Read-ProdPcFacts {
     $facts = [ordered]@{
         registry = $registry.ToArray()
         soundgrid = Read-ProdPcSoundGrid
+        adapters = @(Read-ProdPcAdapters)
         power = Read-ProdPcPower
         defender = Read-ProdPcDefender
         firewall = Read-ProdPcFirewall
+        firewall_standard = Read-ProdPcFirewallStandard
     }
     $back = ConvertTo-Json -InputObject $facts -Depth 20 | ConvertFrom-Json
     # The plan reads only this shape: a list that did not come back as a
@@ -774,6 +1024,14 @@ function Read-ProdPcFacts {
     $registryBack = @(Get-ProdPcList $back 'registry')
     $adaptersRead = @($facts.soundgrid.adapters).Count
     $adaptersBack = @(Get-ProdPcList (Get-ProdPcField $back 'soundgrid') 'adapters')
+    $everyNicBack = @(Get-ProdPcList $back 'adapters')
+    if ($everyNicBack.Count -ne @($facts.adapters).Count) {
+        throw "the facts did not come back from their JSON round trip in shape ($($everyNicBack.Count) of $(@($facts.adapters).Count) wired and other adapters)"
+    }
+    $groupRulesBack = @(Get-ProdPcList (Get-ProdPcField $back 'firewall_standard') 'group_rules')
+    if ($groupRulesBack.Count -ne @($facts.firewall_standard.group_rules).Count) {
+        throw "the facts did not come back from their JSON round trip in shape ($($groupRulesBack.Count) of $(@($facts.firewall_standard.group_rules).Count) firewall group rules)"
+    }
     if ($registryBack.Count -ne $registry.Count -or $null -eq (Get-ProdPcField $registryBack[0] 'path') -or $adaptersBack.Count -ne $adaptersRead) {
         throw "the facts did not come back from their JSON round trip in shape ($($registryBack.Count) of $($registry.Count) registry values, $($adaptersBack.Count) of $adaptersRead adapters)"
     }
@@ -794,6 +1052,8 @@ function Invoke-ProdPcAction {
     switch ($Action.Kind) {
         'registry' { Set-ProdPcRegistryValue -Path $Action.Path -Name $Action.Name -Type $Action.Type -Value $Action.Wanted }
         'nic_keyword' { Set-NetAdapterAdvancedProperty -Name $Action.Adapter -RegistryKeyword $Action.Name -RegistryValue ([string]$Action.Wanted) -NoRestart }
+        'nic_advanced' { Set-NetAdapterAdvancedProperty -Name $Action.Adapter -RegistryKeyword $Action.Name -RegistryValue ([string]$Action.Wanted) -NoRestart }
+        'nic_value' { Set-ProdPcRegistryValue -Path $Action.Path -Name $Action.Name -Type 'String' -Value $Action.Wanted }
         'nic_pnp' { Set-ProdPcRegistryValue -Path $Action.Path -Name 'PnPCapabilities' -Type 'DWord' -Value $Action.Wanted }
         'power' {
             $set = Invoke-ProdPcNative -File 'powercfg.exe' -Arguments @('/setacvalueindex', 'SCHEME_CURRENT', 'SUB_PROCESSOR', 'CPMINCORES', [string]$Action.Wanted)
@@ -806,7 +1066,6 @@ function Invoke-ProdPcAction {
             $preference[$Action.Name] = $Action.Wanted
             Set-MpPreference @preference
         }
-        'firewall' { Set-NetFirewallProfile -Profile $Action.Name -Enabled False }
         default { throw "unknown action kind '$($Action.Kind)'" }
     }
 }

@@ -5,15 +5,16 @@
  * made PP's Waves SoundGrid driver resync (an audible pop per scan, proven
  * A/B/A). The owner's rule: a production PC runs Windows LTSC or Windows 11
  * IoT Enterprise, with Defender's real-time protection (and any passive /
- * EDR block mode), every other antivirus and every firewall profile OFF,
- * and nothing lets a box run otherwise. SongPlayer checks it
+ * EDR block mode) and every other antivirus OFF, the firewall off or (a PC
+ * with a Dante leg, #255 / dstack#155) dstack's two-network standard, and
+ * nothing lets a box run otherwise. SongPlayer checks it
  * itself at the start and every minute (`crate::prod_env`) and publishes
  * `GET /api/v1/status.environment`; this spec (SNV's suite and PP's subset,
  * read-only) waits for the first check after the deploy's restart and FAILS
  * on any problem, each named by its code and Slovak text
  * (`environment-gate.ts`, unit-tested in the mock suite). There is no
- * allowance: an edition that is not allowed, Defender on, a firewall profile
- * on, or a fact the check could not read are all fatal.
+ * allowance: an edition that is not allowed, Defender on, a firewall in
+ * neither accepted state, or a fact the check could not read are all fatal.
  *
  * The dashboard's health bar then says so (`data-environment="ok"`, its
  * last poll) and shows no "Prostredie" segment, and the console is clean
@@ -21,9 +22,11 @@
  *
  * #255: the same gate covers the production PC's audio profile (with
  * SoundGrid installed, the adapter its driver chose as its port on NDIS with
- * Waves' settings off; automatic updates off; MMCSS for Pro Audio). Its report-only facts (the Dante adapter's driver,
- * the Windows Update driver exclusion, power) never fail: they are logged
- * and shown as the grey "Profil PC" segment.
+ * Waves' settings off; automatic updates off and drivers excluded; MMCSS for
+ * Pro Audio). Its report-only facts (power) never fail: they are logged and
+ * shown as the grey "Profil PC" segment. #255 item D: on a PC with a Dante
+ * leg (SNV's out-4), dstack's two-network standard §6 items 1–3
+ * (`status.environment.two_networks`, `environment-gate.ts`).
  */
 
 import { test, expect, type APIRequestContext } from "@playwright/test";
@@ -65,7 +68,7 @@ test.describe("production environment post-deploy verification (#233)", () => {
     });
   });
 
-  test("the box runs an allowed edition with Defender real-time and the firewall off", async ({
+  test("the box runs an allowed edition with Defender real-time off and the firewall off or dstack's standard", async ({
     page,
     request,
   }) => {
@@ -94,6 +97,7 @@ test.describe("production environment post-deploy verification (#233)", () => {
         (nic ? ` adapter ${nic.name ?? nic.guid} ${nic.service ?? "?"} ${nic.driver_model ?? "?"}` : ""),
     );
     console.log(`[#255 report-only] ${notes.length === 0 ? "none" : notes.join("; ")}`);
+    console.log(`[#255 two networks] ${JSON.stringify((env as EnvironmentStatus | null)?.two_networks ?? null)}`);
     expect(environmentFailures(env), "the production environment").toEqual([]);
 
     // The dashboard agrees: its poll's marker says "ok" (asserted FIRST: an

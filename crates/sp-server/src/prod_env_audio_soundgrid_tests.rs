@@ -192,8 +192,8 @@ fn pp_s_soundgrid_adapter_is_the_one_its_driver_chose() {
         walk(&pp(), text(&dante), interfaces()),
         (
             SoundGridFacts::Adapter {
-                mac: DVS_MAC.to_string(),
-                nic: dante_facts(),
+                mac: CX_MAC.to_string(),
+                nic: cx_facts(),
             },
             Vec::new()
         )

@@ -525,6 +525,9 @@ mod tests;
 #[path = "session_tests_cap.rs"]
 mod tests_cap;
 #[cfg(test)]
+#[path = "session_tests_dante.rs"]
+mod tests_dante;
+#[cfg(test)]
 #[path = "session_tests_feedback.rs"]
 mod tests_feedback;
 #[cfg(test)]

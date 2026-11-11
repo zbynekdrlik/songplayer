@@ -3,9 +3,12 @@
 //! (`facts_from`).
 
 use sp_core::prod_env::FirewallProfile;
+use sp_core::prod_env::firewall::FirewallDefaults;
 
 use super::*;
 use crate::prod_env::audio::production_example;
+use crate::prod_env::firewall::BlockRules;
+use crate::prod_env::network::{NetworkFacts, snv_adapter_rows, snv_example};
 use crate::prod_env::{EnvFacts, WBEM_E_INVALID_CLASS, WBEM_E_INVALID_NAMESPACE};
 
 // ---- the firewall: the active store decides ----
@@ -14,6 +17,8 @@ fn row(name: &str, enabled: Option<u32>) -> FirewallRow {
     FirewallRow {
         name: name.to_string(),
         enabled,
+        default_inbound: Some(4),
+        default_outbound: Some(2),
     }
 }
 
@@ -203,7 +208,8 @@ fn a_defender_status_that_cannot_be_read_says_why() {
 // ---- one check's facts ----
 
 /// A production box's raw reads: IoT Enterprise LTSC, Defender real-time
-/// off, every firewall profile off (locally, no policy).
+/// off, every firewall profile off (locally, no policy), resolume-snv's two
+/// networks (the bindings come from WMI).
 fn direct() -> DirectRead {
     DirectRead {
         edition_id: Ok(Some("IoTEnterpriseS".to_string())),
@@ -214,6 +220,11 @@ fn direct() -> DirectRead {
         firewall_local: [RegDword::Value(0); 3],
         defender_service: ServiceRead::State(4),
         audio: production_example(),
+        network: NetworkFacts {
+            bindings: None,
+            physical: None,
+            ..snv_example()
+        },
     }
 }
 
@@ -223,9 +234,15 @@ fn wmi() -> WmiRead {
             realtime: Some(false),
             mode: Some("Normal".to_string()),
             antivirus_enabled: Some(true),
+            behavior_monitor: Some(false),
+            ioav: Some(false),
+            on_access: Some(false),
         })),
         firewall: Ok(store(0, 0, 0)),
+        firewall_rules: Ok(Vec::new()),
         antivirus: Ok(Vec::new()),
+        bindings: Ok(snv_example().bindings.unwrap()),
+        adapters: Ok(snv_adapter_rows()),
     }
 }
 
@@ -239,13 +256,77 @@ fn a_production_box_reads_as_its_facts() {
             build_number: Some(26100),
             defender_realtime: Some(false),
             defender_passive: Some(false),
+            defender_protections_on: Some(Vec::new()),
             defender_mode: Some("Normal".to_string()),
             defender_antivirus_enabled: Some(true),
             antivirus_on: Some(Vec::new()),
             firewall: [Some(false); 3],
+            firewall_defaults: [Some(FirewallDefaults {
+                inbound: 4,
+                outbound: 2,
+            }); 3],
+            firewall_rules: Some(BlockRules::default()),
             audio: production_example(),
+            network: snv_example(),
             read_errors: Vec::new(),
         }
+    );
+}
+
+/// #255 item D: the two-network facts are taken as read with WMI's
+/// bindings; why one could not be read follows, each once; a bindings read
+/// that failed is said, and leaves them unread.
+#[test]
+fn the_two_network_facts_take_wmi_s_bindings_and_their_reasons_follow() {
+    let mut network = direct().network;
+    network.errors = vec![
+        "the routing table could not be listed (error 87)".to_string(),
+        "EditionID is missing".to_string(),
+    ];
+    let read = DirectRead {
+        edition_id: Ok(None),
+        network,
+        ..direct()
+    };
+    let refused = WmiRead {
+        bindings: Err(-5),
+        adapters: Err(-6),
+        ..wmi()
+    };
+    let facts = facts_from(&read, &Ok(refused));
+    assert_eq!(facts.network.bindings, None);
+    assert_eq!(facts.network.physical, None);
+    assert_eq!(facts.network.legs, snv_example().legs);
+    assert_eq!(
+        facts.read_errors,
+        [
+            "EditionID is missing",
+            "the routing table could not be listed (error 87)",
+            "the network adapters' bindings could not be read (0xFFFFFFFB)",
+            "the network adapters could not be read (0xFFFFFFFA)",
+        ]
+    );
+    // The adapters alone refused: the bindings are taken.
+    let adapters_refused = WmiRead {
+        adapters: Err(-6),
+        ..wmi()
+    };
+    let facts = facts_from(&direct(), &Ok(adapters_refused));
+    assert_eq!(facts.network.bindings, snv_example().bindings);
+    assert_eq!(facts.network.physical, None);
+    assert_eq!(
+        facts.read_errors,
+        ["the network adapters could not be read (0xFFFFFFFA)"]
+    );
+    let gone = facts_from(&direct(), &Err("the WMI check did not finish".to_string()));
+    assert_eq!(gone.network.bindings, None);
+    assert_eq!(gone.network.physical, None);
+    assert_eq!(
+        gone.read_errors
+            .iter()
+            .filter(|why| *why == "the WMI check did not finish")
+            .count(),
+        1
     );
 }
 
@@ -400,6 +481,9 @@ fn defenders_query_decides_its_fact() {
             realtime: Some(true),
             mode: Some("Normal".to_string()),
             antivirus_enabled: Some(true),
+            behavior_monitor: Some(false),
+            ioav: Some(false),
+            on_access: Some(false),
         })),
         ..wmi()
     };
@@ -418,6 +502,71 @@ fn defenders_query_decides_its_fact() {
           not stopped (state 4)"
         ]
     );
+}
+
+/// #255: the protections besides real-time, from Defender's own status.
+#[test]
+fn defenders_other_protections_are_read_from_its_status() {
+    let with = |behavior_monitor, ioav, on_access| WmiRead {
+        defender: Ok(Some(DefenderRow {
+            realtime: Some(false),
+            mode: Some("Normal".to_string()),
+            antivirus_enabled: Some(true),
+            behavior_monitor,
+            ioav,
+            on_access,
+        })),
+        ..wmi()
+    };
+    let read = |w: WmiRead| facts_from(&direct(), &Ok(w));
+    assert_eq!(
+        read(with(Some(true), Some(false), Some(true))).defender_protections_on,
+        Some(vec![
+            "behavior_monitoring".to_string(),
+            "on_access".to_string()
+        ])
+    );
+    assert_eq!(
+        read(with(Some(false), Some(true), Some(false))).defender_protections_on,
+        Some(vec!["ioav".to_string()])
+    );
+    assert_eq!(
+        read(with(Some(false), Some(false), Some(false))).defender_protections_on,
+        Some(Vec::new())
+    );
+    // A running Defender whose row names no state cannot be verified.
+    let unread = read(with(Some(false), None, Some(false)));
+    assert_eq!(unread.defender_protections_on, None);
+    assert_eq!(unread.defender_realtime, Some(false));
+    assert!(
+        unread
+            .read_errors
+            .contains(&"Defender's status names no ioav state; the WinDefend service is not stopped (state 4)".to_string()),
+        "{:?}",
+        unread.read_errors
+    );
+    // Its service stopped: off, whatever the row lacks.
+    let stopped = DirectRead {
+        defender_service: ServiceRead::State(SERVICE_STOPPED),
+        ..direct()
+    };
+    let w = with(None, None, None);
+    assert_eq!(
+        facts_from(&stopped, &Ok(w)).defender_protections_on,
+        Some(Vec::new())
+    );
+    // Not installed (no namespace): none.
+    let gone = WmiRead {
+        defender: Err(WBEM_E_INVALID_NAMESPACE),
+        ..wmi()
+    };
+    assert_eq!(read(gone).defender_protections_on, Some(Vec::new()));
+    // Real-time unreadable: these are not read either.
+    let refused = WmiRead {
+        defender: Err(0x8007_0005_u32 as i32),
+        ..wmi()
+    };
+    assert_eq!(read(refused).defender_protections_on, None);
 }
 
 // ---- Defender switched off entirely (review finding 3) ----
@@ -528,6 +677,9 @@ fn defender_in(mode: Option<&str>, realtime: bool) -> WmiRead {
             realtime: Some(realtime),
             mode: mode.map(str::to_string),
             antivirus_enabled: Some(true),
+            behavior_monitor: Some(false),
+            ioav: Some(false),
+            on_access: Some(false),
         })),
         ..wmi()
     }
@@ -699,7 +851,13 @@ fn every_wmi_query_fails_with_one_code() {
         WmiRead {
             defender: Err(-5),
             firewall: Err(-5),
+            firewall_rules: Err(-5),
             antivirus: Err(-5),
+            bindings: Err(-5),
+            adapters: Err(-5),
         }
     );
 }
+
+#[path = "prod_env_read_tests_firewall.rs"]
+mod firewall;

@@ -142,3 +142,15 @@ async fn the_status_carries_the_data_dir_size_null_until_measured() {
     assert_eq!(json["cache_bytes"], 4_000_000_000_u64);
     assert_eq!(json["data_dir_measured_ms"], 1_760_000_000_000_i64);
 }
+
+/// #255 item C: `dante_refusals` names both listeners' counts, read from
+/// the process-wide guard both listeners ask.
+#[tokio::test]
+async fn the_status_names_the_dante_refusals_of_both_listeners() {
+    let json = status_json(test_state().await).await;
+    let now = crate::dante_guard::global().refusals();
+    assert_eq!(
+        json["dante_refusals"],
+        serde_json::json!({"http": now.http, "remote": now.remote})
+    );
+}

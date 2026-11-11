@@ -1,7 +1,9 @@
 //! #255 (the production PC audio profile, lane 1): the audio profile on the
 //! environment status — the network adapters the audio transports run on,
 //! Windows Update, MMCSS and power — and the report-only facts the dashboard
-//! shows as notes ([`notes`]).
+//! shows as notes ([`notes`]). #255 item D deleted the note on Dante Virtual
+//! Soundcard's adapter (DVS is not used: SongPlayer's Dante output is a
+//! native device); a PC with a Dante leg is checked by [`super::network`].
 //!
 //! The owner's directive (12.10.2026): what was found and set by hand on PP
 //! and SNV is built into SongPlayer, so a reinstalled or new PC is checked by
@@ -239,24 +241,6 @@ impl NicView {
     }
 }
 
-/// Dante Virtual Soundcard and its adapter (report only).
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DanteView {
-    /// DVS's configuration (`manager.json`) exists (`None`: could not be
-    /// read).
-    #[serde(default)]
-    pub installed: Option<bool>,
-    /// Its `PrimaryInterfaceAddress` (the adapter's MAC).
-    #[serde(default)]
-    pub interface_address: Option<String>,
-    /// Its `PrimaryInterfaceName` (shown only).
-    #[serde(default)]
-    pub interface_name: Option<String>,
-    /// The adapter with that MAC.
-    #[serde(default)]
-    pub nic: Option<NicView>,
-}
-
 /// Windows Update's policies.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WindowsUpdateView {
@@ -309,52 +293,54 @@ pub struct AudioProfile {
     #[serde(default)]
     pub soundgrid_nic: Option<NicView>,
     #[serde(default)]
-    pub dante: DanteView,
-    #[serde(default)]
     pub windows_update: WindowsUpdateView,
     #[serde(default)]
     pub mmcss: MmcssView,
     #[serde(default)]
     pub power: PowerView,
+    /// #285: every wired adapter (`None`: could not be listed, or an older
+    /// server).
+    #[serde(default)]
+    pub wired_nics: Option<Vec<WiredNicView>>,
     /// The report-only facts that are not the production ones ([`notes`]):
     /// shown, never a problem.
     #[serde(default)]
     pub notes: Vec<String>,
 }
 
+/// One value of a wired adapter on the status.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WiredValueView {
+    pub keyword: String,
+    /// As read (`None`: absent or unread).
+    #[serde(default)]
+    pub value: Option<String>,
+    /// `None`: could not be read.
+    #[serde(default)]
+    pub ok: Option<bool>,
+}
+
+/// One wired adapter on the status (#285).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WiredNicView {
+    pub guid: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub values: Vec<WiredValueView>,
+    /// Every value holds (`None`: something could not be read).
+    #[serde(default)]
+    pub ok: Option<bool>,
+}
+
 /// The report-only facts that are not the production ones, in Slovak: the
-/// Dante adapter's driver model (its effect is still being measured), the
 /// active power scheme and core parking (the setup script applies core
 /// parking; both stay report-only here). None of them is a problem. The Windows Update
 /// driver exclusion was one until #255 lane 2 made it a gate.
 pub fn notes(p: &AudioProfile) -> Vec<String> {
     let mut notes = Vec::new();
-    match (p.dante.installed, &p.dante.nic) {
-        (None, _) => notes.push("inštaláciu Dante Virtual Soundcard sa nepodarilo zistiť".to_string()),
-        (Some(false), _) => {}
-        (Some(true), None) => {
-            let mac = p
-                .dante
-                .interface_address
-                .as_deref()
-                .map(|m| format!(" (MAC {m})"))
-                .unwrap_or_default();
-            notes.push(format!(
-                "sieťovú kartu Dante Virtual Soundcard{mac} sa nepodarilo určiť"
-            ));
-        }
-        (Some(true), Some(nic)) => match nic.driver_model {
-            Some(DriverModel::NetAdapterCx) => notes.push(format!(
-                "sieťová karta Dante (DVS) „{}“ beží na ovládači NetAdapterCx (vplyv sa ešte meria)",
-                nic.label()
-            )),
-            Some(DriverModel::Ndis) => {}
-            None => notes.push(format!(
-                "ovládač sieťovej karty Dante (DVS) „{}“ sa nepodarilo zistiť",
-                nic.label()
-            )),
-        },
-    }
     match p.power.scheme_guid.as_deref() {
         None => notes.push("aktívny plán napájania sa nepodarilo zistiť".to_string()),
         Some(guid) if ECONOMY_SCHEMES.contains(&guid.to_ascii_lowercase().as_str()) => {

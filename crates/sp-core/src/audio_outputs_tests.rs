@@ -719,6 +719,10 @@ fn every_asio_reason_code_reads_in_slovak() {
             "host_down",
             "zvukový proces ASIO (sp-audio-host) nebeží — SongPlayer ho spúšťa znova",
         ),
+        (
+            "clock_off_rate",
+            "karta neberie zvuk svojou frekvenciou — hodiny sa nedajú použiť (napr. SoundGrid bez siete)",
+        ),
         ("later", "neznámy dôvod"),
         ("", "neznámy dôvod"),
     ];

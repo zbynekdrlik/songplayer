@@ -4,6 +4,7 @@
 use super::*;
 use crate::health::HealthTone;
 use crate::prod_env::audio::{AudioProfile, MmcssSetting, NicSetting, PowerView, SoundGridState};
+use crate::prod_env::firewall::FirewallDefaults;
 
 /// Every problem, one of each kind and profile.
 fn every_problem() -> Vec<EnvProblem> {
@@ -17,6 +18,9 @@ fn every_problem() -> Vec<EnvProblem> {
             build: None,
         },
         EnvProblem::DefenderRealtimeOn,
+        EnvProblem::DefenderProtectionOn("behavior_monitoring".to_string()),
+        EnvProblem::DefenderProtectionOn("ioav".to_string()),
+        EnvProblem::DefenderProtectionOn("on_access".to_string()),
         EnvProblem::DefenderPassive("EDR Block Mode".to_string()),
         EnvProblem::AntivirusOn("ESET Security".to_string()),
     ];
@@ -71,6 +75,18 @@ fn every_audio_problem() -> Vec<EnvProblem> {
     all.push(EnvProblem::Unreadable(Unreadable::SoundGrid));
     all.push(EnvProblem::Unreadable(Unreadable::WindowsUpdate));
     all.push(EnvProblem::Unreadable(Unreadable::Mmcss));
+    all.push(EnvProblem::Unreadable(Unreadable::WiredNics));
+    all.push(EnvProblem::WiredNicValue {
+        nic: nic(),
+        keyword: "*EEE".to_string(),
+        value: Some("1".to_string()),
+    });
+    all.push(EnvProblem::WiredNicValue {
+        nic: nic(),
+        keyword: "*SelectiveSuspend".to_string(),
+        value: None,
+    });
+    all.push(EnvProblem::WiredNicUnreadable { nic: nic() });
     all
 }
 
@@ -102,6 +118,10 @@ fn every_audio_problem_has_its_stable_code() {
             "unreadable:soundgrid",
             "unreadable:windows_update",
             "unreadable:mmcss",
+            "unreadable:wired_nics",
+            "wired_nic_value:*EEE",
+            "wired_nic_value:*SelectiveSuspend",
+            "unreadable:wired_nic",
         ]
     );
 }
@@ -149,6 +169,11 @@ fn every_audio_problem_reads_in_slovak() {
             "väzby protokolu SoundGrid na sieťové karty sa nepodarilo zistiť",
             "nastavenia Windows Update sa nepodarilo zistiť",
             "nastavenia MMCSS sa nepodarilo zistiť",
+            "zoznam sieťových kariet sa nepodarilo zistiť",
+            "sieťová karta „soundgrid-pcie“: nastavenie „*EEE“ nie je produkčné (je 1)",
+            "sieťová karta „soundgrid-pcie“: hodnota „*SelectiveSuspend“ v registri chýba \
+             (ovládač ju mohol pri inštalácii zmazať, najbližší deploy ju zapíše)",
+            "nastavenia sieťovej karty „soundgrid-pcie“ sa nepodarilo zistiť",
         ]
     );
 }
@@ -162,6 +187,9 @@ fn every_problem_has_its_stable_code() {
             "edition_not_allowed",
             "edition_not_allowed",
             "defender_realtime_on",
+            "defender_protection_on:behavior_monitoring",
+            "defender_protection_on:ioav",
+            "defender_protection_on:on_access",
             "defender_passive_mode",
             "antivirus_on",
             "firewall_on:domain",
@@ -189,11 +217,17 @@ fn every_problem_reads_in_slovak() {
             "edícia Windows „IoTEnterprise“ nie je povolená (povolené sú len Windows LTSC a \
              Windows 11 IoT Enterprise)",
             "ochrana Windows Defender v reálnom čase je zapnutá",
+            "ochrana Windows Defender „sledovanie správania“ je zapnutá",
+            "ochrana Windows Defender „kontrola stiahnutých súborov (IOAV)“ je zapnutá",
+            "ochrana Windows Defender „kontrola súborov pri prístupe“ je zapnutá",
             "Windows Defender beží v režime „EDR Block Mode“ a súbory stále kontroluje",
             "antivírus „ESET Security“ je zapnutý",
-            "brána firewall je zapnutá (doménový profil)",
-            "brána firewall je zapnutá (súkromný profil)",
-            "brána firewall je zapnutá (verejný profil)",
+            "brána firewall je zapnutá (doménový profil) a nie je nastavená podľa štandardu \
+             dstack (skupina pravidiel dstack155)",
+            "brána firewall je zapnutá (súkromný profil) a nie je nastavená podľa štandardu \
+             dstack (skupina pravidiel dstack155)",
+            "brána firewall je zapnutá (verejný profil) a nie je nastavená podľa štandardu \
+             dstack (skupina pravidiel dstack155)",
             "edíciu Windows sa nepodarilo zistiť",
             "zostavu Windows sa nepodarilo zistiť",
             "stav ochrany Windows Defender v reálnom čase sa nepodarilo zistiť",
@@ -212,7 +246,9 @@ fn a_problem_is_shown_by_its_code_and_text() {
         p.view(),
         ProblemView {
             code: "firewall_on:public".to_string(),
-            text_sk: "brána firewall je zapnutá (verejný profil)".to_string(),
+            text_sk: "brána firewall je zapnutá (verejný profil) a nie je nastavená podľa \
+                      štandardu dstack (skupina pravidiel dstack155)"
+                .to_string(),
         }
     );
 }
@@ -237,6 +273,7 @@ fn the_status_serializes_every_field_by_name() {
         edition_allowed: Some(true),
         defender_realtime: Some(true),
         defender_passive: Some(false),
+        defender_protections_on: Some(vec!["ioav".to_string()]),
         defender_mode: Some("Normal".to_string()),
         defender_antivirus_enabled: Some(true),
         antivirus_on: Some(vec!["ESET Security".to_string()]),
@@ -244,12 +281,27 @@ fn the_status_serializes_every_field_by_name() {
             domain: Some(false),
             private: None,
             public: Some(true),
+            mode: None,
+            defaults: [
+                Some(FirewallDefaults {
+                    inbound: 2,
+                    outbound: 2,
+                }),
+                None,
+                Some(FirewallDefaults {
+                    inbound: 4,
+                    outbound: 2,
+                }),
+            ],
+            dstack_group_rules: Some(14),
+            block_rules_outside_group: Some(vec!["Block X".to_string()]),
         },
         audio: AudioProfile {
             soundgrid: Some(SoundGridState::NotInstalled),
             notes: vec!["parkovanie jadier je zapnuté (minimum 50 % jadier)".to_string()],
             ..AudioProfile::default()
         },
+        two_networks: None,
         problems: vec![EnvProblem::DefenderRealtimeOn.view()],
         read_errors: vec!["firewall private: error 5".to_string()],
         checked_at_ms: Some(1_791_608_681_366),
@@ -268,21 +320,29 @@ fn the_status_serializes_every_field_by_name() {
             "edition_allowed": true,
             "defender_realtime": true,
             "defender_passive": false,
+            "defender_protections_on": ["ioav"],
             "defender_mode": "Normal",
             "defender_antivirus_enabled": true,
             "antivirus_on": ["ESET Security"],
-            "firewall": {"domain": false, "private": null, "public": true},
+            "firewall": {
+                "domain": false,
+                "private": null,
+                "public": true,
+                "mode": null,
+                "defaults": [
+                    {"inbound": 2, "outbound": 2},
+                    null,
+                    {"inbound": 4, "outbound": 2},
+                ],
+                "dstack_group_rules": 14,
+                "block_rules_outside_group": ["Block X"],
+            },
             "audio": {
                 "soundgrid": "not_installed",
                 "soundgrid_port_mac": null,
                 "soundgrid_nic": null,
-                "dante": {
-                    "installed": null,
-                    "interface_address": null,
-                    "interface_name": null,
-                    "nic": null,
-                },
                 "windows_update": {"no_auto_update": null, "drivers_excluded": null},
+                "wired_nics": null,
                 "mmcss": {
                     "system_responsiveness": null,
                     "network_throttling_index": null,
@@ -296,6 +356,7 @@ fn the_status_serializes_every_field_by_name() {
                 },
                 "notes": ["parkovanie jadier je zapnuté (minimum 50 % jadier)"],
             },
+            "two_networks": null,
             "problems": [{
                 "code": "defender_realtime_on",
                 "text_sk": "ochrana Windows Defender v reálnom čase je zapnutá",
@@ -390,7 +451,8 @@ fn more_problems_show_the_first_and_count_the_rest() {
         tip,
         format!(
             "{RULE_SK} Zistené: ochrana Windows Defender v reálnom čase je zapnutá; brána \
-             firewall je zapnutá (doménový profil)."
+             firewall je zapnutá (doménový profil) a nie je nastavená podľa štandardu dstack \
+             (skupina pravidiel dstack155)."
         )
     );
     let three = [
@@ -408,13 +470,18 @@ fn the_rule_names_the_audio_profile() {
     assert!(RULE_SK.starts_with(
         "Produkčný počítač musí bežať na Windows LTSC alebo Windows 11 IoT Enterprise, s \
          vypnutou ochranou Windows Defender v reálnom čase (ani v pasívnom režime), bez iného \
-         antivírusu a s vypnutou bránou firewall"
+         antivírusu — nič nesmie kontrolovať programy, ktoré SongPlayer spúšťa. Brána firewall \
+         je vypnutá vo všetkých profiloch, alebo (počítač so sieťou Dante) zapnutá vo všetkých \
+         podľa štandardu dstack: predvolene všetko povolené a blokuje len skupina pravidiel \
+         dstack155."
     ));
     assert!(RULE_SK.ends_with(
-        "programy, ktoré SongPlayer spúšťa. Sieťová karta, ktorú má ovládač SoundGrid zvolenú \
+        "skupina pravidiel dstack155. Sieťová karta, ktorú má ovládač SoundGrid zvolenú \
          ako port, beží na ovládači NDIS s vypnutým moderovaním prerušení, riadením toku a \
          úsporou energie, automatické aktualizácie Windows sú vypnuté a MMCSS je nastavené pre \
-         Pro Audio."
+         Pro Audio. Počítač so sieťou Dante má zapnutú jednu fyzickú sieťovú kartu, jednu \
+         predvolenú trasu cez LAN a sieť Dante bez brány, s metrikou 900, bez registrácie v \
+         DNS, bez NetBIOS, zdieľania a klienta siete."
     ));
 }
 
@@ -487,3 +554,6 @@ fn notes_are_counted_like_slovak_counts_them() {
     assert_eq!(notes_word(5), "poznámok");
     assert_eq!(notes_word(11), "poznámok");
 }
+
+#[path = "prod_env_tests_firewall.rs"]
+mod firewall_tests;

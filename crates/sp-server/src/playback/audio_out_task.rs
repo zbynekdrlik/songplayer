@@ -217,6 +217,8 @@ async fn build(
         },
         OutputType::Asio => match AsioOut::for_entry(entry) {
             Ok(out) => {
+                // #229: an open at another rate proves the card's first.
+                let out = out.with_network_rate(network_rate);
                 let sink = OutputSink::Asio(Arc::new(out));
                 start(&sink, &entry.id);
                 log_started(entry, built_rate);

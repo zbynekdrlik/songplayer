@@ -58,9 +58,12 @@ BeforeAll {
                     $adapter = @($Facts.soundgrid.adapters | Where-Object { $_.guid -eq $action.AdapterGuid })[0]
                     $adapter.settings | Add-Member -NotePropertyName $action.Name -NotePropertyValue ([string]$action.Wanted) -Force
                 }
+                { $_ -eq 'nic_value' -or $_ -eq 'nic_advanced' } {
+                    $adapter = @($Facts.adapters | Where-Object { $_.guid -eq $action.AdapterGuid })[0]
+                    $adapter.settings | Add-Member -NotePropertyName $action.Name -NotePropertyValue ([string]$action.Wanted) -Force
+                }
                 'power' { $Facts.power.cpmincores_ac = $action.Wanted }
                 'defender' { $Facts.defender.preferences.($action.Name) = $action.Wanted }
-                'firewall' { $Facts.firewall.($action.Name) = $false }
                 default { throw "no fake apply for $($action.Kind)" }
             }
         }
@@ -242,10 +245,7 @@ Describe 'Get-ProdPcPlan' {
             'defender_policy DisableBehaviorMonitoring',
             'defender_policy DisableOnAccessProtection',
             'defender_policy DisableScanOnRealtimeEnable',
-            'defender_policy DisableIOAVProtection',
-            'firewall Domain',
-            'firewall Private',
-            'firewall Public'
+            'defender_policy DisableIOAVProtection'
         )
         @(Get-ProdPcBlockers -Facts $facts) | Should -HaveCount 0
     }
@@ -271,7 +271,6 @@ Describe 'Get-ProdPcPlan' {
         $byName['defender MAPSReporting'].Wanted | Should -Be 0
         $byName['defender SubmitSamplesConsent'].Wanted | Should -Be 2
         $byName['defender_policy DisableOnAccessProtection'].Path | Should -BeExactly 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection'
-        $byName['firewall Private'].Current | Should -BeExactly 'on'
     }
 
     It 'plans nothing once its own changes are applied (a second run plans nothing)' {
@@ -308,11 +307,11 @@ Describe 'Get-ProdPcPlan' {
         $plan[0].Current | Should -BeExactly '(none)'
     }
 
-    It 'plans one firewall profile that is on, and power with no core-parking value' {
+    It 'plans power with no core-parking value, and never a firewall profile that is on (issue 255)' {
         $facts = Read-Fixture 'pp'
         $facts.firewall.Public = $true
         $facts.power.cpmincores_ac = $null
-        Get-PlanLines $facts | Should -Be @('power CPMINCORES', 'firewall Public')
+        Get-PlanLines $facts | Should -Be @('power CPMINCORES')
         @(Get-ProdPcPlan -Facts $facts)[0].Current | Should -BeExactly '(none)'
     }
 }
@@ -428,6 +427,212 @@ Describe 'Get-ProdPcPlan: the SoundGrid adapter' {
     }
 }
 
+Describe 'Get-ProdPcPlan: every wired adapter (issue 285, the owner''s rule)' {
+    BeforeAll {
+        function New-Adapter {
+            param([string]$Name, [string]$Guid, [string]$Media = '802.3', [string]$Status = 'Up', $Settings = $null, [string]$PnpDeviceId = 'USB\VID_0BDA&PID_8153\000001')
+            if ($null -eq $Settings) { $Settings = [pscustomobject]@{} }
+            return [pscustomobject]@{
+                name = $Name; guid = $Guid; description = $Name; mac = ''; permanent_mac = ''; media = $Media; status = $Status
+                pnp_device_id = $PnpDeviceId
+                class_key = "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e972-e325-11ce-bfc1-08002be10318}\$Guid"
+                settings = $Settings
+            }
+        }
+        function Get-NicActions {
+            param($Facts)
+            return @(Get-ProdPcPlan -Facts $Facts | Where-Object { $_.Area -eq 'nic' })
+        }
+        $script:Always = @('*FlowControl', '*EEE', 'EEE', 'EnableGreenEthernet', 'AdvancedEEE', 'EnableExtraPowerSaving', 'GigaLite', '*SelectiveSuspend')
+        # resolume-snv's 'Ethernet 4' (PnPDeviceID as read on 10.11.2026).
+        $script:Rtl8156 = 'USB\VID_0BDA&PID_8156\4F13005C8C'
+        function Get-Rtl8156Actions {
+            param($Facts)
+            return @(Get-NicActions $Facts | Where-Object { $_.Kind -eq 'nic_advanced' })
+        }
+    }
+
+    It 'knows an RTL8156 by its hardware id' {
+        foreach ($case in @(
+                @($script:Rtl8156, $true),
+                @('usb\vid_0bda&pid_8156\4f13005c8c', $true),
+                @(' USB\VID_0BDA&PID_8156 ', $true),
+                @('USB\VID_0BDA&PID_8156&MI_00\7&1', $true),
+                @('USB\VID_0BDA&PID_81560\1', $false),
+                @('USB\VID_0BDA&PID_8153\000001', $false),
+                @('PCI\VEN_10EC&DEV_8125&SUBSYS_0', $false),
+                @('XUSB\VID_0BDA&PID_8156\1', $false),
+                @('', $false))) {
+            Test-ProdPcRtl8156 $case[0] | Should -Be $case[1] -Because $case[0]
+        }
+    }
+
+    It 'sets an RTL8156 to 8 transmit URBs and 64 transmit buffers through its driver' {
+        $settings = [pscustomobject]@{ PendingTransmits = '3'; TransmitBufferLen = '18' }
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(New-Adapter 'Ethernet 4' '0014' -Settings $settings -PnpDeviceId $script:Rtl8156) -Force
+        $own = Get-Rtl8156Actions $facts
+        @($own | ForEach-Object { "$($_.Name) $($_.Current) $($_.Wanted)" }) | Should -Be @('PendingTransmits 3 8', 'TransmitBufferLen 18 64')
+        $own[0].Adapter | Should -BeExactly 'Ethernet 4'
+        $own[0].AdapterGuid | Should -BeExactly '0014'
+        # after every other value of the adapter, its restart covers both
+        @(Get-NicActions $facts)[-1].Name | Should -BeExactly 'TransmitBufferLen'
+    }
+
+    It 'leaves an RTL8156 already at 8 and 64 alone, and sets one that is missing' {
+        $settings = [pscustomobject]@{ PendingTransmits = '8'; TransmitBufferLen = '64' }
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(New-Adapter 'Ethernet 4' '0014' -Settings $settings -PnpDeviceId $script:Rtl8156) -Force
+        Get-Rtl8156Actions $facts | Should -HaveCount 0
+        $settings.PSObject.Properties.Remove('TransmitBufferLen')
+        $settings.PendingTransmits = '128'
+        @(Get-Rtl8156Actions $facts | ForEach-Object { "$($_.Name) $($_.Current) $($_.Wanted)" }) | Should -Be @('PendingTransmits 128 8', 'TransmitBufferLen (none) 64')
+    }
+
+    It 'never sets the RTL8156 values on another adapter' {
+        $settings = [pscustomobject]@{ PendingTransmits = '3'; TransmitBufferLen = '18' }
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(
+            (New-Adapter 'Dante' '0014' -Settings $settings),
+            (New-Adapter 'NoId' '0015' -Settings $settings -PnpDeviceId '')
+        ) -Force
+        Get-Rtl8156Actions $facts | Should -HaveCount 0
+        @(Get-NicActions $facts | Where-Object { $_.Name -in @('PendingTransmits', 'TransmitBufferLen') }) | Should -HaveCount 0
+    }
+
+    It 'sets the RTL8156 values on an adapter whose PnPCapabilities the SoundGrid review sets' {
+        $facts = Read-Fixture 'pp'
+        $sg = $facts.soundgrid.adapters[0]
+        $sg.settings.PSObject.Properties.Remove('PnPCapabilities')
+        $copy = $sg | ConvertTo-Json -Depth 5 | ConvertFrom-Json
+        $copy | Add-Member -NotePropertyName media -NotePropertyValue '802.3' -Force
+        $copy | Add-Member -NotePropertyName status -NotePropertyValue 'Up' -Force
+        $copy | Add-Member -NotePropertyName pnp_device_id -NotePropertyValue $script:Rtl8156 -Force
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @($copy) -Force
+        @(Get-ProdPcPlan -Facts $facts | Where-Object { $_.Name -eq 'PnPCapabilities' }) | Should -HaveCount 1
+        @(Get-Rtl8156Actions $facts | ForEach-Object { $_.Name }) | Should -Be @('PendingTransmits', 'TransmitBufferLen')
+    }
+
+    It 'plans no RTL8156 value on the second run' {
+        $settings = [pscustomobject]@{ PendingTransmits = '3' }
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(New-Adapter 'Ethernet 4' '0014' -Settings $settings -PnpDeviceId $script:Rtl8156) -Force
+        $facts = Copy-Facts $facts
+        $own = Get-Rtl8156Actions $facts
+        $own | Should -HaveCount 2
+        Set-FactsAsApplied -Facts $facts -Actions $own
+        Get-Rtl8156Actions (Copy-Facts $facts) | Should -HaveCount 0
+    }
+
+    It 'applies an RTL8156 value through the driver, never around it' {
+        $script:Set = @()
+        function Set-NetAdapterAdvancedProperty {
+            param([string]$Name, [string]$RegistryKeyword, [string]$RegistryValue, [switch]$NoRestart)
+            $script:Set += "$Name|$RegistryKeyword|$RegistryValue|$NoRestart"
+        }
+        $action = New-ProdPcAction -Area 'nic' -Name 'PendingTransmits' -Current '3' -Wanted '8' -Reason 'r' -Kind 'nic_advanced' -Target @{ Adapter = 'Ethernet 4'; AdapterGuid = '0014'; Path = 'HKLM:\x'; Type = 'String' }
+        Invoke-ProdPcAction -Action $action
+        $script:Set | Should -Be @('Ethernet 4|PendingTransmits|8|True')
+    }
+
+    It 'turns off the values a USB driver hides, on a PC with no SoundGrid, and stops Windows turning it off' {
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(New-Adapter 'Dante' '0014') -Force
+        $actions = Get-NicActions $facts
+        $values = @($actions | Where-Object { $_.Kind -eq 'nic_value' })
+        @($values | ForEach-Object { $_.Name }) | Should -Be $script:Always
+        @($values | Where-Object { $_.Wanted -ne '0' }) | Should -HaveCount 0
+        $values[0].Adapter | Should -BeExactly 'Dante'
+        $values[0].Path | Should -BeLike '*\0014'
+        @($actions | Where-Object { $_.Kind -eq 'nic_pnp' -and $_.Name -eq 'PnPCapabilities' -and $_.Wanted -eq 24 }) | Should -HaveCount 1
+    }
+
+    It 'sets a value that is on, and leaves one already off' {
+        $settings = [pscustomobject]@{ '*EEE' = '1'; '*FlowControl' = '0'; PnPCapabilities = '24' }
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(New-Adapter 'Dante' '0014' -Settings $settings) -Force
+        $actions = Get-NicActions $facts
+        @($actions | Where-Object { $_.Name -eq '*EEE' })[0].Current | Should -BeExactly '1'
+        @($actions | Where-Object { $_.Name -eq '*FlowControl' }) | Should -HaveCount 0
+        @($actions | Where-Object { $_.Name -eq 'PnPCapabilities' }) | Should -HaveCount 0
+    }
+
+    It 'turns off the where-present values only where the driver has them' {
+        $settings = [pscustomobject]@{ '*InterruptModeration' = '1' }
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(
+            (New-Adapter 'Ethernet' '0001' -Settings $settings),
+            (New-Adapter 'Dante' '0014')
+        ) -Force
+        $moderation = @(Get-NicActions $facts | Where-Object { $_.Name -eq '*InterruptModeration' })
+        $moderation | Should -HaveCount 1
+        $moderation[0].Adapter | Should -BeExactly 'Ethernet'
+        @(Get-NicActions $facts | Where-Object { $_.Name -in @('GreenEthernet', 'PowerSavingMode', '*PowerSavingMode') }) | Should -HaveCount 0
+    }
+
+    It 'leaves a radio and a disabled adapter alone' {
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(
+            (New-Adapter 'Wi-Fi' '0002' -Media 'Native 802.11'),
+            (New-Adapter 'Off' '0003' -Status 'Disabled')
+        ) -Force
+        Get-NicActions $facts | Should -HaveCount 0
+    }
+
+    It 'blocks on a wired adapter with no key in the network class' {
+        $adapter = New-Adapter 'Dante' '0014'
+        $adapter.class_key = $null
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @($adapter) -Force
+        @(Get-ProdPcBlockers -Facts $facts | ForEach-Object { $_.Code }) | Should -Contain 'unreadable:wired_nic'
+    }
+
+    It 'leaves an adapter that is not present alone (an unplugged USB adapter)' {
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(New-Adapter 'Dante' '0014' -Status 'Not Present') -Force
+        Get-NicActions $facts | Should -HaveCount 0
+    }
+
+    It 'never writes a required SoundGrid setting the driver lacks: it stays a blocker' {
+        $facts = Read-Fixture 'pp'
+        $sg = $facts.soundgrid.adapters[0]
+        $sg.settings.PSObject.Properties.Remove('*FlowControl')
+        $copy = [pscustomobject]@{}
+        foreach ($p in $sg.settings.PSObject.Properties) { $copy | Add-Member -NotePropertyName $p.Name -NotePropertyValue $p.Value }
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(
+            [pscustomobject]@{ name = $sg.name; guid = $sg.guid; description = $sg.name; mac = ''; permanent_mac = ''
+                media = '802.3'; status = 'Up'; class_key = $sg.class_key; settings = $copy }
+        ) -Force
+        @(Get-ProdPcBlockers -Facts $facts | ForEach-Object { $_.Code }) | Should -Contain 'soundgrid_nic_setting:flow_control'
+        @(Get-NicActions $facts | Where-Object { $_.Name -eq '*FlowControl' }) | Should -HaveCount 0
+    }
+
+    It 'plans nothing on the second run' {
+        $facts = Read-Fixture 'fresh'
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(New-Adapter 'Dante' '0014') -Force
+        $facts = Copy-Facts $facts
+        foreach ($action in @(Get-NicActions $facts)) {
+            $adapter = @($facts.adapters | Where-Object { $_.guid -eq $action.AdapterGuid })[0]
+            $adapter.settings | Add-Member -NotePropertyName $action.Name -NotePropertyValue ([string]$action.Wanted) -Force
+        }
+        Get-NicActions $facts | Should -HaveCount 0
+    }
+
+    It 'does not act twice on what the SoundGrid review already acts on' {
+        $facts = Read-Fixture 'pp'
+        $port = @($facts.soundgrid.adapters | Where-Object { $_.mac -match '6[Cc].24.08.[Ee]5.9[Cc].91' })[0]
+        $copy = $port | ConvertTo-Json -Depth 5 | ConvertFrom-Json
+        $copy | Add-Member -NotePropertyName media -NotePropertyValue '802.3' -Force
+        $copy | Add-Member -NotePropertyName status -NotePropertyValue 'Up' -Force
+        $copy.settings | Add-Member -NotePropertyName '*EEE' -NotePropertyValue '1' -Force
+        $port.settings | Add-Member -NotePropertyName '*EEE' -NotePropertyValue '1' -Force
+        $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @($copy) -Force
+        $eee = @(Get-ProdPcPlan -Facts $facts | Where-Object { $_.Name -eq '*EEE' })
+        $eee | Should -HaveCount 1
+        $eee[0].Area | Should -BeExactly 'soundgrid_nic'
+    }
+}
+
 Describe 'Get-ProdPcPlan: Defender' {
     It "leaves Defender's preferences alone when its service is stopped or missing, its policy keys not" {
         foreach ($service in @('Stopped', 'missing')) {
@@ -472,6 +677,143 @@ Describe 'Get-ProdPcPlan: Defender' {
     }
 }
 
+Describe 'Get-ProdPcBlockers: the firewall (issue 255, dstack#155)' {
+    BeforeAll {
+        # The facts' blocker codes.
+        function Get-BlockerCodes {
+            param($Facts)
+            return @(Get-ProdPcBlockers -Facts $Facts | ForEach-Object { $_.Code })
+        }
+        # SNV with a firewall that is on and follows nothing of the standard
+        # (Windows' own default actions, no group rule).
+        function Get-PlainOnFacts {
+            $facts = Read-Fixture 'snv'
+            foreach ($p in @('Domain', 'Private', 'Public')) {
+                $facts.firewall_standard.defaults.$p.inbound = 'Block'
+            }
+            $facts.firewall_standard.block_rules = @()
+            $facts.firewall_standard.group_rules = @()
+            return $facts
+        }
+    }
+
+    It 'never plans a firewall action, whatever the state' {
+        $mixed = Read-Fixture 'snv'
+        $mixed.firewall.Public = $false
+        foreach ($facts in @((Read-Fixture 'pp'), (Read-Fixture 'snv'), (Read-Fixture 'fresh'), (Get-PlainOnFacts), $mixed)) {
+            @(Get-PlanLines $facts | Where-Object { $_ -like 'firewall *' }) | Should -HaveCount 0
+        }
+    }
+
+    It "holds dstack's standard as SNV read it on 10.11.2026" {
+        Get-BlockerCodes (Read-Fixture 'snv') | Should -HaveCount 0
+    }
+
+    It 'holds every profile off whatever its rules (PP; no firewall_standard needed)' {
+        Get-BlockerCodes (Read-Fixture 'pp') | Should -HaveCount 0
+        $facts = Read-Fixture 'snv'
+        foreach ($p in @('Domain', 'Private', 'Public')) { $facts.firewall.$p = $false }
+        $facts.firewall_standard.group_rules = @()
+        Get-BlockerCodes $facts | Should -HaveCount 0
+    }
+
+    It 'blocks a firewall that is on and follows nothing of the standard, never turning it off' {
+        $facts = Get-PlainOnFacts
+        Get-BlockerCodes $facts | Should -Be @('firewall_on:domain', 'firewall_on:private', 'firewall_on:public')
+        @(Get-ProdPcBlockers -Facts $facts)[0].Text | Should -Match 'never turns a profile off'
+        $facts.firewall.Domain = $false
+        $facts.firewall.Private = $false
+        # An OFF profile's Allow defaults are no attempt at the standard.
+        $facts.firewall_standard.defaults.Domain.inbound = 'Allow'
+        Get-BlockerCodes $facts | Should -Be @('firewall_on:public')
+    }
+
+    It 'blocks a profile that is on when its rules were not read' {
+        $facts = Read-Fixture 'pp'
+        $facts.firewall.Private = $true
+        Get-BlockerCodes $facts | Should -Be @('unreadable:firewall_rules')
+    }
+
+    It 'blocks an unread profile and judges nothing else' {
+        $facts = Read-Fixture 'snv'
+        $facts.firewall.Private = 'NotConfigured'
+        $facts.firewall_standard.group_rules = @()
+        $blockers = @(Get-ProdPcBlockers -Facts $facts)
+        @($blockers | ForEach-Object { $_.Code }) | Should -Be @('unreadable:firewall:private')
+        $blockers[0].Text | Should -Match 'reads NotConfigured'
+    }
+
+    It "blocks a profile that is off while dstack's standard is set up" {
+        $facts = Read-Fixture 'snv'
+        $facts.firewall.Public = $false
+        Get-BlockerCodes $facts | Should -Be @('firewall_off:public')
+    }
+
+    It 'blocks a default action that is not Allow, naming both' {
+        $facts = Read-Fixture 'snv'
+        $facts.firewall_standard.defaults.Private.outbound = 'Block'
+        $blockers = @(Get-ProdPcBlockers -Facts $facts)
+        @($blockers | ForEach-Object { $_.Code }) | Should -Be @('firewall_default_block:private')
+        $blockers[0].Text | Should -Match 'inbound Allow, outbound Block'
+        # Group rules alone are an attempt: Windows' defaults then block.
+        $facts = Read-Fixture 'snv'
+        foreach ($p in @('Domain', 'Private', 'Public')) { $facts.firewall_standard.defaults.$p.inbound = 'Block' }
+        Get-BlockerCodes $facts | Should -Be @('firewall_default_block:domain', 'firewall_default_block:private', 'firewall_default_block:public')
+    }
+
+    It 'blocks an enabled Block rule outside the group, by its display name else its name' {
+        $facts = Read-Fixture 'snv'
+        $facts.firewall_standard.block_rules = @($facts.firewall_standard.block_rules) + @(
+            [pscustomobject]@{ name = '{1}'; display_name = 'Block X'; group = ''; display_group = '' },
+            [pscustomobject]@{ name = '{2}'; display_name = ''; group = 'Other'; display_group = 'Other' },
+            [pscustomobject]@{ name = '{3}'; display_name = 'by display group'; group = ''; display_group = 'dstack155' }
+        )
+        $blockers = @(Get-ProdPcBlockers -Facts $facts)
+        @($blockers | ForEach-Object { $_.Code }) | Should -Be @('firewall_block_outside_group')
+        $blockers[0].Text | Should -Match 'dstack155: Block X, \{2\}$'
+    }
+
+    It 'blocks a group that does not hold exactly 14 enabled Block rules' {
+        $facts = Read-Fixture 'snv'
+        $facts.firewall_standard.group_rules = @($facts.firewall_standard.group_rules | Select-Object -First 13)
+        Get-BlockerCodes $facts | Should -Be @('firewall_group_incomplete')
+        $facts = Read-Fixture 'snv'
+        @($facts.firewall_standard.group_rules)[3].enabled = $false
+        Get-BlockerCodes $facts | Should -Be @('firewall_group_incomplete')
+        $facts = Read-Fixture 'snv'
+        @($facts.firewall_standard.group_rules)[5].action = 'Allow'
+        $blockers = @(Get-ProdPcBlockers -Facts $facts)
+        @($blockers | ForEach-Object { $_.Code }) | Should -Be @('firewall_group_incomplete')
+        $blockers[0].Text | Should -Match 'holds 14 rule\(s\), 13 of them enabled Block'
+        # Group rules but none left and default Allow: still the standard, incomplete.
+        $facts = Read-Fixture 'snv'
+        $facts.firewall_standard.group_rules = @()
+        $facts.firewall_standard.block_rules = @()
+        Get-BlockerCodes $facts | Should -Be @('firewall_group_incomplete')
+    }
+
+    It 'blocks a group rule not bound to the Dante leg alone' {
+        $facts = Read-Fixture 'snv'
+        $rules = @($facts.firewall_standard.group_rules)
+        $rules[0].interface_alias = @('Any')
+        $rules[1].interface_alias = @('Dante70', 'Ethernet 4')
+        $rules[2].interface_alias = @()
+        $blockers = @(Get-ProdPcBlockers -Facts $facts)
+        @($blockers | ForEach-Object { $_.Code }) | Should -Be @('firewall_group_interface')
+        $blockers[0].Text | Should -Match "\(Dante70\) alone: $([regex]::Escape($rules[0].name)), $([regex]::Escape($rules[1].name)), $([regex]::Escape($rules[2].name))$"
+    }
+
+    It 'blocks a group rule that names SongPlayer.exe' {
+        $facts = Read-Fixture 'snv'
+        $rules = @($facts.firewall_standard.group_rules)
+        $rules[4].programs = @('C:\Program Files\SongPlayer\songplayer.exe')
+        $rules[6].programs = @('SongPlayer.exe.bak')
+        $blockers = @(Get-ProdPcBlockers -Facts $facts)
+        @($blockers | ForEach-Object { $_.Code }) | Should -Be @('firewall_group_songplayer')
+        $blockers[0].Text | Should -Match "Dante device\): $([regex]::Escape($rules[4].name))$"
+    }
+}
+
 Describe 'setup-prod-pc.ps1 itself' {
     It 'plans from a facts file and changes nothing (-Plan -FactsJson), exit 0' {
         $output = & $script:Pwsh -NoProfile -NonInteractive -File $script:ScriptPath -Plan -FactsJson (Join-Path $script:FixtureDir 'snv.json') 2>&1
@@ -490,8 +832,24 @@ Describe 'setup-prod-pc.ps1 itself' {
     It 'prints every fresh action and still exits 0 in -Plan' {
         $output = & $script:Pwsh -NoProfile -NonInteractive -File $script:ScriptPath -Plan -FactsJson (Join-Path $script:FixtureDir 'fresh.json') 2>&1
         $LASTEXITCODE | Should -Be 0
-        @($output | Where-Object { "$_" -like 'PLAN  *' }) | Should -HaveCount 28
+        @($output | Where-Object { "$_" -like 'PLAN  *' }) | Should -HaveCount 25
         (($output | ForEach-Object { "$_" }) -join "`n") | Should -Match "PLAN  soundgrid_nic adapter 'Ethernet' \*FlowControl: 3 -> 0"
+    }
+
+    It "names each firewall blocker in -Plan and still exits 0 (issue 255)" {
+        $facts = Read-Fixture 'snv'
+        $facts.firewall.Public = $false
+        $path = Join-Path ([System.IO.Path]::GetTempPath()) "setup-prod-pc-fw-$PID.json"
+        try {
+            ConvertTo-Json -InputObject $facts -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
+            $output = & $script:Pwsh -NoProfile -NonInteractive -File $script:ScriptPath -Plan -FactsJson $path 2>&1
+            $LASTEXITCODE | Should -Be 0
+            $text = ($output | ForEach-Object { "$_" }) -join "`n"
+            $text | Should -Match 'BLOCKED firewall_off:public: '
+            $text | Should -Not -Match 'PLAN  firewall'
+        } finally {
+            Remove-Item -LiteralPath $path -ErrorAction SilentlyContinue
+        }
     }
 
     It 'refuses -FactsJson without -Plan (a fixture is never applied), exit 2' {

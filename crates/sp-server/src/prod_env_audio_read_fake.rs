@@ -1,6 +1,6 @@
 //! #255: the audio walk's test registry and PP's / SNV's layout as read on
 //! the boxes (12./13.10.2026), shared by `prod_env_audio_read_tests.rs` and
-//! `prod_env_audio_read_tests_dvs.rs`.
+//! `prod_env_audio_read_tests_profile.rs`.
 
 use std::collections::HashMap;
 
@@ -12,13 +12,13 @@ use crate::prod_env::audio::{NicFacts, Reading, SettingRead};
 /// An in-memory HKLM: names compared as Windows does, ASCII case ignored;
 /// a value or key never set is absent.
 #[derive(Clone, Default)]
-pub(super) struct Fake {
+pub(crate) struct Fake {
     values: HashMap<(String, String), RegValue>,
     keys: HashMap<String, Result<Vec<String>, u32>>,
 }
 
 impl Fake {
-    pub(super) fn set(&mut self, key: &str, name: &str, value: RegValue) {
+    pub(crate) fn set(&mut self, key: &str, name: &str, value: RegValue) {
         self.values
             .insert((key.to_ascii_lowercase(), name.to_ascii_lowercase()), value);
     }
@@ -61,11 +61,11 @@ pub(super) fn t(s: &str) -> RegValue {
 }
 
 pub(super) const SG_GUID: &str = "{DBFC2CF4-1A2B-4C3D-8E9F-0123456789AB}";
-pub(super) const DVS_GUID: &str = "{0B5E1C2D-3E4F-4A5B-9C6D-7E8F90A1B2C3}";
+pub(super) const CX_GUID: &str = "{0B5E1C2D-3E4F-4A5B-9C6D-7E8F90A1B2C3}";
 pub(super) const SG_DEVICE: &str =
     r"PCI\VEN_10EC&DEV_8168&SUBSYS_393917AA&REV_15\01000000684CE00000";
-pub(super) const DVS_DEVICE: &str = r"USB\VID_0BDA&PID_8156\000001";
-pub(super) const DVS_MAC: &str = "6c1ff773c7d9";
+pub(super) const CX_DEVICE: &str = r"USB\VID_0BDA&PID_8156\000001";
+pub(super) const CX_MAC: &str = "6c1ff773c7d9";
 
 pub(super) fn class_key(index: &str) -> String {
     format!(r"{NET_CLASS}\{index}")
@@ -112,13 +112,14 @@ pub(super) fn add_soundgrid(reg: &mut Fake) {
     reg.subkeys_of(SOUNDGRID_SERVICE, Ok(vec!["Linkage".to_string()]));
 }
 
-/// PP's Dante adapter: Realtek's NetAdapterCx `rtucx21x64`
+/// PP's USB adapter (its Dante adapter while it ran DVS): Realtek's
+/// NetAdapterCx `rtucx21x64`
 /// (`KmdfLibraryVersion` 1.33), instance 0012 whose id Windows wrote in
 /// lower case and which names no device instance (the connection does).
-pub(super) fn add_dante(reg: &mut Fake) {
+pub(super) fn add_cx_nic(reg: &mut Fake) {
     reg.add_instance("0012");
     let key = class_key("0012");
-    reg.set(&key, "NetCfgInstanceId", t(&DVS_GUID.to_ascii_lowercase()));
+    reg.set(&key, "NetCfgInstanceId", t(&CX_GUID.to_ascii_lowercase()));
     reg.set(
         &key,
         "DriverDesc",
@@ -127,9 +128,9 @@ pub(super) fn add_dante(reg: &mut Fake) {
     reg.set(&key, "*IfConnectorPresent", RegValue::Dword(1));
     reg.set(&key, "*InterruptModeration", t("1"));
     reg.set(&key, "*FlowControl", t("3"));
-    reg.set(&connection(DVS_GUID), "Name", t("Ethernet 4"));
-    reg.set(&connection(DVS_GUID), "PnPInstanceId", t(DVS_DEVICE));
-    reg.set(&device(DVS_DEVICE), "Service", t("rtucx21x64"));
+    reg.set(&connection(CX_GUID), "Name", t("Ethernet 4"));
+    reg.set(&connection(CX_GUID), "PnPInstanceId", t(CX_DEVICE));
+    reg.set(&device(CX_DEVICE), "Service", t("rtucx21x64"));
     reg.set(&wdf("rtucx21x64"), "KmdfLibraryVersion", t("1.33"));
 }
 
@@ -154,7 +155,7 @@ pub(super) fn add_policies(reg: &mut Fake) {
 pub(super) fn pp() -> Fake {
     let mut reg = Fake::default();
     add_soundgrid(&mut reg);
-    add_dante(&mut reg);
+    add_cx_nic(&mut reg);
     add_policies(&mut reg);
     reg
 }
@@ -166,6 +167,13 @@ pub(super) fn row(guid: &str, mac: &str, hardware: bool, filter: bool) -> IfRow 
         permanent_mac: mac.to_string(),
         hardware,
         filter,
+        // `NdisPhysicalMediumUnspecified`: the wired check has its own rows
+        // (`prod_env_audio_wired_tests.rs`), this fixture is PP before it.
+        medium: 0,
+        // No ifType either: like the medium, the wired check has its own rows.
+        if_type: 0,
+        present: true,
+        enabled: true,
     }
 }
 
@@ -188,23 +196,15 @@ pub(super) const SG_PREFERENCES: &str = r#"<?xml version="1.0"?>
 "#;
 
 /// PP's interfaces: the SoundGrid adapter and its filter module's interface
-/// (the same MAC), the Dante adapter and its filter module's interface.
+/// (the same MAC), the USB adapter and its filter module's interface.
 pub(super) fn interfaces() -> Result<Vec<IfRow>, u32> {
     Ok(vec![
         row("{FFFFFFFF-0000-4000-8000-000000000002}", SG_MAC, true, true),
         row(SG_GUID, SG_MAC, true, false),
-        row(
-            "{FFFFFFFF-0000-4000-8000-000000000001}",
-            DVS_MAC,
-            true,
-            true,
-        ),
-        row(DVS_GUID, DVS_MAC, true, false),
+        row("{FFFFFFFF-0000-4000-8000-000000000001}", CX_MAC, true, true),
+        row(CX_GUID, CX_MAC, true, false),
     ])
 }
-
-/// DVS's `manager.json`, with fields the profile does not read.
-pub(super) const MANAGER: &str = r#"{"PrimaryInterfaceName":" Ethernet 4 ","PrimaryInterfaceAddress":"6c1ff773c7d9","Latency":"High","AsioLatency":10000,"Rates":{"Sample":96000,"List":[44100,48000]}}"#;
 
 pub(super) fn power_read() -> PowerRead {
     PowerRead {
@@ -262,9 +262,9 @@ pub(super) fn soundgrid_facts() -> NicFacts {
     }
 }
 
-pub(super) fn dante_facts() -> NicFacts {
+pub(super) fn cx_facts() -> NicFacts {
     NicFacts {
-        guid: DVS_GUID.to_string(),
+        guid: CX_GUID.to_string(),
         name: Some("Ethernet 4".to_string()),
         description: Some("Realtek Gaming USB 2.5GbE Family Controller".to_string()),
         service: Some("rtucx21x64".to_string()),

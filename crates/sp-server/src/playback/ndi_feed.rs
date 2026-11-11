@@ -105,25 +105,37 @@ pub struct FeedCore {
     pictures: BTreeMap<i64, SharedFrame>,
     /// The stamp the last take served.
     served: Option<i64>,
+    /// When the last take ran, µs on the caller's clock (`NdiFeed`'s
+    /// epoch): a late picture's `late_us` is measured from it.
+    served_at_us: i64,
     /// The stamp of the last picture KEPT (pushes come in stamp order; a
     /// late one never entered the feed, so it proves no fresh readback).
     newest: Option<i64>,
     coalesced: u64,
     late: u64,
     /// The last [`NDI_LATE_EVENTS`] late pictures: (their stamp, the stamp
-    /// served before they came).
-    late_events: VecDeque<(i64, i64)>,
+    /// served before they came, µs from that take to their push).
+    late_events: VecDeque<(i64, i64, i64)>,
 }
 
 impl FeedCore {
-    /// The `program-max` thread read boundary `stamp_100ns` back.
+    /// The `program-max` thread read boundary `stamp_100ns` back (tests:
+    /// no clock, every push at 0 µs).
+    #[cfg(test)]
     pub fn push(&mut self, stamp_100ns: i64, picture: SharedFrame) -> Pushed {
+        self.push_at(stamp_100ns, picture, 0)
+    }
+
+    /// The `program-max` thread read boundary `stamp_100ns` back at
+    /// `now_us` (the clock `take_at` reads).
+    pub fn push_at(&mut self, stamp_100ns: i64, picture: SharedFrame, now_us: i64) -> Pushed {
         if let Some(served) = self.served.filter(|&served| stamp_100ns <= served) {
             self.late += 1;
             if self.late_events.len() == NDI_LATE_EVENTS {
                 self.late_events.pop_front();
             }
-            self.late_events.push_back((stamp_100ns, served));
+            self.late_events
+                .push_back((stamp_100ns, served, now_us - self.served_at_us));
             return Pushed::Late;
         }
         self.newest = Some(stamp_100ns);
@@ -136,10 +148,18 @@ impl FeedCore {
         Pushed::Kept
     }
 
-    /// The `program-output` thread sends boundary `stamp_100ns`: its
-    /// picture, if it came; every older one goes with it.
+    /// The `program-output` thread sends boundary `stamp_100ns` (tests: no
+    /// clock, every take at 0 µs).
+    #[cfg(test)]
     pub fn take(&mut self, stamp_100ns: i64) -> Option<SharedFrame> {
+        self.take_at(stamp_100ns, 0)
+    }
+
+    /// The `program-output` thread sends boundary `stamp_100ns` at
+    /// `now_us`: its picture, if it came; every older one goes with it.
+    pub fn take_at(&mut self, stamp_100ns: i64, now_us: i64) -> Option<SharedFrame> {
         self.served = Some(stamp_100ns);
+        self.served_at_us = now_us;
         let mut kept = self.pictures.split_off(&stamp_100ns);
         let picture = kept.remove(&stamp_100ns);
         self.pictures = kept;
@@ -163,7 +183,7 @@ impl FeedCore {
     pub fn late_events(&self) -> Vec<LateEvent> {
         self.late_events
             .iter()
-            .map(|&(stamp, served)| LateEvent::of(stamp, served))
+            .map(|&(stamp, served, late_us)| LateEvent::of(stamp, served, late_us))
             .collect()
     }
 }
@@ -178,11 +198,16 @@ pub struct LateEvent {
     /// Grid slots from it to the boundary served before it came (0: it
     /// lost the race to its own boundary's take).
     pub behind_slots: i64,
+    /// µs from the take of the boundary served before it came to its push:
+    /// with `behind_slots` 0, how late the readback was against its own
+    /// boundary's send (#279: a few hundred µs late, or a stall).
+    pub late_us: i64,
 }
 
 impl LateEvent {
-    fn of(stamp_100ns: i64, served_100ns: i64) -> Self {
+    fn of(stamp_100ns: i64, served_100ns: i64, late_us: i64) -> Self {
         Self {
+            late_us,
             utc_ms: stamp_100ns / 10_000,
             behind_slots: grid_index_100ns(served_100ns, GENLOCK_GRID_FPS)
                 - grid_index_100ns(stamp_100ns, GENLOCK_GRID_FPS),
@@ -354,6 +379,13 @@ pub struct NdiStatus {
     pub uyvy_us_p99: u64,
 }
 
+/// The box's monotonic clock in µs, the one both threads read for a late
+/// picture's `late_us` (#279 gate 2).
+#[cfg_attr(test, mutants::skip)] // a clock read; the arithmetic on it is tested with injected instants
+fn now_us() -> i64 {
+    crate::audio_host::mono::mono_100ns() / 10
+}
+
 /// The feed and the NDI telemetry, under one lock. The p99 windows are
 /// MAX's (`program_max::Window`, the last `MAX_STAT_WINDOW`).
 #[derive(Default)]
@@ -381,13 +413,23 @@ impl NdiFeed {
 
     /// The `program-max` thread: boundary `stamp_100ns`'s picture.
     pub fn push(&self, stamp_100ns: i64, picture: SharedFrame) -> Pushed {
-        self.lock().core.push(stamp_100ns, picture)
+        self.push_at(stamp_100ns, picture, now_us())
+    }
+
+    /// `push` at `now_us` on the box's monotonic clock (`now_us`; tests).
+    pub fn push_at(&self, stamp_100ns: i64, picture: SharedFrame, now_us: i64) -> Pushed {
+        self.lock().core.push_at(stamp_100ns, picture, now_us)
     }
 
     /// The `program-output` thread: boundary `stamp_100ns`'s picture, if it
     /// came (every older one goes).
     pub fn take(&self, stamp_100ns: i64) -> Option<SharedFrame> {
-        self.lock().core.take(stamp_100ns)
+        self.take_at(stamp_100ns, now_us())
+    }
+
+    /// `take` at `now_us` on the box's monotonic clock (`now_us`; tests).
+    pub fn take_at(&self, stamp_100ns: i64, now_us: i64) -> Option<SharedFrame> {
+        self.lock().core.take_at(stamp_100ns, now_us)
     }
 
     /// The `program-output` thread, on the canvas by the setting, after the

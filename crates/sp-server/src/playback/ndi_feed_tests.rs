@@ -430,11 +430,13 @@ fn a_late_picture_is_kept_as_an_event_with_its_stamp_and_lag() {
         vec![
             LateEvent {
                 utc_ms: b(2) / 10_000,
-                behind_slots: 1
+                behind_slots: 1,
+                late_us: 0
             },
             LateEvent {
                 utc_ms: b(3) / 10_000,
-                behind_slots: 0
+                behind_slots: 0,
+                late_us: 0
             },
         ],
         "oldest first: 2 trailed the served 3 by one slot, 3 lost its own race"
@@ -469,16 +471,50 @@ fn the_late_events_keep_the_newest_ones() {
     );
     let status = {
         let shared = NdiFeed::default();
-        shared.take(b(5));
-        shared.push(b(4), pic(4));
+        shared.take_at(b(5), 1_000);
+        shared.push_at(b(4), pic(4), 1_120);
         shared.status(NdiSource::Gpu)
     };
     assert_eq!(
         status.readback_late_events,
         vec![LateEvent {
             utc_ms: b(4) / 10_000,
-            behind_slots: 1
+            behind_slots: 1,
+            late_us: 120
         }],
         "the status serves them"
     );
+}
+
+/// #279 gate 2: a late picture carries how long after the take that served
+/// the boundary before it it came, on the instants the threads pass.
+#[test]
+fn a_late_picture_says_how_long_after_its_take_it_came() {
+    let mut feed = FeedCore::default();
+    assert!(feed.take_at(b(7), 5_000).is_none());
+    assert_eq!(feed.push_at(b(7), pic(7), 5_380), Pushed::Late);
+    assert!(feed.take_at(b(8), 38_333).is_none());
+    assert_eq!(feed.push_at(b(6), pic(6), 41_000), Pushed::Late);
+    assert_eq!(
+        feed.late_events(),
+        vec![
+            LateEvent {
+                utc_ms: b(7) / 10_000,
+                behind_slots: 0,
+                late_us: 380
+            },
+            LateEvent {
+                utc_ms: b(6) / 10_000,
+                behind_slots: 2,
+                late_us: 2_667
+            },
+        ],
+        "each from the take before it: 7 lost its own race by 380 us, 6 came 2.667 ms after 8's take"
+    );
+    assert_eq!(
+        feed.push_at(b(9), pic(9), 41_100),
+        Pushed::Kept,
+        "an on-time picture adds no event"
+    );
+    assert_eq!(feed.late_events().len(), 2);
 }

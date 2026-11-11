@@ -147,6 +147,14 @@ refresh being refused, not the 60 s cooldown the step waits out.
      the proxy is on SNV, and he copies that address.
   3. The address carries a one-time code, so it comes in through
      `airuleset.py secret request <NAME>` (the page holds at most 1 h).
+     The LOGIN PROCESS does not wait that long (resolume-snv 8.11.2026:
+     started 19:17:16Z, gone with no log line when the callback came
+     ~25 min later; `complete-login` answered `error sending request for
+     url (http://127.0.0.1:54545/callback…)`). Start step 1 only when the
+     owner is at the browser, and hand the callback on the moment it lands
+     (a watcher on `secret status <NAME>` that runs `secret exec`). Check
+     first that 54545 listens (`Get-NetTCPConnection -LocalPort 54545
+     -State Listen`).
   4. `secret exec <NAME> -- <script>` posts it to `POST
      /api/v1/ai/proxy/complete-login {"callback_url"}`, which forwards it to
      the login process and restarts the proxy.

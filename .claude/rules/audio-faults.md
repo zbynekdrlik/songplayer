@@ -111,8 +111,9 @@ worker no longer writes drain silence past the content, `dabing.md`).
 
 Not faults, by design: `pacing.repeats` (a 24/25 fps song's conversion, a
 paused standby), `pacing.dropped` (60→30 decimation), `late_frames`, an
-ASIO `no_clock` calm wait and its `clock_waits` (the output is not
-running), a Blank / nothing-selected fill or resync, an output's start-up
+ASIO `no_clock` or `clock_off_rate` calm wait (#229: a card over 1 % off
+its rate, its silent proof reading `opening`) and its `clock_waits` (the
+output is not running), a Blank / nothing-selected fill or resync, an output's start-up
 and driver open (not running), the post-deploy probe's own outputs (their
 receiver closes after the probe; `PROBE_OUTPUT_PREFIX`).
 

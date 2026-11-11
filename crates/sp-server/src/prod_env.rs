@@ -4,8 +4,9 @@
 //! scan of the processes SongPlayer launches (yt-dlp, deno) made the Waves
 //! SoundGrid driver resync, an audible pop each time. The owner's rule: a
 //! production PC runs Windows LTSC or Windows IoT Enterprise, with Defender's
-//! real-time protection and every firewall profile OFF, and no startup check
-//! or test may let a box run otherwise.
+//! real-time protection OFF, and no startup check or test may let a box run
+//! otherwise. The firewall (#255, dstack#155, 10.11.2026): every profile off,
+//! or dstack's two-network standard ([`firewall`]).
 //!
 //! This module turns the facts read from the box ([`EnvFacts`]: the raw
 //! reads of `prod_env_win.rs`, on Windows with no process spawned, made into
@@ -18,17 +19,19 @@
 //! (`note`) and holds. The vocabulary (codes, Slovak texts, the wire shape)
 //! is `sp_core::prod_env`.
 //!
-//! #255 adds the production PC's audio profile ([`audio`]): the adapters the
-//! SoundGrid Protocol is bound to on an NDIS driver with Waves' settings,
-//! Windows Update's automatic updates off, MMCSS set for Pro Audio; the
-//! Dante adapter, the driver exclusion and power are reported only.
+//! #255 adds the production PC's audio profile ([`audio`]): the adapter the
+//! SoundGrid driver uses on an NDIS driver with Waves' settings, Windows
+//! Update's automatic updates and driver installs off, MMCSS set for Pro
+//! Audio; power is reported only. #255 item D: a PC with a Dante leg (an
+//! enabled Dante output's `ip`) follows dstack's two-network standard §6
+//! items 1–3 ([`network`]).
 
+use std::net::Ipv4Addr;
 use std::sync::{LazyLock, RwLock};
 use std::time::Duration;
 
-use sp_core::prod_env::{
-    EnvProblem, EnvironmentStatus, FirewallProfile, FirewallState, Unreadable,
-};
+use sp_core::prod_env::firewall::FirewallDefaults;
+use sp_core::prod_env::{EnvProblem, EnvironmentStatus, FirewallState, Unreadable};
 use tracing::{error, info, warn};
 
 /// How often the box is checked again.
@@ -81,6 +84,9 @@ pub struct EnvFacts {
     pub defender_realtime: Option<bool>,
     /// Defender runs in a passive / EDR block mode (it still scans).
     pub defender_passive: Option<bool>,
+    /// Defender's other protections that are on, by its own status
+    /// (`read::defender_protections_on`); `[]` when Defender is off.
+    pub defender_protections_on: Option<Vec<String>>,
     /// Defender's running mode (`AMRunningMode`, shown only).
     pub defender_mode: Option<String>,
     /// Defender's antivirus engine is on (`AntivirusEnabled`, shown only).
@@ -90,8 +96,16 @@ pub struct EnvFacts {
     /// The domain, private and public firewall profile (the active policy
     /// store, `read::active_firewall`; the registry when it cannot be read).
     pub firewall: [Option<bool>; 3],
+    /// #255 (dstack#155): each profile's default actions in the active store
+    /// (`None`: not read; the registry fallback has none).
+    pub firewall_defaults: [Option<FirewallDefaults>; 3],
+    /// #255 (dstack#155): the active store's enabled Block rules by group
+    /// (`None`: not read).
+    pub firewall_rules: Option<firewall::BlockRules>,
     /// #255: the audio profile (`audio::read::read_audio`).
     pub audio: audio::AudioFacts,
+    /// #255 item D: the two-network facts (`network::read`).
+    pub network: network::NetworkFacts,
     /// Why a fact could not be read.
     pub read_errors: Vec<String>,
 }
@@ -168,10 +182,17 @@ pub fn verdict(facts: &EnvFacts) -> EnvVerdict {
         }),
         (Some(_), Some(true)) => {}
     }
-    match (facts.defender_realtime, facts.defender_passive) {
-        (Some(realtime), Some(passive)) => {
+    match (
+        facts.defender_realtime,
+        facts.defender_passive,
+        &facts.defender_protections_on,
+    ) {
+        (Some(realtime), Some(passive), Some(protections)) => {
             if realtime {
                 problems.push(EnvProblem::DefenderRealtimeOn);
+            }
+            for name in protections {
+                problems.push(EnvProblem::DefenderProtectionOn(name.clone()));
             }
             if passive {
                 let mode = facts.defender_mode.clone().unwrap_or_default();
@@ -188,14 +209,9 @@ pub fn verdict(facts: &EnvFacts) -> EnvVerdict {
             }
         }
     }
-    for (profile, on) in FirewallProfile::ALL.into_iter().zip(facts.firewall) {
-        match on {
-            None => problems.push(EnvProblem::Unreadable(Unreadable::Firewall(profile))),
-            Some(true) => problems.push(EnvProblem::FirewallOn(profile)),
-            Some(false) => {}
-        }
-    }
+    problems.extend(firewall::problems(facts));
     problems.extend(audio::problems(&facts.audio));
+    problems.extend(network::problems(&facts.network));
     EnvVerdict {
         ok: problems.is_empty(),
         ltsc: edition.map(is_ltsc),
@@ -244,6 +260,7 @@ pub fn status_of(check: &Check, now_ms: i64) -> (EnvironmentStatus, Vec<EnvProbl
         edition_allowed: v.edition_allowed,
         defender_realtime: facts.defender_realtime,
         defender_passive: facts.defender_passive,
+        defender_protections_on: facts.defender_protections_on.clone(),
         defender_mode: facts.defender_mode.clone(),
         defender_antivirus_enabled: facts.defender_antivirus_enabled,
         antivirus_on: facts.antivirus_on.clone(),
@@ -251,8 +268,13 @@ pub fn status_of(check: &Check, now_ms: i64) -> (EnvironmentStatus, Vec<EnvProbl
             domain,
             private,
             public,
+            mode: firewall::mode(facts, &firewall::problems(facts)),
+            defaults: facts.firewall_defaults,
+            dstack_group_rules: facts.firewall_rules.as_ref().map(|r| r.in_group),
+            block_rules_outside_group: facts.firewall_rules.as_ref().map(|r| r.outside.clone()),
         },
         audio: audio::view(&facts.audio),
+        two_networks: Some(network::view(&facts.network)),
         problems: v.problems.iter().map(EnvProblem::view).collect(),
         read_errors: facts.read_errors.clone(),
         checked_at_ms: Some(now_ms),
@@ -350,8 +372,8 @@ fn log_step(step: LogStep, status: &EnvironmentStatus, problems: &[EnvProblem]) 
             Some(note) => info!(note = %note, "production environment: not checked"),
             None => info!(
                 edition = ?status.edition_id,
-                "production environment: holds (edition allowed, Defender and firewall off, \
-                 audio profile set)"
+                "production environment: holds (edition allowed, Defender off, the firewall off or \
+                 dstack's standard, audio profile set)"
             ),
         },
         LogStep::Problems => {
@@ -427,13 +449,14 @@ impl<T: Send + 'static> Reader<T> {
 
 /// The Windows reads: the registry directly, WMI through the bounded reader.
 pub struct Platform {
-    direct: fn() -> DirectRead,
+    /// The direct reads, for the Dante outputs' addresses.
+    direct: fn(&[Ipv4Addr]) -> DirectRead,
     wmi: Reader<WmiRead>,
 }
 
 impl Platform {
     /// The reads `direct` (at each check) and `wmi` (bounded).
-    pub fn new(direct: fn() -> DirectRead, wmi: fn() -> WmiRead) -> Self {
+    pub fn new(direct: fn(&[Ipv4Addr]) -> DirectRead, wmi: fn() -> WmiRead) -> Self {
         Self {
             direct,
             wmi: Reader::new(wmi),
@@ -442,15 +465,40 @@ impl Platform {
 }
 
 /// This check's input: the facts on Windows (WMI within `bound`, the
-/// registry as read now), none elsewhere.
-pub async fn next_check(platform: Option<&mut Platform>, bound: Duration) -> Check {
+/// registry as read now, the two-network facts for the enabled Dante
+/// outputs' addresses `dante`, or why those could not be read), none
+/// elsewhere.
+pub async fn next_check(
+    platform: Option<&mut Platform>,
+    bound: Duration,
+    dante: Result<Vec<Ipv4Addr>, String>,
+) -> Check {
     let Some(platform) = platform else {
         return Check::NotWindows;
     };
     let wmi = platform.wmi.next(bound).await;
-    match tokio::task::spawn_blocking(platform.direct).await {
-        Ok(direct) => Check::Read(facts_from(&direct, &wmi)),
+    let direct = platform.direct;
+    let ips = dante.clone().unwrap_or_default();
+    match tokio::task::spawn_blocking(move || direct(&ips)).await {
+        Ok(direct) => {
+            let mut facts = facts_from(&direct, &wmi);
+            if let Err(why) = dante {
+                facts.network.dante_ips = None;
+                facts.read_errors.push(why);
+            }
+            Check::Read(facts)
+        }
         Err(e) => Check::Read(EnvFacts::unread(format!("the registry check failed: {e}"))),
+    }
+}
+
+/// The enabled Dante outputs' addresses (`dante_guard::dante_ips`), or why
+/// the audio outputs could not be read.
+#[cfg_attr(test, mutants::skip)] // glue: the DB read; the rule is `dante_guard::dante_ips`
+async fn dante_ips(pool: &sqlx::SqlitePool) -> Result<Vec<Ipv4Addr>, String> {
+    match crate::playback::audio_out_config::load(pool).await {
+        Ok(settings) => Ok(crate::dante_guard::dante_ips(&settings.entries)),
+        Err(e) => Err(format!("the audio outputs could not be read: {e}")),
     }
 }
 
@@ -469,16 +517,18 @@ fn platform() -> Option<Platform> {
 }
 
 /// Checks the box at once and every [`CHECK_EVERY`], publishing into
-/// [`global`], until the shutdown.
+/// [`global`], until the shutdown. #255 item D: the enabled Dante outputs
+/// are read from `pool` at each check.
 #[cfg_attr(test, mutants::skip)] // the loop; `apply`, `next_check` and `Reader` are tested
-pub async fn run(mut shutdown: tokio::sync::broadcast::Receiver<()>) {
+pub async fn run(pool: sqlx::SqlitePool, mut shutdown: tokio::sync::broadcast::Receiver<()>) {
     let mut platform = platform();
     let mut reporter = Reporter::default();
     let mut tick = tokio::time::interval(CHECK_EVERY);
     loop {
         tokio::select! {
             _ = tick.tick() => {
-                let check = next_check(platform.as_mut(), READ_BOUND).await;
+                let dante = dante_ips(&pool).await;
+                let check = next_check(platform.as_mut(), READ_BOUND, dante).await;
                 apply(global(), &mut reporter, &check, chrono::Utc::now().timestamp_millis());
             }
             _ = shutdown.recv() => break,
@@ -491,6 +541,12 @@ pub mod read;
 
 #[path = "prod_env_audio.rs"]
 pub mod audio;
+
+#[path = "prod_env_firewall.rs"]
+pub mod firewall;
+
+#[path = "prod_env_network.rs"]
+pub mod network;
 pub use read::{
     AvProduct, DefenderRow, DirectRead, FirewallRow, RegDword, RegString, ServiceRead, WmiRead,
     active_firewall, defender_realtime, facts_from, firewall_from_registry,

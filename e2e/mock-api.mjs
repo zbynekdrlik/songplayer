@@ -1541,10 +1541,19 @@ const ENV_HOLDS = {
   edition_allowed: null,
   defender_realtime: null,
   defender_passive: null,
+  defender_protections_on: null,
   defender_mode: null,
   defender_antivirus_enabled: null,
   antivirus_on: null,
-  firewall: { domain: null, private: null, public: null },
+  firewall: {
+    domain: null,
+    private: null,
+    public: null,
+    mode: null,
+    defaults: [null, null, null],
+    dstack_group_rules: null,
+    block_rules_outside_group: null,
+  },
   // #255: the production PC's audio profile: nothing read off Windows, so
   // no note either (a spec sends `audio: {notes: […]}` for the grey
   // "Profil PC" segment).
@@ -1552,7 +1561,6 @@ const ENV_HOLDS = {
     soundgrid: null,
     soundgrid_port_mac: null,
     soundgrid_nic: null,
-    dante: { installed: null, interface_address: null, interface_name: null, nic: null },
     windows_update: { no_auto_update: null, drivers_excluded: null },
     mmcss: {
       system_responsiveness: null,
@@ -1561,8 +1569,11 @@ const ENV_HOLDS = {
       pro_audio_scheduling_category: null,
     },
     power: { scheme_guid: null, scheme_name: null, core_parking_min_cores_pct: null },
+    wired_nics: null,
     notes: [],
   },
+  // #255 item D: the two-network facts (none read off Windows).
+  two_networks: null,
   problems: [],
   read_errors: [],
   checked_at_ms: null,
@@ -1666,6 +1677,7 @@ app.get("/api/v1/status", (_req, res) => {
     // reads these to show the offline-LAN URL + raw-IP fallback.
     lan_url: "http://sp.local:8920",
     lan_ip: "10.77.9.201",
+    dante_refusals: { http: 0, remote: 0 },
     // #229 item C: the node's name and its paid-AI switch, as the server
     // (`paid_ai_held` = the kinds held while off; the mock's lyrics and
     // metadata always are).

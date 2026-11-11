@@ -50,7 +50,8 @@ export interface AsioTelemetry {
   /** The driver's resync requests since the output was built (#233). */
   resyncs: number;
   latency_ms: number;
-  /** While waiting: the reason's stable code (`no_clock`: the driver gives no clock). */
+  /** While waiting: the reason's stable code (`no_clock`: the driver gives no clock;
+   *  `clock_off_rate`: its card takes audio over 1 % off its rate, #229). */
   reason_code?: string | null;
 }
 
@@ -86,10 +87,19 @@ function onDriverWorker(o: OutputStatus): boolean {
   return o.type === "asio" || o.type === "dante";
 }
 
-/** The enabled ASIO outputs waiting for their driver's clock (`no_clock`). */
+/** The waits for a usable clock: none (`no_clock`), or a card that takes
+ *  audio over 1 % off its rate (`clock_off_rate`, #229: PP's SoundGrid with
+ *  its network off, by the owner's choice outside services). */
+const CLOCK_WAITS = ["no_clock", "clock_off_rate"];
+
+/** The enabled ASIO outputs waiting for a usable clock from their driver. */
 export function waitingForClock(list: OutputStatus[]): OutputStatus[] {
   return list.filter(
-    (o) => onDriverWorker(o) && o.enabled && o.state === "waiting" && o.asio?.reason_code === "no_clock",
+    (o) =>
+      onDriverWorker(o) &&
+      o.enabled &&
+      o.state === "waiting" &&
+      CLOCK_WAITS.includes(o.asio?.reason_code ?? ""),
   );
 }
 

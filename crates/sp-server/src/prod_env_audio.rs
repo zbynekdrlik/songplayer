@@ -22,13 +22,17 @@
 //! - **MMCSS** (GATE, #210 part 2): `SystemResponsiveness` 0,
 //!   `NetworkThrottlingIndex` 0xFFFFFFFF, the Pro Audio task at priority 6,
 //!   scheduling category High.
-//! - **Reported only**: Dante Virtual Soundcard's adapter (its effect is
-//!   still being measured), the power scheme and core parking
-//!   (`sp_core::prod_env::audio::notes`).
+//! - **Every wired adapter** (GATE, #285, the owner's rule):
+//!   `prod_env_audio_wired.rs`.
+//! - **Reported only**: the power scheme and core parking
+//!   (`sp_core::prod_env::audio::notes`). #255 item D deleted the note on
+//!   Dante Virtual Soundcard's adapter: DVS is not used (SongPlayer's Dante
+//!   output is a native device); a PC with a Dante leg is checked by
+//!   `prod_env::network`.
 
 use sp_core::prod_env::audio::{
-    AudioProfile, DanteView, DriverModel, MmcssSetting, MmcssView, NicSetting, NicSettingView,
-    NicView, PowerView, SoundGridState, WindowsUpdateView, nic_label, notes,
+    AudioProfile, DriverModel, MmcssSetting, MmcssView, NicSetting, NicSettingView, NicView,
+    PowerView, SoundGridState, WindowsUpdateView, nic_label, notes,
 };
 use sp_core::prod_env::{EnvProblem, Unreadable};
 
@@ -105,19 +109,6 @@ impl NicFacts {
     }
 }
 
-/// Dante Virtual Soundcard as read (report only).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct DanteFacts {
-    /// Its `manager.json` exists (`None`: could not be read).
-    pub installed: Option<bool>,
-    /// `PrimaryInterfaceAddress` (the adapter's MAC).
-    pub interface_address: Option<String>,
-    /// `PrimaryInterfaceName` (shown only).
-    pub interface_name: Option<String>,
-    /// The adapter with that MAC.
-    pub nic: Option<NicFacts>,
-}
-
 /// MMCSS's system profile as read.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MmcssFacts {
@@ -160,7 +151,6 @@ pub enum SoundGridFacts {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AudioFacts {
     pub soundgrid: SoundGridFacts,
-    pub dante: DanteFacts,
     /// `NoAutoUpdate` is 1.
     pub no_auto_update: Option<bool>,
     /// `ExcludeWUDriversInQualityUpdate` is 1 (a gate since lane 2's setup
@@ -168,6 +158,8 @@ pub struct AudioFacts {
     pub drivers_excluded: Option<bool>,
     pub mmcss: MmcssFacts,
     pub power: PowerFacts,
+    /// #285: every wired adapter (`None`: could not be listed).
+    pub wired_nics: Option<Vec<read::wired::WiredNicFacts>>,
     /// Why a fact could not be read.
     pub errors: Vec<String>,
 }
@@ -363,7 +355,7 @@ pub fn soundgrid_problems(soundgrid: &SoundGridFacts) -> Vec<EnvProblem> {
 }
 
 /// The audio profile's problems, in order: SoundGrid, Windows Update,
-/// MMCSS. The report-only facts are never one.
+/// MMCSS, every wired adapter. The report-only facts are never one.
 pub fn problems(audio: &AudioFacts) -> Vec<EnvProblem> {
     let mut problems = soundgrid_problems(&audio.soundgrid);
     // Windows Update: one "cannot be read" for either policy, then each
@@ -378,7 +370,23 @@ pub fn problems(audio: &AudioFacts) -> Vec<EnvProblem> {
         problems.push(EnvProblem::DriversNotExcluded);
     }
     problems.extend(mmcss_problems(&audio.mmcss));
+    let judged = soundgrid_judged(&audio.soundgrid);
+    problems.extend(read::wired::problems_besides(&audio.wired_nics, &judged));
     problems
+}
+
+/// The SoundGrid adapter's keywords its own check judges: each setting read
+/// under a keyword, and `PnPCapabilities` (always judged).
+pub fn soundgrid_judged(soundgrid: &SoundGridFacts) -> Vec<(String, String)> {
+    let SoundGridFacts::Adapter { nic, .. } = soundgrid else {
+        return Vec::new();
+    };
+    nic.settings
+        .iter()
+        .filter_map(|s| s.keyword.clone())
+        .chain(["PnPCapabilities".to_string()])
+        .map(|keyword| (nic.guid.clone(), keyword))
+        .collect()
 }
 
 /// One adapter on the status.
@@ -433,12 +441,6 @@ pub fn view(audio: &AudioFacts) -> AudioProfile {
         soundgrid: Some(state),
         soundgrid_port_mac: port_mac.cloned(),
         soundgrid_nic: nic,
-        dante: DanteView {
-            installed: audio.dante.installed,
-            interface_address: audio.dante.interface_address.clone(),
-            interface_name: audio.dante.interface_name.clone(),
-            nic: audio.dante.nic.as_ref().map(nic_view),
-        },
         windows_update: WindowsUpdateView {
             no_auto_update: audio.no_auto_update,
             drivers_excluded: audio.drivers_excluded,
@@ -454,6 +456,10 @@ pub fn view(audio: &AudioFacts) -> AudioProfile {
             scheme_name: audio.power.scheme_name.clone(),
             core_parking_min_cores_pct: audio.power.core_parking_min_cores,
         },
+        wired_nics: audio
+            .wired_nics
+            .as_ref()
+            .map(|nics| nics.iter().map(read::wired::view).collect()),
         notes: Vec::new(),
     };
     profile.notes = notes(&profile);
@@ -461,8 +467,7 @@ pub fn view(audio: &AudioFacts) -> AudioProfile {
 }
 
 /// A production PC's audio facts (the tests' fixture): PP's SoundGrid
-/// adapter on its NDIS driver with every setting off, DVS on a NetAdapterCx
-/// adapter (report only), automatic updates off and drivers excluded from
+/// adapter on its NDIS driver with every setting off, automatic updates off and drivers excluded from
 /// Windows Update (both 1 on PP since 12.10.2026), MMCSS set, no core
 /// parking.
 #[cfg(test)]
@@ -497,17 +502,6 @@ pub fn production_example() -> AudioFacts {
                 Reading::Absent,
             ),
         },
-        dante: DanteFacts {
-            installed: Some(true),
-            interface_address: Some("6c1ff773c7d9".to_string()),
-            interface_name: Some("Ethernet 4".to_string()),
-            nic: Some(nic(
-                "{0B5E0000-0000-0000-0000-000000000002}",
-                "Ethernet 4",
-                "rtucx21x64",
-                Reading::Value("1.33".to_string()),
-            )),
-        },
         no_auto_update: Some(true),
         drivers_excluded: Some(true),
         mmcss: MmcssFacts {
@@ -521,6 +515,10 @@ pub fn production_example() -> AudioFacts {
             scheme_name: Some("High performance".to_string()),
             core_parking_min_cores: Some(100),
         },
+        wired_nics: Some(vec![
+            read::wired::example("{DBFC2CF4-0000-0000-0000-000000000001}", "soundgrid-pcie"),
+            read::wired::example("{0B5E0000-0000-0000-0000-000000000002}", "Ethernet 4"),
+        ]),
         errors: Vec::new(),
     }
 }

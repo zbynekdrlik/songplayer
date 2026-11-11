@@ -5,6 +5,8 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use sp_core::prod_env::firewall::FirewallDefaults;
+use sp_core::prod_env::network::NetProblem;
 use sp_core::prod_env::{
     EnvProblem, EnvironmentStatus, FirewallProfile, FirewallState, Unreadable,
 };
@@ -13,7 +15,8 @@ use tower::ServiceExt;
 use super::*;
 
 /// A production box: IoT Enterprise LTSC, Defender real-time off, every
-/// firewall profile off.
+/// firewall profile off (Windows' own default actions, no Block rule),
+/// resolume-snv's two networks as dstack set them up (#255 item D).
 fn production() -> EnvFacts {
     EnvFacts {
         edition_id: Some("IoTEnterpriseS".to_string()),
@@ -21,14 +24,24 @@ fn production() -> EnvFacts {
         build_number: Some(26100),
         defender_realtime: Some(false),
         defender_passive: Some(false),
+        defender_protections_on: Some(Vec::new()),
         defender_mode: Some("Normal".to_string()),
         defender_antivirus_enabled: Some(true),
         antivirus_on: Some(Vec::new()),
         firewall: [Some(false); 3],
+        firewall_defaults: [Some(WINDOWS_DEFAULTS); 3],
+        firewall_rules: Some(firewall::BlockRules::default()),
         audio: audio::production_example(),
+        network: network::snv_example(),
         read_errors: Vec::new(),
     }
 }
+
+/// Windows' own default actions: inbound Block, outbound Allow.
+const WINDOWS_DEFAULTS: FirewallDefaults = FirewallDefaults {
+    inbound: 4,
+    outbound: 2,
+};
 
 /// Production but for the edition and the build.
 fn with_edition(edition: &str, build: Option<u32>) -> EnvFacts {
@@ -210,6 +223,48 @@ fn defender_on_or_unread_is_a_problem() {
     );
 }
 
+/// #255: an intelligence update turned behaviour monitoring, IOAV and the
+/// on-access scan back on while real-time stayed off (resolume-snv,
+/// 7.11.2026). Each is named, after real-time and before the mode; unread
+/// is unreadable.
+#[test]
+fn defenders_other_protections_are_each_a_problem() {
+    let on = verdict(&EnvFacts {
+        defender_realtime: Some(true),
+        defender_passive: Some(true),
+        defender_mode: Some("Passive Mode".to_string()),
+        defender_protections_on: Some(vec!["behavior_monitoring".to_string(), "ioav".to_string()]),
+        ..production()
+    });
+    assert!(!on.ok);
+    assert_eq!(
+        on.problems,
+        [
+            EnvProblem::DefenderRealtimeOn,
+            EnvProblem::DefenderProtectionOn("behavior_monitoring".to_string()),
+            EnvProblem::DefenderProtectionOn("ioav".to_string()),
+            EnvProblem::DefenderPassive("Passive Mode".to_string()),
+        ]
+    );
+    let alone = verdict(&EnvFacts {
+        defender_protections_on: Some(vec!["on_access".to_string()]),
+        ..production()
+    });
+    assert!(!alone.ok);
+    assert_eq!(
+        alone.problems,
+        [EnvProblem::DefenderProtectionOn("on_access".to_string())]
+    );
+    let unread = verdict(&EnvFacts {
+        defender_protections_on: None,
+        ..production()
+    });
+    assert_eq!(
+        unread.problems,
+        [EnvProblem::Unreadable(Unreadable::Defender)]
+    );
+}
+
 /// Review finding 2: Defender passive, or another antivirus product on.
 #[test]
 fn a_scanning_defender_or_antivirus_is_a_problem() {
@@ -311,9 +366,8 @@ fn every_problem_is_listed_in_order() {
         [
             not_allowed("Professional", Some(26100)),
             EnvProblem::DefenderRealtimeOn,
-            EnvProblem::FirewallOn(FirewallProfile::Domain),
+            // #255: a profile unread, the firewall is judged no further.
             EnvProblem::Unreadable(Unreadable::Firewall(FirewallProfile::Private)),
-            EnvProblem::FirewallOn(FirewallProfile::Public),
         ]
     );
     let nothing = verdict(&EnvFacts::unread("the check did not finish within 30s"));
@@ -329,6 +383,7 @@ fn every_problem_is_listed_in_order() {
             EnvProblem::Unreadable(Unreadable::SoundGrid),
             EnvProblem::Unreadable(Unreadable::WindowsUpdate),
             EnvProblem::Unreadable(Unreadable::Mmcss),
+            EnvProblem::Unreadable(Unreadable::WiredNics),
         ]
     );
 }
@@ -395,11 +450,22 @@ fn the_status_carries_every_fact_and_problem() {
         build_number: Some(22631),
         defender_realtime: Some(true),
         defender_passive: Some(true),
+        defender_protections_on: Some(Vec::new()),
         defender_mode: Some("Passive Mode".to_string()),
         defender_antivirus_enabled: Some(false),
         antivirus_on: Some(vec!["ESET Security".to_string()]),
         firewall: [Some(true), None, Some(false)],
+        firewall_defaults: [Some(WINDOWS_DEFAULTS), None, Some(WINDOWS_DEFAULTS)],
+        firewall_rules: Some(firewall::BlockRules {
+            in_group: 2,
+            outside: vec!["Block X".to_string()],
+        }),
         audio: audio::production_example(),
+        // #255 item D: a second default route, through the Dante leg.
+        network: network::NetworkFacts {
+            default_routes: Some(vec![12, 30]),
+            ..network::snv_example()
+        },
         read_errors: vec!["the private firewall setting is missing".to_string()],
     };
     let (status, problems) = status_of(&Check::Read(facts), 2_000);
@@ -408,8 +474,16 @@ fn the_status_carries_every_fact_and_problem() {
         EnvProblem::DefenderRealtimeOn,
         EnvProblem::DefenderPassive("Passive Mode".to_string()),
         EnvProblem::AntivirusOn("ESET Security".to_string()),
-        EnvProblem::FirewallOn(FirewallProfile::Domain),
+        // #255: an unread profile: nothing else of the firewall is judged.
         EnvProblem::Unreadable(Unreadable::Firewall(FirewallProfile::Private)),
+        // #255 item D: after the audio profile's.
+        EnvProblem::Network(NetProblem::DefaultRoutes(vec![
+            "Ethernet 4".to_string(),
+            "Dante70".to_string(),
+        ])),
+        EnvProblem::Network(NetProblem::LegDefaultRoute {
+            nic: "Dante70".to_string(),
+        }),
     ];
     assert_eq!(problems, expected_problems);
     assert_eq!(
@@ -425,6 +499,7 @@ fn the_status_carries_every_fact_and_problem() {
             edition_allowed: Some(false),
             defender_realtime: Some(true),
             defender_passive: Some(true),
+            defender_protections_on: Some(Vec::new()),
             defender_mode: Some("Passive Mode".to_string()),
             defender_antivirus_enabled: Some(false),
             antivirus_on: Some(vec!["ESET Security".to_string()]),
@@ -432,8 +507,16 @@ fn the_status_carries_every_fact_and_problem() {
                 domain: Some(true),
                 private: None,
                 public: Some(false),
+                mode: None,
+                defaults: [Some(WINDOWS_DEFAULTS), None, Some(WINDOWS_DEFAULTS)],
+                dstack_group_rules: Some(2),
+                block_rules_outside_group: Some(vec!["Block X".to_string()]),
             },
             audio: audio::view(&audio::production_example()),
+            two_networks: Some(network::view(&network::NetworkFacts {
+                default_routes: Some(vec![12, 30]),
+                ..network::snv_example()
+            })),
             problems: expected_problems.iter().map(EnvProblem::view).collect(),
             read_errors: vec!["the private firewall setting is missing".to_string()],
             checked_at_ms: Some(2_000),
@@ -457,12 +540,67 @@ fn the_status_carries_every_fact_and_problem() {
             .and_then(|n| n.service.as_deref()),
         Some("rt640x64")
     );
-    // One note: the DVS adapter on NetAdapterCx. The driver exclusion is
-    // a gate since lane 2, and production_example() holds it.
-    assert_eq!(held.audio.notes.len(), 1);
+    // No note: #255 item D deleted the one on Dante Virtual Soundcard's
+    // adapter. The driver exclusion is a gate since lane 2, and
+    // production_example() holds it.
+    assert_eq!(held.audio.notes, Vec::<String>::new());
+    // #255 item D: the two networks on the status.
+    let two = held.two_networks.expect("two_networks");
+    assert_eq!(two.dante_ips, Some(vec!["10.77.7.107".to_string()]));
+    assert_eq!(two.legs[0].nic.as_deref(), Some("Dante70"));
     // Off Windows nothing is read, so no note either.
     let (off, _) = status_of(&Check::NotWindows, 4_000);
     assert_eq!(off.audio, sp_core::prod_env::audio::AudioProfile::default());
+    assert_eq!(off.two_networks, None);
+}
+
+/// #255 item D: a PC with a Dante leg that departs from dstack's two-network
+/// standard fails the check, after every other problem; with no Dante
+/// output (PP) the same departures are not judged; outputs that cannot be
+/// read are a problem.
+#[test]
+fn the_two_network_standard_gates_a_pc_with_a_dante_leg() {
+    let mut facts = production();
+    facts.network.legs[0].netbios = audio::Reading::Value(1);
+    facts.antivirus_on = Some(vec!["ESET Security".to_string()]);
+    let v = verdict(&facts);
+    assert!(!v.ok);
+    assert_eq!(
+        v.problems,
+        [
+            EnvProblem::AntivirusOn("ESET Security".to_string()),
+            EnvProblem::Network(NetProblem::LegNetbios {
+                nic: "Dante70".to_string(),
+                value: Some(1),
+            }),
+        ]
+    );
+    let pp = EnvFacts {
+        network: network::NetworkFacts {
+            dante_ips: Some(Vec::new()),
+            legs: Vec::new(),
+            ..facts.network.clone()
+        },
+        antivirus_on: Some(Vec::new()),
+        ..facts.clone()
+    };
+    assert!(verdict(&pp).ok);
+    let unread = EnvFacts {
+        network: network::NetworkFacts {
+            dante_ips: None,
+            ..facts.network.clone()
+        },
+        antivirus_on: Some(Vec::new()),
+        ..facts
+    };
+    assert_eq!(
+        verdict(&unread)
+            .problems
+            .iter()
+            .map(EnvProblem::code)
+            .collect::<Vec<_>>(),
+        ["unreadable:dante_outputs"]
+    );
 }
 
 // ---- what a check logs ----
@@ -585,7 +723,8 @@ async fn both_routes_answer_the_published_status() {
         expected["problems"],
         serde_json::json!([{
             "code": "firewall_on:private",
-            "text_sk": "brána firewall je zapnutá (súkromný profil)",
+            "text_sk": "brána firewall je zapnutá (súkromný profil) a nie je nastavená podľa \
+                        štandardu dstack (skupina pravidiel dstack155)",
         }])
     );
     assert_eq!(

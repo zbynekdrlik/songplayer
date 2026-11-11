@@ -78,9 +78,9 @@ rtrb = "=0.4.0"
 # and `asrc_servo.rs` are adapters over it). dstack by tag, no Dante code in
 # this repo. MIT OR Apache-2.0 since v0.6.12 (its MIT notice ships in
 # THIRD-PARTY-NOTICES.txt).
-dlink = { git = "https://github.com/zbynekdrlik/dstack", tag = "v0.6.52" }
-dstack = { git = "https://github.com/zbynekdrlik/dstack", tag = "v0.6.52" }
-dstack-resample = { git = "https://github.com/zbynekdrlik/dstack", tag = "v0.6.52" }
+dlink = { git = "https://github.com/zbynekdrlik/dstack", tag = "v0.6.72" }
+dstack = { git = "https://github.com/zbynekdrlik/dstack", tag = "v0.6.72" }
+dstack-resample = { git = "https://github.com/zbynekdrlik/dstack", tag = "v0.6.72" }
 # #228: the SP-program burn-id QR (911014, #151's payload). Pure-Rust
 # encoder; `default-features = false` drops the optional image / svg / pic
 # renderers (the module matrix needs none). MIT OR Apache-2.0 (its MIT notice
@@ -134,6 +134,11 @@ windows-sys = { version = "0.59", features = [
     "Win32_NetworkManagement_IpHelper",
     "Win32_NetworkManagement_Ndis",
     "Win32_System_Power",
+    # #255 item D: the Dante leg's address, the default routes and the
+    # interface metric (GetUnicastIpAddressTable, GetIpForwardTable2,
+    # GetIpInterfaceTable take an ADDRESS_FAMILY and hand SOCKADDR_INETs,
+    # `prod_env_network_win.rs`).
+    "Win32_Networking_WinSock",
     # #259: the wall report reads Windows' displays (EnumDisplayDevicesW,
     # EnumDisplaySettingsW) and the process list (a Toolhelp snapshot) to
     # find Resolume Arena, with no process spawned (`wall/win.rs`; its
