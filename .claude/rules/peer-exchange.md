@@ -804,6 +804,30 @@ wait for a peer that has the song", below).
     peer's copy is made from another audio than this node's`): a song this
     node downloaded itself (nobody had it within 2 h), or a peer that
     downloaded its song again since;
+  - another audio while the job may NOT run here (#304: the lyrics with
+    paid AI off, PP) → this node takes the PEER'S SONG first
+    (`Exchange::take_peers_song`, `peer/song_swap.rs`), else held as
+    before: the peer's video + audio (`decide::holds(Job::Download)`, its
+    audio = the plan's `peer_audio`, else held) fetched as sha-checked
+    parts, swapped under `SONG_FILES` over the names the row records (the
+    names never change, so no rename / re-link of the set; the old files
+    linked as `<name>.peer-old` — never `.prev`, the video upgrade's
+    rollback source — until the placed sizes match the catalog, put back
+    on any failure, a placed video back into its part); then
+    `record_origins` (video + audio), the audio's `peer_hashes` entry (the
+    catalog's sha at the placed size / mtime), `format::record(None)`, and
+    this node's stems of the OLD audio deleted, their stem records
+    forgotten and every row of that audio that recorded them
+    `requeue_lost_stems` (the stems job then takes the peer's: the same
+    audio now). The hook then takes the copy in the SAME pick
+    (`unless_peers_audio` answers `None`). Bounded: once swapped the
+    record vouches (`Same`), so it repeats only when the peer's audio sha
+    changes; a row with no video or audio recorded, a peer listing no
+    pair, a moved row or a refused name (a player holds it) = the 30-min
+    hold, the parts kept (no re-transfer). INFO `exchange: this node's
+    audio is not the peer's - the peer's video and audio replace it`.
+    Paid AI on, the stems hook and SNV (no peers): unchanged. Tests:
+    `song_swap_tests.rs`, `held_tests.rs::another_audio_with_no_song_of_the_peers_to_take_is_held`;
   - this node cannot tell yet → waited for like a failed fetch
     (`after_failed_fetch` with `PeerError::NotYet`, no attempt, within the
     2 h bound), never decided on a guess: the peer lists no audio of the

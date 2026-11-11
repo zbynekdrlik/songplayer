@@ -167,3 +167,137 @@ async fn with_paid_ai_on_the_song_here_stays_and_the_lyrics_run_here() {
     assert_eq!(std::fs::read(&video).unwrap(), own_video());
     assert_eq!(fetch_record(pp.pool(), YT, "audio").await.unwrap(), None);
 }
+
+/// The file half over a temp dir: `(own, parts)` with distinct bytes.
+fn files(dir: &Path) -> (super::Pair, super::Pair) {
+    let own = super::Pair {
+        video: dir.join("song_video.mp4"),
+        audio: dir.join("song_audio.flac"),
+    };
+    let parts = super::Pair {
+        video: dir.join("v.part"),
+        audio: dir.join("a.part"),
+    };
+    std::fs::write(&own.video, own_video()).unwrap();
+    std::fs::write(&own.audio, own_audio()).unwrap();
+    std::fs::write(&parts.video, bytes(2_000, 1)).unwrap();
+    std::fs::write(&parts.audio, song_audio()).unwrap();
+    (own, parts)
+}
+
+/// Both parts take the names, the old copies go.
+#[test]
+fn replace_pair_places_both_and_keeps_no_old_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let (own, parts) = files(dir.path());
+    super::replace_pair(&own, &parts, (2_000, 3_000)).unwrap();
+    assert_eq!(std::fs::read(&own.video).unwrap(), bytes(2_000, 1));
+    assert_eq!(std::fs::read(&own.audio).unwrap(), song_audio());
+    assert!(!parts.video.exists() && !parts.audio.exists());
+    assert_eq!(files_ending(dir.path(), ".peer-old"), 0);
+}
+
+/// The audio cannot take its name (here: its part is gone): the old video
+/// is back under its name, the placed video back in its part (no transfer
+/// next time), the old audio untouched, no link left.
+#[test]
+fn replace_pair_puts_the_old_song_back_when_the_audio_cannot_take_its_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let (own, parts) = files(dir.path());
+    std::fs::remove_file(&parts.audio).unwrap();
+    let err = super::replace_pair(&own, &parts, (2_000, 3_000)).unwrap_err();
+    assert!(err.contains("audio"), "{err}");
+    assert_eq!(std::fs::read(&own.video).unwrap(), own_video());
+    assert_eq!(std::fs::read(&own.audio).unwrap(), own_audio());
+    assert_eq!(std::fs::read(&parts.video).unwrap(), bytes(2_000, 1));
+    assert_eq!(files_ending(dir.path(), ".peer-old"), 0);
+}
+
+/// A placed file of another size than the catalog's: the old pair is back.
+#[test]
+fn replace_pair_puts_the_old_song_back_when_a_size_is_not_the_catalogs() {
+    for sizes in [(2_001, 3_000), (2_000, 3_001)] {
+        let dir = tempfile::tempdir().unwrap();
+        let (own, parts) = files(dir.path());
+        let err = super::replace_pair(&own, &parts, sizes).unwrap_err();
+        assert!(err.contains("size"), "{err}");
+        assert_eq!(std::fs::read(&own.video).unwrap(), own_video());
+        assert_eq!(std::fs::read(&own.audio).unwrap(), own_audio());
+        assert_eq!(files_ending(dir.path(), ".peer-old"), 0);
+    }
+}
+
+/// The video cannot take its name (its part is gone): nothing changes.
+#[test]
+fn replace_pair_changes_nothing_when_the_video_cannot_take_its_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let (own, parts) = files(dir.path());
+    std::fs::remove_file(&parts.video).unwrap();
+    let err = super::replace_pair(&own, &parts, (2_000, 3_000)).unwrap_err();
+    assert!(err.contains("video"), "{err}");
+    assert_eq!(std::fs::read(&own.video).unwrap(), own_video());
+    assert_eq!(std::fs::read(&own.audio).unwrap(), own_audio());
+    assert_eq!(std::fs::read(&parts.audio).unwrap(), song_audio());
+    assert_eq!(files_ending(dir.path(), ".peer-old"), 0);
+}
+
+/// A stale link from a crashed swap is replaced, never an error.
+#[test]
+fn replace_pair_replaces_a_stale_old_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let (own, parts) = files(dir.path());
+    std::fs::write(super::old_path(&own.audio), b"stale").unwrap();
+    super::replace_pair(&own, &parts, (2_000, 3_000)).unwrap();
+    assert_eq!(std::fs::read(&own.audio).unwrap(), song_audio());
+    assert_eq!(files_ending(dir.path(), ".peer-old"), 0);
+}
+
+/// The placed audio's hash is the catalog's, stored as the hasher would:
+/// the audio guard vouches for it without reading the file again.
+#[tokio::test]
+async fn the_placed_audios_hash_is_stored() {
+    let (_snv, pp, id, (_, audio)) = pp_downloaded_itself(false).await;
+    let row = lyrics_row(&pp, id).await;
+    let step = crate::peer::lyrics::first(Some(&pp.ex), &row).await;
+    assert!(matches!(step, PeerStep::Done));
+    let hashed = crate::db::models_peer::hash_of(pp.pool(), &audio.to_string_lossy())
+        .await
+        .unwrap()
+        .expect("the placed audio's hash is stored");
+    assert_eq!(hashed.sha256, song_audio_sha());
+    let (size, mtime_ms) = crate::peer::hasher::stat(&audio).await.unwrap();
+    assert!(
+        hashed.holds(size, mtime_ms),
+        "it holds for the file on disk"
+    );
+}
+
+/// A row that records no video (only an audio) has no pair to swap: held,
+/// and nothing is transferred for it.
+#[tokio::test]
+async fn a_row_with_no_video_is_held_with_nothing_transferred() {
+    let (_snv, pp, id, (_, audio)) = pp_downloaded_itself(false).await;
+    sqlx::query("UPDATE videos SET file_path = '' WHERE id = ?")
+        .bind(id)
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    let row = lyrics_row(&pp, id).await;
+    let step = crate::peer::lyrics::first(Some(&pp.ex), &row).await;
+    assert!(matches!(step, PeerStep::Deferred), "held");
+    assert_eq!(std::fs::read(&audio).unwrap(), own_audio());
+    let parts = pp.cache().join(crate::peer::fetch::PARTS_DIR);
+    let fetched = parts.exists() && std::fs::read_dir(&parts).unwrap().next().is_some();
+    assert!(!fetched, "nothing transferred");
+    assert_eq!(has_lyrics(&pp, id).await, 0);
+}
+
+/// A file that was not there counts as removed; any other error stays one.
+#[test]
+fn gone_forgives_only_a_missing_file() {
+    use std::io::{Error, ErrorKind};
+    assert!(super::gone(Ok(())).is_ok());
+    assert!(super::gone(Err(Error::from(ErrorKind::NotFound))).is_ok());
+    let denied = super::gone(Err(Error::from(ErrorKind::PermissionDenied)));
+    assert_eq!(denied.unwrap_err().kind(), ErrorKind::PermissionDenied);
+}
