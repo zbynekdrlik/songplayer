@@ -25,21 +25,25 @@
 //!   else from [`NO_LINE_START_MS`] ([`window_start`]);
 //! - cut by the app's ffmpeg into a WAV in a temp dir ([`cut_args`]); the pick
 //!   and the cut hold `cache::SONG_FILES` (a rename holds it from its read to
-//!   its record), the cut bounded by [`CUT_TIMEOUT`].
+//!   its record), the wait for it bounded by [`LOCK_TIMEOUT`], the cut by
+//!   [`CUT_TIMEOUT`].
 //!
 //! The dub, its transcripts, its session event log and its work dir all stay
 //! in that temp dir, dropped after the call. It runs WITHOUT the heavy slot:
 //! the child is network-bound (no torch), and a gate must not wait behind a
 //! stems separation. The child and its set-up (the scripts, the SDK check) are
 //! bounded together by [`DUB_TIMEOUT`], the dub's read-back by
-//! [`MEASURE_TIMEOUT`]: with the cut, below the spec's request timeout.
+//! [`MEASURE_TIMEOUT`]: with the lock wait and the cut (15 + 15 + 240 + 15 =
+//! 285 s), below the spec's 300 s request timeout.
 //!
 //! `ok` = the child finished, the dub holds sound (RMS at least
 //! [`MIN_DUB_RMS_DBFS`]) and the subtitle builder makes at least one Slovak
 //! line of its transcripts ([`verdict`]). The answer never carries a key: every
 //! error text is redacted with the key ([`finish`]). Refused with 409 (nothing
 //! sent) while paid AI is off, with no Gemini key, with no venv python, or with
-//! no song or no ffmpeg ([`ProbeStatus::Refused`]).
+//! no song or no ffmpeg ([`ProbeStatus::Refused`]); anything else that stops
+//! it (an unreadable catalogue, busy song files, a failed cut) answers 200
+//! with `ok: false`.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -47,6 +51,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
+use tracing::warn;
 
 use crate::dabing::child::{DubSessionStats, DubSummary};
 use crate::dabing::subtitles::{DubTranscripts, transcripts_to_track};
@@ -61,6 +66,10 @@ pub const NO_LINE_START_MS: u64 = 30_000;
 /// Bound of the ffmpeg cut (well under a second): a hung ffmpeg fails the
 /// probe with its own error and releases the song-files lock.
 pub const CUT_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Bound of the wait for `cache::SONG_FILES` (a rename or a cache-sweep pass
+/// holds it for seconds): a probe never waits out the request behind it.
+pub const LOCK_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Bound of the dub itself: the scripts, the SDK check and the child (a 20 s
 /// clip streams in ~20 s, then the drain and the loudness passes). A hung
@@ -122,7 +131,8 @@ pub struct DubProbeReport {
     pub youtube_id: Option<String>,
     /// Where the window starts in the song (ms).
     pub start_ms: Option<u64>,
-    /// The clip's length (ms); 0 when no clip was picked.
+    /// The clip's requested length (ms; a song ending sooner gives a shorter
+    /// cut); 0 when no clip was picked.
     pub clip_ms: u64,
     pub source: Option<ClipSource>,
     /// How long the dub took (ms), set-up included; 0 when none ran.
@@ -329,8 +339,9 @@ pub fn finish(
     }
 }
 
-/// The probe's song (module doc). `Err` says why there is none.
-pub async fn pick_clip(pool: &SqlitePool, cache_dir: &Path) -> Result<ProbeClip, String> {
+/// The probe's song (module doc); `Ok(None)` when no song qualifies, `Err`
+/// when the catalogue cannot be read.
+pub async fn pick_clip(pool: &SqlitePool, cache_dir: &Path) -> Result<Option<ProbeClip>, String> {
     let rows: Vec<(String, String, Option<String>, Option<String>)> = sqlx::query_as(concat!(
         "SELECT youtube_id, audio_file_path, vocals_file_path, stem_status FROM videos \
          WHERE normalized = 1 AND audio_file_path IS NOT NULL AND ",
@@ -357,15 +368,31 @@ pub async fn pick_clip(pool: &SqlitePool, cache_dir: &Path) -> Result<ProbeClip,
             ClipSource::VocalStem
         };
         let first = crate::lyrics::g35t_probe::first_line_start(cache_dir, &youtube_id).await;
-        return Ok(ProbeClip {
+        return Ok(Some(ProbeClip {
             youtube_id,
             input,
             source,
             start_ms: window_start(first),
-        });
+        }));
     }
-    Err("no song to probe: no downloaded song has its audio on disk".to_string())
+    Ok(None)
 }
+
+/// The refusal when no song qualifies.
+pub const NO_SONG: &str = "no song to probe: no downloaded song has its audio on disk";
+
+/// The probe's bounds: the wait for the song files and the dub.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Limits {
+    pub lock: Duration,
+    pub dub: Duration,
+}
+
+/// The production bounds ([`LOCK_TIMEOUT`], [`DUB_TIMEOUT`]).
+pub const LIMITS: Limits = Limits {
+    lock: LOCK_TIMEOUT,
+    dub: DUB_TIMEOUT,
+};
 
 /// Cut `clip` into the WAV `out` with `ffmpeg` ([`cut_args`]).
 #[cfg_attr(test, mutants::skip)] // shells out to ffmpeg; its arguments are `cut_args`, tested
@@ -499,11 +526,8 @@ pub struct ProbeInput<'a> {
 
 /// The whole probe (module doc). Each missing precondition refuses it before
 /// anything is sent; the pick and the cut hold `cache::SONG_FILES`; the dub
-/// runs after the lock is released, bounded by `dub_limit`.
-pub async fn run_probe(
-    input: &ProbeInput<'_>,
-    dub_limit: Duration,
-) -> (ProbeStatus, DubProbeReport) {
+/// runs after the lock is released. Bounded by `limits`.
+pub async fn run_probe(input: &ProbeInput<'_>, limits: Limits) -> (ProbeStatus, DubProbeReport) {
     let report = DubProbeReport::new(input.model, input.voice);
     let refused =
         |report: DubProbeReport, error: String| (ProbeStatus::Refused, report.failed(error));
@@ -530,10 +554,16 @@ pub async fn run_probe(
     let (report, ffmpeg) = {
         // A rename holds this lock from its read to its record: holding it
         // from the pick through the cut, the clip's input never moves between.
-        let _files = crate::downloader::cache::SONG_FILES.lock().await;
+        let files = crate::downloader::cache::SONG_FILES.lock();
+        let Ok(_files) = tokio::time::timeout(limits.lock, files).await else {
+            let secs = limits.lock.as_secs_f64();
+            let error = format!("the song files stayed busy for {secs} s (a rename or a sweep)");
+            return (ProbeStatus::Ran, report.failed(error));
+        };
         let clip = match pick_clip(input.pool, input.cache_dir).await {
-            Ok(clip) => clip,
-            Err(error) => return refused(report, error),
+            Ok(Some(clip)) => clip,
+            Ok(None) => return refused(report, NO_SONG.to_string()),
+            Err(error) => return (ProbeStatus::Ran, report.failed(error)),
         };
         let report = report.with_clip(&clip);
         let Some(ffmpeg) = input.ffmpeg.as_deref() else {
@@ -560,15 +590,21 @@ pub async fn run_probe(
         model: input.model,
         voice: input.voice,
     };
-    let outcome = match tokio::time::timeout(dub_limit, run_dub(&run)).await {
+    let outcome = match tokio::time::timeout(limits.dub, run_dub(&run)).await {
         Ok(Ok(summary)) => read_back(ffmpeg, summary).await,
         Ok(Err(error)) => Err(error),
         Err(_) => Err(format!(
             "no dub within {} s (the session was ended)",
-            dub_limit.as_secs()
+            limits.dub.as_secs()
         )),
     };
     let elapsed_ms = started.elapsed().as_millis() as u64;
+    // A child killed on a timeout may still hold a file for a moment
+    // (Windows): say so rather than leave a temp dir behind unseen.
+    let path = dir.path().to_path_buf();
+    if let Err(e) = dir.close() {
+        warn!(dir = %path.display(), "dub probe: its temp dir could not be removed: {e}");
+    }
     (ProbeStatus::Ran, finish(report, outcome, elapsed_ms, keys))
 }
 

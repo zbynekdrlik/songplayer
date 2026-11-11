@@ -771,7 +771,8 @@ child, args or session.
   (`db::queue_row!`); the input by `dub_input_audio` (`source` `vocal_stem` /
   `audio`); 20 s from the first served lyrics line (`g35t_probe::first_line_start`),
   else from 30 s; cut to a 16-bit WAV by the app's ffmpeg in a temp dir. The pick
-  and the cut hold `cache::SONG_FILES`, the cut bounded at 15 s.
+  and the cut hold `cache::SONG_FILES` (its wait bounded at 15 s, `LOCK_TIMEOUT`),
+  the cut bounded at 15 s.
 - The dub, its transcripts, its `_dub_events.jsonl` and its work dir stay in that
   temp dir (dropped after). NOT under the heavy slot (network-bound; a gate must
   not wait behind stems), plan `HeavyStepPlan::cpu_idle()`. The scripts + SDK
@@ -785,7 +786,10 @@ child, args or session.
   line, redacted with the keys, then cut (`finish` through
   `gemini_api::body_excerpt`).
 - 409 (nothing sent) while paid AI is off, with no key, no venv python, no song or
-  no ffmpeg; 200 once it ran.
+  no ffmpeg; 200 with `ok: false` for an unreadable catalogue, busy song files, a
+  failed cut or dub. `clip_ms` is the REQUESTED length (a song ending sooner gives
+  a shorter cut). A temp dir a killed child still held (Windows) is WARNed, never
+  silent.
 - `e2e/post-deploy-dub-live.spec.ts` (SNV only; PP's config lists its specs and
   leaves it out) gates through the pure `e2e/dub-live-gate.ts`
   (`dubLiveGateFailures(status, probe)`), unit-tested by the mock-suite

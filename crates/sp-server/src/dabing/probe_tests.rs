@@ -439,7 +439,7 @@ async fn the_probe_picks_the_lowest_downloaded_song_with_its_audio_on_disk() {
     let g = on_disk(cache, "g_audio.flac");
     Row::new(7, "ggggggggggg", &g).insert(&pool).await;
 
-    let clip = pick_clip(&pool, cache).await.unwrap();
+    let clip = pick_clip(&pool, cache).await.unwrap().unwrap();
 
     assert_eq!(
         clip,
@@ -472,7 +472,7 @@ async fn without_a_ready_vocal_stem_the_clip_is_cut_from_the_audio() {
         .insert(&pool)
         .await;
 
-        let clip = pick_clip(&pool, cache).await.unwrap();
+        let clip = pick_clip(&pool, cache).await.unwrap().unwrap();
 
         assert_eq!(
             clip,
@@ -487,14 +487,33 @@ async fn without_a_ready_vocal_stem_the_clip_is_cut_from_the_audio() {
     }
 }
 
-const NO_SONG: &str = "no song to probe: no downloaded song has its audio on disk";
-
 #[tokio::test]
 async fn an_empty_catalogue_has_no_song_to_probe() {
     let dir = tempfile::tempdir().unwrap();
-    assert_eq!(
-        pick_clip(&pool().await, dir.path()).await,
-        Err(NO_SONG.to_string())
+    assert_eq!(pick_clip(&pool().await, dir.path()).await, Ok(None));
+}
+
+/// A catalogue that cannot be read is an error of the box, not "no song":
+/// the probe ran (200) and failed naming it.
+#[tokio::test]
+async fn an_unreadable_catalogue_fails_the_probe_not_refuses_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let tools = tools_with_python(dir.path());
+    let pool = pool().await;
+    pool.close().await;
+    let error = pick_clip(&pool, dir.path()).await.unwrap_err();
+    assert!(
+        error.starts_with("reading the catalogue failed: "),
+        "{error}"
+    );
+
+    let (status, report) = probe(&pool, dir.path(), &tools, Some("ffmpeg".into()), key()).await;
+    assert_eq!(status, ProbeStatus::Ran);
+    assert!(!report.ok);
+    let error = report.error.unwrap();
+    assert!(
+        error.starts_with("reading the catalogue failed: "),
+        "{error}"
     );
 }
 
@@ -526,8 +545,14 @@ async fn probe(
         model: "m",
         voice: "speaker",
     };
-    run_probe(&input, Duration::from_secs(5)).await
+    run_probe(&input, LIMITS_FOR_TESTS).await
 }
+
+/// Bounds long enough for every test (the lock test sets its own).
+const LIMITS_FOR_TESTS: Limits = Limits {
+    lock: Duration::from_secs(60),
+    dub: Duration::from_secs(5),
+};
 
 fn key() -> Option<Vec<String>> {
     Some(vec!["k-live".to_string(), "k-spare".to_string()])
@@ -682,6 +707,48 @@ async fn the_probe_reads_its_song_under_the_song_files_lock() {
     drop(held);
 
     assert_eq!(task.await.unwrap(), refused(NO_SONG));
+}
+
+/// Song files held past the probe's bound: the probe RAN (200) and failed
+/// naming the busy files, without picking a song (the run is bounded under
+/// the spec's request timeout, never parked behind a sweep).
+#[tokio::test]
+async fn song_files_held_past_the_bound_fail_the_probe() {
+    let dir = tempfile::tempdir().unwrap();
+    let tools = tools_with_python(dir.path());
+    let pool = one_song(dir.path()).await;
+    let held = crate::downloader::cache::SONG_FILES.lock().await;
+    let input = ProbeInput {
+        pool: &pool,
+        cache_dir: dir.path(),
+        tools_dir: &tools,
+        ffmpeg: None,
+        keys: key(),
+        model: "m",
+        voice: "speaker",
+    };
+    let limits = Limits {
+        lock: Duration::from_millis(200),
+        dub: Duration::from_secs(5),
+    };
+
+    let (status, report) = run_probe(&input, limits).await;
+    drop(held);
+
+    assert_eq!(status, ProbeStatus::Ran);
+    assert_eq!(
+        report.error.as_deref(),
+        Some("the song files stayed busy for 0.2 s (a rename or a sweep)")
+    );
+    assert_eq!(report.youtube_id, None);
+    assert_eq!(
+        LIMITS,
+        Limits {
+            lock: LOCK_TIMEOUT,
+            dub: DUB_TIMEOUT
+        }
+    );
+    assert_eq!((LOCK_TIMEOUT.as_secs(), DUB_TIMEOUT.as_secs()), (15, 240));
 }
 
 /// The scripts the probe runs are the dub worker's: every embedded script is

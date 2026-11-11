@@ -16,7 +16,7 @@ use axum::http::StatusCode;
 use tracing::{info, warn};
 
 use crate::AppState;
-use crate::dabing::probe::{DUB_TIMEOUT, DubProbeReport, ProbeInput, ProbeStatus, run_probe};
+use crate::dabing::probe::{DubProbeReport, LIMITS, ProbeInput, ProbeStatus, run_probe};
 
 /// `POST /api/v1/dabing/probe` (module doc).
 #[cfg_attr(test, mutants::skip)] // glue on Gemini Live; `run_probe` is tested, the route by `probe_route_*`
@@ -54,7 +54,7 @@ pub async fn probe(State(state): State<AppState>) -> (StatusCode, Json<DubProbeR
         model: &model,
         voice: &voice,
     };
-    let (status, report) = run_probe(&input, DUB_TIMEOUT).await;
+    let (status, report) = run_probe(&input, LIMITS).await;
     if report.ok {
         info!(
             youtube_id = ?report.youtube_id, elapsed_ms = report.elapsed_ms,
