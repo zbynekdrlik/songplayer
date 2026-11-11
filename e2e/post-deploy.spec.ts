@@ -293,8 +293,10 @@ test.describe("SongPlayer post-deploy feature verification", () => {
    * This gate polls `GET /api/v1/program` until a source is on program,
    * `SP-program` has `health.connections > 0` (`0` = dark, or not polled yet
    * right after a start; `-1` = no valid reading; keep waiting either way)
-   * and the server names no `degraded_reason`, and
-   * FAILS if it stays dark. It switches no scene: whatever the program shows
+   * and the server names no `degraded_reason`, and (#305 item 3) the
+   * server's NDI source finder lists `SP-program` (`ndi.discoverable.state`
+   * `discoverable`; its first verdict comes within ~30 s of the restart), and
+   * FAILS if it stays dark or undiscoverable. It switches no scene: whatever the program shows
    * is what its receivers take.
    *
    * Note: SongPlayer does NOT silently self-heal this state (CLAUDE.md
@@ -318,7 +320,7 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     }
     expect(
       verdict?.ok,
-      `SP-program had no live NDI receiver — the Presenter, strih and the stream get nothing (#127, #221): ${JSON.stringify(verdict)}`,
+      `SP-program had no live NDI receiver, or the network does not list it (#305) — the Presenter, strih and the stream get nothing (#127, #221): ${JSON.stringify(verdict)}`,
     ).toBe(true);
   });
 

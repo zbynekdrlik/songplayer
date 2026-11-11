@@ -2220,6 +2220,19 @@ function programBody() {
       switches: 0,
       readback_us_p99: 0,
       uyvy_us_p99: 0,
+      // #305 item 3: SP-program's discoverability (mirrors
+      // `ndi_discover::DiscoverStatus`); the mock reads it as listed.
+      discoverable: {
+        state: "discoverable",
+        since_ms: 0,
+        seen_at_ms: 0,
+        address: "127.0.0.1:5961",
+        on_dante: false,
+        reads: 1,
+        misses: 0,
+        expected: "MOCK (SP-program)",
+        reason: null,
+      },
     },
     // #279 P3a: the compositor's sides (mirrors `program_max::GpuStatus`);
     // the mock composes nothing.

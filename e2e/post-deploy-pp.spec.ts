@@ -41,6 +41,7 @@ import {
   type APIRequestContext,
 } from "@playwright/test";
 import { healthRow } from "./box-api";
+import { discoverableState, type ProgramReceiverView } from "./ndi-health-gate";
 import { ObsDriver } from "./obs-driver";
 import {
   peerSetupFailures,
@@ -165,6 +166,19 @@ test.describe("PP post-deploy (#229)", () => {
     // The status names no key and no Cloudflare secret (`peer::lan`).
     console.log(`[#229 pp] exchange: ${JSON.stringify(s)}`);
     expect(peerSetupFailures(s!, NODE, PEER, PEER_HOST)).toEqual([]);
+  });
+
+  // #305 item 3: PP is where SP-program lost its advertisement (11.11.2026).
+  // The server's long-lived NDI finder must list it (the first verdict comes
+  // within ~30 s of the restart).
+  test("SP-program is discoverable on the network (#305)", async ({ request }) => {
+    await expect
+      .poll(
+        async () =>
+          discoverableState(await getJson<ProgramReceiverView>(request, "/api/v1/program")),
+        { timeout: 60_000, message: "ndi.discoverable.state on GET /api/v1/program" },
+      )
+      .toBe("discoverable");
   });
 
   test("PP reads SNV's catalog live through Cloudflare", async ({ request }) => {
