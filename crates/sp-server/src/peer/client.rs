@@ -110,6 +110,10 @@ pub struct PeerClient {
     reads: Mutex<HashMap<String, LastRead>>,
     /// One transfer at a time per peer (`fetch.rs`).
     pub(crate) slots: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// #307: the parts this client verified, by path: (size, mtime, sha256).
+    pub(crate) verified: Mutex<HashMap<std::path::PathBuf, super::fetch::Verified>>,
+    /// #307: the parts this client really hashed (a verified one skipped).
+    pub(crate) part_hashes: std::sync::atomic::AtomicU64,
 }
 
 impl PeerClient {
@@ -131,6 +135,8 @@ impl PeerClient {
             cache: Mutex::new(HashMap::new()),
             reads: Mutex::new(HashMap::new()),
             slots: Mutex::new(HashMap::new()),
+            verified: Mutex::new(HashMap::new()),
+            part_hashes: std::sync::atomic::AtomicU64::new(0),
         }
     }
 

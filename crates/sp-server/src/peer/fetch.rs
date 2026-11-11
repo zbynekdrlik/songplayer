@@ -3,13 +3,17 @@
 //! artifact's sha, so a part of an older copy is never resumed into a newer
 //! one; it resumes with `Range: bytes=N-` (a 206 must start at N, a 200
 //! restarts), stops at the catalog's size, and is sha-checked at the end (a
-//! mismatch drops it and the cached catalog). One transfer at a time per
-//! peer; the caller fetches one job's artifacts from one peer, so two
+//! mismatch drops it and the cached catalog; a part verified before and
+//! unchanged since, by size and mtime, is not hashed again, #307). One
+//! transfer at a time per peer; the caller fetches one job's artifacts from
+//! one peer, so two
 //! transfers never write the same part. The caller renames the verified part
 //! into place (`peer::{download, stems, lyrics}`).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use std::time::SystemTime;
 
 use tokio::io::AsyncWriteExt;
 use tracing::info;
@@ -21,6 +25,24 @@ use super::hash::sha256_file;
 use super::kind::{ArtifactKind, Job};
 use super::wire::{Artifact, is_sha256_hex};
 use crate::downloader::cache::is_valid_video_id;
+
+/// #307: at most this many verified parts are remembered.
+pub(crate) const MAX_VERIFIED: usize = 0;
+
+/// #307: a part this client hashed and found to be its artifact.
+#[derive(Debug)]
+pub(crate) struct Verified {
+    size: u64,
+    mtime: SystemTime,
+    sha256: String,
+}
+
+/// A part's size and modified time, `None` when either cannot be read (it
+/// is then always hashed).
+async fn part_stamp(part: &Path) -> Option<(u64, SystemTime)> {
+    let meta = tokio::fs::metadata(part).await.ok()?;
+    Some((meta.len(), meta.modified().ok()?))
+}
 
 /// The parts dir's name under the cache (#261: the daily cache sweep lists
 /// it by this name too).
@@ -98,6 +120,11 @@ impl PeerClient {
         if have < a.size {
             self.download(peer, a, &part, have).await?;
         }
+        let stamp = part_stamp(&part).await;
+        if self.was_verified(&part, stamp, &a.sha256) {
+            return Ok(part);
+        }
+        self.part_hashes.fetch_add(1, Ordering::Relaxed);
         let got = sha256_file(&part, 0).await?;
         if got != a.sha256 {
             let _ = tokio::fs::remove_file(&part).await;
@@ -107,7 +134,37 @@ impl PeerClient {
                 got,
             });
         }
+        self.remember_verified(&part, stamp, got);
         Ok(part)
+    }
+
+    /// #307: `part` is the one this client verified as `sha256`, unchanged
+    /// since (its size and mtime).
+    fn was_verified(&self, part: &Path, stamp: Option<(u64, SystemTime)>, sha256: &str) -> bool {
+        let Some((size, mtime)) = stamp else {
+            return false;
+        };
+        lock(&self.verified)
+            .get(part)
+            .is_some_and(|v| v.size == size && v.mtime == mtime && v.sha256 == sha256)
+    }
+
+    /// #307: remember a verified part; past [`MAX_VERIFIED`] entries the
+    /// memory starts over (a re-hash is its only cost).
+    fn remember_verified(&self, part: &Path, stamp: Option<(u64, SystemTime)>, sha256: String) {
+        let Some((size, mtime)) = stamp else {
+            return;
+        };
+        let mut verified = lock(&self.verified);
+        let entry = Verified {
+            size,
+            mtime,
+            sha256,
+        };
+        verified.insert(part.to_path_buf(), entry);
+        if verified.len() > MAX_VERIFIED {
+            verified.clear();
+        }
     }
 
     async fn download(
