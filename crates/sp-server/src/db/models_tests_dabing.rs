@@ -659,9 +659,35 @@ async fn list_dub_videos_row_says_whether_the_dabing_playlist_can_play_it() {
         .execute(&pool)
         .await
         .unwrap();
-    assert_eq!(
-        playable(pool.clone()).await,
-        (false, None),
+    // #303: a song that left its YouTube playlist is no longer listed at
+    // all, and the gate refuses it.
+    assert!(
+        list_dub_videos(&pool).await.unwrap().is_empty(),
         "left its playlist"
     );
+    assert_eq!(dabing_video_membership(&pool, 7, id).await.unwrap(), None);
+}
+
+/// #303 (#260's rule): the Dabing list never lists a dub-requested row whose
+/// song left its YouTube playlist (`removed_at` set); the other rows stay.
+#[tokio::test]
+async fn list_dub_videos_leaves_out_a_song_that_left_its_playlist() {
+    let pool = setup().await;
+    let kept = insert_video(&pool, "vk", "Kept").await;
+    let gone = insert_video(&pool, "vg", "Gone").await;
+    set_dub_requested(&pool, kept, true).await.unwrap();
+    set_dub_requested(&pool, gone, true).await.unwrap();
+    sqlx::query("UPDATE videos SET removed_at = 1 WHERE id = ?")
+        .bind(gone)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let ids: Vec<i64> = list_dub_videos(&pool)
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.video_id)
+        .collect();
+    assert_eq!(ids, vec![kept]);
 }
