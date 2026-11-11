@@ -220,3 +220,7 @@ impl Exchange {
 #[cfg(test)]
 #[path = "audio_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "song_swap_tests.rs"]
+mod song_swap_tests;
