@@ -32,6 +32,7 @@ const FLOWS_TIP: &str =
     "Koľko prúdov zvuku odoberá zariadenie v sieti Dante (nastavuje sa v Dante Controlleri).";
 const LATE_TIP: &str = "Najväčšie oneskorenie paketu pri odchode a najdlhšie jedno odoslanie, odkedy výstup beží. Musí ostať hlboko pod latenciou zariadenia.";
 const CONVERSION_TIP: &str = "Prevod frekvencie: program SongPlayera má 48 kHz a SongPlayer ho tak posiela zariadeniu Dante; na frekvenciu siete ho prevádza zariadenie Dante samo, pevným pomerom na hodinách siete. SongPlayer len plynulo dorovnáva rozdiel hodín (korekcia).";
+const NO_CONVERSION_TIP: &str = "Prevod frekvencie: program SongPlayera aj sieť Dante bežia na 48 kHz, nič sa neprevádza. SongPlayer len plynulo dorovnáva rozdiel hodín (korekcia).";
 const PUMP_TIP: &str = "Bloky zvuku, ktoré vlákno zariadenia spracovalo neskoro, vynechalo alebo nestihlo, odkedy výstup beží.";
 
 /// The ASIO chips' phrases for a card or a driver, as a Dante output's, whole
@@ -136,14 +137,14 @@ pub fn dante_state_chips(state: &str, f: &AsioFigures, d: Option<&DanteFigures>)
 /// the network's rate, never the worker's (always the program's).
 fn conversion(network_hz: u32) -> Chip {
     let program = khz_sk(PROGRAM_RATE);
-    let text = if network_hz == PROGRAM_RATE {
-        format!("{program} kHz bez prevodu")
-    } else {
-        format!(
-            "{program} → {} kHz (prevádza zariadenie Dante)",
-            khz_sk(network_hz)
-        )
-    };
+    if network_hz == PROGRAM_RATE {
+        let text = format!("{program} kHz bez prevodu");
+        return chip("asio-conversion", text, NO_CONVERSION_TIP);
+    }
+    let text = format!(
+        "{program} → {} kHz (prevádza zariadenie Dante)",
+        khz_sk(network_hz)
+    );
     chip("asio-conversion", text, CONVERSION_TIP)
 }
 

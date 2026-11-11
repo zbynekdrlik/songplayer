@@ -85,13 +85,11 @@ fn the_conversion_names_the_network_rate_the_device_converts_to() {
         text_of(&dante_resampling_chips(&at_96, 48_000), "asio-conversion"),
         "48 kHz bez prevodu"
     );
-    assert_eq!(
-        text_of(
-            &dante_resampling_chips(&figures(), 48_000),
-            "asio-conversion"
-        ),
-        "48 kHz bez prevodu"
-    );
+    let at_48 = dante_resampling_chips(&figures(), 48_000);
+    let c = at_48.iter().find(|c| c.key == "asio-conversion").unwrap();
+    assert_eq!(c.text, "48 kHz bez prevodu");
+    // A network at the program's rate converts nothing: the tooltip says so.
+    assert_eq!(c.title.as_deref(), Some(NO_CONVERSION_TIP));
 }
 
 #[test]

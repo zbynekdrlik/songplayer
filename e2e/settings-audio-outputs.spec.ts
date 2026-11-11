@@ -1111,6 +1111,7 @@ test("a Dante output on a 48 kHz network converts nothing (#285)", async ({ page
   expect(seeded.status()).toBe(204);
   await openSettings(page);
   await expect(chip(page, "asio-conversion")).toHaveText("48 kHz bez prevodu", { timeout: 10000 });
+  await expect(chip(page, "asio-conversion")).toHaveAttribute("title", /nič sa neprevádza/);
   expect(realConsoleErrors()).toEqual([]);
 });
 

@@ -1659,12 +1659,15 @@ difference with its UTC time.
   read "48 kHz bez prevodu" while dlink converts on the device's clock.
   `dante_resampling_chips(f, network_hz)` replaces the `asio-conversion`
   chip whole (its own `CONVERSION_TIP`, no phrase rewrite): "48 → 96 kHz
-  (prevádza zariadenie Dante)", "48 kHz bez prevodu" at a 48 kHz network,
+  (prevádza zariadenie Dante)", "48 kHz bez prevodu" at a 48 kHz network
+  (its own tooltip, `NO_CONVERSION_TIP`: nothing is converted),
   kHz the Slovak way (`khz_sk`: "44,1"). `network_hz` = the entry's
   effective rate (`audio_outputs::effective_rate`: `"network"` → the
   server's `audio_network_rate` from `GET /api/v1/program`, else its Hz),
   read in sp-ui `audio_outputs_dante.rs::resampling_line` (which also holds
-  `running_asio`: `audio_outputs.rs` is at the cap). The mock's Dante output
+  `running_asio`: `audio_outputs.rs` is at the cap). It reads the row's
+  entry, not the saved one; a Dante row has no rate control, so an
+  unsaved edit cannot change it. The mock's Dante output
   runs at 48 kHz like the server's; specs "a running Dante output reads as
   Dante…" (96 kHz) and "a Dante output on a 48 kHz network converts
   nothing" in `settings-audio-outputs.spec.ts`; pins in
@@ -1684,8 +1687,15 @@ difference with its UTC time.
   fails naming the read. NOT gated: `late_max_us` / `send_max_us` (maxima
   since the start: a start-up spike would fail every deploy). Each failure
   names the output, the figure and both reads. In effect at SNV only (PP
-  has no Dante output). Note `pump_overruns` is gated here although the
-  fault ledger reads it as a risk (`audio-faults.md`): the design's rule.
+  has no Dante output). **Open (#285 comment 6809562378, the main
+  session decides): `pump_late` is gated as the design says, but dstack
+  counts EVERY block the pump runs one block or more behind its due time
+  (`stream.rs` `Due::Run { late }`), and the ledger leaves it out because
+  38 % of the blocks wake one block behind while FOH reads late 0
+  (`audio-faults.md`): if that still holds on resolume-snv, the gate
+  fails every SNV deploy.** `pump_overruns` (a block whose own work took
+  longer than its period) is gated too, although the ledger reads it as a
+  risk only; no live minute of it was read for this lane.
 - Tests run the real stack on `ClockSource::System` (a test receiver over UDP,
   `ONE_DEVICE`: each binds the Dante ports). Not proven yet: Windows media
   threads at load, real PTP, a real receiver, Dante Controller.
