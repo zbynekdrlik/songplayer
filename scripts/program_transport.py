@@ -79,7 +79,7 @@ def to_pause(start: dict, now: dict) -> Optional[int]:
     if not isinstance(source, int) or source < 0:
         return None
     still_on = now.get("source") == source
-    replays = start.get("transport") == "Playing" and now.get("transport") == "Playing"
+    replays = start.get("transport") != "Playing" and now.get("transport") == "Playing"
     return source if still_on and replays else None
 
 

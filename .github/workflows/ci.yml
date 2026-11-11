@@ -135,9 +135,9 @@ jobs:
       - name: Install Python eval dependencies (ruff + pytest + jsonschema + requests + numpy + soundfile)
         run: pip install ruff==0.5.7 pytest==8.3.2 jsonschema==4.23.0 requests==2.32.3 numpy==2.1.1 soundfile==0.12.1
       - name: Lint with ruff
-        run: ruff check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_spout.py scripts/wall_locate.py scripts/wall_analysis.py scripts/wall_spans.py
+        run: ruff check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py scripts/program_transport.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_spout.py scripts/wall_locate.py scripts/wall_analysis.py scripts/wall_spans.py
       - name: Format check with ruff
-        run: ruff format --check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_spout.py scripts/wall_locate.py scripts/wall_analysis.py scripts/wall_spans.py
+        run: ruff format --check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py scripts/program_transport.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_spout.py scripts/wall_locate.py scripts/wall_analysis.py scripts/wall_spans.py
       - name: Run pytest
         run: pytest eval/lyrics/tests -v
       - name: Run scripts pytest (#171 segment stitch / additivity, #156 minidump helpers)
@@ -1423,6 +1423,22 @@ jobs:
             exit 1
           }
 
+      # #308: the title check and every post-deploy spec restore SP-program's
+      # start scene with a cut, and a cut re-kicks a playlist (it starts its
+      # next song even when it was paused). Record SP-program's playlist and
+      # its transport now; the job's last step pauses it again when it did
+      # not play here (camera-box's rig needs SP-program silent, 11.11.2026).
+      - name: Record SP-program's playlist transport (#308)
+        id: program_start
+        shell: powershell
+        run: |
+          $py = "C:\Program Files\Python312\python.exe"
+          & $py scripts\program_transport.py save "$env:RUNNER_TEMP\sp-program-start.json"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "FAIL: SP-program's start state could not be read (exit $LASTEXITCODE)"
+            exit 1
+          }
+
       - name: Ensure OBS is running
         shell: powershell
         run: |
@@ -2647,6 +2663,21 @@ jobs:
             exit 1
           }
           Write-Host "OK: post-deploy feature-level Playwright passed"
+
+      # #308: put SP-program's playlist back as the job found it (a playlist
+      # paused or idle before the job and restarted by a restore cut is
+      # paused again; an operator's cut or play meanwhile is kept). Runs
+      # after a failed suite too.
+      - name: Put SP-program's playlist transport back (#308)
+        if: ${{ !cancelled() && steps.program_start.outcome == 'success' }}
+        shell: powershell
+        run: |
+          $py = "C:\Program Files\Python312\python.exe"
+          & $py scripts\program_transport.py restore "$env:RUNNER_TEMP\sp-program-start.json"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "FAIL: SP-program's playlist transport was not put back (exit $LASTEXITCODE)"
+            exit 1
+          }
 
       - name: Upload post-deploy Playwright report on failure
         if: failure()
