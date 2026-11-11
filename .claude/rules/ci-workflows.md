@@ -310,6 +310,15 @@ completes, and the next dev push sits `pending` with ZERO jobs —
 `gh api -X POST repos/<owner>/<repo>/actions/runs/<old-run>/force-cancel`; the
 pending run starts within seconds.
 
+A run can also hang `queued` with ZERO jobs and NO other run in the group
+(11.11.2026, run 43097797568, pushed 20:44Z, still queued at 21:41Z, GitHub
+status green): `gh run cancel` says "completed", `force-cancel` answers 409
+"has not been queued yet", `gh run rerun` says "workflow file may be
+broken" (it was not: no workflow change, YAML valid). Nothing on GitHub's
+side moves it; a NEW push to the branch supersedes it through the
+concurrency group. Check for it whenever a waiter has printed only the run
+id for over 10 min.
+
 ## `Build WASM (trunk)` red with "error downloading archive file: 504" = trunk's wasm-bindgen fetch, not our code (21.9.2026)
 
 trunk downloads `wasm-bindgen` from the OLD `rustwasm/wasm-bindgen` release
