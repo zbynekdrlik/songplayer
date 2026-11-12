@@ -409,7 +409,8 @@ wait for a peer that has the song", below).
   size and mtime are the ones this process verified (#307,
   `PeerClient::verified`, in memory, at most 256 parts, then it starts
   over; `part_hashes` counts the real hashes); a changed or unknown part
-  is hashed as before.
+  is hashed as before. Like `peer_hashes`, it trusts size + mtime: only an outside overwrite
+  at the same size within one NTFS 100 ns tick would slip through.
 - The Cloudflare Access service token for PP is MAIN SESSION OPS (plan task
   5.3 step 8, pending the owner on 7.10.2026, #229 comment 6031719797):
   until it exists the probe of `https://sp.newlevel.media` answers

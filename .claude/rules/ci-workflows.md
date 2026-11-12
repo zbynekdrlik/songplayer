@@ -553,6 +553,13 @@ kept. Tests: `scripts/tests/test_program_transport.py` (Eval Checks; the
 script is in both ruff lists). PP's subset (`deploy-pp.yml`) has its own
 restore (`programRestoreTarget`) and no such step yet.
 
+Known limits (release 0.91.0 review): only a start told `Paused` / `Idle`
+is paused again (no health row at the record = unknown, left alone); an
+operator who presses ▶ on the same playlist during the job is paused too
+(the job cannot tell that play from its own re-kick); a re-run of the
+deploy job after an attempt that restarted SongPlayer but never reached
+the E2E restore records `Playing` and puts nothing back.
+
 ## Post-deploy E2E scene switches: wait for the transition, never blind-sleep (#170, #221 L3)
 
 **#221 L3 (read this first).** The E2E scene driver no longer talks to cg

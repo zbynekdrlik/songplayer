@@ -29,6 +29,7 @@ from typing import Callable, Optional
 BASE = "http://127.0.0.1:8920"
 PAUSE_READBACK_S = 10.0
 TIMEOUT_S = 10.0
+NOT_PLAYING = ("Paused", "Idle")
 
 Get = Callable[[str], object]
 Post = Callable[[str], None]
@@ -73,13 +74,17 @@ def read_state(get: Get) -> dict:
 
 
 def to_pause(start: dict, now: dict) -> Optional[int]:
-    """The playlist to pause again: the start's, when it did not play then,
-    is still on program and plays now; else `None`."""
+    """The playlist to pause again: the start's, when it was paused or idle
+    then, is still on program and plays now; else `None`."""
     source = start.get("source")
     if not isinstance(source, int) or source < 0:
         return None
     still_on = now.get("source") == source
-    replays = start.get("transport") != "Playing" and now.get("transport") == "Playing"
+    # Only a start told to be paused or idle: a start with no health row
+    # (`None`) is unknown, it may have played.
+    replays = (
+        start.get("transport") in NOT_PLAYING and now.get("transport") == "Playing"
+    )
     return source if still_on and replays else None
 
 
