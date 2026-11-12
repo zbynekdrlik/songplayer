@@ -210,8 +210,8 @@ function firewallFailures(fw: FirewallStatus | undefined, shown: (v: unknown) =>
         f.push(`firewall.defaults.${p} is ${shown(d)}, not {"inbound":2,"outbound":2}`);
       }
     });
-    if (fw?.dstack_group_rules !== 14) {
-      f.push(`firewall.dstack_group_rules is ${shown(fw?.dstack_group_rules)}, not 14`);
+    if (fw?.dstack_group_rules !== DSTACK_GROUP_RULES) {
+      f.push(`firewall.dstack_group_rules is ${shown(fw?.dstack_group_rules)}, not ${DSTACK_GROUP_RULES}`);
     }
     const outside = fw?.block_rules_outside_group;
     if (!Array.isArray(outside) || outside.length > 0) {
@@ -225,6 +225,11 @@ function firewallFailures(fw: FirewallStatus | undefined, shown: (v: unknown) =>
 
 /** How long the gate waits for SongPlayer's first check after a restart, ms
  * (a read may take up to the server's 30 s bound). */
+/** The enabled Block rules dstack's group `dstack155` holds
+ *  (`sp_core::prod_env::firewall::DSTACK_GROUP_RULES`; 16 since #309: Windows'
+ *  own mDNS blocked on the Dante leg). */
+export const DSTACK_GROUP_RULES = 16;
+
 export const FIRST_CHECK_WAIT_MS = 60_000;
 
 /** The first check has run (the gate polls for it). */

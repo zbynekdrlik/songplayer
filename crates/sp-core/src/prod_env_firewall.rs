@@ -16,9 +16,10 @@ use serde::{Deserialize, Serialize};
 pub const DSTACK_GROUP: &str = "dstack155";
 
 /// How many enabled Block rules the group holds: in + out for obs64.exe,
-/// Arena.exe, python.exe, RustDesk.exe, svchost.exe, mDNSResponder.exe, and
-/// TCP in + out.
-pub const DSTACK_GROUP_RULES: u32 = 14;
+/// Arena.exe, python.exe, RustDesk.exe, svchost.exe, mDNSResponder.exe, TCP,
+/// and Windows' own mDNS (the Dnscache service, UDP 5353; dstack added it
+/// for #309: SongPlayer's `_ndi._tcp` record left on the Dante leg).
+pub const DSTACK_GROUP_RULES: u32 = 16;
 
 /// A default action's value (`MSFT_NetFirewallProfile`
 /// `DefaultInboundAction` / `DefaultOutboundAction`): Allow.

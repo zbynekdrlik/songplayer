@@ -110,7 +110,7 @@ const FIREWALL_DSTACK = {
     { inbound: 2, outbound: 2 },
     { inbound: 2, outbound: 2 },
   ],
-  dstack_group_rules: 14,
+  dstack_group_rules: 16,
   block_rules_outside_group: [],
 };
 
@@ -258,7 +258,7 @@ test.describe("production environment gate (#233)", () => {
       'firewall.defaults.public is null, not {"inbound":2,"outbound":2}',
     ]);
     expect(environmentFailures(holds({ firewall: { ...FIREWALL_DSTACK, dstack_group_rules: 13 } }))).toEqual([
-      "firewall.dstack_group_rules is 13, not 14",
+      "firewall.dstack_group_rules is 13, not 16",
     ]);
     expect(
       environmentFailures(holds({ firewall: { ...FIREWALL_DSTACK, block_rules_outside_group: ["Block X"] } })),

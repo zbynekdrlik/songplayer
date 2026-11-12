@@ -41,7 +41,7 @@ fn facts(
 
 /// dstack's standard as resolume-snv read it (10.11.2026 12:00Z).
 fn standard() -> EnvFacts {
-    facts([Some(true); 3], [Some(ALLOW); 3], rules(14, &[]))
+    facts([Some(true); 3], [Some(ALLOW); 3], rules(16, &[]))
 }
 
 use FirewallProfile::{Domain, Private, Public};
@@ -148,7 +148,7 @@ fn a_block_rule_outside_the_group_is_named() {
     let f = facts(
         [Some(true); 3],
         [Some(ALLOW); 3],
-        rules(14, &["Block X", "Block Y"]),
+        rules(16, &["Block X", "Block Y"]),
     );
     assert_eq!(
         problems(&f),

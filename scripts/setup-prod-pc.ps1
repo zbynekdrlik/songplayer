@@ -573,14 +573,14 @@ function Add-ProdPcEveryNicReview {
 # replaces issue 233's "every profile off" on a PC with a Dante leg. Two
 # states hold: every profile off (a PC with no Dante leg), or dstack's
 # standard: every profile on, its default actions Allow, every enabled Block
-# rule in the group dstack155, which holds exactly 14 enabled Block rules,
+# rule in the group dstack155, which holds exactly 16 enabled Block rules,
 # each bound to the Dante leg (InterfaceAlias Dante70), none naming
 # SongPlayer.exe. This script NEVER turns a profile off and never makes the
 # group (dstack does): anything else is a blocker naming what differs. The
 # same "attempted" rule as SongPlayer's own check (prod_env_firewall.rs): a
 # profile on with no group rule and no default Allow is a firewall that is
 # simply on (firewall_on), nothing more.
-# (The group's name, its 14 rules and the leg's alias are written as
+# (The group's name, its 16 rules and the leg's alias are written as
 # literals: the tests load only this file's functions.)
 
 # Whether a rule of the facts' block_rules belongs to dstack's group.
@@ -648,8 +648,8 @@ function Add-ProdPcFirewallReview {
         $Blockers.Add((New-ProdPcBlocker 'firewall_block_outside_group' "enabled Block rules outside the group dstack155: $($outside -join ', ')"))
     }
     $groupBlocks = @($groupRules | Where-Object { $true -eq (Get-ProdPcField $_ 'enabled') -and [string](Get-ProdPcField $_ 'action') -eq 'Block' })
-    if ($groupBlocks.Count -ne 14 -or $groupBlocks.Count -ne $groupRules.Count) {
-        $Blockers.Add((New-ProdPcBlocker 'firewall_group_incomplete' "the group dstack155 holds $($groupRules.Count) rule(s), $($groupBlocks.Count) of them enabled Block: dstack's standard wants exactly 14, all enabled Block"))
+    if ($groupBlocks.Count -ne 16 -or $groupBlocks.Count -ne $groupRules.Count) {
+        $Blockers.Add((New-ProdPcBlocker 'firewall_group_incomplete' "the group dstack155 holds $($groupRules.Count) rule(s), $($groupBlocks.Count) of them enabled Block: dstack's standard wants exactly 16, all enabled Block"))
     }
     $unbound = @($groupRules | Where-Object {
             $aliases = @(Get-ProdPcList $_ 'interface_alias')

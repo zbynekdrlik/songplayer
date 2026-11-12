@@ -885,9 +885,9 @@ Describe 'Get-ProdPcBlockers: the firewall (issue 255, dstack#155)' {
         $blockers[0].Text | Should -Match 'dstack155: Block X, \{2\}$'
     }
 
-    It 'blocks a group that does not hold exactly 14 enabled Block rules' {
+    It 'blocks a group that does not hold exactly 16 enabled Block rules' {
         $facts = Read-Fixture 'snv'
-        $facts.firewall_standard.group_rules = @($facts.firewall_standard.group_rules | Select-Object -First 13)
+        $facts.firewall_standard.group_rules = @($facts.firewall_standard.group_rules | Select-Object -First 15)
         Get-BlockerCodes $facts | Should -Be @('firewall_group_incomplete')
         $facts = Read-Fixture 'snv'
         @($facts.firewall_standard.group_rules)[3].enabled = $false
@@ -896,7 +896,7 @@ Describe 'Get-ProdPcBlockers: the firewall (issue 255, dstack#155)' {
         @($facts.firewall_standard.group_rules)[5].action = 'Allow'
         $blockers = @(Get-ProdPcBlockers -Facts $facts)
         @($blockers | ForEach-Object { $_.Code }) | Should -Be @('firewall_group_incomplete')
-        $blockers[0].Text | Should -Match 'holds 14 rule\(s\), 13 of them enabled Block'
+        $blockers[0].Text | Should -Match 'holds 16 rule\(s\), 15 of them enabled Block'
         # Group rules but none left and default Allow: still the standard, incomplete.
         $facts = Read-Fixture 'snv'
         $facts.firewall_standard.group_rules = @()
