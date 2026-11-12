@@ -70,8 +70,15 @@ export const DANTE_LATE_TOP_BINS = 2;
  * Each failure names the figure and both reads.
  */
 /** #285: the figures the gate logs but never fails on, over the minute. */
-export function danteGateLog(_first: OutputStatus, _second: OutputStatus): string {
-  return "";
+export function danteGateLog(first: OutputStatus, second: OutputStatus): string {
+  const a = first.dante;
+  const b = second.dante;
+  if (second.type !== "dante" || !a || !b) return "";
+  const top = (bins: number[]) => bins.slice(-DANTE_LATE_TOP_BINS).reduce((s, n) => s + n, 0);
+  return (
+    `Dante output ${second.id}: packets 2 ms or more late ${top(a.late_bins)} -> ${top(b.late_bins)}, ` +
+    `pump_late ${a.pump_late} -> ${b.pump_late}, pump_overruns ${a.pump_overruns} -> ${b.pump_overruns}`
+  );
 }
 
 export function danteGateFailures(first: OutputStatus, second: OutputStatus): string[] {
@@ -92,15 +99,14 @@ export function danteGateFailures(first: OutputStatus, second: OutputStatus): st
   if (!(sum(b.late_bins) > sum(a.late_bins))) {
     f.push(`${at}: packets sent (late_bins sum) ${sum(a.late_bins)} -> ${sum(b.late_bins)}, want growth`);
   }
-  const top = (bins: number[]) => sum(bins.slice(-DANTE_LATE_TOP_BINS));
   if (b.late_bins.length !== a.late_bins.length || b.late_bins.length < DANTE_LATE_TOP_BINS) {
     f.push(`${at}: late_bins ${JSON.stringify(a.late_bins)} -> ${JSON.stringify(b.late_bins)}, want the same bins at both reads`);
-  } else if (top(b.late_bins) > top(a.late_bins)) {
-    f.push(`${at}: packets 2 ms or more late (last two late_bins) ${top(a.late_bins)} -> ${top(b.late_bins)}`);
   }
-  for (const k of ["pump_late", "pump_missed", "pump_overruns"] as const) {
-    if (b[k] > a[k]) f.push(`${at}: ${k} ${a[k]} -> ${b[k]}`);
-  }
+  // The ledger's rule (audio-faults.md): a missed pump block is silence, a
+  // loss; a late packet or pump block is not (FOH at 10 ms reads late 0
+  // while out-4 sends packets 2-5 ms late, dev CI 43124069179):
+  // `danteGateLog` names those.
+  if (b.pump_missed > a.pump_missed) f.push(`${at}: pump_missed ${a.pump_missed} -> ${b.pump_missed}`);
   return f;
 }
 

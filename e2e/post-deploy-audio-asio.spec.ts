@@ -18,8 +18,9 @@
  *    minute, so the gate's time does not grow with the number of outputs
  *    (up to 4, `MAX_ASIO_OUTPUTS`). A native Dante output (#285) is also
  *    judged on its stack's figures over that minute (`danteGateFailures`):
- *    its clock ready at both reads, a receiver's flow, packets sent, none
- *    2 ms or more late, no pump late / missed / overrun.
+ *    its clock ready at both reads, a receiver's flow, packets sent, no
+ *    missed pump block (the ledger's loss); packets 2 ms or more late and
+ *    late / overrun pump blocks are logged (`danteGateLog`), not failed.
  *
  * 3. #233 (the spawn finding): a child process SongPlayer spawns (one yt-dlp,
  *    `POST /api/v1/youtube/probe`; skipped when no output runs, every
@@ -53,6 +54,7 @@ import {
   asioCountReading,
   asioGateFailures,
   danteGateFailures,
+  danteGateLog,
   type OutputStatus,
 } from "./audio-outputs-gate";
 import {
@@ -181,6 +183,8 @@ test.describe("ASIO output (#233)", () => {
       expect(asioGateFailures(f, second), `ASIO output ${f.id}`).toEqual([]);
       // #285: a native Dante output's stack figures over the same minute
       // (none for any other output).
+      const danteLog = danteGateLog(f, second);
+      if (danteLog) console.log(`[#285 dante] ${danteLog}`);
       expect(danteGateFailures(f, second), `Dante output ${f.id}`).toEqual([]);
     }
   });
