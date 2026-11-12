@@ -514,7 +514,7 @@ through camera-box's write routes (camera-box issue 1432,
   `$env:RUNNER_TEMP\rig-lease-hold.json`; 409 → wait 30 s polls, 60 min, then
   exit 3 (job fails); 401 / 400 / a 200 without a valid lease id → exit 2
   (our own misconfiguration, loud); no token, 404 (no write routes) or no
-  answer / 503 (the gate's `OUTAGE_READS` rule) → a WARN and the job runs
+  answer / any 5xx / 429 (the gate's `OUTAGE_READS` rule; review: a 500 is never "our token is wrong") → a WARN and the job runs
   unheld, exactly as before #314. `expected_secs` 5400 (the server's max;
   it is the heartbeat's hold ceiling, `over_hold`).
 - The heartbeat runs DETACHED (`Start-Process -WindowStyle Hidden`, the
@@ -527,8 +527,10 @@ through camera-box's write routes (camera-box issue 1432,
   exit 4; one right after the release is no loss. The runner's orphan
   clean-up also ends it at job end.
 - "Release the rig lease (#314)" is each job's last step, `if: always()`:
-  releases the state file's lease (`released: false` = it was lost or
-  reclaimed: a WARN), deletes the file (the heartbeat then stops) and prints
+  deletes the state file FIRST (the heartbeat checks it before every
+  beat, so none lands after the release and reads as a lost lease), then
+  releases its lease (`released: false` = it was lost or reclaimed: a WARN;
+  a corrupt state file = a WARN, nothing released, never a failed step) and prints
   the heartbeat log's tail. A failed release is a WARN (stale in 180 s).
 - The two jobs hold SEPARATELY: the seconds between the deploy's release and
   the E2E's acquire are a gap a camera-box run may take; the E2E then waits

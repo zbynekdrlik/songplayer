@@ -17,7 +17,8 @@ Three subcommands, one per workflow step:
 - `acquire` (right after the gate's wait, before anything stops SongPlayer):
   takes `resources` (resolume-snv) for `--expected-secs`, waiting while
   another holder answers 409 (every `--poll-seconds`, at most
-  `--max-wait-seconds`, then exit 3 like the gate). Taken -> the lease id and
+  `--max-wait-seconds`, then exit 3 like the gate; a 5xx or 429 answer counts
+  as no answer). Taken -> the lease id and
   the URL that took it go into `--state-file`. No token in `RIG_LEASE_TOKEN`,
   a server without the write routes (404) or a lease service that does not
   answer (the gate's own outage rule: `OUTAGE_READS` reads in a row once a
@@ -154,7 +155,9 @@ def acquire(
     while True:
         answer = post(ACQUIRE, body)
         status = answer[1][0] if answer else None
-        if answer is None or status == 503:
+        # 503 lease_io, any other 5xx or a 429 (a proxy, a restart) = the
+        # service is not answering usefully: the outage rule, never our fault
+        if answer is None or status == 429 or status >= 500:
             unreachable += 1
             if held is None or unreachable >= OUTAGE_READS:
                 log(
@@ -352,7 +355,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.state_file.write_text(json.dumps(state), encoding="utf-8")
         return code
 
-    state = read_state(args.state_file)
+    try:
+        state = read_state(args.state_file)
+    except ValueError as e:
+        # never fail the always() release on it: the lease, if any, goes stale
+        log(f"::warning::rig lease hold: {one_line(e)} - treated as no lease")
+        if args.command == "release":
+            args.state_file.unlink(missing_ok=True)
+        return EXIT_OK
     if state is None:
         if args.command == "release":
             log("rig lease hold: this job holds no lease - nothing to release")
@@ -371,9 +381,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             time.sleep,
             log,
         )
-    code = release(post, state["lease_id"], log)
+    # the file goes first: the heartbeat checks it before every beat, so no
+    # beat lands after the release (it would read as a lost lease)
     args.state_file.unlink(missing_ok=True)
-    return code
+    return release(post, state["lease_id"], log)
 
 
 if __name__ == "__main__":
