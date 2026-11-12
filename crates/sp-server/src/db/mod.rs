@@ -1,6 +1,7 @@
 //! Database layer — SQLite pool creation and manual migration system.
 
 pub mod models;
+pub mod models_blocked; // #265 the node's song block list (V44)
 pub mod models_dabing; // #180 dubbing D1 queries (own module, 1000-line cap)
 pub mod models_membership; // #260 a row's membership in its YouTube playlist (V40)
 pub mod models_peer; // #229 the node exchange's tables (own module, models.rs is at the cap)
@@ -45,6 +46,21 @@ macro_rules! active_playlist {
     };
 }
 pub(crate) use active_playlist;
+
+/// #265: a row the selection may PICK on its own — the youtube selector's
+/// queries (the pick and its rotation restart) and Loop's remembered song
+/// after a restart: still in its YouTube playlist (#260, V40 `removed_at`)
+/// and its song not blocked on this node (V44 `blocked_songs`, by YouTube
+/// id, so every playlist's row of it). The ONE "never pick" predicate;
+/// qualified with `v.` (`videos v`). An operator's play-video by id and a
+/// custom set list do not ask it: a block stops automatic picks only.
+macro_rules! pickable_row {
+    () => {
+        "v.removed_at IS NULL AND NOT EXISTS \
+         (SELECT 1 FROM blocked_songs b WHERE b.youtube_id = v.youtube_id)"
+    };
+}
+pub(crate) use pickable_row;
 
 /// All migrations as (version, SQL) tuples.
 /// Each SQL string may contain multiple statements separated by semicolons.
@@ -92,6 +108,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (41, MIGRATION_V41),
     (42, MIGRATION_V42),
     (43, MIGRATION_V43),
+    (44, MIGRATION_V44),
 ];
 
 const MIGRATION_V1: &str = "
@@ -715,6 +732,18 @@ WHERE removed_at IS NULL
   AND playlist_id IN (SELECT id FROM playlists WHERE deactivated_at IS NOT NULL)
 ";
 
+/// V44 (#265): the node's song block list. A song blocked here (by its
+/// YouTube id, `title` = the wall's text when it was blocked, the FIRST
+/// block's time kept) is never picked automatically on this node
+/// (`pickable_row!`); the node exchange carries no blocks.
+const MIGRATION_V44: &str = "
+CREATE TABLE IF NOT EXISTS blocked_songs (
+    youtube_id TEXT PRIMARY KEY,
+    blocked_at_ms INTEGER NOT NULL,
+    title TEXT NOT NULL
+)
+";
+
 /// Connection-pool tuning for the FILE-backed pool (#184 round A).
 ///
 /// WAL + NORMAL synchronous remove reader/writer blocking for this
@@ -917,6 +946,9 @@ mod tests_v42;
 #[path = "mod_tests_v43.rs"]
 #[cfg(test)]
 mod tests_v43;
+#[path = "mod_tests_v44.rs"]
+#[cfg(test)]
+mod tests_v44;
 
 #[path = "mod_tests_pool.rs"]
 #[cfg(test)]

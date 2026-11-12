@@ -1862,3 +1862,52 @@ body {
     max-width: none;
 }
 
+
+/* #265: /blok — block a song on this node, phone first. */
+.block-page { max-width: 560px; margin: 0 auto; padding: 0 4px; }
+.block-page h1 { font-size: 1.3rem; margin: 8px 0; }
+.block-page h2 { font-size: 1rem; color: var(--text-dim); margin: 0 0 8px; }
+.block-hint, .block-muted { color: var(--text-dim); font-size: 0.9rem; }
+.block-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    margin: 12px 0;
+}
+.block-current-title { font-size: 1.15rem; margin: 0 0 10px; overflow-wrap: anywhere; }
+.block-search {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 44px;
+    font-size: 1rem;
+    padding: 8px 10px;
+    background: var(--bg-input);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+.block-results, .block-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.block-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+}
+.block-row:last-child { border-bottom: none; }
+.block-row-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.block-btn {
+    min-height: 44px;
+    padding: 8px 14px;
+    font-size: 0.95rem;
+    border-radius: 6px;
+    border: 1px solid var(--error);
+    background: var(--error);
+    color: #fff;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.block-btn:disabled { opacity: 0.45; cursor: default; }
+.block-btn-undo { background: transparent; color: var(--text); border-color: var(--text-dim); }
+.block-message { min-height: 1.4em; color: var(--text-dim); }

@@ -49,6 +49,10 @@ once, kept a year, then deleted with its files.
 
 ## What a marked row is NOT any more
 
+(#265: the pick queries below and Loop's remembered song read the mark
+through ONE fragment, `db::pickable_row!()`, which also leaves out a song
+blocked on this node: `song-block.md`.)
+
 - **Picked:** the youtube selector's queries (`get_unplayed_normalized_video_ids`,
   `get_normalized_video_ids`, so the Continuous / Single pick AND its
   rotation restart), Loop's remembered song

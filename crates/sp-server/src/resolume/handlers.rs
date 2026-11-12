@@ -24,14 +24,9 @@ const FADE_STEPS: u32 = 20;
 
 /// Format title text matching legacy Python behavior — clean `Song - Artist`.
 /// No warning indicator (gemini_failed is no longer surfaced in titles).
-pub fn format_title_text(song: &str, artist: &str) -> String {
-    match (song.is_empty(), artist.is_empty()) {
-        (false, false) => format!("{song} - {artist}"),
-        (false, true) => song.to_string(),
-        (true, false) => artist.to_string(),
-        (true, true) => String::new(),
-    }
-}
+/// #265: the one formatter lives in sp-core, so the `/blok` page searches by
+/// exactly the wall's text.
+pub use sp_core::song_block::wall_title as format_title_text;
 
 /// Generate `n` evenly-spaced opacity values from `1/n` to `1.0` inclusive.
 pub fn fade_steps(n: u32) -> Vec<f64> {

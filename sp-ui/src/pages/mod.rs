@@ -1,3 +1,4 @@
+pub mod block;
 pub mod dabing;
 pub mod dashboard;
 pub mod live;

@@ -220,15 +220,17 @@ pub async fn record_play(
     Ok(())
 }
 
-/// Return IDs (from videos table) of normalized videos in a playlist.
+/// Return IDs (from videos table) of normalized videos in a playlist the
+/// selection may pick (`db::pickable_row!`: #260's mark, #265's block).
 pub async fn get_normalized_video_ids(
     pool: &SqlitePool,
     playlist_id: i64,
 ) -> Result<Vec<i64>, sqlx::Error> {
-    let rows = sqlx::query(
-        "SELECT id FROM videos WHERE playlist_id = ? AND normalized = 1 AND removed_at IS NULL \
-         ORDER BY id",
-    )
+    let rows = sqlx::query(concat!(
+        "SELECT v.id AS id FROM videos v WHERE v.playlist_id = ? AND v.normalized = 1 AND ",
+        crate::db::pickable_row!(),
+        " ORDER BY v.id"
+    ))
     .bind(playlist_id)
     .fetch_all(pool)
     .await?;
@@ -237,18 +239,20 @@ pub async fn get_normalized_video_ids(
 }
 
 /// Return IDs (from videos table) of normalized videos not played ON this
-/// playlist since its rotation began (#261: the rotation counts its own plays).
+/// playlist since its rotation began (#261: the rotation counts its own plays),
+/// that the selection may pick (`db::pickable_row!`).
 pub async fn get_unplayed_normalized_video_ids(
     pool: &SqlitePool,
     playlist_id: i64,
 ) -> Result<Vec<i64>, sqlx::Error> {
-    let rows = sqlx::query(
+    let rows = sqlx::query(concat!(
         "SELECT v.id
          FROM videos v
          LEFT JOIN play_history ph ON ph.video_id = v.id AND ph.playlist_id = v.playlist_id
-         WHERE v.playlist_id = ? AND v.normalized = 1 AND v.removed_at IS NULL AND ph.id IS NULL
-         ORDER BY v.id",
-    )
+         WHERE v.playlist_id = ? AND v.normalized = 1 AND ph.id IS NULL AND ",
+        crate::db::pickable_row!(),
+        " ORDER BY v.id"
+    ))
     .bind(playlist_id)
     .fetch_all(pool)
     .await?;

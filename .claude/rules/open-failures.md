@@ -268,8 +268,9 @@ play, with no WARN and no failure counted.
 - **Selecting.** When Loop has no current song, the selector takes
   `loop_memory::remembered`, but only while that song is still a
   downloaded video of the playlist that has not left its YouTube playlist
-  (#260 `removed_at`, `playlist-membership.md`; for a custom playlist, one
-  of its items, whatever the mark). Otherwise a youtube playlist picks at random as before, and a
+  (#260 `removed_at`, `playlist-membership.md`) and is not blocked on this
+  node (#265, `song-block.md`; both through `db::pickable_row!()`); for a
+  custom playlist, one of its items, whatever the mark or a block. Otherwise a youtube playlist picks at random as before, and a
   custom one plays nothing.
 - **Rule for new code.** A new place that sets `current_video_id` calls
   `remember_logged` too.

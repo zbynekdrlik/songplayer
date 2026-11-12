@@ -435,13 +435,17 @@ stops SongPlayer:
 
 - `GET /rig-lease.json?resources=resolume-snv` (camera-box issue 1450: the box-scoped view, so a holder of only SNV's cameras / strih / stream never blocks SongPlayer's deploy; today's server ignores the query and answers the whole-rig view, schema 1 unchanged; pinned by `test_every_ci_lease_wait_asks_the_resolume_snv_view`) (camera-box `scripts/rig-lease-server.py`, :8890;
   `held`, `stale`, `holder.repo`, `expected_release_at`, `ttl_s`), trying
-  `http://10.77.9.200:8890` (dev1's LAN address, 5-15 ms from win-resolume,
-  29.9.2026) and then `http://dev1:8890` (the mDNS name `dev1.local`: it
+  `http://10.77.9.195:8890` (dev1's LAN address, 12.11.2026; it was
+  10.77.9.200 from 29.9.2026, refused once it moved: the gate then read the
+  name below, correctly) and then `http://dev1:8890` (the mDNS name `dev1.local`: it
   survives a LAN IP change, but one cold lookup from the box's Python failed
   with `getaddrinfo failed`). win-resolume has NO tailscale, so the
   tailscale address times out, and camera-box's documented `10.77.9.103` is
   stale (dev1's LAN IP moved). If dev1's LAN IP moves again, the name keeps
-  the gate working; update the first URL.
+  the gate working; update the first URL. The lease is only as good as what a holder declares:
+  the server's group `snv-video` (cams, strih, stream, imag) does NOT
+  include `resolume-snv`; a holder of it never stops our deploy (camera-box
+  run 43165398426, 12.11.2026, met our 06:05Z restart's E2E audio).
 - Held, not stale, by another repo (a held lease with no readable holder
   counts as another repo's): wait, one line per 30 s poll naming the holder,
   its run and `expected_release_at`; at most 60 min, then exit 3 and the job
