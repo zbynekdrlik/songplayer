@@ -111,7 +111,10 @@ def test_a_holder_past_the_bound_fails_the_job():
     assert logs[-1].startswith("::error::")
 
 
-@pytest.mark.parametrize("reply", [None, (503, {"error": "lease_io"})])
+@pytest.mark.parametrize(
+    "reply",
+    [None, (503, {"error": "lease_io"}), (500, {}), (502, {}), (429, {})],
+)
 def test_a_service_that_does_not_answer_runs_the_job_unheld(reply):
     code, state, clock, logs = run_acquire(scripted(reply))
     assert (code, state) == (EXIT_OK, None)
@@ -385,11 +388,38 @@ def test_expected_secs_outside_camera_boxs_bounds_is_refused(tmp_path, secs):
         main(args)
 
 
-def test_a_corrupt_state_file_is_refused(tmp_path):
+@pytest.mark.parametrize("text", ['{"lease_id": "x", "url": "http://dev1:8890"}', "{"])
+def test_a_corrupt_state_file_releases_nothing_and_never_fails(tmp_path, capsys, text):
+    # review of d07029c3: a ValueError here failed the always() step
     state_file = tmp_path / "lease.json"
-    state_file.write_text('{"lease_id": "x", "url": "http://dev1:8890"}')
-    with pytest.raises(ValueError):
-        main(["release", "--state-file", str(state_file)])
+    state_file.write_text(text)
+    assert main(["release", "--state-file", str(state_file)]) == EXIT_OK
+    assert not state_file.exists()
+    assert "::warning::" in capsys.readouterr().out
+    state_file.write_text(text)
+    assert main(["heartbeat", "--state-file", str(state_file)]) == EXIT_OK
+
+
+def test_the_release_deletes_the_state_file_before_it_posts(
+    lease_server, tmp_path, monkeypatch
+):
+    # review of d07029c3: a beat between the release and the delete logged a
+    # false "lease is lost"; with the file gone first the heartbeat stops
+    monkeypatch.setenv("RIG_LEASE_TOKEN", TOKEN)
+    state_file = tmp_path / "lease.json"
+    assert main(acquire_args(lease_server.url, state_file)) == EXIT_OK
+    seen = []
+    answer = lease_server.answer
+
+    def spy(path, auth, body):
+        if path == "/rig-lease/release":
+            seen.append(state_file.exists())
+        return answer(path, auth, body)
+
+    lease_server.answer = spy
+    assert main(["release", "--state-file", str(state_file)]) == EXIT_OK
+    assert seen == [False]
+    assert lease_server.holder is None
 
 
 # ---- the wiring in ci.yml ------------------------------------------------------------
