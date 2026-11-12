@@ -9,6 +9,7 @@ paths:
   - "sp-ui/src/pages/block.rs"
   - "e2e/block-songs.spec.ts"
   - "e2e/post-deploy-block-songs.spec.ts"
+  - "e2e/block-gate*.ts"
 ---
 
 # A song blocked on one node (#265)
@@ -71,20 +72,27 @@ Design: #265 comment 6814953166; the lane's anchors: comment 6814998873.
   (`http://<node>:8920/blok`, on SNV `http://sp.local:8920/blok`), LAN only,
   no login (like the dashboard). Phone first (the `.block-*` styles, 44 px
   targets, no horizontal scroll at 390 px).
-- "Teraz na programe": the song of the playlist on program (`state ==
-  Playing` once told, #225; `song_block::program_video`, the lowest
-  playlist id when a cut shows two), its title = the WS now-playing's
-  `wall_title`, else the row's; its YouTube id from the node's rows (the
-  `GET /api/v1/playlists/{id}/videos` of every listed playlist, read again
-  when the list changes). Button `block-current-btn` "Zablokovať v <uzol>"
+- "Teraz na programe" (`block-current`, `data-state` loading | nothing |
+  song): `song_block::program_view` — the song of the playlist on program
+  (`player_view::program_badge(..).is_on_program()`, the one on-program
+  rule; the lowest playlist id when a cut shows two) shows at once;
+  "Načítavam…" until every playlist's state was told
+  (`selection::states_known`, #225: never "nothing plays" before), then
+  "Na programe nehrá žiadna pieseň.". Its title = THAT playlist's WS
+  now-playing `wall_title`, else the row's; its YouTube id from the node's
+  rows (the `GET /api/v1/playlists/{id}/videos` of every listed playlist,
+  read again when the list changes). Button `block-current-btn` "Zablokovať v <uzol>"
   (`block_label`: `node_name` from `/api/v1/status`, else "tomto uzle"),
   disabled with "Už je zablokovaná" once blocked or while its id is
   unknown.
 - The search `block-search`: `song_block::search` over the node's songs
-  (`catalog`: each YouTube id once, by title), every word, case and
+  (`catalog`: each YouTube id once, its title the server's pick — a row
+  with metadata first, then the oldest —, by title), every word, case and
   diacritics ignored (`fold`), at most `SEARCH_LIMIT` 20, nothing for an
   empty query; each `block-result` (`data-youtube-id`) with "Zablokovať".
-- The list `block-list`, each row "Odblokovať" (`block-unblock`).
+- The list `block-list` (`data-loaded` once read; "Načítavam…" before,
+  and a failed read keeps it so with the error on `block-message`), each
+  row "Odblokovať" (`block-unblock`).
 - Every rule is sp-core's (sp-ui has no unit tests).
 
 ## Tests
@@ -99,8 +107,13 @@ Design: #265 comment 6814953166; the lane's anchors: comment 6814998873.
   plays).
 - Mock E2E `e2e/block-songs.spec.ts` at 390×844 (the mock mirrors the
   routes; `/__mock/blocked-reset`). Post-deploy `e2e/post-deploy-block-songs.spec.ts`
-  (SNV and PP's subset) is READ-ONLY: `GET /api/v1/blocked` and the page
-  showing that list; it never blocks a song on a box.
+  (SNV and PP's subset) is READ-ONLY: `GET /api/v1/blocked`, the page's
+  list loaded with no error line, and the area past "Načítavam…" with,
+  for a youtube playlist's song on program, an enabled "Zablokovať v …"
+  or "Už je zablokovaná" (the pure `e2e/block-gate.ts::currentAreaProblem`,
+  mock unit spec `block-gate.spec.ts`; a set list's song is not judged: it
+  may be a row no song list names). It never clicks, never blocks a song
+  on a box.
 
 ## Not built (follow-up only if the owner asks after using the page)
 

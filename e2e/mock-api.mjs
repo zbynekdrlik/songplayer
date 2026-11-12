@@ -1940,7 +1940,14 @@ function shownTitle(v) {
   return wallTitle((v.song ?? "").trim(), (v.artist ?? "").trim()) || (v.title ?? "").trim();
 }
 app.get("/api/v1/blocked", (_req, res) => {
-  res.json([...blockedSongs].sort((a, b) => b.blocked_at_ms - a.blocked_at_ms));
+  // The server's order: the newest block first, then by YouTube id.
+  res.json(
+    [...blockedSongs].sort(
+      (a, b) =>
+        b.blocked_at_ms - a.blocked_at_ms ||
+        (a.youtube_id < b.youtube_id ? -1 : a.youtube_id > b.youtube_id ? 1 : 0),
+    ),
+  );
 });
 app.post("/api/v1/blocked", (req, res) => {
   const youtubeId = typeof req.body?.youtube_id === "string" ? req.body.youtube_id.trim() : null;

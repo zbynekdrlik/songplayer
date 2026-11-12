@@ -1,8 +1,8 @@
 //! #265: the block page's pure rules.
 
 use super::{
-    BlockedSong, CatalogSong, ProgramCandidate, SEARCH_LIMIT, block_label, catalog, fold,
-    is_blocked, program_video, search, shown_title, wall_title,
+    BlockedSong, CatalogRow, CatalogSong, ProgramCandidate, ProgramView, SEARCH_LIMIT, block_label,
+    catalog, fold, is_blocked, program_view, search, shown_title, wall_title,
 };
 
 fn song(id: &str, title: &str) -> CatalogSong {
@@ -39,20 +39,34 @@ fn the_button_names_the_node_or_says_this_node() {
     assert_eq!(block_label(None), "Zablokovať v tomto uzle");
 }
 
+fn row(row_id: i64, id: &str, title: &str, has_metadata: bool) -> CatalogRow {
+    CatalogRow {
+        row_id,
+        youtube_id: id.to_string(),
+        title: title.to_string(),
+        has_metadata,
+    }
+}
+
+/// Each song once, by title (case and diacritics folded); its title the
+/// server's pick: a row with metadata first, then the oldest; an empty
+/// title never.
 #[test]
 fn the_catalog_holds_each_song_once_by_title() {
     let rows = vec![
-        song("b", ""),
-        song("b", "Bravo - X"),
-        song("a", "alfa - Y"),
-        song("b", "Bravo again"),
-        song("c", "Čaj - Z"),
+        row(1, "b", "", true),
+        row(9, "b", "Bravo - X", true),
+        row(2, "b", "yt bravo", false),
+        row(12, "b", "Bravo later", true),
+        row(4, "a", "alfa - Y", false),
+        row(3, "a", "alfa older", false),
+        row(5, "c", "Čaj - Z", true),
     ];
     let got = catalog(rows);
     assert_eq!(
         got,
         vec![
-            song("a", "alfa - Y"),
+            song("a", "alfa older"),
             song("b", "Bravo - X"),
             song("c", "Čaj - Z")
         ]
@@ -102,16 +116,36 @@ fn the_song_on_program_is_the_on_program_playlist_s_video() {
         on_program,
         video_id,
     };
-    assert_eq!(program_video(&[]), None);
-    assert_eq!(program_video(&[c(1, false, Some(10))]), None);
-    assert_eq!(program_video(&[c(1, true, None)]), None);
+    let song = |playlist_id, video_id| ProgramView::Song {
+        playlist_id,
+        video_id,
+    };
+    // Nothing on program claims "nothing" only once every state is known.
+    assert_eq!(program_view(false, &[]), ProgramView::Loading);
+    assert_eq!(program_view(true, &[]), ProgramView::Nothing);
     assert_eq!(
-        program_video(&[c(1, false, Some(10)), c(2, true, Some(20))]),
-        Some(20)
+        program_view(true, &[c(1, false, Some(10))]),
+        ProgramView::Nothing
     );
     assert_eq!(
-        program_video(&[c(5, true, Some(50)), c(3, true, Some(30)), c(4, true, None)]),
-        Some(30)
+        program_view(false, &[c(1, false, Some(10))]),
+        ProgramView::Loading
+    );
+    assert_eq!(
+        program_view(true, &[c(1, true, None)]),
+        ProgramView::Nothing
+    );
+    // A song told to be on program shows before the rest is known.
+    assert_eq!(
+        program_view(false, &[c(1, false, Some(10)), c(2, true, Some(20))]),
+        song(2, 20)
+    );
+    assert_eq!(
+        program_view(
+            true,
+            &[c(5, true, Some(50)), c(3, true, Some(30)), c(4, true, None)]
+        ),
+        song(3, 30)
     );
 }
 

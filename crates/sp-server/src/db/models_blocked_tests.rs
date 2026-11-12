@@ -131,8 +131,9 @@ async fn the_song_title_is_the_wall_s_text_from_this_node_s_rows() {
     assert_eq!(song_title(&pool, "clip").await.unwrap(), None);
 }
 
-/// Thirty picks out of three songs, one blocked (by a row of ANOTHER
-/// playlist's id: the block is per song) — a random pick cannot pass by luck.
+/// Thirty picks out of three songs, two blocked (the same songs also sit in
+/// another playlist: the block is per YouTube id, every row) — a random pick
+/// cannot pass by luck.
 #[tokio::test]
 async fn continuous_never_picks_a_blocked_song() {
     let pool = memory_pool().await;
@@ -233,4 +234,31 @@ async fn a_custom_set_list_keeps_a_blocked_song() {
         .await
         .unwrap();
     assert_eq!(pick, Some(ids[1]));
+}
+
+/// The Dabing playlist's Loop after a restart: a dub-requested song of
+/// another playlist it remembers is not taken once blocked.
+#[tokio::test]
+async fn the_dabing_loop_skips_a_blocked_remembered_dub() {
+    let pool = memory_pool().await;
+    let (_, ids) = songs(&pool, "fast", &[0, 1]).await;
+    sqlx::query("UPDATE videos SET dub_requested = 1 WHERE id = ?")
+        .bind(ids[1])
+        .execute(&pool)
+        .await
+        .unwrap();
+    let dabing: i64 = sqlx::query_scalar(
+        "INSERT INTO playlists (name, youtube_url, kind) VALUES ('dabing', '', 'dabing') \
+         RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    loop_memory::remember(&pool, dabing, ids[1]).await.unwrap();
+    assert_eq!(
+        loop_memory::remembered(&pool, dabing).await.unwrap(),
+        Some(ids[1])
+    );
+    block_yt(&pool, 1).await;
+    assert_eq!(loop_memory::remembered(&pool, dabing).await.unwrap(), None);
 }

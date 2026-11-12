@@ -6,6 +6,8 @@
 //! over the node's songs and its "song on program" live here (WASM-safe,
 //! workspace-tested: sp-ui has no unit tests).
 
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 
 /// One blocked song as `GET /api/v1/blocked` lists it and `POST` answers.
@@ -63,17 +65,33 @@ pub struct CatalogSong {
     pub title: String,
 }
 
-/// The node's songs once each (the first row of a YouTube id wins, a row
-/// with an empty title never), by title.
-pub fn catalog(rows: impl IntoIterator<Item = CatalogSong>) -> Vec<CatalogSong> {
-    let mut out: Vec<CatalogSong> = Vec::new();
-    for row in rows {
-        if row.title.is_empty() || out.iter().any(|s| s.youtube_id == row.youtube_id) {
-            continue;
-        }
-        out.push(row);
-    }
-    out.sort_by_key(|s| fold(&s.title));
+/// One row of a playlist's song list, as the page reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogRow {
+    pub row_id: i64,
+    pub youtube_id: String,
+    /// [`shown_title`] of the row.
+    pub title: String,
+    /// The row names its song or artist (else its title is YouTube's).
+    pub has_metadata: bool,
+}
+
+/// The node's songs once each, by title. A song's title is the server's
+/// pick (`models_blocked::song_title`): a row with metadata first, then the
+/// oldest row; a row with an empty title never.
+pub fn catalog(rows: impl IntoIterator<Item = CatalogRow>) -> Vec<CatalogSong> {
+    let mut rows: Vec<CatalogRow> = rows.into_iter().filter(|r| !r.title.is_empty()).collect();
+    rows.sort_by_key(|r| (!r.has_metadata, r.row_id));
+    let mut seen = HashSet::new();
+    let mut out: Vec<CatalogSong> = rows
+        .into_iter()
+        .filter(|r| seen.insert(r.youtube_id.clone()))
+        .map(|r| CatalogSong {
+            youtube_id: r.youtube_id,
+            title: r.title,
+        })
+        .collect();
+    out.sort_by_cached_key(|s| fold(&s.title));
     out
 }
 
@@ -132,14 +150,34 @@ pub struct ProgramCandidate {
     pub video_id: Option<i64>,
 }
 
-/// The song on program now: the video of the playlist on program (the
-/// lowest id when, in a cut, two are), `None` when none plays one.
-pub fn program_video(candidates: &[ProgramCandidate]) -> Option<i64> {
-    candidates
+/// The page's "Teraz na programe" area.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgramView {
+    /// Not every playlist's state was told yet (#225: claim nothing).
+    Loading,
+    /// Every state is known and no playlist on program plays a song.
+    Nothing,
+    /// The playlist on program and its song (the lowest playlist id when,
+    /// in a cut, two are).
+    Song { playlist_id: i64, video_id: i64 },
+}
+
+/// What the area shows: a song told to be on program shows at once; with
+/// none, "nothing" only once every state is known (`states_known`).
+pub fn program_view(states_known: bool, candidates: &[ProgramCandidate]) -> ProgramView {
+    let on_program = candidates
         .iter()
-        .filter(|c| c.on_program && c.video_id.is_some())
-        .min_by_key(|c| c.playlist_id)
-        .and_then(|c| c.video_id)
+        .filter(|c| c.on_program)
+        .filter_map(|c| c.video_id.map(|v| (c.playlist_id, v)))
+        .min_by_key(|(playlist_id, _)| *playlist_id);
+    match on_program {
+        Some((playlist_id, video_id)) => ProgramView::Song {
+            playlist_id,
+            video_id,
+        },
+        None if states_known => ProgramView::Nothing,
+        None => ProgramView::Loading,
+    }
 }
 
 /// Whether `youtube_id` is in the blocked list.

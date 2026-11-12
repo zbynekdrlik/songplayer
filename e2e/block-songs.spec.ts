@@ -27,11 +27,13 @@ test.beforeEach(async ({ page, request }) => {
   });
   await request.post("/__mock/blocked-reset");
   await request.post("/__mock/settings-reset");
+  await request.post("/__mock/ws-replay", { data: {} });
 });
 
 test.afterEach(async ({ request }) => {
   await request.post("/__mock/blocked-reset");
   await request.post("/__mock/settings-reset");
+  await request.post("/__mock/ws-replay", { data: {} });
   const real = consoleMessages.filter((m) => !ALLOWED_CONSOLE.some((r) => r.test(m)));
   expect(real).toEqual([]);
 });
@@ -47,6 +49,7 @@ test("block the song on program, search and block another, unblock one", async (
   await page.goto("/blok");
   await expect(page.getByTestId("block-page")).toBeVisible({ timeout: 10_000 });
   const list = page.getByTestId("block-list");
+  await expect(list).toHaveAttribute("data-loaded", "true");
   await expect(list).toContainText("Žiadna pieseň nie je zablokovaná.");
 
   // The song on program (the mock's playlist 1, video 1): the wall's title.
@@ -132,4 +135,23 @@ test("a node with no name says 'tomto uzle'; the routes answer the server's stat
   const again = await request.post("/api/v1/blocked", { data: { youtube_id: "abc123" } });
   expect(again.status()).toBe(201);
   expect(await again.json()).toEqual(await first.json());
+});
+
+// #225's rule on this page: nothing is claimed before it was told. While the
+// WS replay is held back the area reads "Načítavam…", never "nothing plays";
+// then the song on program shows.
+test("the song on program reads 'Načítavam…' until the program state is told", async ({
+  page,
+  request,
+}) => {
+  await request.post("/__mock/ws-replay", { data: { delay_ms: 3000 } });
+  await page.goto("/blok");
+  const current = page.getByTestId("block-current");
+  await expect(current).toHaveAttribute("data-state", "loading", { timeout: 10_000 });
+  await expect(current).toContainText("Načítavam…");
+  await expect(current).not.toContainText("Na programe nehrá");
+  await expect(current).toHaveAttribute("data-state", "song", { timeout: 10_000 });
+  await expect(page.getByTestId("block-current-title")).toHaveText(
+    "Never Gonna Give You Up - Rick Astley",
+  );
 });

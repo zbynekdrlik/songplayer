@@ -4,9 +4,12 @@
  *
  * - `GET /api/v1/blocked` answers 200 with a list of `{youtube_id, title,
  *   blocked_at_ms}`.
- * - `/blok` loads in a phone-sized browser with its "Teraz na programe"
- *   area, its search and its blocked list; the list shows exactly the
- *   server's blocked songs.
+ * - `/blok` loads in a phone-sized browser with its search, its blocked
+ *   list LOADED (`data-loaded`, no error line) showing exactly the server's
+ *   blocked songs, and its "Teraz na programe" area past "Načítavam…":
+ *   a song on a youtube playlist on program has an enabled "Zablokovať v
+ *   …" (its YouTube id found among the node's songs) or "Už je
+ *   zablokovaná" (`block-gate.ts::currentAreaProblem`). Never clicked.
  *
  * It NEVER blocks or unblocks a song on the box: a block would stop that
  * song being picked on the node. The block / unblock flow is the mock
@@ -14,6 +17,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { currentAreaProblem } from "./block-gate";
 
 type Blocked = { youtube_id: string; title: string; blocked_at_ms: number };
 
@@ -55,7 +59,8 @@ test.describe("the song block page post-deploy verification (#265)", () => {
     await expect(page.getByTestId("block-current")).toBeVisible();
     await expect(page.getByTestId("block-search")).toBeVisible();
     const list = page.getByTestId("block-list");
-    await expect(list).toBeVisible();
+    await expect(list).toHaveAttribute("data-loaded", "true", { timeout: 15_000 });
+    await expect(page.getByTestId("block-message"), "no error line").toHaveText("");
     if (blocked.length === 0) {
       await expect(list).toContainText("Žiadna pieseň nie je zablokovaná.", { timeout: 15_000 });
     } else {
@@ -64,7 +69,44 @@ test.describe("the song block page post-deploy verification (#265)", () => {
       });
     }
     const current = page.getByTestId("block-current");
-    console.log(`[#265 block] on program: ${(await current.innerText()).replace(/\s+/g, " ")}`);
+    await expect(current).not.toHaveAttribute("data-state", "loading", { timeout: 15_000 });
+    // The on-program playlist's kind, read AFTER the page settled.
+    const status = (await (await request.get("/api/v1/status")).json()) as {
+      active_playlist_ids?: number[];
+    };
+    const playlists = (await (await request.get("/api/v1/playlists")).json()) as {
+      id: number;
+      kind?: string;
+    }[];
+    const onAir = status.active_playlist_ids ?? [];
+    const programKind =
+      onAir.length === 1 ? (playlists.find((p) => p.id === onAir[0])?.kind ?? "youtube") : null;
+    const button = page.getByTestId("block-current-btn");
+    // The node's song lists load after the program state: poll until the
+    // area holds (or 15 s), then log the read it ended on.
+    let area = { state: "", buttonText: null as string | null, buttonDisabled: false };
+    await expect
+      .poll(
+        async () => {
+          try {
+            const hasButton = (await button.count()) === 1;
+            area = {
+              state: (await current.getAttribute("data-state")) ?? "",
+              buttonText: hasButton ? (await button.innerText()).trim() : null,
+              buttonDisabled: hasButton ? await button.isDisabled() : false,
+            };
+            return currentAreaProblem(area, programKind);
+          } catch (e) {
+            return `the area could not be read: ${e}`;
+          }
+        },
+        { timeout: 15_000, message: "the song on program's area" },
+      )
+      .toBeNull();
+    console.log(
+      `[#265 block] on program (${programKind ?? "none"}): ` +
+        `${(await current.innerText()).replace(/\s+/g, " ")} [${JSON.stringify(area)}]`,
+    );
 
     // Read-only: the list is still what it was.
     const after = (await (await request.get("/api/v1/blocked")).json()) as Blocked[];
