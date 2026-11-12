@@ -34,6 +34,7 @@ pub mod prod_env; // #233: the production environment's problems, status and hea
 pub mod program_refusal;
 pub mod query_param; // #256: the one whole-count query parse (hours, days)
 pub mod seek_model;
+pub mod song_block; // #265: the per-node song block list (the /blok page, the wall title)
 pub mod status_chip;
 pub mod ui_usage; // #256: the dashboard's usage log (wire, client rules, summary, Nastavenia line)
 pub mod video_upgrade_view; // #223 S13: Nastavenia's view of the 4K upgrade

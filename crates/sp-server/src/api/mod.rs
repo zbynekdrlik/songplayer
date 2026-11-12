@@ -3,6 +3,7 @@
 pub mod ai;
 pub mod audio; // #233: GET /api/v1/audio/asio-drivers (the ASIO driver list)
 pub mod audio_faults; // #257: GET /api/v1/audio/faults (the audio fault ledger)
+pub mod blocked; // #265: GET/POST /api/v1/blocked + DELETE /api/v1/blocked/{youtube_id}
 pub mod dabing; // #180 dubbing D1
 pub mod dabing_probe; // #232 unit 2: POST /api/v1/dabing/probe (the live Live Translate gate)
 pub mod diag; // #223 S0: POST /api/v1/diag/decode-bench
@@ -157,6 +158,14 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         // #259: the LED wall report (Arena's own output setup vs the box)
         .route("/api/v1/wall", axum::routing::get(routes_status::wall))
         // #256: the dashboard's usage log (its batches, and their summary)
+        .route(
+            "/api/v1/blocked",
+            axum::routing::get(blocked::list_blocked).post(blocked::block_song),
+        )
+        .route(
+            "/api/v1/blocked/{youtube_id}",
+            axum::routing::delete(blocked::unblock_song),
+        )
         .route(
             "/api/v1/ui-usage",
             axum::routing::post(ui_usage::post_ui_usage),

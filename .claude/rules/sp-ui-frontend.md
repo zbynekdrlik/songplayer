@@ -808,6 +808,16 @@ Right after a page load the Player showed "Nič nehrá" / "Mixér — nič nehr�
   knob (3 s); `/__mock/ws-replay` also holds the mock's 2 s playlist-1 song
   interval, so the knob alone sets the window.
 
+- **`selection::states_known(&[], np)` is TRUE** (`all()` over no
+  playlist). `store.playlists` starts empty until the App's load lands (and
+  stays empty when it fails), so a page that decides "nothing plays" from
+  it claims that before it was told anything (#265 review round 2). Gate
+  on a list that is `Option` until read (`/blok` reads `/api/v1/playlists`
+  itself, `None` until it lands), and prove it in a spec that holds BOTH
+  the list (`page.route` delay) and the WS replay, with the
+  MutationObserver recorder set to `attributeOldValue: true` (two writes in
+  one task coalesce into one callback).
+
 ## The Player mixer slot renders from `mixer_controls`, and `store.dabing` is app-wide (#184)
 
 The mixer slot in `player.rs` no longer does an either/or `match` on the dub row.
