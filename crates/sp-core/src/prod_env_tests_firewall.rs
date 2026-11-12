@@ -34,7 +34,7 @@ fn every_firewall_problem() -> Vec<EnvProblem> {
 #[test]
 fn the_standards_values_are_dstacks() {
     assert_eq!(DSTACK_GROUP, "dstack155");
-    assert_eq!(DSTACK_GROUP_RULES, 16);
+    assert_eq!(DSTACK_GROUP_RULES, 14);
     assert_eq!(
         (ACTION_NOT_CONFIGURED, ACTION_ALLOW, ACTION_BLOCK),
         (0, 2, 4)
@@ -80,7 +80,7 @@ fn every_firewall_problem_reads_in_slovak() {
             "brána firewall (verejný profil): predvolená akcia má byť povoliť (prichádzajúce: \
              nenastavené, odchádzajúce: hodnota 7)",
             "brána firewall má zapnuté blokovacie pravidlá mimo skupiny dstack155: „Block X“",
-            "skupina pravidiel dstack155 má 13 zapnutých blokovacích pravidiel (má ich mať 16)",
+            "skupina pravidiel dstack155 má 13 zapnutých blokovacích pravidiel (má ich mať 14)",
             "predvolené akcie brány firewall (súkromný profil) sa nepodarilo zistiť",
             "blokovacie pravidlá brány firewall sa nepodarilo zistiť",
         ]

@@ -3,7 +3,7 @@
 //!
 //! - every profile off (a PC with no Dante leg);
 //! - dstack's standard: every profile on, its default actions Allow, every
-//!   enabled Block rule in the group `dstack155`, which holds exactly 16.
+//!   enabled Block rule in the group `dstack155`, which holds exactly 14.
 //!
 //! Which one the box means: the standard is "attempted" once the group holds
 //! a rule, a profile that is on allows by default, or the rules could not be

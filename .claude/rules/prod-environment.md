@@ -459,7 +459,7 @@ every problem (`code: text`), on every fact that is not the production one
 whatever `ok` says (`edition_allowed` true; `defender_realtime`,
 `defender_passive` false; the firewall by its `mode`: `off` with every profile
 false, or `dstack155` with every profile true, each `defaults` entry 2 / 2,
-`dstack_group_rules` 16 (14 until #309 added dstack's two Dnscache mDNS rules) and `block_rules_outside_group` `[]` (any other
+`dstack_group_rules` 14 and `block_rules_outside_group` `[]` (any other
 mode, null included, fails: `firewallFailures`); `antivirus_on` and
 `defender_protections_on` `[]`; #285: `audio.wired_nics` a non-empty list
 with every adapter `ok`; a fact
@@ -534,7 +534,7 @@ shell; ASCII only, it is read as cp1252) and pwsh 7 (the Linux tests).
   `firewall_standard`, and `Add-ProdPcFirewallReview` (pure) gives BLOCKERS
   only, with lane 1's codes and the same "attempted" rule: `firewall_on:<p>`,
   `firewall_off:<p>`, `firewall_default_block:<p>`,
-  `firewall_block_outside_group`, `firewall_group_incomplete` (exactly 16,
+  `firewall_block_outside_group`, `firewall_group_incomplete` (exactly 14,
   every one enabled Block), `unreadable:firewall:<p>`,
   `unreadable:firewall_rules` (a profile on and no `firewall_standard`),
   plus the script's own `firewall_group_interface` (a group rule not bound

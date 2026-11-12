@@ -52,9 +52,7 @@
       { "name": "dstack155-mDNSResponder.exe-In", "display_name": "dstack155 block mDNSResponder.exe in on Dante70", "group": "dstack155", "display_group": "dstack155" },
       { "name": "dstack155-mDNSResponder.exe-Out", "display_name": "dstack155 block mDNSResponder.exe out on Dante70", "group": "dstack155", "display_group": "dstack155" },
       { "name": "dstack155-TCP-In", "display_name": "dstack155 block TCP in on Dante70", "group": "dstack155", "display_group": "dstack155" },
-      { "name": "dstack155-TCP-Out", "display_name": "dstack155 block TCP out on Dante70", "group": "dstack155", "display_group": "dstack155" },
-      { "name": "dstack155-mDNS-dnscache-In", "display_name": "dstack155 block Windows mDNS (dnscache) in on Dante70", "group": "dstack155", "display_group": "dstack155" },
-      { "name": "dstack155-mDNS-dnscache-Out", "display_name": "dstack155 block Windows mDNS (dnscache) out on Dante70", "group": "dstack155", "display_group": "dstack155" }
+      { "name": "dstack155-TCP-Out", "display_name": "dstack155 block TCP out on Dante70", "group": "dstack155", "display_group": "dstack155" }
     ],
     "group_rules": [
       { "name": "dstack155-obs64.exe-In", "display_name": "dstack155 block obs64.exe in on Dante70", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe"] },
@@ -70,9 +68,7 @@
       { "name": "dstack155-mDNSResponder.exe-In", "display_name": "dstack155 block mDNSResponder.exe in on Dante70", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\Bonjour\\mDNSResponder.exe"] },
       { "name": "dstack155-mDNSResponder.exe-Out", "display_name": "dstack155 block mDNSResponder.exe out on Dante70", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\Bonjour\\mDNSResponder.exe"] },
       { "name": "dstack155-TCP-In", "display_name": "dstack155 block TCP in on Dante70", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["Any"] },
-      { "name": "dstack155-TCP-Out", "display_name": "dstack155 block TCP out on Dante70", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["Any"] },
-      { "name": "dstack155-mDNS-dnscache-In", "display_name": "dstack155 block Windows mDNS (dnscache) in on Dante70", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["%SystemRoot%\\system32\\svchost.exe"] },
-      { "name": "dstack155-mDNS-dnscache-Out", "display_name": "dstack155 block Windows mDNS (dnscache) out on Dante70", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["%SystemRoot%\\system32\\svchost.exe"] }
+      { "name": "dstack155-TCP-Out", "display_name": "dstack155 block TCP out on Dante70", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["Any"] }
     ]
   }
 }

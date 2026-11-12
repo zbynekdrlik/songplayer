@@ -481,7 +481,7 @@ fn query_firewall(
 }
 
 /// #255 (dstack#155): the active store's enabled Block rules (`Action` 4
-/// Block, `Enabled` 1 true), at most `MAX_ROWS` (dstack's group is 16).
+/// Block, `Enabled` 1 true), at most `MAX_ROWS` (dstack's group is 14).
 #[cfg_attr(test, mutants::skip)] // Windows glue
 fn query_firewall_rules(
     locator: &windows::Win32::System::Wmi::IWbemLocator,
