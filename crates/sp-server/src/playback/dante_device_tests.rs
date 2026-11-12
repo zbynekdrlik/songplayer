@@ -338,8 +338,17 @@ fn the_device_serves_a_receiver_the_rings_audio() {
         .enable_all()
         .build()
         .unwrap();
+    let asked = Instant::now();
     let granted = rt.block_on(Client::new(ip).request_flow(SocketAddrV4::new(ip, PORT), &req));
-    assert!(granted.is_ok(), "the flow: {granted:?}");
+    // #302: a refused or unanswered request names how long it waited and
+    // what the device did meanwhile (dev CI 43121764441: Err(Timeout)).
+    assert!(
+        granted.is_ok(),
+        "the flow: {granted:?} after {:?} (consumed {} frames; stack: {:?})",
+        asked.elapsed(),
+        device.consumed_frames(),
+        link.figures()
+    );
     let start = Instant::now();
     let mut buf = [0u8; 2048];
     let (mut left, mut right) = (false, false);
