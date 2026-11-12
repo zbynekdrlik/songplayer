@@ -4,6 +4,8 @@ paths:
   - ".cargo/mutants.toml"
   - "scripts/rig_lease_gate.py"
   - "scripts/tests/test_rig_lease_gate.py"
+  - "scripts/rig_lease_hold.py"
+  - "scripts/tests/test_rig_lease_hold.py"
   - "scripts/spout-quiesce.ps1"
   - "scripts/tests/test_spout_quiesce_workflows.py"
   - "scripts/tests/test_setup_prod_pc_workflows.py"
@@ -460,9 +462,8 @@ stops SongPlayer:
   (`OUTAGE_READS`) is the outage (review round 1: one blip used to deploy
   into the lease just seen held). Any other non-zero exit is the gate's own
   failure and fails the job.
-- Residual: the gate reads the lease, it does not HOLD it. A lease another
-  repo takes in the ~1 min between the check and "Deploy SongPlayer"
-  (artifact downloads) is not seen. The E2E job runs the same gate again
+- The gate only reads the lease; since #314 the step right after it HOLDS it
+  (next section). The E2E job runs the same gate again
   twice: right after its checkout, before its first step that acts on the
   box (release 0.71.0 review: starting OBS, the restart, the title check's
   program cut, the Presenter "[CI PROBE]"), and right before
@@ -496,6 +497,49 @@ stops SongPlayer:
   script is in both ruff lists): the decision, the bounded wait on a fake
   clock (120 × 30 s then exit 3; a last short pause ends exactly at the
   bound), the fetch over a real local HTTP server.
+
+## Both jobs HOLD the rig lease (#314, `scripts/rig_lease_hold.py`)
+
+The gate only waits, so a camera-box run could start in the middle of our
+deploy or E2E. "Hold the rig lease for the deploy / the E2E job (#314)" runs
+right after each job's first gate and takes `resources: resolume-snv`
+through camera-box's write routes (camera-box issue 1432,
+`scripts/rig_lease_write.py`, `.claude/rules/rig-lease-http.md` there):
+
+- `POST /rig-lease/acquire {repo, run_id, run_url, job, expected_secs
+  60..5400, resources}` on `http://10.77.9.195:8890` then `http://dev1:8890`
+  (base URLs, no path) with `Authorization: Bearer $RIG_LEASE_TOKEN` (repo
+  secret `RIG_LEASE_TOKEN`, camera-box's token, the one restreamer uses; set
+  by camera-box after the owner's OK). 200 → `{lease_id, url}` into
+  `$env:RUNNER_TEMP\rig-lease-hold.json`; 409 → wait 30 s polls, 60 min, then
+  exit 3 (job fails); 401 / 400 / a 200 without a valid lease id → exit 2
+  (our own misconfiguration, loud); no token, 404 (no write routes) or no
+  answer / 503 (the gate's `OUTAGE_READS` rule) → a WARN and the job runs
+  unheld, exactly as before #314. `expected_secs` 5400 (the server's max;
+  it is the heartbeat's hold ceiling, `over_hold`).
+- The heartbeat runs DETACHED (`Start-Process -WindowStyle Hidden`, the
+  pattern the OBS start already uses): every 30 s while the state file
+  exists (a silent remote holder is reclaimable after 180 s), at most
+  5400 s, into its own `--log-file`. NEVER `-RedirectStandardOutput` on it:
+  a redirected child inherits the step's output pipe and the runner waits
+  for it — the step would never end. A refused beat (404 `not_holder` / 409
+  `over_hold`) while the state file still exists = `::error::` lease lost,
+  exit 4; one right after the release is no loss. The runner's orphan
+  clean-up also ends it at job end.
+- "Release the rig lease (#314)" is each job's last step, `if: always()`:
+  releases the state file's lease (`released: false` = it was lost or
+  reclaimed: a WARN), deletes the file (the heartbeat then stops) and prints
+  the heartbeat log's tail. A failed release is a WARN (stale in 180 s).
+- The two jobs hold SEPARATELY: the seconds between the deploy's release and
+  the E2E's acquire are a gap a camera-box run may take; the E2E then waits
+  for it at its gate, before it acts on the box. Inside the E2E job the
+  second gate (before the post-deploy suite) reads our own hold as `OWN`.
+- Tests: `scripts/tests/test_rig_lease_hold.py` (Eval Checks; the script is
+  in both ruff lists): the acquire's wait / outage / refusals on a fake
+  clock, heartbeat and release, all three subcommands over a real local
+  HTTP server answering like camera-box's routes, and the ci.yml wiring
+  (hold right after the gate, token on both steps, no redirection, the
+  release `always()` and last but the failure-only report).
 
 **The E2E job's "Verify Resolume title delivery" cuts SP-program** (release
 0.71.0 review). Since #221 lane 2 only SP-program's playlist writes the

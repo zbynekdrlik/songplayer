@@ -135,9 +135,9 @@ jobs:
       - name: Install Python eval dependencies (ruff + pytest + jsonschema + requests + numpy + soundfile)
         run: pip install ruff==0.5.7 pytest==8.3.2 jsonschema==4.23.0 requests==2.32.3 numpy==2.1.1 soundfile==0.12.1
       - name: Lint with ruff
-        run: ruff check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py scripts/program_transport.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_spout.py scripts/wall_locate.py scripts/wall_analysis.py scripts/wall_spans.py
+        run: ruff check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/rig_lease_hold.py scripts/pp_deploy_pick.py scripts/program_transport.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_spout.py scripts/wall_locate.py scripts/wall_analysis.py scripts/wall_spans.py
       - name: Format check with ruff
-        run: ruff format --check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py scripts/program_transport.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_spout.py scripts/wall_locate.py scripts/wall_analysis.py scripts/wall_spans.py
+        run: ruff format --check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/rig_lease_hold.py scripts/pp_deploy_pick.py scripts/program_transport.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_spout.py scripts/wall_locate.py scripts/wall_analysis.py scripts/wall_spans.py
       - name: Run pytest
         run: pytest eval/lyrics/tests -v
       - name: Run scripts pytest (#171 segment stitch / additivity, #156 minidump helpers)
@@ -1110,6 +1110,36 @@ jobs:
             exit 1
           }
 
+
+      # #314: the gate above only WAITS; this step TAKES the lease through
+      # camera-box's write routes (scripts/rig_lease_hold.py), so a camera-box
+      # run that starts now waits for this job. A detached heartbeat keeps it
+      # (every 30 s; a silent holder is reclaimable after 180 s) and the job's
+      # last step releases it, always. No RIG_LEASE_TOKEN, a server without
+      # the write routes or a lease outage = a WARN, the job runs unheld as
+      # before; another holder still there after 60 min = the job fails.
+      - name: Hold the rig lease for the deploy (#314)
+        shell: powershell
+        timeout-minutes: 70
+        env:
+          RIG_LEASE_TOKEN: ${{ secrets.RIG_LEASE_TOKEN }}
+        run: |
+          $py = "C:\Program Files\Python312\python.exe"
+          $state = "$env:RUNNER_TEMP\rig-lease-hold.json"
+          $hblog = "$env:RUNNER_TEMP\rig-lease-heartbeat.log"
+          & $py scripts\rig_lease_hold.py acquire --url "http://10.77.9.195:8890" --url "http://dev1:8890" --repo "${{ github.repository }}" --run-id "${{ github.run_id }}" --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" --job "${{ github.job }}" --resources resolume-snv --expected-secs 5400 --state-file $state --poll-seconds 30 --max-wait-seconds 3600
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            Write-Error "FAIL: the rig lease was not taken (exit $code; 3 = still held after 60 min, 2 = our token or request was refused)"
+            exit 1
+          }
+          if (Test-Path $state) {
+            # Detached and NOT redirected: a redirected child would inherit
+            # this step's output pipe and the runner would wait for it.
+            Start-Process -FilePath $py -ArgumentList @("scripts\rig_lease_hold.py", "heartbeat", "--state-file", "`"$state`"", "--log-file", "`"$hblog`"") -WindowStyle Hidden
+            Write-Host "OK: rig lease held for this job; heartbeat started"
+          }
+
       - name: Clean old artifacts
         shell: powershell
         run: |
@@ -1410,6 +1440,24 @@ jobs:
 
           Write-Host "=== All health checks passed ==="
 
+      # #314: give the rig lease back whatever happened (the heartbeat stops
+      # when the state file goes); its log names a lease lost mid-job.
+      - name: Release the rig lease (#314)
+        if: always()
+        shell: powershell
+        env:
+          RIG_LEASE_TOKEN: ${{ secrets.RIG_LEASE_TOKEN }}
+        run: |
+          $py = "C:\Program Files\Python312\python.exe"
+          $hblog = "$env:RUNNER_TEMP\rig-lease-heartbeat.log"
+          & $py scripts\rig_lease_hold.py release --state-file "$env:RUNNER_TEMP\rig-lease-hold.json"
+          $code = $LASTEXITCODE
+          if (Test-Path $hblog) { Get-Content $hblog -Tail 20 }
+          if ($code -ne 0) {
+            Write-Error "FAIL: the rig lease release itself failed (exit $code)"
+            exit 1
+          }
+
   e2e-resolume:
     name: E2E Tests (win-resolume)
     needs: [deploy-resolume]
@@ -1442,6 +1490,36 @@ jobs:
           if ($code -ne 0) {
             Write-Error "FAIL: the rig-lease gate itself failed (exit $code)"
             exit 1
+          }
+
+
+      # #314: the gate above only WAITS; this step TAKES the lease through
+      # camera-box's write routes (scripts/rig_lease_hold.py), so a camera-box
+      # run that starts now waits for this job. A detached heartbeat keeps it
+      # (every 30 s; a silent holder is reclaimable after 180 s) and the job's
+      # last step releases it, always. No RIG_LEASE_TOKEN, a server without
+      # the write routes or a lease outage = a WARN, the job runs unheld as
+      # before; another holder still there after 60 min = the job fails.
+      - name: Hold the rig lease for the E2E job (#314)
+        shell: powershell
+        timeout-minutes: 70
+        env:
+          RIG_LEASE_TOKEN: ${{ secrets.RIG_LEASE_TOKEN }}
+        run: |
+          $py = "C:\Program Files\Python312\python.exe"
+          $state = "$env:RUNNER_TEMP\rig-lease-hold.json"
+          $hblog = "$env:RUNNER_TEMP\rig-lease-heartbeat.log"
+          & $py scripts\rig_lease_hold.py acquire --url "http://10.77.9.195:8890" --url "http://dev1:8890" --repo "${{ github.repository }}" --run-id "${{ github.run_id }}" --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" --job "${{ github.job }}" --resources resolume-snv --expected-secs 5400 --state-file $state --poll-seconds 30 --max-wait-seconds 3600
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            Write-Error "FAIL: the rig lease was not taken (exit $code; 3 = still held after 60 min, 2 = our token or request was refused)"
+            exit 1
+          }
+          if (Test-Path $state) {
+            # Detached and NOT redirected: a redirected child would inherit
+            # this step's output pipe and the runner would wait for it.
+            Start-Process -FilePath $py -ArgumentList @("scripts\rig_lease_hold.py", "heartbeat", "--state-file", "`"$state`"", "--log-file", "`"$hblog`"") -WindowStyle Hidden
+            Write-Host "OK: rig lease held for this job; heartbeat started"
           }
 
       - name: Ensure OBS is running
@@ -2701,3 +2779,21 @@ jobs:
             e2e/test-results/
           retention-days: 7
           if-no-files-found: ignore
+
+      # #314: give the rig lease back whatever happened (the heartbeat stops
+      # when the state file goes); its log names a lease lost mid-job.
+      - name: Release the rig lease (#314)
+        if: always()
+        shell: powershell
+        env:
+          RIG_LEASE_TOKEN: ${{ secrets.RIG_LEASE_TOKEN }}
+        run: |
+          $py = "C:\Program Files\Python312\python.exe"
+          $hblog = "$env:RUNNER_TEMP\rig-lease-heartbeat.log"
+          & $py scripts\rig_lease_hold.py release --state-file "$env:RUNNER_TEMP\rig-lease-hold.json"
+          $code = $LASTEXITCODE
+          if (Test-Path $hblog) { Get-Content $hblog -Tail 20 }
+          if ($code -ne 0) {
+            Write-Error "FAIL: the rig lease release itself failed (exit $code)"
+            exit 1
+          }
