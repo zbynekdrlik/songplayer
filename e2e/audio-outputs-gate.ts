@@ -69,6 +69,11 @@ export const DANTE_LATE_TOP_BINS = 2;
  * it is a since-start maximum, so a start-up spike would fail every deploy.
  * Each failure names the figure and both reads.
  */
+/** #285: the figures the gate logs but never fails on, over the minute. */
+export function danteGateLog(_first: OutputStatus, _second: OutputStatus): string {
+  return "";
+}
+
 export function danteGateFailures(first: OutputStatus, second: OutputStatus): string[] {
   if (second.type !== "dante") return [];
   const a = first.dante;
