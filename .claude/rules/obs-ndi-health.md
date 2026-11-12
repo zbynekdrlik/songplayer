@@ -111,6 +111,24 @@ Tests: `ndi_health_expect_tests.rs`, `api/program_tests.rs`.
 
 ## `SP-program` must be DISCOVERABLE, not only fed (#305 item 3)
 
+**What the finder can and cannot see (#309, measured on resolume-snv
+12.11.2026).** The NDI runtime (6.3.2) runs its OWN mDNS inside the process
+that loads it (`shared_mdns`, adapters from `GetAdaptersAddresses`), so
+`SP-program`'s `_ndi._tcp` record comes from SongPlayer.exe itself, never
+from Windows' Dnscache (no svchost socket on UDP 5353 there). It announces
+on EVERY adapter, unsolicited, one 188 B response every 10 s;
+`ndi.adapters.allowed` (transmission only) does not hold it back, and no
+runtime key limits its mDNS. On SNV it therefore also announces on the
+Dante leg (`10.77.7.107:5961`): an accepted exception of dstack's
+two-network standard (ROZHODNUTÉ on #309: ~19 B/s, Dante and PTP ignore
+it, the leg filter blocks TCP to the Dante address, camera-box's receivers
+prefer the LAN record). Never `ndi.networks.discovery` (a discovery server
+stops mDNS: camera-box's rule, TVs and guest laptops find sources only by
+mDNS). The in-process finder reads the PC's own mDNS view, which lists
+every adapter's record without the wire (it kept the Dante address after
+the leg was blocked): `on_dante` / `address` say what the PC knows, never
+what another host receives; a wire check needs a finder on another host.
+
 PP 11.11.2026: after a NIC drop the sender, its data port 5961 and its frame
 counters lived on, receivers already connected kept the count ≥ 1, and no
 receiver could FIND `RESOLUME-PP (SP-program)` (its OS mDNS registration was
