@@ -137,21 +137,67 @@ test("a node with no name says 'tomto uzle'; the routes answer the server's stat
   expect(await again.json()).toEqual(await first.json());
 });
 
-// #225's rule on this page: nothing is claimed before it was told. While the
-// WS replay is held back the area reads "Načítavam…", never "nothing plays";
-// then the song on program shows.
+// #225's rule on this page: nothing is claimed before it was told. Every
+// `data-state` the area takes is recorded from the first DOM change (a
+// MutationObserver from an init script), so a one-render "nothing" flash is
+// caught, not only what an `expect` happens to poll. Held back: the WS
+// replay, then the playlist list the page reads itself.
+async function recordAreaStates(page: import("@playwright/test").Page) {
+  await page.addInitScript(() => {
+    const seen: string[] = [];
+    (window as unknown as { spAreaStates: string[] }).spAreaStates = seen;
+    const read = () => {
+      const el = document.querySelector('[data-testid="block-current"]');
+      const state = el?.getAttribute("data-state");
+      if (state && seen[seen.length - 1] !== state) seen.push(state);
+    };
+    new MutationObserver(read).observe(document, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["data-state"],
+    });
+  });
+}
+
+async function areaStates(page: import("@playwright/test").Page): Promise<string[]> {
+  return page.evaluate(() => (window as unknown as { spAreaStates: string[] }).spAreaStates);
+}
+
 test("the song on program reads 'Načítavam…' until the program state is told", async ({
   page,
   request,
 }) => {
+  await recordAreaStates(page);
   await request.post("/__mock/ws-replay", { data: { delay_ms: 3000 } });
   await page.goto("/blok");
   const current = page.getByTestId("block-current");
-  await expect(current).toHaveAttribute("data-state", "loading", { timeout: 10_000 });
-  await expect(current).toContainText("Načítavam…");
-  await expect(current).not.toContainText("Na programe nehrá");
+  await expect(current).toContainText("Načítavam…", { timeout: 10_000 });
   await expect(current).toHaveAttribute("data-state", "song", { timeout: 10_000 });
   await expect(page.getByTestId("block-current-title")).toHaveText(
     "Never Gonna Give You Up - Rick Astley",
   );
+  expect(await areaStates(page)).toEqual(["loading", "song"]);
+});
+
+test("with the playlist list held back the area never claims 'nothing'", async ({
+  page,
+  request,
+}) => {
+  await recordAreaStates(page);
+  // The playlist list lands 1 s late and the WS replay (every state) 3 s
+  // late: with no list read yet the page must not take "no playlist" for
+  // "every state known, nothing plays".
+  await request.post("/__mock/ws-replay", { data: { delay_ms: 3000 } });
+  await page.route("**/api/v1/playlists", async (route) => {
+    await new Promise((r) => setTimeout(r, 1000));
+    await route.continue();
+  });
+  await page.goto("/blok");
+  const current = page.getByTestId("block-current");
+  await expect(current).toHaveAttribute("data-state", "song", { timeout: 10_000 });
+  expect(await areaStates(page)).toEqual(["loading", "song"]);
+  // The button is enabled once the song lists name the song's id.
+  await expect(page.getByTestId("block-current-btn")).toBeEnabled({ timeout: 10_000 });
+  await page.unroute("**/api/v1/playlists");
 });

@@ -72,13 +72,14 @@ pub struct CatalogRow {
     pub youtube_id: String,
     /// [`shown_title`] of the row.
     pub title: String,
-    /// The row names its song or artist (else its title is YouTube's).
+    /// The row names its song (the server's pick counts only that).
     pub has_metadata: bool,
 }
 
 /// The node's songs once each, by title. A song's title is the server's
-/// pick (`models_blocked::song_title`): a row with metadata first, then the
-/// oldest row; a row with an empty title never.
+/// pick (`models_blocked::song_title`): a row with a song name first, then
+/// the oldest; a row with no title at all (no song, artist or YouTube
+/// title: nothing to search by) is left out.
 pub fn catalog(rows: impl IntoIterator<Item = CatalogRow>) -> Vec<CatalogSong> {
     let mut rows: Vec<CatalogRow> = rows.into_iter().filter(|r| !r.title.is_empty()).collect();
     rows.sort_by_key(|r| (!r.has_metadata, r.row_id));

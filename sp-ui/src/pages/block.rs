@@ -38,9 +38,8 @@ async fn load_rows(playlists: Vec<Playlist>) -> Rows {
         let path = format!("/api/v1/playlists/{}/videos", p.id);
         if let Ok(videos) = api::get::<Vec<Video>>(&path).await {
             for v in videos {
-                let song = v.song.as_deref().unwrap_or("").trim();
-                let artist = v.artist.as_deref().unwrap_or("").trim();
-                let has_metadata = !song.is_empty() || !artist.is_empty();
+                // The server's pick counts a row with a song name.
+                let has_metadata = !v.song.as_deref().unwrap_or("").trim().is_empty();
                 let title = shown_title(v.song.as_deref(), v.artist.as_deref(), &v.title);
                 rows.insert(
                     v.id,
@@ -63,6 +62,9 @@ pub fn BlockPage() -> impl IntoView {
     let node = RwSignal::new(None::<String>);
     // `None` until the list was read (#225: claim only what was told).
     let blocked = RwSignal::new(None::<Vec<BlockedSong>>);
+    // The page's own read of the playlist list: `None` until it landed, so
+    // an empty list before the load is never "every state known" (#225).
+    let playlists = RwSignal::new(None::<Vec<Playlist>>);
     let rows = RwSignal::new(Rows::new());
     let query = RwSignal::new(String::new());
     let message = RwSignal::new(String::new());
@@ -87,14 +89,17 @@ pub fn BlockPage() -> impl IntoView {
             }
         });
         reload_blocked();
-    });
-
-    // The node's songs, read again whenever the playlist list changes.
-    Effect::new(move |_| {
-        let playlists = store.playlists.get();
         spawn_local(async move {
-            let loaded = load_rows(playlists).await;
-            let _ = rows.try_set(loaded);
+            match api::get::<Vec<Playlist>>("/api/v1/playlists").await {
+                Ok(list) => {
+                    let _ = playlists.try_set(Some(list.clone()));
+                    let loaded = load_rows(list).await;
+                    let _ = rows.try_set(loaded);
+                }
+                Err(e) => {
+                    let _ = message.try_set(format!("Zoznam playlistov sa nedá načítať: {e}"));
+                }
+            }
         });
     });
 
@@ -103,9 +108,10 @@ pub fn BlockPage() -> impl IntoView {
     // The "Teraz na programe" area: loading, nothing, or the song on
     // program as (its YouTube id when the node's rows name it, its title).
     let current = Memo::new(move |_| {
-        let known = store
-            .playlists
-            .with(|p| store.now_playing.with(|np| states_known(p, np)));
+        let known = playlists.with(|p| {
+            p.as_deref()
+                .is_some_and(|p| store.now_playing.with(|np| states_known(p, np)))
+        });
         store.now_playing.with(|np| {
             let candidates: Vec<ProgramCandidate> = np
                 .iter()

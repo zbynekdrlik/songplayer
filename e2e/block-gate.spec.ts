@@ -9,28 +9,50 @@ const area = (state: string, buttonText: string | null, buttonDisabled: boolean)
   buttonText,
   buttonDisabled,
 });
+const on = (kind: string | null, decoding = true) => ({ onAir: [4], kind, decoding });
 
 test("the block gate judges the song on program's area", () => {
-  // Never told the states.
-  expect(currentAreaProblem(area("loading", null, false), null)).toContain("never learned");
-  // Nothing on program: nothing to judge.
-  expect(currentAreaProblem(area("nothing", null, false), null)).toBeNull();
-  // A youtube playlist's song: enabled = its id was found.
-  expect(currentAreaProblem(area("song", "Zablokovať v snv", false), "youtube")).toBeNull();
-  expect(currentAreaProblem(area("song", "Zablokovať v snv", true), "youtube")).toContain(
-    "not found",
+  const enabled = area("song", "Zablokovať v snv", false);
+  const disabled = area("song", "Zablokovať v snv", true);
+  // Never told the states: always a failure.
+  expect(currentAreaProblem(area("loading", null, false), on("youtube"))).toContain(
+    "never learned",
   );
-  // An unknown kind counts as youtube (the default kind).
-  expect(currentAreaProblem(area("song", "Zablokovať v snv", true), null)).toContain("not found");
-  // A set list may play a row no song list names: not judged.
-  expect(currentAreaProblem(area("song", "Zablokovať v snv", true), "custom")).toBeNull();
+  expect(
+    currentAreaProblem(area("loading", null, false), { onAir: [], kind: null, decoding: false }),
+  ).toContain("never learned");
+  // A youtube playlist's song: enabled = its id was found.
+  expect(currentAreaProblem(enabled, on("youtube"))).toBeNull();
+  expect(currentAreaProblem(disabled, on("youtube"))).toContain("not found");
+  // A set list / the Dabing playlist may play a row no song list names.
+  expect(currentAreaProblem(disabled, on("custom"))).toBeNull();
+  expect(currentAreaProblem(disabled, on("dabing"))).toBeNull();
+  // A song decoding on program must show; nothing decoding may read "nothing".
+  expect(currentAreaProblem(area("nothing", null, false), on("youtube"))).toContain(
+    "page shows none",
+  );
+  expect(currentAreaProblem(area("nothing", null, false), on("custom"))).toContain(
+    "page shows none",
+  );
+  expect(currentAreaProblem(area("nothing", null, false), on("youtube", false))).toBeNull();
+  // Not judged: nothing on air, a fade's two, an unlisted (test item) playlist.
+  expect(
+    currentAreaProblem(area("nothing", null, false), { onAir: [], kind: null, decoding: false }),
+  ).toBeNull();
+  expect(currentAreaProblem(disabled, { onAir: [4, 5], kind: "youtube", decoding: true })).toBeNull();
+  expect(currentAreaProblem(disabled, on(null))).toBeNull();
+  expect(currentAreaProblem(area("nothing", null, false), on(null))).toBeNull();
   // Already blocked: disabled.
-  expect(currentAreaProblem(area("song", "Už je zablokovaná", true), "youtube")).toBeNull();
-  expect(currentAreaProblem(area("song", "Už je zablokovaná", false), "youtube")).toContain(
+  expect(currentAreaProblem(area("song", "Už je zablokovaná", true), on("youtube"))).toBeNull();
+  expect(currentAreaProblem(area("song", "Už je zablokovaná", false), on("youtube"))).toContain(
     "enabled",
   );
   // Anything else.
-  expect(currentAreaProblem(area("song", null, false), "youtube")).toContain("no block button");
-  expect(currentAreaProblem(area("song", "Block", false), "youtube")).toContain("unexpected");
-  expect(currentAreaProblem(area("odd", null, false), null)).toContain("unknown area state");
+  expect(currentAreaProblem(area("song", null, false), on("youtube"))).toContain(
+    "no block button",
+  );
+  expect(currentAreaProblem(area("song", "Block", false), on("youtube"))).toContain("unexpected");
+  expect(currentAreaProblem(area("odd", null, false), on("youtube"))).toContain(
+    "unknown area state",
+  );
 });

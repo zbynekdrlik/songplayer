@@ -77,7 +77,9 @@ Design: #265 comment 6814953166; the lane's anchors: comment 6814998873.
   (`player_view::program_badge(..).is_on_program()`, the one on-program
   rule; the lowest playlist id when a cut shows two) shows at once;
   "Načítavam…" until every playlist's state was told
-  (`selection::states_known`, #225: never "nothing plays" before), then
+  (`selection::states_known` over the page's OWN read of
+  `/api/v1/playlists`, `None` until it landed: an empty list before the
+  load is no "every state known"; #225: never "nothing plays" before), then
   "Na programe nehrá žiadna pieseň.". Its title = THAT playlist's WS
   now-playing `wall_title`, else the row's; its YouTube id from the node's
   rows (the `GET /api/v1/playlists/{id}/videos` of every listed playlist,
@@ -87,7 +89,7 @@ Design: #265 comment 6814953166; the lane's anchors: comment 6814998873.
   unknown.
 - The search `block-search`: `song_block::search` over the node's songs
   (`catalog`: each YouTube id once, its title the server's pick — a row
-  with metadata first, then the oldest —, by title), every word, case and
+  with a song name first, then the oldest —, by title), every word, case and
   diacritics ignored (`fold`), at most `SEARCH_LIMIT` 20, nothing for an
   empty query; each `block-result` (`data-youtube-id`) with "Zablokovať".
 - The list `block-list` (`data-loaded` once read; "Načítavam…" before,

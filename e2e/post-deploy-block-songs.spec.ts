@@ -6,10 +6,12 @@
  *   blocked_at_ms}`.
  * - `/blok` loads in a phone-sized browser with its search, its blocked
  *   list LOADED (`data-loaded`, no error line) showing exactly the server's
- *   blocked songs, and its "Teraz na programe" area past "Načítavam…":
- *   a song on a youtube playlist on program has an enabled "Zablokovať v
- *   …" (its YouTube id found among the node's songs) or "Už je
- *   zablokovaná" (`block-gate.ts::currentAreaProblem`). Never clicked.
+ *   blocked songs, and its "Teraz na programe" area past "Načítavam…",
+ *   judged against the server read at the same poll
+ *   (`block-gate.ts::currentAreaProblem`): a song decoding on program must
+ *   show, and on a youtube playlist its "Zablokovať v …" must be enabled
+ *   (its YouTube id found among the node's songs) or read "Už je
+ *   zablokovaná". Never clicked.
  *
  * It NEVER blocks or unblocks a song on the box: a block would stop that
  * song being picked on the node. The block / unblock flow is the mock
@@ -17,7 +19,8 @@
  */
 
 import { test, expect } from "@playwright/test";
-import { currentAreaProblem } from "./block-gate";
+import { healthRow } from "./box-api";
+import { currentAreaProblem, type ProgramFacts } from "./block-gate";
 
 type Blocked = { youtube_id: string; title: string; blocked_at_ms: number };
 
@@ -69,42 +72,47 @@ test.describe("the song block page post-deploy verification (#265)", () => {
       });
     }
     const current = page.getByTestId("block-current");
-    await expect(current).not.toHaveAttribute("data-state", "loading", { timeout: 15_000 });
-    // The on-program playlist's kind, read AFTER the page settled.
-    const status = (await (await request.get("/api/v1/status")).json()) as {
-      active_playlist_ids?: number[];
-    };
-    const playlists = (await (await request.get("/api/v1/playlists")).json()) as {
-      id: number;
-      kind?: string;
-    }[];
-    const onAir = status.active_playlist_ids ?? [];
-    const programKind =
-      onAir.length === 1 ? (playlists.find((p) => p.id === onAir[0])?.kind ?? "youtube") : null;
     const button = page.getByTestId("block-current-btn");
-    // The node's song lists load after the program state: poll until the
-    // area holds (or 15 s), then log the read it ended on.
+    // The page and the server are read together at every poll (a cut in
+    // between must not judge one playlist's button by another's facts);
+    // the node's song lists load after the program state, so poll until the
+    // area holds (or 20 s), then log the read it ended on.
     let area = { state: "", buttonText: null as string | null, buttonDisabled: false };
+    let program: ProgramFacts = { onAir: [], kind: null, decoding: false };
     await expect
       .poll(
         async () => {
           try {
+            const status = (await (
+              await request.get("/api/v1/status", { timeout: 10_000 })
+            ).json()) as { active_playlist_ids?: number[] };
+            const onAir = status.active_playlist_ids ?? [];
+            const playlists = (await (
+              await request.get("/api/v1/playlists", { timeout: 10_000 })
+            ).json()) as { id: number; kind?: string }[];
+            const listed = onAir.length === 1 ? playlists.find((p) => p.id === onAir[0]) : undefined;
+            const health = onAir.length === 1 ? await healthRow(request, onAir[0]) : undefined;
+            program = {
+              onAir,
+              kind: listed ? (listed.kind ?? "youtube") : null,
+              decoding: health?.transport === "Playing",
+            };
             const hasButton = (await button.count()) === 1;
             area = {
               state: (await current.getAttribute("data-state")) ?? "",
               buttonText: hasButton ? (await button.innerText()).trim() : null,
               buttonDisabled: hasButton ? await button.isDisabled() : false,
             };
-            return currentAreaProblem(area, programKind);
+            return currentAreaProblem(area, program);
           } catch (e) {
             return `the area could not be read: ${e}`;
           }
         },
-        { timeout: 15_000, message: "the song on program's area" },
+        { timeout: 20_000, message: "the song on program's area" },
       )
       .toBeNull();
     console.log(
-      `[#265 block] on program (${programKind ?? "none"}): ` +
+      `[#265 block] program ${JSON.stringify(program)}: ` +
         `${(await current.innerText()).replace(/\s+/g, " ")} [${JSON.stringify(area)}]`,
     );
 
