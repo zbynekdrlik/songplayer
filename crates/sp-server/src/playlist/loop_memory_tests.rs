@@ -83,3 +83,48 @@ async fn a_custom_playlist_takes_a_song_of_its_items() {
         .unwrap();
     assert_eq!(remembered(&pool, 3).await.unwrap(), Some(21));
 }
+
+/// #300: the Dabing page's ▶ plays every row of the Dabing section on the
+/// Dabing playlist, a dub-requested song of another playlist included, so
+/// Loop takes such a song back after a restart — only while it is still in
+/// the section (requested, downloaded, not removed). A youtube playlist never
+/// takes another playlist's dub-requested song.
+#[tokio::test]
+async fn the_dabing_playlist_takes_a_dub_requested_song_of_another_playlist() {
+    let pool = pool().await;
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, kind) VALUES (4, 'Dabing', '', 'dabing')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    remember(&pool, 4, 21).await.unwrap();
+    assert_eq!(
+        remembered(&pool, 4).await.unwrap(),
+        None,
+        "not dub-requested: not in the Dabing section"
+    );
+    sqlx::query("UPDATE videos SET dub_requested = 1 WHERE id IN (21, 13)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(remembered(&pool, 4).await.unwrap(), Some(21));
+    remember(&pool, 1, 21).await.unwrap();
+    assert_eq!(
+        remembered(&pool, 1).await.unwrap(),
+        None,
+        "a youtube playlist does not take another's dub-requested song"
+    );
+    remember(&pool, 4, 13).await.unwrap();
+    assert_eq!(remembered(&pool, 4).await.unwrap(), None, "not downloaded");
+    remember(&pool, 4, 21).await.unwrap();
+    sqlx::query("UPDATE videos SET removed_at = 1 WHERE id = 21")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        remembered(&pool, 4).await.unwrap(),
+        None,
+        "left its YouTube playlist"
+    );
+}

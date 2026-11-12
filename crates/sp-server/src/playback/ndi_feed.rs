@@ -32,13 +32,14 @@
 //!   `ndi`.
 
 use std::collections::{BTreeMap, VecDeque};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::Serialize;
 use sp_core::config::NdiSource;
 use sp_core::genlock::{GENLOCK_GRID_FPS, grid_index_100ns};
 
 use crate::playback::frame_buf::{PerSize, SharedFrame};
+use crate::playback::ndi_discover::{DiscoverStatus, NdiDiscover};
 use crate::playback::program_max::Window;
 
 /// How many read-back pictures wait for the `program-output` thread; over
@@ -377,6 +378,8 @@ pub struct NdiStatus {
     /// boundary's constant black is no readback: it adds to neither.
     pub readback_us_p99: u64,
     pub uyvy_us_p99: u64,
+    /// #305 item 3: whether the network lists `SP-program`.
+    pub discoverable: DiscoverStatus,
 }
 
 /// The box's monotonic clock in µs, the one both threads read for a late
@@ -404,6 +407,8 @@ struct FeedState {
 #[derive(Default)]
 pub struct NdiFeed {
     state: Mutex<FeedState>,
+    /// #305 item 3: `SP-program`'s discoverability (`ndi_discover.rs`).
+    pub discover: Arc<NdiDiscover>,
 }
 
 impl NdiFeed {
@@ -495,6 +500,7 @@ impl NdiFeed {
             switches,
             readback_us_p99: windows.0.p99(),
             uyvy_us_p99: windows.1.p99(),
+            discoverable: self.discover.status(),
         }
     }
 }

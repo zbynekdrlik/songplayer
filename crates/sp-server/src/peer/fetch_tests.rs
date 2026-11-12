@@ -389,3 +389,74 @@ async fn a_node_fetches_into_its_parts_dir() {
     assert_eq!(part.parent(), Some(pp.cache().join("peer").as_path()));
     assert_eq!(std::fs::read(part).unwrap(), bytes(3_000, 2));
 }
+
+/// #307: the parts this client really hashed.
+fn hashes(client: &PeerClient) -> u64 {
+    client
+        .part_hashes
+        .load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// #307: a retry over a complete part that has not changed since it was
+/// verified does not read it again; one whose bytes changed (same size, a
+/// new mtime) is hashed again and refused.
+#[tokio::test]
+async fn an_unchanged_verified_part_is_hashed_once() {
+    let data = body();
+    let a = artifact_of(&data);
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let part = part_of(dir.path(), &a);
+    std::fs::write(&part, &data).unwrap();
+    let client = PeerClient::new();
+    let peer = peer_at(&server.uri());
+    client.fetch(&peer, &a, dir.path()).await.unwrap();
+    assert_eq!(hashes(&client), 1);
+    for _ in 0..3 {
+        client.fetch(&peer, &a, dir.path()).await.unwrap();
+    }
+    assert_eq!(
+        hashes(&client),
+        1,
+        "an unchanged verified part is not read again"
+    );
+
+    let mut other = data.clone();
+    other[0] ^= 0xff;
+    std::fs::write(&part, &other).unwrap();
+    let later = std::time::SystemTime::now() + Duration::from_secs(60);
+    std::fs::File::options()
+        .write(true)
+        .open(&part)
+        .unwrap()
+        .set_modified(later)
+        .unwrap();
+    let err = client.fetch(&peer, &a, dir.path()).await.unwrap_err();
+    assert!(matches!(err, PeerError::ShaMismatch { .. }), "{err:?}");
+    assert_eq!(hashes(&client), 2, "a changed part is hashed again");
+}
+
+/// #307: the memory is per client and bounded: past `MAX_VERIFIED` parts
+/// it starts over.
+#[test]
+fn the_verified_memory_is_bounded() {
+    let client = PeerClient::new();
+    let t = std::time::SystemTime::UNIX_EPOCH;
+    for i in 0..=MAX_VERIFIED {
+        client.remember_verified(Path::new(&format!("p{i}")), Some((1, t)), "s".into());
+    }
+    assert!(!client.was_verified(Path::new("p0"), Some((1, t)), "s"));
+    assert_eq!(client.verified.lock().unwrap().len(), 0);
+    client.remember_verified(Path::new("q"), Some((1, t)), "s".into());
+    assert!(client.was_verified(Path::new("q"), Some((1, t)), "s"));
+    assert!(!client.was_verified(Path::new("q"), Some((2, t)), "s"));
+    let later = t + Duration::from_secs(1);
+    assert!(!client.was_verified(Path::new("q"), Some((1, later)), "s"));
+    assert!(!client.was_verified(Path::new("q"), Some((1, t)), "x"));
+    assert!(!client.was_verified(Path::new("q"), None, "s"));
+}

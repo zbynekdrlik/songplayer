@@ -75,9 +75,10 @@ impl Exchange {
                 Some(self.not_now(job, video_id, youtube_id, peer, why).await)
             }
             AudioVerdict::Other => {
-                // #229 item C: held while it may not run here, quietly.
+                // #229 item C: it may not run here; #304: the peer's song
+                // first, then its copy (`peer::song_swap`), else held.
                 if !self.may_run_here(job).await {
-                    return Some(self.hold(job, video_id, youtube_id).await);
+                    return self.take_peers_song(job, plan, video_id, youtube_id).await;
                 }
                 info!(
                     youtube_id,

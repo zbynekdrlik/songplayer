@@ -10,13 +10,23 @@
  */
 
 import { test, expect } from "@playwright/test";
-import { classifyConnections, programReceiverVerdict } from "./ndi-health-gate";
+import {
+  classifyConnections,
+  discoverableState,
+  programReceiverVerdict,
+} from "./ndi-health-gate";
 
 const program = (
   source: number | null,
   connections: number,
   degraded_reason: string | null = null,
-) => ({ source, health: { connections }, degraded_reason });
+  discoverable = "discoverable",
+) => ({
+  source,
+  health: { connections },
+  degraded_reason,
+  ndi: { discoverable: { state: discoverable } },
+});
 
 test.describe("SP-program dark gate logic (#127, #221)", () => {
   test("classifyConnections distinguishes live / dark / never-polled", () => {
@@ -34,6 +44,7 @@ test.describe("SP-program dark gate logic (#127, #221)", () => {
       source: 7,
       connections: 2,
       degraded_reason: null,
+      discoverable: "discoverable",
     });
     expect(programReceiverVerdict(program(-1, 1)).ok, "OBS manuál on program").toBe(true);
   });
@@ -67,8 +78,48 @@ test.describe("SP-program dark gate logic (#127, #221)", () => {
   });
 
   test("an absent degraded_reason reads as none", () => {
-    const verdict = programReceiverVerdict({ source: 4, health: { connections: 1 } });
+    const verdict = programReceiverVerdict({
+      source: 4,
+      health: { connections: 1 },
+      ndi: { discoverable: { state: "discoverable" } },
+    });
     expect(verdict.ok).toBe(true);
     expect(verdict.degraded_reason).toBeNull();
+  });
+
+  test("fails while SP-program is not discoverable on the network (#305)", () => {
+    const lost = programReceiverVerdict(
+      program(7, 2, "SP-program not discoverable on the network", "not_discoverable"),
+    );
+    expect(lost.ok).toBe(false);
+    expect(lost.discoverable).toBe("not_discoverable");
+    expect(lost.degraded_reason).toBe("SP-program not discoverable on the network");
+    // The receiver count alone never passes it: PP's sender kept its
+    // receivers' count while nobody could find it.
+    expect(programReceiverVerdict(program(7, 2, null, "not_discoverable")).ok).toBe(false);
+    expect(programReceiverVerdict(program(7, 2, null, "starting")).ok, "still in its grace").toBe(
+      false,
+    );
+    expect(programReceiverVerdict(program(7, 2, null, "unavailable")).ok, "no finder").toBe(false);
+  });
+
+  test("a server that sends no discoverability fails the gate (#305)", () => {
+    const none = programReceiverVerdict({ source: 4, health: { connections: 1 } });
+    expect(none.ok).toBe(false);
+    expect(none.discoverable).toBe("missing");
+    const nulls = programReceiverVerdict({
+      source: 4,
+      health: { connections: 1 },
+      ndi: { discoverable: null },
+    });
+    expect(nulls.discoverable).toBe("missing");
+    expect(programReceiverVerdict({ ...nulls, ndi: null }).discoverable).toBe("missing");
+  });
+
+  test("discoverableState reads the state, or missing (#305, PP's gate)", () => {
+    expect(discoverableState(program(7, 0, null, "discoverable"))).toBe("discoverable");
+    expect(discoverableState(program(null, 0, null, "stale"))).toBe("stale");
+    expect(discoverableState(null), "no answer").toBe("missing");
+    expect(discoverableState({ source: 1, health: { connections: 1 } })).toBe("missing");
   });
 });

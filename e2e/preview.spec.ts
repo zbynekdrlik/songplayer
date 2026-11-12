@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 // #184 round G: the shim's pure transport-lag decisions, imported node-side
 // (like `audio-helpers.mjs` in frontend.spec.ts) so the table runs without a
 // browser. The module's class only touches browser globals inside methods.
@@ -68,6 +68,35 @@ async function startPreview(page: Page) {
   return { card, video };
 }
 
+/**
+ * readyState >= 3 within 15 s. #311: one run on the GitHub runner stayed at
+ * readyState 1 with no other evidence; a failure now names what the element
+ * holds (buffered ranges, network state, its error).
+ */
+async function expectDecoded(video: Locator) {
+  try {
+    await expect
+      .poll(async () => video.evaluate((el: HTMLVideoElement) => el.readyState), { timeout: 15000 })
+      .toBeGreaterThanOrEqual(3);
+  } catch (e) {
+    const state = await video.evaluate((el: HTMLVideoElement) => {
+      const ranges: string[] = [];
+      for (let i = 0; i < el.buffered.length; i++) {
+        ranges.push(`${el.buffered.start(i).toFixed(3)}-${el.buffered.end(i).toFixed(3)}`);
+      }
+      return {
+        readyState: el.readyState,
+        networkState: el.networkState,
+        currentTime: el.currentTime,
+        paused: el.paused,
+        buffered: ranges,
+        error: el.error ? `${el.error.code} ${el.error.message}` : null,
+      };
+    });
+    throw new Error(`${(e as Error).message}\n#311 video state: ${JSON.stringify(state)}`);
+  }
+}
+
 test("clicking start streams live A/V into an MSE <video> that decodes and advances", async ({
   page,
   request,
@@ -94,12 +123,7 @@ test("clicking start streams live A/V into an MSE <video> that decodes and advan
   try {
     // readyState >= 3 (HAVE_FUTURE_DATA) proves the browser actually DECODED the
     // streamed H.264+AAC — a broken stream or a codec-less browser never gets here.
-    await expect
-      .poll(
-        async () => video.evaluate((el: HTMLVideoElement) => el.readyState),
-        { timeout: 15000 },
-      )
-      .toBeGreaterThanOrEqual(3);
+    await expectDecoded(video);
 
     // Real decoded geometry (the fixture is 640x360).
     const width = await video.evaluate((el: HTMLVideoElement) => el.videoWidth);
@@ -171,12 +195,7 @@ test("the Dabing Player preview survives position ticks — WS opened once, neve
     await page.getByTestId("preview-start").click();
     const video = page.getByTestId("preview-video");
     await expect(video).toBeVisible({ timeout: 10000 });
-    await expect
-      .poll(
-        async () => video.evaluate((el: HTMLVideoElement) => el.readyState),
-        { timeout: 15000 },
-      )
-      .toBeGreaterThanOrEqual(3);
+    await expectDecoded(video);
 
     const playerHandle = await page.getByTestId("player").elementHandle();
     const videoHandle = await video.elementHandle();

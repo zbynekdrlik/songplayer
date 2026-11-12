@@ -236,10 +236,19 @@ async fn nothing_newer_is_held_keeping_the_wait() {
     assert_eq!(wait_rows(&pp).await, 1, "the wait is not ended");
 }
 
-/// A peer's copy made from another audio would run here: held instead.
+/// A peer's copy made from another audio would run here: held instead
+/// while the peer lists no song of its own for this node to take (#304:
+/// with one, this node takes it, `song_swap_tests.rs`).
 #[tokio::test]
-async fn another_audio_is_held() {
-    let (_snv, pp, id) = snv_lyrics_pp_off(false).await;
+async fn another_audio_with_no_song_of_the_peers_to_take_is_held() {
+    let (snv, pp, id) = snv_lyrics_pp_off(false).await;
+    let snv_video: String = sqlx::query_scalar("SELECT file_path FROM videos WHERE youtube_id = ?")
+        .bind(YT)
+        .fetch_one(snv.pool())
+        .await
+        .unwrap();
+    std::fs::remove_file(&snv_video).unwrap();
+    snv.hash_now().await;
     let audio = audio_path(&pp, id).await;
     std::fs::write(&audio, crate::peer::rig::bytes(3_000, 9)).unwrap();
     pp.hash_now().await;
@@ -249,6 +258,12 @@ async fn another_audio_is_held() {
     assert_eq!(lyrics_state(&pp, id).await, (0, 0, true));
     assert!(pp.ex.board.snapshot("pp").is_empty());
     assert_eq!(json_at(&pp), None);
+    let kept = std::fs::read(&audio).unwrap();
+    assert_eq!(
+        kept,
+        crate::peer::rig::bytes(3_000, 9),
+        "this node's audio stays"
+    );
 }
 
 /// A peer's copy that cannot be taken now (this node's audio cannot be

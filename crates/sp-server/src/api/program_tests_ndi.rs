@@ -10,6 +10,22 @@ use super::tests::{add_playlist, call};
 use crate::api::routes::tests::test_state;
 use crate::playback::frame_buf::SharedFrame;
 
+/// #305 item 3: `ndi.discoverable` before the check began.
+fn starting() -> serde_json::Value {
+    serde_json::json!({
+        "state": "starting",
+        "since_ms": null,
+        "seen_at_ms": null,
+        "read_at_ms": null,
+        "address": null,
+        "on_dante": false,
+        "reads": 0,
+        "misses": 0,
+        "expected": null,
+        "reason": null,
+    })
+}
+
 #[tokio::test]
 async fn get_program_reports_the_ndi_block() {
     let state = test_state().await;
@@ -29,6 +45,7 @@ async fn get_program_reports_the_ndi_block() {
             "switches": 0,
             "readback_us_p99": 0,
             "uyvy_us_p99": 0,
+            "discoverable": starting(),
         }),
         "the default: the CPU canvas, nothing read back"
     );
@@ -70,7 +87,73 @@ async fn get_program_reports_the_ndi_block() {
             "switches": 1,
             "readback_us_p99": 1700,
             "uyvy_us_p99": 450,
+            "discoverable": starting(),
         }),
         "the cut answer carries it too"
+    );
+}
+
+/// #305 item 3: `ndi.discoverable` as the check reads it, and its
+/// `degraded_reason` "SP-program not discoverable on the network" once it is
+/// lost past the grace; the receiver reason keeps precedence, and a listing
+/// again clears it.
+#[tokio::test]
+async fn get_program_reports_sp_program_s_discoverability() {
+    use crate::playback::ndi_discover::At;
+    use sp_ndi::FoundSource;
+    use sp_ndi::test_util::MockNdiSourceFinder;
+    let state = test_state().await;
+    let discover = state.program_bus.max().ndi.discover.clone();
+    let finder = MockNdiSourceFinder::default();
+    // The route judges staleness on the real monotonic clock: the reads are
+    // placed up to now (UTC values of the test's own).
+    let mono = At::now().mono_ms;
+    let at = |t: i64| At {
+        mono_ms: mono - 41_000 + t,
+        utc_ms: t,
+    };
+    discover.begin("RESOLUME-PP (SP-program)".into(), at(1_000));
+    for t in [11_000, 21_000, 31_000] {
+        discover.poll(&finder, &[], || at(t));
+    }
+    let (status, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["ndi"]["discoverable"]["state"], "not_discoverable");
+    assert_eq!(json["ndi"]["discoverable"]["since_ms"], 31_000);
+    assert_eq!(json["ndi"]["discoverable"]["misses"], 3);
+    assert_eq!(
+        json["degraded_reason"], "SP-program not discoverable on the network",
+        "nothing on program: the source still must be findable"
+    );
+
+    // A source on program with no receiver: the receiver reason first.
+    let pid = add_playlist(&state.pool, "slow").await;
+    state.program_bus.select_initial(pid, None);
+    state.program_bus.set_connections(0);
+    let (_, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
+    assert_eq!(json["degraded_reason"], "no NDI receiver on SP-program");
+
+    state.program_bus.set_connections(1);
+    finder.set_sources(vec![FoundSource {
+        name: "resolume-pp (SP-program)".into(),
+        url: "10.77.8.201:5961".into(),
+    }]);
+    discover.poll(&finder, &[], || at(41_000));
+    let (_, json) = call(state, "GET", "/api/v1/program", None).await;
+    assert_eq!(json["degraded_reason"], serde_json::Value::Null);
+    assert_eq!(
+        json["ndi"]["discoverable"],
+        serde_json::json!({
+            "state": "discoverable",
+            "since_ms": 41_000,
+            "seen_at_ms": 41_000,
+            "read_at_ms": 41_000,
+            "address": "10.77.8.201:5961",
+            "on_dante": false,
+            "reads": 4,
+            "misses": 0,
+            "expected": "RESOLUME-PP (SP-program)",
+            "reason": null,
+        })
     );
 }

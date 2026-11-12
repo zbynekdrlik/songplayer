@@ -405,7 +405,12 @@ wait for a peer that has the song", below).
   and fetch one job's artifacts from ONE peer (`FetchPlan` = one peer):
   two fetches of the same video and kind from two peers would drop each
   other's part. A failed adoption keeps a verified part: the next attempt
-  re-hashes it locally and does not transfer it again.
+  does not transfer it again, and does not hash it again either while its
+  size and mtime are the ones this process verified (#307,
+  `PeerClient::verified`, in memory, at most 256 parts, then it starts
+  over; `part_hashes` counts the real hashes); a changed or unknown part
+  is hashed as before. Like `peer_hashes`, it trusts size + mtime: only an outside overwrite
+  at the same size within one NTFS 100 ns tick would slip through.
 - The Cloudflare Access service token for PP is MAIN SESSION OPS (plan task
   5.3 step 8, pending the owner on 7.10.2026, #229 comment 6031719797):
   until it exists the probe of `https://sp.newlevel.media` answers
@@ -727,7 +732,7 @@ wait for a peer that has the song", below).
   video share files by name (#136), so a final name may hold another row's
   file: the VIDEO is renamed first, and when it cannot take its name (that
   row's video open in a player) nothing is touched and both verified parts
-  stay for the next ask (re-hashed, no transfer); when the audio then cannot
+  stay for the next ask (no transfer; not hashed again while unchanged, #307); when the audio then cannot
   take its name, a video this attempt placed goes back into its part, a
   video that was there stays.
 - `Exchange::run_here` drops the parts of the job's needed kinds
@@ -804,6 +809,38 @@ wait for a peer that has the song", below).
     peer's copy is made from another audio than this node's`): a song this
     node downloaded itself (nobody had it within 2 h), or a peer that
     downloaded its song again since;
+  - another audio while the job may NOT run here (#304: the lyrics with
+    paid AI off, PP) → this node takes the PEER'S SONG first
+    (`Exchange::take_peers_song`, `peer/song_swap.rs`), else held as
+    before: the peer's video + audio (`decide::holds(Job::Download)`, its
+    audio = the plan's `peer_audio`, else held) fetched as sha-checked
+    parts, swapped under `SONG_FILES` over the names the row records (the
+    names never change, so no rename / re-link of the set; the old files
+    linked under their first free set-aside name `<name>.replaced`
+    (`cache::free_set_aside_name`, never `.prev`, the video upgrade's
+    rollback source: a leftover is the self-heal's WARN and the sweep's
+    30-day `replaced`) until the placed sizes match the catalog, put back
+    on any failure, a placed video back into its part); held as well
+    while the row's files changed since the fetch began (names AND each
+    file's size / mtime: an upgrade or repair in place) or a stems
+    separation of the song runs (`stems::progress::in_flight`, its
+    `mark_stems_done` would record old-audio stems); then
+    `record_origins` (video + audio), the audio's `peer_hashes` entry (the
+    catalog's sha at the placed size / mtime), `format::record(None)`, the
+    V35 upgrade record of the replaced video cleared (no rollback puts the
+    old video back), and this node's stems of the OLD audio deleted with
+    its `{yt}_stemsep` resume dir, their stem records
+    forgotten and every row of that audio that recorded them
+    `requeue_lost_stems` (the stems job then takes the peer's: the same
+    audio now). The hook then takes the copy in the SAME pick
+    (`unless_peers_audio` answers `None`). Bounded: once swapped the
+    record vouches (`Same`), so it repeats only when the peer's audio sha
+    changes; a row with no video or audio recorded, a peer listing no
+    pair, a moved row or a refused name (a player holds it) = the 30-min
+    hold, the parts kept (no re-transfer). INFO `exchange: this node's
+    audio is not the peer's - the peer's video and audio replace it`.
+    Paid AI on, the stems hook and SNV (no peers): unchanged. Tests:
+    `song_swap_tests.rs`, `held_tests.rs::another_audio_with_no_song_of_the_peers_to_take_is_held`;
   - this node cannot tell yet → waited for like a failed fetch
     (`after_failed_fetch` with `PeerError::NotYet`, no attempt, within the
     2 h bound), never decided on a guess: the peer lists no audio of the

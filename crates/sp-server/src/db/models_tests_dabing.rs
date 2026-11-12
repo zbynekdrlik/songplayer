@@ -625,3 +625,69 @@ async fn requesting_a_dub_clears_an_earlier_error() {
     assert_eq!(col_str(&pool, id, "dub_status").await, "queued");
     assert_eq!(col_opt_str(&pool, id, "dub_error").await, None);
 }
+
+/// #300: a listed row is playable on the Dabing playlist exactly while the
+/// play-video gate admits it there: downloaded and still in its YouTube
+/// playlist. The Dabing page disables the ▶ of every other row.
+#[tokio::test]
+async fn list_dub_videos_row_says_whether_the_dabing_playlist_can_play_it() {
+    let pool = setup().await;
+    let id = insert_video(&pool, "vp", "Playable").await;
+    set_dub_requested(&pool, id, true).await.unwrap();
+    let playable = |pool: SqlitePool| async move {
+        let rows = list_dub_videos(&pool).await.unwrap();
+        let gate = dabing_video_membership(&pool, 7, id).await.unwrap();
+        (rows[0].playable, gate)
+    };
+    assert_eq!(
+        playable(pool.clone()).await,
+        (false, Some(false)),
+        "not downloaded"
+    );
+    sqlx::query("UPDATE videos SET normalized = 1 WHERE id = ?")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        playable(pool.clone()).await,
+        (true, Some(true)),
+        "downloaded"
+    );
+    sqlx::query("UPDATE videos SET removed_at = 1 WHERE id = ?")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    // #303: a song that left its YouTube playlist is no longer listed at
+    // all, and the gate refuses it.
+    assert!(
+        list_dub_videos(&pool).await.unwrap().is_empty(),
+        "left its playlist"
+    );
+    assert_eq!(dabing_video_membership(&pool, 7, id).await.unwrap(), None);
+}
+
+/// #303 (#260's rule): the Dabing list never lists a dub-requested row whose
+/// song left its YouTube playlist (`removed_at` set); the other rows stay.
+#[tokio::test]
+async fn list_dub_videos_leaves_out_a_song_that_left_its_playlist() {
+    let pool = setup().await;
+    let kept = insert_video(&pool, "vk", "Kept").await;
+    let gone = insert_video(&pool, "vg", "Gone").await;
+    set_dub_requested(&pool, kept, true).await.unwrap();
+    set_dub_requested(&pool, gone, true).await.unwrap();
+    sqlx::query("UPDATE videos SET removed_at = 1 WHERE id = ?")
+        .bind(gone)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let ids: Vec<i64> = list_dub_videos(&pool)
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.video_id)
+        .collect();
+    assert_eq!(ids, vec![kept]);
+}

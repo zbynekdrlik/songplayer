@@ -2,6 +2,9 @@
 paths:
   - crates/sp-server/src/db/models_dabing.rs
   - crates/sp-server/src/api/dabing.rs
+  - crates/sp-server/src/api/dabing_probe.rs
+  - e2e/post-deploy-dub-live.spec.ts
+  - e2e/dub-live-gate*.ts
   - crates/sp-server/src/api/routes_import.rs
   - crates/sp-server/src/startup_dabing.rs
   - crates/sp-server/src/dabing/**
@@ -44,7 +47,8 @@ stems worker's manual bucket — D3 uses it).
   `lyrics_manual_priority` to 1 (so the chain's inputs jump their queues, spec
   §4). Un-requesting sets `dub_status='none'`, `dub_requested=0`, and LEAVES the
   priority flags (the video may still want stems/lyrics).
-- `list_dub_videos(pool)` — `dub_requested=1`, newest first
+- `list_dub_videos(pool)` — `dub_requested=1` and still in its YouTube
+  playlist (`removed_at IS NULL`, #303), newest first
   (`dub_requested_at DESC, id DESC`).
 - `set_dub_mix_ratio(pool, id, ratio)` — clamps to `0.0..=1.0` (NaN → 1.0),
   persists, returns the clamped value.
@@ -93,8 +97,19 @@ paste field (`POST /api/v1/dabing/import`) + a 2 s poll filling
 `store.dabing: RwSignal<Vec<DubRow>>` (page-owned loop, `try_get_untracked` on the
 cancel flag per `sp-ui-frontend.md`). `components/dabing_list.rs` renders rows
 newest-first with the glyph row `stiahnuté → stemy → prepis → preklad → dabing →
-pripravené` (or `chyba: <krok>`) + a **Prehrať** button (reuses
-`api::post_live_play_video` — it already accepts any playlist id).
+pripravené` (or `chyba: <krok>`) + a **Prehrať** button. #300: the ▶ plays
+EVERY row on the Dabing playlist (`store.dabing_playlist_id`, the id the page's
+Player shows; no id yet = no request), never on the row's own `playlist_id` (a
+video toggled for dubbing elsewhere keeps its playlist, maybe the one on
+program). The server's `post_play_video` admits on a `dabing` playlist every
+video of the Dabing section (`models_dabing::dabing_video_membership`: its own
+imports + every dub-requested video, `removed_at IS NULL`; not normalized → 409,
+else 404); `DubRow.playable` (normalized) disables the ▶ of a row the gate
+refuses; a song that left its YouTube playlist is not listed at all
+(`list_dub_videos`: `removed_at IS NULL`, #303); Loop's remembered song on the Dabing playlist takes a
+dub-requested song of another playlist too (`loop_memory::remembered`). The
+mock (`e2e/mock-api.mjs`) mirrors it: 404 / 409 as text, the off-program state +
+NowPlaying for playlist 500, every call in `/__mock/play-video-calls`.
 `components/dub_toggle.rs` is the per-row Dabing toggle placed in `video_list.rs`
 (any playlist). The `videos` list payload gains `dub_requested` + `dub_status`
 (additive, `#[serde(default)]`, populated in `db::models::row_to_video`).
@@ -741,6 +756,49 @@ session stats), `sp-core config` (keys, defaults, `dub_voice_label`),
 `subtitles_tests.rs::one_continuous_session_chunk_builds_a_monotonic_bilingual_track`.
 Trap: the staging secret-scan blocks a test literal `secret="…"` — the fake runner
 takes `redact_word=`.
+
+## The live gate (#232 unit 2, design 6807882928)
+
+`POST /api/v1/dabing/probe` (`api/dabing_probe.rs` → `dabing/probe.rs::run_probe`)
+dubs ONE 20 s clip from the box through the worker's own child call
+(`child::run_live_translate`, the scripts `worker::materialise_scripts` ships,
+`bootstrap::ensure_genai`), with `dub_model_from` / `dub_voice_from` of the
+settings and the first `paid_ai::gemini_keys` key. Never give the probe its own
+child, args or session.
+
+- The clip: the lowest `videos.id` with `normalized = 1`, its audio on disk,
+  outside the test item and the songs that left their playlist
+  (`db::queue_row!`); the input by `dub_input_audio` (`source` `vocal_stem` /
+  `audio`); 20 s from the first served lyrics line (`g35t_probe::first_line_start`),
+  else from 30 s; cut to a 16-bit WAV by the app's ffmpeg in a temp dir. The pick
+  and the cut hold `cache::SONG_FILES` (its wait bounded at 15 s, `LOCK_TIMEOUT`),
+  the cut bounded at 15 s.
+- The dub, its transcripts, its `_dub_events.jsonl` and its work dir stay in that
+  temp dir (dropped after). NOT under the heavy slot (network-bound; a gate must
+  not wait behind stems), plan `HeavyStepPlan::cpu_idle()`. The scripts + SDK
+  check + child are bounded at 240 s (`DUB_TIMEOUT`), the read-back at 15 s.
+- The answer `{ok, model, voice, youtube_id, start_ms, clip_ms, source,
+  elapsed_ms, dub_ms, dub_rms_dbfs, sk_lines, sample, session, error}`: the dub is
+  read back by ffmpeg as 16 kHz mono f32 (`measure_args`, `level_of`),
+  `sk_lines` / `sample` are the subtitle builder's own lines
+  (`transcripts_to_track`). `ok` = the child finished, RMS ≥ −45 dBFS
+  (`MIN_DUB_RMS_DBFS`), ≥ 1 Slovak line (`verdict`). Every error text is put on one
+  line, redacted with the keys, then cut (`finish` through
+  `gemini_api::body_excerpt`).
+- 409 (nothing sent) while paid AI is off, with no key, no venv python, no song or
+  no ffmpeg; 200 with `ok: false` for an unreadable catalogue, busy song files, a
+  failed cut or dub. `clip_ms` is the REQUESTED length (a song ending sooner gives
+  a shorter cut). A temp dir a killed child still held (Windows) is WARNed, never
+  silent.
+- `e2e/post-deploy-dub-live.spec.ts` (SNV only; PP's config lists its specs and
+  leaves it out) gates through the pure `e2e/dub-live-gate.ts`
+  (`dubLiveGateFailures(status, probe)`), unit-tested by the mock-suite
+  `e2e/dub-live-gate.spec.ts`. The model is not pinned (a setting); the spec logs
+  the answer.
+- `cut_clip` / `measure_dub` / `ffmpeg_output` / `run_dub` / `read_back` and the
+  route are `mutants::skip` glue; every decision is in a tested pure fn.
+- UNVERIFIED until the first SNV run: the real session's time for a 20 s clip
+  (expected ~20 s streaming + ≤ 8 s drain + the loudness passes, well under 240 s).
 
 ## Upgrade path (the ONLY sanctioned change to this frozen path)
 When a newer Live Translate model ships: set `dub_model` (Nastavenia → Dabing →

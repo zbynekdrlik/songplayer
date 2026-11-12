@@ -11,9 +11,11 @@
 //!
 //! - [`child`] — the Rust wrapper spawning `scripts/dub_worker.py live-translate`.
 //! - [`worker`] — the background [`worker::DubWorker`].
+//! - [`probe`] — the live post-deploy probe of Live Translate (#232 unit 2).
 //! - [`subtitles`] / [`subtitles_store`] — the D3 EN/SK subtitle track.
 
 pub mod child;
+pub mod probe; // #232 unit 2: the live Gemini Live Translate probe
 pub mod subtitles;
 pub mod subtitles_store;
 pub mod worker;

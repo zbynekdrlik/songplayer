@@ -10,6 +10,9 @@ paths:
   - "crates/sp-server/src/playback/ndi_health_log.rs"
   - "crates/sp-server/src/playback/ndi_health_tests*.rs"
   - "crates/sp-server/src/playback/startup_pipelines.rs"
+  - "crates/sp-server/src/playback/ndi_discover*.rs"
+  - "crates/sp-ndi/src/source_finder*.rs"
+  - "crates/sp-server/src/api/program_tests_ndi.rs"
   - "e2e/post-deploy.spec.ts"
   - "e2e/ndi-health-gate.ts"
   - "e2e/ndi-health-gate.spec.ts"
@@ -105,6 +108,63 @@ the first served pair, before any receiver can re-attach, so every start
 with a source on program logs the WARN, then the INFO once a receiver
 attaches: the pair times the receivers' re-attach after a restart.
 Tests: `ndi_health_expect_tests.rs`, `api/program_tests.rs`.
+
+## `SP-program` must be DISCOVERABLE, not only fed (#305 item 3)
+
+PP 11.11.2026: after a NIC drop the sender, its data port 5961 and its frame
+counters lived on, receivers already connected kept the count ≥ 1, and no
+receiver could FIND `RESOLUME-PP (SP-program)` (its OS mDNS registration was
+gone; FINDING 6806246765). A liveness signal names that state now — it is not
+the fix (the cause waits for PP's evidence; never a sender re-create or a
+runtime re-init, the #60 ruling).
+
+- `sp-ndi` `source_finder.rs`: `NdiSourceFinder` + `RealNdiSourceFinder`,
+  ONE `NDIlib_find_create_v2` instance (`show_local_sources = true`) made in
+  `new`, destroyed in `Drop`; a poll = `find_wait_for_sources` +
+  `find_get_current_sources` on it, under a Mutex. Never a finder per poll.
+  This is NOT the deleted #196 sender-URL discovery (`find.rs` /
+  `source_url.rs`), and the NDI input's own short-lived 30 s list
+  (`find_source_names`) stays separate. `MockNdiSourceFinder`
+  (`sp_ndi::test_util`): `set_sources`, `polls()`.
+- `playback/ndi_discover.rs` (pure, mutation-gated; the task and the log
+  lines `mutants::skip`): the expected name `<COMPUTERNAME> (SP-program)`
+  (ASCII-case-insensitive), one read every 10 s on the blocking pool (1 s
+  SDK wait), states `starting` → `discoverable` / `not_discoverable` /
+  `unavailable` (no SDK, no finder, no `COMPUTERNAME`) / `stale` (no read
+  for 35 s, counted from the start before the first read: a stuck SDK read
+  or a dead task; judged when the status is READ, `status_at`). Not listed
+  for 3 reads in a row past a 30 s grace from the task's start = lost: one
+  WARN `ndi discover: SP-program not discoverable on the network`, one INFO
+  on the return (and on the first sighting). The grace and the staleness run
+  on the box's monotonic clock (`At { mono_ms, utc_ms }`, `audio_host::mono`):
+  a date step moves neither; the `*_ms` fields shown are UTC.
+- A listing in a Dante subnet (`dante_guard::global().subnets()`) COUNTS,
+  reported as `on_dante: true`: resolume-snv's local finder resolves
+  `SP-program` to its Dante leg (`10.77.7.107:5961`), the accepted case of
+  ROZHODNUTÉ 6806263675. A non-Dante entry is preferred when several match.
+- Served as `ndi.discoverable {state, since_ms, seen_at_ms, read_at_ms,
+  address, on_dante, reads, misses, expected, reason}` on `GET /api/v1/program`
+  (`NdiFeed::discover`, so `MaxOut` carries it; no global); the top-level
+  `degraded_reason` = `"SP-program not discoverable on the network"` while
+  `not_discoverable` — whatever is on program — with the receiver reason
+  first when both hold.
+- The post-deploy gate's `programReceiverVerdict` requires
+  `ndi.discoverable.state === "discoverable"` (`starting`, `unavailable`,
+  `stale` and a missing block fail too; `verdict.discoverable` names it).
+  PP runs no `post-deploy.spec.ts`, so `post-deploy-pp.spec.ts` "SP-program
+  is discoverable on the network (#305)" polls `discoverableState` (≤ 60 s).
+- `degraded_reason` can now be non-null with `source: null` (nothing on
+  program, the source still not findable): a reader of the program API must
+  not assume a reason implies a source.
+- Known limit, for the box acceptance: an in-process finder may be answered
+  from the runtime's own registry rather than the OS mDNS view. Compare
+  `ndi.discoverable` with a SEPARATE finder process on the box before
+  trusting a `discoverable`.
+- Tests: `ndi_discover_tests.rs` (name, Dante, the listing chosen, the grace
+  and the 3-read loss on the monotonic clock, `stale`, the return, one read
+  through the mock),
+  `api/program_tests_ndi.rs` (the route block + the reason's precedence),
+  `source_finder_mock.rs`, `e2e/ndi-health-gate.spec.ts`.
 
 ## `SP-program`'s port is pinned across a restart (#196)
 
@@ -245,7 +305,7 @@ there needs tests that kill its mutants.
 
 ## E2E dark gate (post-deploy suite) — on `SP-program` (#127, #221 B4 step 6)
 
-`post-deploy.spec.ts` "SP-program has a live NDI receiver — the program is not dark" polls `GET /api/v1/program` (≤ 60 s, no scene switch) until `programReceiverVerdict` says `ok`: a source on program, `health.connections > 0` and the server's `degraded_reason` `null`. `connections`: `>0` live, `0` dark (also right after a start, before the sender's first poll, when the server names no reason yet), `<0` no valid reading (the SDK's error value) — keep polling on both; `source: null` = nothing on program, a failure too. `post-deploy-dabing.spec.ts` asks the same of SP-program next to "the Dabing pipeline is up" (the dub takes the program). Pure decision logic lives in `e2e/ndi-health-gate.ts` (unit-tested by `ndi-health-gate.spec.ts` in the ubuntu **mock** suite — a `test()` that never touches `page` runs with no browser/box). Keep the baseline-scene discipline (CLAUDE.md "E2E must not switch to disruptive OBS scenes").
+`post-deploy.spec.ts` "SP-program has a live NDI receiver — the program is not dark" polls `GET /api/v1/program` (≤ 60 s, no scene switch) until `programReceiverVerdict` says `ok`: a source on program, `health.connections > 0`, the server's `degraded_reason` `null`, and (#305 item 3) `ndi.discoverable.state` `discoverable`. `connections`: `>0` live, `0` dark (also right after a start, before the sender's first poll, when the server names no reason yet), `<0` no valid reading (the SDK's error value) — keep polling on both; `source: null` = nothing on program, a failure too. `post-deploy-dabing.spec.ts` asks the same of SP-program next to "the Dabing pipeline is up" (the dub takes the program). Pure decision logic lives in `e2e/ndi-health-gate.ts` (unit-tested by `ndi-health-gate.spec.ts` in the ubuntu **mock** suite — a `test()` that never touches `page` runs with no browser/box). Keep the baseline-scene discipline (CLAUDE.md "E2E must not switch to disruptive OBS scenes").
 
 
 ## cg OBS's program is NOT read any more (#221 L6)

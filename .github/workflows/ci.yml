@@ -135,9 +135,9 @@ jobs:
       - name: Install Python eval dependencies (ruff + pytest + jsonschema + requests + numpy + soundfile)
         run: pip install ruff==0.5.7 pytest==8.3.2 jsonschema==4.23.0 requests==2.32.3 numpy==2.1.1 soundfile==0.12.1
       - name: Lint with ruff
-        run: ruff check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_spout.py scripts/wall_locate.py scripts/wall_analysis.py scripts/wall_spans.py
+        run: ruff check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py scripts/program_transport.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_spout.py scripts/wall_locate.py scripts/wall_analysis.py scripts/wall_spans.py
       - name: Format check with ruff
-        run: ruff format --check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_spout.py scripts/wall_locate.py scripts/wall_analysis.py scripts/wall_spans.py
+        run: ruff format --check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py scripts/program_transport.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_spout.py scripts/wall_locate.py scripts/wall_analysis.py scripts/wall_spans.py
       - name: Run pytest
         run: pytest eval/lyrics/tests -v
       - name: Run scripts pytest (#171 segment stitch / additivity, #156 minidump helpers)
@@ -375,10 +375,9 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     needs: [build-wasm]
-    # The job takes ~9 min. Its browser install runs `apt-get update`, and on
-    # 7.10.2026 an Ubuntu mirror stalled it for 70 min (main run 37670589944)
-    # until it was cancelled by hand; with no bound it would have held the
-    # release for GitHub's 6 h default. A stall now fails the job.
+    # The job takes ~9 min. On 7.10.2026 an Ubuntu mirror stalled its old
+    # apt-based browser install for 70 min (main run 37670589944); with no
+    # bound it would have held the release for GitHub's 6 h default.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -392,18 +391,24 @@ jobs:
           path: dist/
       - name: Install E2E dependencies
         run: cd e2e && npm ci
-      # `--with-deps` runs apt-get. On 7.10.2026 its `apt-get update` stalled
-      # on an Ubuntu mirror twice in a row (70 min, then 28 min+) with apt's
-      # defaults; explicit 30 s network timeouts and 3 retries make a stalled
-      # fetch fail over to a retry instead of waiting out the job bound.
-      - name: Bound apt's network waits
-        run: |
-          printf 'Acquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAcquire::Retries "3";\n' \
-            | sudo tee /etc/apt/apt.conf.d/99-ci-network-timeouts
+      # 11.11.2026 (runs 43034979480 x2, 43040260824): the runner's Ubuntu
+      # archive did not resolve (azure.archive.ubuntu.com; archive.ubuntu.com
+      # is routed to it on the runner too), so `--with-deps` / the Chrome
+      # .deb could install nothing — the fourth apt stall since 7.10. The
+      # job needs no apt at all: ubuntu-latest ships Google Chrome and with
+      # it every system library Chromium loads, so only Playwright's own
+      # Chromium build is downloaded (from Playwright's CDN, not apt) and the
+      # preinstalled Chrome is used as the `chrome` channel.
       - name: Install Playwright browsers
-        run: cd e2e && npx playwright install chromium --with-deps
-      - name: Install Google Chrome (H.264/AAC for the #178 preview MSE E2E)
-        run: cd e2e && npx playwright install chrome
+        run: cd e2e && npx playwright install chromium
+      - name: Google Chrome (H.264/AAC for the #178 preview MSE E2E)
+        run: |
+          set -euo pipefail
+          if [ -x /opt/google/chrome/chrome ]; then
+            /opt/google/chrome/chrome --version
+          else
+            cd e2e && npx playwright install chrome
+          fi
       - name: Start mock API
         run: cd e2e && node mock-api.mjs &
       - name: Wait for mock API
@@ -1068,6 +1073,7 @@ jobs:
     # older run / a moved ref).
     outputs:
       deployed_version: ${{ steps.healthcheck.outputs.deployed_version }}
+      program_start: ${{ steps.program_start.outputs.program_start }}
     steps:
       - uses: actions/checkout@v4
 
@@ -1176,6 +1182,26 @@ jobs:
             Write-Error "FAIL: scripts/runner-autostart.ps1 exited $code - the runner's auto-start is not delivered (see its lines above); SongPlayer was not stopped"
             exit 1
           }
+
+      # #308: a restart starts SP-program's playlist playing, and the E2E
+      # job's restore cuts re-kick it too. Record SP-program's playlist and
+      # its transport BEFORE this job stops SongPlayer; the E2E job's last
+      # step pauses it again when it did not play here (camera-box's rig
+      # needs SP-program silent, 11.11.2026). No answer (SongPlayer down) =
+      # no record, a warning, and nothing put back.
+      - name: Record SP-program's playlist transport (#308)
+        id: program_start
+        shell: powershell
+        run: |
+          $py = "C:\Program Files\Python312\python.exe"
+          $file = "$env:RUNNER_TEMP\sp-program-start.json"
+          & $py scripts\program_transport.py save $file
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::warning::SP-program's start state could not be read (exit $LASTEXITCODE): nothing to put back after the E2E job"
+            exit 0
+          }
+          $json = (Get-Content -Path $file -Raw).Trim()
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "program_start=$json"
 
       - name: Deploy SongPlayer
         id: deploy
@@ -2642,6 +2668,25 @@ jobs:
             exit 1
           }
           Write-Host "OK: post-deploy feature-level Playwright passed"
+
+      # #308: put SP-program's playlist back as the job found it (a playlist
+      # paused or idle before the job and restarted by a restore cut is
+      # paused again; an operator's cut or play meanwhile is kept). Runs
+      # after a failed suite too.
+      - name: Put SP-program's playlist transport back (#308)
+        if: ${{ !cancelled() && needs.deploy-resolume.outputs.program_start != '' }}
+        shell: powershell
+        env:
+          PROGRAM_START: ${{ needs.deploy-resolume.outputs.program_start }}
+        run: |
+          $py = "C:\Program Files\Python312\python.exe"
+          $file = "$env:RUNNER_TEMP\sp-program-start.json"
+          Set-Content -Path $file -Value $env:PROGRAM_START -NoNewline -Encoding ascii
+          & $py scripts\program_transport.py restore $file
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "FAIL: SP-program's playlist transport was not put back (exit $LASTEXITCODE)"
+            exit 1
+          }
 
       - name: Upload post-deploy Playwright report on failure
         if: failure()

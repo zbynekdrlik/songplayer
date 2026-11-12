@@ -320,6 +320,7 @@ impl<B: NdiBackend> Drop for NdiSender<B> {
 pub mod test_util {
     pub use crate::receive_mock::{MockNdiReceiveBackend, MockVideoFrame};
     pub use crate::sender_mock::MockNdiBackend;
+    pub use crate::source_finder_mock::MockNdiSourceFinder;
 }
 
 // ---------------------------------------------------------------------------

@@ -2,6 +2,9 @@ import { test, expect } from "@playwright/test";
 import {
   WINDOW_BLOCKS,
   asioGateFailures,
+  danteGateFailures,
+  danteGateLog,
+  DANTE_LATE_TOP_BINS,
   lv1PathFailures,
   gatedAsioOutputs,
   waitingForClock,
@@ -10,6 +13,7 @@ import {
   parseVbanHeader,
   receiverFailures,
   type AsioTelemetry,
+  type DanteTelemetry,
   type OutputStatus,
 } from "./audio-outputs-gate";
 
@@ -313,4 +317,143 @@ test("a native Dante output is gated like an ASIO one (#285)", () => {
   const dante = { id: "out-4", type: "dante", enabled: true, state: "running" } as OutputStatus;
   const off = { ...dante, id: "out-5", enabled: false } as OutputStatus;
   expect(gatedAsioOutputs([dante, off]).map((o) => o.id)).toEqual(["out-4"]);
+});
+
+// #285 (design 6809328088): the native Dante output's stack figures over
+// the ASIO gate's minute. `late_bins` at dstack's edges: < 0.25, 0.5, 1, 2,
+// 5 ms, then 5 ms or more; the last two are 2 ms or more late.
+const danteFigures = (over: Partial<DanteTelemetry> = {}): DanteTelemetry => ({
+  clock_ready: true,
+  live_flows: 1,
+  late_bins: [1000, 20, 3, 1, 0, 0],
+  late_max_us: 2400,
+  send_max_us: 90,
+  pump_late: 2,
+  pump_missed: 0,
+  pump_overruns: 1,
+  ...over,
+});
+const out4 = (blocks: number, dante: DanteTelemetry | undefined): OutputStatus => ({
+  ...dvs(blocks, { id: "out-4", type: "dante", name: "Dante" }, { driver: "SongPlayer", driver_rate: 48000 }),
+  rate: 48000,
+  ...(dante ? { dante } : {}),
+});
+
+test.describe("Dante gate (#285)", () => {
+  test("a clean minute passes, its late maximum is not gated", () => {
+    expect(DANTE_LATE_TOP_BINS).toBe(2);
+    const later = danteFigures({ late_bins: [90_000, 900, 40, 9, 0, 0], late_max_us: 9_000, send_max_us: 900 });
+    expect(danteGateFailures(out4(100, danteFigures()), out4(1900, later))).toEqual([]);
+    // Only the bins under 2 ms grew, by one packet each.
+    const one = danteFigures({ late_bins: [1001, 21, 4, 2, 0, 0] });
+    expect(danteGateFailures(out4(100, danteFigures()), out4(1900, one))).toEqual([]);
+    // Packets already late before the minute stand as they were.
+    const before = danteFigures({ late_bins: [1000, 20, 3, 1, 4, 2] });
+    const after = danteFigures({ late_bins: [5000, 20, 3, 1, 4, 2] });
+    expect(danteGateFailures(out4(100, before), out4(1900, after))).toEqual([]);
+    // A gate run with the asio gate: the same output passes both.
+    expect(asioGateFailures(out4(100, danteFigures()), out4(1900, later))).toEqual([]);
+  });
+
+  test("an output of another type is not judged", () => {
+    expect(danteGateFailures(dvs(100), dvs(1900))).toEqual([]);
+    const vban = lv1(130, { dante: danteFigures({ clock_ready: false }) });
+    expect(danteGateFailures(lv1(100), vban)).toEqual([]);
+  });
+
+  test("a running Dante output with no figures fails, naming it and the read", () => {
+    const bins = danteFigures({ late_bins: [2000, 20, 3, 1, 0, 0] });
+    expect(danteGateFailures(out4(100, undefined), out4(1900, bins))).toEqual([
+      "Dante output out-4: no Dante figures (outputs[i].dante) at the first read",
+    ]);
+    expect(danteGateFailures(out4(100, danteFigures()), out4(1900, undefined))).toEqual([
+      "Dante output out-4: no Dante figures (outputs[i].dante) at the second read",
+    ]);
+    expect(danteGateFailures(out4(100, undefined), out4(1900, undefined))).toEqual([
+      "Dante output out-4: no Dante figures (outputs[i].dante) at the first and second read",
+    ]);
+  });
+
+  test("the clock must be ready at both reads", () => {
+    const sent = danteFigures({ late_bins: [2000, 20, 3, 1, 0, 0] });
+    expect(danteGateFailures(out4(100, danteFigures({ clock_ready: false })), out4(1900, sent))).toEqual([
+      "Dante output out-4: clock_ready false -> true, want true at both reads",
+    ]);
+    expect(
+      danteGateFailures(out4(100, danteFigures()), out4(1900, { ...sent, clock_ready: false })),
+    ).toEqual(["Dante output out-4: clock_ready true -> false, want true at both reads"]);
+  });
+
+  test("a receiver must hold a flow", () => {
+    const sent = danteFigures({ late_bins: [2000, 20, 3, 1, 0, 0] });
+    expect(danteGateFailures(out4(100, danteFigures()), out4(1900, { ...sent, live_flows: 0 }))).toEqual([
+      "Dante output out-4: live_flows 1 -> 0, want at least 1",
+    ]);
+    expect(danteGateFailures(out4(100, danteFigures({ live_flows: 0 })), out4(1900, sent))).toEqual([]);
+  });
+
+  test("packets must go out in the minute", () => {
+    expect(danteGateFailures(out4(100, danteFigures()), out4(1900, danteFigures()))).toEqual([
+      "Dante output out-4: packets sent (late_bins sum) 1024 -> 1024, want growth",
+    ]);
+    // A device rebuilt in the minute counts from 0 again: no growth.
+    const fresh = danteFigures({ late_bins: [500, 0, 0, 0, 0, 0] });
+    expect(danteGateFailures(out4(100, danteFigures()), out4(1900, fresh))).toEqual([
+      "Dante output out-4: packets sent (late_bins sum) 1024 -> 500, want growth",
+    ]);
+  });
+
+  test("packets 2 ms or more late are logged, never a failure (FOH at 10 ms reads them on time)", () => {
+    // #285, dev CI 43124069179: under the E2E's load out-4 sent 71 packets
+    // 2-5 ms late and 1 over 5 ms in 17 min while FOH read late 0; the
+    // ledger counts only pump_missed as a loss (audio-faults.md).
+    const base = danteFigures();
+    const later = danteFigures({ late_bins: [2000, 20, 3, 1, 2, 3] });
+    expect(danteGateFailures(out4(100, base), out4(1900, later))).toEqual([]);
+    expect(danteGateLog(out4(100, base), out4(1900, later))).toBe(
+      "Dante output out-4: packets 2 ms or more late 0 -> 5, pump_late 2 -> 2, pump_overruns 1 -> 1",
+    );
+  });
+
+  test("bins that change shape between the reads fail", () => {
+    const short = danteFigures({ late_bins: [5000, 20] });
+    expect(danteGateFailures(out4(100, danteFigures()), out4(1900, short))).toEqual([
+      "Dante output out-4: late_bins [1000,20,3,1,0,0] -> [5000,20], want the same bins at both reads",
+    ]);
+    const one = (late_bins: number[]) => danteFigures({ late_bins });
+    expect(danteGateFailures(out4(100, one([10])), out4(1900, one([20])))).toEqual([
+      "Dante output out-4: late_bins [10] -> [20], want the same bins at both reads",
+    ]);
+  });
+
+  test("only a missed pump block fails; late and overrun pump blocks are logged", () => {
+    const sent = { late_bins: [2000, 20, 3, 1, 0, 0] };
+    const after = danteFigures({ ...sent, pump_late: 3, pump_missed: 1, pump_overruns: 4 });
+    expect(danteGateFailures(out4(100, danteFigures()), out4(1900, after))).toEqual([
+      "Dante output out-4: pump_missed 0 -> 1",
+    ]);
+    expect(danteGateLog(out4(100, danteFigures()), out4(1900, after))).toBe(
+      "Dante output out-4: packets 2 ms or more late 0 -> 0, pump_late 2 -> 3, pump_overruns 1 -> 4",
+    );
+  });
+
+  test("a non-Dante output or missing figures log nothing", () => {
+    expect(danteGateLog(dvs(100), dvs(1900))).toBe("");
+    expect(danteGateLog(out4(100, undefined), out4(1900, danteFigures()))).toBe("");
+  });
+
+  test("every failure at once is listed", () => {
+    const bad = danteFigures({
+      clock_ready: false,
+      live_flows: 0,
+      late_bins: [1000, 20, 3, 1, 0, 0],
+      pump_missed: 7,
+    });
+    expect(danteGateFailures(out4(100, danteFigures()), out4(1900, bad))).toEqual([
+      "Dante output out-4: clock_ready true -> false, want true at both reads",
+      "Dante output out-4: live_flows 1 -> 0, want at least 1",
+      "Dante output out-4: packets sent (late_bins sum) 1024 -> 1024, want growth",
+      "Dante output out-4: pump_missed 0 -> 7",
+    ]);
+  });
 });

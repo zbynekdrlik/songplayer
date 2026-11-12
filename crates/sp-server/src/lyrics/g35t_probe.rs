@@ -237,7 +237,7 @@ pub async fn pick_clip(pool: &SqlitePool, cache_dir: &Path) -> Result<ProbeClip,
 
 /// The earliest line start (ms) of the song's served `{yt}_lyrics.json`;
 /// `None` when the file is missing, unreadable or has no line.
-async fn first_line_start(cache_dir: &Path, youtube_id: &str) -> Option<u64> {
+pub(crate) async fn first_line_start(cache_dir: &Path, youtube_id: &str) -> Option<u64> {
     let path = cache_dir.join(format!("{youtube_id}_lyrics.json"));
     let text = tokio::fs::read_to_string(&path).await.ok()?;
     let track: sp_core::lyrics::LyricsTrack = serde_json::from_str(&text).ok()?;

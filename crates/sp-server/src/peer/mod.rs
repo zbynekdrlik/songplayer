@@ -23,6 +23,7 @@ pub mod leftovers; // #261: the records of a video no row has any more go, daily
 pub mod lyrics;
 pub mod queued;
 pub mod repair;
+pub mod song_swap; // #304: a held job takes the peer's song first
 pub mod standin;
 pub mod stems;
 pub mod throttle;

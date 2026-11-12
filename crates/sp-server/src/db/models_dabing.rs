@@ -104,6 +104,11 @@ pub struct DubRow {
     /// The pinned dub voice (#184 round C), read from the repurposed
     /// `dub_voice_ref_path` column. `None` until the worker resolves one.
     pub dub_voice: Option<String>,
+    /// #300: the row's ▶ can play it on the Dabing playlist — downloaded
+    /// (`normalized`), exactly what `dabing_video_membership` admits for a
+    /// listed row (every listed row is dub-requested and, #303, still in its
+    /// YouTube playlist). Otherwise the gate answers 409.
+    pub playable: bool,
 }
 
 /// Build a [`DubRow`] from a selected `videos` row (shared by every query here).
@@ -125,12 +130,14 @@ fn row_to_dub_row(r: &sqlx::sqlite::SqliteRow) -> DubRow {
         lyrics_present,
         chain_state: chain_state.to_string(),
         dub_voice: r.get("dub_voice_ref_path"),
+        playable: r.get::<i64, _>("playable") != 0,
     }
 }
 
 const DUB_ROW_SELECT: &str = "SELECT id, playlist_id, title, song, dub_status, \
      dub_error, dub_file_path, stem_status, has_lyrics, \
-     dub_voice_ref_path FROM videos";
+     dub_voice_ref_path, (normalized = 1) AS playable \
+     FROM videos";
 
 /// Set (or clear) the dub request on a video. Requesting flips `dub_requested`
 /// on, moves `dub_status` to `'queued'`, clears an earlier `dub_error` (the
@@ -166,17 +173,38 @@ pub async fn set_dub_requested(
     Ok(res.rows_affected())
 }
 
-/// Every dub-requested video, newest request first (`dub_requested_at DESC`,
-/// tie-broken by `id DESC` so a batch added in the same millisecond stays
-/// deterministic), for the Dabing section list.
+/// Every dub-requested video still in its YouTube playlist (#303, #260's
+/// `removed_at` mark: a song that left it is never listed), newest request
+/// first (`dub_requested_at DESC`, tie-broken by `id DESC` so a batch added in
+/// the same millisecond stays deterministic), for the Dabing section list.
 pub async fn list_dub_videos(pool: &SqlitePool) -> Result<Vec<DubRow>, sqlx::Error> {
     let rows = sqlx::query(&format!(
-        "{DUB_ROW_SELECT} WHERE dub_requested = 1 \
+        "{DUB_ROW_SELECT} WHERE dub_requested = 1 AND removed_at IS NULL \
          ORDER BY dub_requested_at DESC, id DESC"
     ))
     .fetch_all(pool)
     .await?;
     Ok(rows.iter().map(row_to_dub_row).collect())
+}
+
+/// Whether `video_id` may play on the Dabing playlist `playlist_id` (#300):
+/// `Some(normalized)` for a video of the Dabing section — imported into the
+/// Dabing playlist itself, or dub-requested from any playlist — that has not
+/// left its YouTube playlist; `None` for any other video. The Dabing page's ▶
+/// plays every row on the Dabing output, never on the video's own playlist.
+pub async fn dabing_video_membership(
+    pool: &SqlitePool,
+    playlist_id: i64,
+    video_id: i64,
+) -> Result<Option<bool>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT normalized FROM videos WHERE id = ? AND removed_at IS NULL \
+         AND (playlist_id = ? OR dub_requested = 1)",
+    )
+    .bind(video_id)
+    .bind(playlist_id)
+    .fetch_optional(pool)
+    .await
 }
 
 /// Persist the resolved dub voice for a video (#184 round C). The voice name is

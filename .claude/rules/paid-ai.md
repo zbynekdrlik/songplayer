@@ -19,6 +19,7 @@ paths:
   - "crates/sp-server/src/lyrics/worker*.rs"
   - "crates/sp-server/src/dabing/worker*.rs"
   - "crates/sp-server/src/api/lyrics_g35t.rs"
+  - "crates/sp-server/src/api/dabing_probe.rs"
   - "crates/sp-server/src/api/lyrics.rs"
   - "crates/sp-server/src/api/metadata*.rs"
   - "crates/sp-server/src/api/routes*.rs"
@@ -136,8 +137,10 @@ Every path:
   the YouTube description): the AI client is handed to it only while ON;
   OFF, the description probe reads "skipped".
 - **Every Gemini key read** goes through `paid_ai::gemini_keys` (`None`
-  while OFF): the lyrics tiers, the dub worker's first key, and the g35t
-  probe (which answers `ok:false` with `OFF_REASON` and sends nothing).
+  while OFF): the lyrics tiers, the dub worker's first key, the g35t
+  probe (which answers `ok:false` with `OFF_REASON` and sends nothing)
+  and the Live Translate probe (`dabing/probe.rs`, #232 unit 2: 409 with
+  `OFF_REASON`, nothing sent).
   - The metadata chain still reads its keys once at startup (`lib.rs`); its
     switch is read per walk.
 - A NEW paid provider reads its credential or decides its call through

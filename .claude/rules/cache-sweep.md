@@ -96,7 +96,7 @@ comment 6230045110.
     rollback must not eat a newer build's caches).
   - `replaced` — a `<name>.replaced` / `<name>.N.replaced` of a SONG file
     (`<name>` matches `SONG_RE`: a set-aside only ever comes from a song's
-    unit move) 30 d, only while
+    unit move or #304's peer song swap) 30 d, only while
     `<name>` holds a file: it is then the stale copy the unit move meant to
     delete (a stuck move-back, a failed delete, a crash after the rename).
     With `<name>` empty it may be the ONLY copy of a song file: it stays,

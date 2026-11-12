@@ -596,10 +596,52 @@ app.delete("/api/v1/playlists/:id/items/:vid", (req, res) => {
   res.status(204).end();
 });
 
-app.post("/api/v1/playlists/:id/play-video", (_req, res) => {
-  // No-op for the mock — the WS interval already streams NowPlaying
-  // updates, so the dashboard sees activity without us replaying.
+// Every play-video the dashboard sent, in order (`GET /__mock/play-video-calls`,
+// cleared by `/__mock/dabing-reset`).
+let playVideoCalls = [];
+app.post("/api/v1/playlists/:id/play-video", (req, res) => {
+  const playlist_id = Number(req.params.id);
+  const video_id = Number(req.body && req.body.video_id);
+  playVideoCalls.push({ playlist_id, video_id });
+  // #300: the Dabing playlist plays every video of the Dabing section (the
+  // server's `models_dabing::dabing_video_membership`), whatever playlist the
+  // video belongs to, and refuses any other (404); a row not downloaded yet
+  // answers 409, as the server's. It is played OFF program, so the dashboard
+  // is told what the server's engine tells it: the pipeline decodes
+  // (`WaitingForScene` + transport `Playing`) and its song.
+  if (playlist_id === DABING_PLAYLIST_ID) {
+    const row = dubRows.find((r) => r.video_id === video_id);
+    if (!row) {
+      res.status(404).type("text/plain").send("video not in the Dabing section");
+      return;
+    }
+    if (!row.playable) {
+      res.status(409).type("text/plain").send("video not normalized");
+      return;
+    }
+    playingOffAir.add(playlist_id);
+    broadcastPlaybackState(playlist_id, "WaitingForScene", "Playing");
+    const song = JSON.stringify({
+      type: "NowPlaying",
+      data: {
+        playlist_id,
+        video_id,
+        song: row.title,
+        artist: "",
+        position_ms: 0,
+        duration_ms: 200000,
+      },
+    });
+    for (const ws of wsClients) sendLive(ws, song);
+    res.status(204).end();
+    return;
+  }
+  // Any other playlist: a no-op for the mock — the WS interval already streams
+  // NowPlaying updates, so the dashboard sees activity without us replaying.
   res.status(204).end();
+});
+app.get("/__mock/play-video-calls", (_req, res) => {
+  res.json({ calls: playVideoCalls });
 });
 
 app.post("/__mock/live-reset", (_req, res) => {
@@ -1452,6 +1494,8 @@ app.post("/api/v1/dabing/import", (req, res) => {
     lyrics_present: false,
     chain_state: "queued",
     dub_voice: null,
+    // The mock has no download worker: a pasted video is playable at once.
+    playable: true,
   };
   // Newest first.
   dubRows.unshift(row);
@@ -1481,6 +1525,7 @@ app.patch("/api/v1/videos/:id/dub", (req, res) => {
         lyrics_present: false,
         chain_state: chainStateFor("queued"),
         dub_voice: null,
+        playable: true,
       });
     }
   } else {
@@ -1504,7 +1549,8 @@ app.post("/__mock/dabing-add", (req, res) => {
   const dub_status = b.dub_status ?? "ready";
   const row = {
     video_id,
-    playlist_id: DABING_PLAYLIST_ID,
+    // #300: a video toggled for dubbing in another playlist keeps that one.
+    playlist_id: b.playlist_id ?? DABING_PLAYLIST_ID,
     title: b.title ?? `Dabing ${video_id}`,
     dub_status,
     dub_error: b.dub_error ?? null,
@@ -1514,6 +1560,8 @@ app.post("/__mock/dabing-add", (req, res) => {
     lyrics_present: !!b.lyrics_present,
     chain_state: b.chain_state ?? chainStateFor(dub_status),
     dub_voice: b.dub_voice ?? null,
+    // #300: false = not downloaded yet (the server's gate answers 409).
+    playable: b.playable ?? true,
   };
   dubRows.unshift(row);
   res.status(201).json(row);
@@ -1522,6 +1570,7 @@ app.post("/__mock/dabing-add", (req, res) => {
 app.post("/__mock/dabing-reset", (_req, res) => {
   dubRows = [];
   nextDubId = 9000;
+  playVideoCalls = [];
   res.json({ ok: true });
 });
 
@@ -2171,6 +2220,19 @@ function programBody() {
       switches: 0,
       readback_us_p99: 0,
       uyvy_us_p99: 0,
+      // #305 item 3: SP-program's discoverability (mirrors
+      // `ndi_discover::DiscoverStatus`); the mock reads it as listed.
+      discoverable: {
+        state: "discoverable",
+        since_ms: 0,
+        seen_at_ms: 0,
+        address: "127.0.0.1:5961",
+        on_dante: false,
+        reads: 1,
+        misses: 0,
+        expected: "MOCK (SP-program)",
+        reason: null,
+      },
     },
     // #279 P3a: the compositor's sides (mirrors `program_max::GpuStatus`);
     // the mock composes nothing.
@@ -2344,9 +2406,11 @@ function mockAsioOutput(e, network) {
   };
 }
 // #285: a Dante entry as the server lists it: the ASIO worker's line, its
-// `type`, and the stack's figures while it runs.
-function mockDanteOutput(e, network) {
-  const line = mockAsioOutput({ ...e, asio: { driver: e.dante.device, channels: [0, 1] } }, network);
+// `type`, and the stack's figures while it runs. The worker hands the device
+// the program's 48 kHz whatever the network's rate (dlink converts on the
+// device, #285 step 2), so its rate is 48 kHz.
+function mockDanteOutput(e) {
+  const line = mockAsioOutput({ ...e, asio: { driver: e.dante.device, channels: [0, 1] } }, 48000);
   const dante = {
     clock_ready: true,
     live_flows: 1,
@@ -2365,7 +2429,7 @@ function mockOutputs() {
   const network = Number(settings.audio_network_rate || 48000);
   return list.map((e) => {
     if (e.type === "asio") return mockAsioOutput(e, network);
-    if (e.type === "dante") return mockDanteOutput(e, network);
+    if (e.type === "dante") return mockDanteOutput(e);
     const rate = e.rate === "network" || e.rate === undefined ? network : Number(e.rate);
     const enabled = e.enabled !== false;
     const held = enabled ? vbanHeld.get(e.id) : undefined;

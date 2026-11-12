@@ -510,3 +510,160 @@ async fn play_video_on_missing_playlist_returns_404() {
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     assert!(engine_rx.try_recv().is_err());
 }
+
+// #300: the Dabing page's ▶ plays a dub row on the Dabing playlist's own
+// output, whichever playlist the video belongs to. The Dabing playlist admits
+// every video of the Dabing section (dub-requested, or its own import), never
+// an arbitrary one.
+
+/// The seeded Dabing playlist's id (after `setup`).
+async fn dabing_playlist(pool: &SqlitePool) -> i64 {
+    crate::startup::ensure_dabing_playlist_exists(pool)
+        .await
+        .unwrap();
+    sqlx::query_scalar("SELECT id FROM playlists WHERE kind = 'dabing'")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// POST play-video `video` on `playlist`; the status and the engine command
+/// it sent, if any.
+async fn play_on(
+    pool: SqlitePool,
+    playlist: i64,
+    video: i64,
+) -> (StatusCode, Option<crate::EngineCommand>) {
+    let (engine_tx, mut engine_rx) = mpsc::channel(8);
+    let app = crate::api::router(build_state(pool, engine_tx), None);
+    let resp = app
+        .oneshot(
+            Request::post(format!("/api/v1/playlists/{playlist}/play-video"))
+                .header("content-type", "application/json")
+                .body(Body::from(format!(r#"{{"video_id": {video}}}"#)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    (resp.status(), engine_rx.try_recv().ok())
+}
+
+#[tokio::test]
+async fn dabing_playlist_plays_a_dub_requested_video_of_another_playlist() {
+    let (pool, _, v1, _) = setup().await;
+    let dabing = dabing_playlist(&pool).await;
+    crate::db::models_dabing::set_dub_requested(&pool, v1, true)
+        .await
+        .unwrap();
+
+    let (status, cmd) = play_on(pool, dabing, v1).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    match cmd {
+        Some(crate::EngineCommand::PlayVideo {
+            playlist_id,
+            video_id,
+            position_ms,
+        }) => {
+            assert_eq!(playlist_id, dabing, "plays on the Dabing output");
+            assert_eq!(video_id, v1);
+            assert_eq!(position_ms, None);
+        }
+        other => panic!("expected PlayVideo on the Dabing playlist, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn dabing_playlist_refuses_a_foreign_video_that_is_not_dub_requested() {
+    let (pool, _, v1, _) = setup().await;
+    let dabing = dabing_playlist(&pool).await;
+
+    let (status, cmd) = play_on(pool, dabing, v1).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(cmd.is_none());
+}
+
+#[tokio::test]
+async fn dabing_playlist_answers_409_for_a_dub_requested_video_not_yet_normalized() {
+    let (pool, _, v1, _) = setup().await;
+    let dabing = dabing_playlist(&pool).await;
+    crate::db::models_dabing::set_dub_requested(&pool, v1, true)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE videos SET normalized = 0 WHERE id = ?")
+        .bind(v1)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (status, cmd) = play_on(pool, dabing, v1).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(cmd.is_none());
+}
+
+#[tokio::test]
+async fn dabing_playlist_refuses_a_dub_requested_video_that_left_its_playlist() {
+    let (pool, _, v1, _) = setup().await;
+    let dabing = dabing_playlist(&pool).await;
+    crate::db::models_dabing::set_dub_requested(&pool, v1, true)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE videos SET removed_at = 1 WHERE id = ?")
+        .bind(v1)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (status, cmd) = play_on(pool, dabing, v1).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(cmd.is_none());
+}
+
+#[tokio::test]
+async fn dabing_playlist_plays_its_own_import_that_is_not_dub_requested() {
+    let (pool, _, _, _) = setup().await;
+    let dabing = dabing_playlist(&pool).await;
+    let own = crate::db::models::upsert_video(&pool, dabing, "own", Some("Own"))
+        .await
+        .unwrap()
+        .id;
+    sqlx::query("UPDATE videos SET normalized = 1 WHERE id = ?")
+        .bind(own)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (status, cmd) = play_on(pool, dabing, own).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(matches!(
+        cmd,
+        Some(crate::EngineCommand::PlayVideo { playlist_id, video_id, .. })
+            if playlist_id == dabing && video_id == own
+    ));
+}
+
+/// The widened gate is the Dabing playlist's alone: a youtube playlist still
+/// refuses a dub-requested video of another playlist.
+#[tokio::test]
+async fn youtube_playlist_still_refuses_a_dub_requested_foreign_video() {
+    let (pool, ytlive_id, _, _) = setup().await;
+    let yt_id: i64 = sqlx::query_scalar("SELECT id FROM playlists WHERE name='src'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let foreign = crate::db::models::upsert_video(&pool, ytlive_id, "foreign", Some("F"))
+        .await
+        .unwrap()
+        .id;
+    sqlx::query("UPDATE videos SET normalized = 1 WHERE id = ?")
+        .bind(foreign)
+        .execute(&pool)
+        .await
+        .unwrap();
+    crate::db::models_dabing::set_dub_requested(&pool, foreign, true)
+        .await
+        .unwrap();
+
+    let (status, cmd) = play_on(pool, yt_id, foreign).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(cmd.is_none());
+}

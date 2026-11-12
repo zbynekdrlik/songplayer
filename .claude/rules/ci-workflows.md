@@ -310,6 +310,15 @@ completes, and the next dev push sits `pending` with ZERO jobs —
 `gh api -X POST repos/<owner>/<repo>/actions/runs/<old-run>/force-cancel`; the
 pending run starts within seconds.
 
+A run can also hang `queued` with ZERO jobs and NO other run in the group
+(11.11.2026, run 43097797568, pushed 20:44Z, still queued at 21:41Z, GitHub
+status green): `gh run cancel` says "completed", `force-cancel` answers 409
+"has not been queued yet", `gh run rerun` says "workflow file may be
+broken" (it was not: no workflow change, YAML valid). Nothing on GitHub's
+side moves it; a NEW push to the branch supersedes it through the
+concurrency group. Check for it whenever a waiter has printed only the run
+id for over 10 min.
+
 ## `Build WASM (trunk)` red with "error downloading archive file: 504" = trunk's wasm-bindgen fetch, not our code (21.9.2026)
 
 trunk downloads `wasm-bindgen` from the OLD `rustwasm/wasm-bindgen` release
@@ -520,6 +529,36 @@ older one. `gh run cancel` on the queued survivor still lands, even when the
 run keeps showing `queued` for a minute, and then NO run is left for the
 commit. Leave a duplicate alone. If both end cancelled, re-run the survivor
 in full (`gh run rerun <id>`, not `--failed`).
+
+## The E2E job puts SP-program's playlist back as it found it (#308)
+
+A restore cut re-kicks a playlist: the title check's cut back and every
+spec's `afterAll` / `afterEach` restore start the start playlist's NEXT
+song, whether it was playing or paused (11.11.2026: `sp-fast` paused and
+silent before run 43106123548, playing after it; camera-box's
+program-audio sampler read SP-program at -38..-50 dBFS and its release
+E2E refused). A restart starts SP-program's playlist playing as well
+(dev run 43111838795: a record taken in the E2E job, after the deploy's
+restart, read `Playing` and put nothing back). So the DEPLOY job records
+SP-program's source and its playlist's transport before it stops
+SongPlayer ("Record SP-program's playlist transport", right after the
+runner's auto-start delivery; `scripts/program_transport.py save`, the
+box's Python; the JSON goes out as the job output `program_start`; no
+answer = a warning and no record) and the E2E job, as its last box step
+(`!cancelled()` and a record there: after a failed suite too), writes it
+to a file and pauses that playlist again when it did not play at the record, is
+still the program's source and plays now, then reads the pause back
+within 10 s or fails (`restore`). An operator's cut or play meanwhile is
+kept. Tests: `scripts/tests/test_program_transport.py` (Eval Checks; the
+script is in both ruff lists). PP's subset (`deploy-pp.yml`) has its own
+restore (`programRestoreTarget`) and no such step yet.
+
+Known limits (release 0.91.0 review): only a start told `Paused` / `Idle`
+is paused again (no health row at the record = unknown, left alone); an
+operator who presses ▶ on the same playlist during the job is paused too
+(the job cannot tell that play from its own re-kick); a re-run of the
+deploy job after an attempt that restarted SongPlayer but never reached
+the E2E restore records `Playing` and puts nothing back.
 
 ## Post-deploy E2E scene switches: wait for the transition, never blind-sleep (#170, #221 L3)
 
