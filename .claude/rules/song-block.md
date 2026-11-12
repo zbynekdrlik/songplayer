@@ -83,7 +83,10 @@ Design: #265 comment 6814953166; the lane's anchors: comment 6814998873.
   "Na programe nehrá žiadna pieseň.". Its title = THAT playlist's WS
   now-playing `wall_title`, else the row's; its YouTube id from the node's
   rows (the `GET /api/v1/playlists/{id}/videos` of every listed playlist,
-  read again when the list changes). Button `block-current-btn` "Zablokovať v <uzol>"
+  read once when the page opens). Known limit: a song playing on after its
+  row left its YouTube playlist (#260: it plays to its end) is in no song
+  list, so its button stays disabled (block it from the search later, or
+  it is not picked again anyway). Button `block-current-btn` "Zablokovať v <uzol>"
   (`block_label`: `node_name` from `/api/v1/status`, else "tomto uzle"),
   disabled with "Už je zablokovaná" once blocked or while its id is
   unknown.
@@ -110,9 +113,13 @@ Design: #265 comment 6814953166; the lane's anchors: comment 6814998873.
 - Mock E2E `e2e/block-songs.spec.ts` at 390×844 (the mock mirrors the
   routes; `/__mock/blocked-reset`). Post-deploy `e2e/post-deploy-block-songs.spec.ts`
   (SNV and PP's subset) is READ-ONLY: `GET /api/v1/blocked`, the page's
-  list loaded with no error line, and the area past "Načítavam…" with,
-  for a youtube playlist's song on program, an enabled "Zablokovať v …"
-  or "Už je zablokovaná" (the pure `e2e/block-gate.ts::currentAreaProblem`,
+  list loaded with no error line, and the area past "Načítavam…", judged
+  against `/api/v1/status`, `/api/v1/playlists` and the on-air playlist's
+  health row read in the SAME poll (20 s): a song decoding on program must
+  show; on a youtube playlist an enabled "Zablokovať v …" or "Už je
+  zablokovaná"; nothing / two on air or an unlisted (test item) playlist
+  is not judged; which song is shown is not compared (no HTTP field names
+  the on-air song) (the pure `e2e/block-gate.ts::currentAreaProblem`,
   mock unit spec `block-gate.spec.ts`; a set list's song is not judged: it
   may be a row no song list names). It never clicks, never blocks a song
   on a box.

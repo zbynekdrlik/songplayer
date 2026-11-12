@@ -146,15 +146,24 @@ async function recordAreaStates(page: import("@playwright/test").Page) {
   await page.addInitScript(() => {
     const seen: string[] = [];
     (window as unknown as { spAreaStates: string[] }).spAreaStates = seen;
-    const read = () => {
-      const el = document.querySelector('[data-testid="block-current"]');
-      const state = el?.getAttribute("data-state");
+    const note = (state: string | null | undefined) => {
       if (state && seen[seen.length - 1] !== state) seen.push(state);
     };
-    new MutationObserver(read).observe(document, {
+    // Each record's OLD value first, then the value now: two writes inside
+    // one task, coalesced into one callback, still leave both states.
+    new MutationObserver((records) => {
+      for (const r of records) {
+        const el = r.target as Element;
+        if (r.type === "attributes" && el.getAttribute?.("data-testid") === "block-current") {
+          note(r.oldValue);
+        }
+      }
+      note(document.querySelector('[data-testid="block-current"]')?.getAttribute("data-state"));
+    }).observe(document, {
       subtree: true,
       childList: true,
       attributes: true,
+      attributeOldValue: true,
       attributeFilter: ["data-state"],
     });
   });
