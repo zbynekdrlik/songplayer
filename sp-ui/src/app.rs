@@ -13,6 +13,9 @@ pub enum Page {
     Settings,
     Lyrics,
     Dabing,
+    /// #265: `/blok`, the phone page to block a song on this node. No tab:
+    /// it is reached by its short address.
+    Block,
 }
 
 impl Default for Page {
@@ -31,6 +34,7 @@ impl Page {
             Self::Lyrics => "/lyrics",
             Self::Dabing => "/dabing",
             Self::Settings => "/settings",
+            Self::Block => "/blok",
         }
     }
 
@@ -43,6 +47,7 @@ impl Page {
             "/lyrics" => Self::Lyrics,
             "/dabing" => Self::Dabing,
             "/settings" => Self::Settings,
+            "/blok" => Self::Block,
             _ => Self::Dashboard,
         }
     }
@@ -191,6 +196,7 @@ pub fn App() -> impl IntoView {
                 Page::Settings => pages::settings::SettingsPage().into_any(),
                 Page::Lyrics => pages::lyrics::LyricsPage().into_any(),
                 Page::Dabing => pages::dabing::DabingPage().into_any(),
+                Page::Block => pages::block::BlockPage().into_any(),
             }}
         </main>
     }

@@ -117,3 +117,19 @@ async fn a_play_by_id_of_a_blocked_song_still_plays() {
         "the engine is told to play it"
     );
 }
+
+/// A database that cannot be read answers 500 on every route, naming why,
+/// never an empty list or a block that did not happen.
+#[tokio::test]
+async fn a_database_error_answers_500() {
+    let state = test_state().await;
+    state.pool.close().await;
+    let req = Request::get("/api/v1/blocked").body(Body::empty()).unwrap();
+    let (status, body) = send(&state, req).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(body.contains("block list"), "{body}");
+    let (status, _) = send(&state, post(r#"{"youtube_id":"TwzfEwsTfag"}"#)).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    let (status, _) = send(&state, delete("TwzfEwsTfag")).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+}

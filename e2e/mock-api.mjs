@@ -1925,6 +1925,56 @@ app.post("/__mock/ui-usage-reset", (_req, res) => {
   res.json({ posts: uiUsagePosts });
 });
 
+// #265: the node's song block list, as the server's routes
+// (`api/blocked.rs`): GET the list (newest first), POST {youtube_id} → 201
+// with the stored row (404 for a song the node has no row of; a second
+// block keeps the first one), DELETE → 204 (404 when not blocked). The
+// title is the wall's text (`song_block::shown_title`). Reset with
+// `POST /__mock/blocked-reset`.
+let blockedSongs = [];
+function wallTitle(song, artist) {
+  if (song && artist) return `${song} - ${artist}`;
+  return song || artist || "";
+}
+function shownTitle(v) {
+  return wallTitle((v.song ?? "").trim(), (v.artist ?? "").trim()) || (v.title ?? "").trim();
+}
+app.get("/api/v1/blocked", (_req, res) => {
+  res.json([...blockedSongs].sort((a, b) => b.blocked_at_ms - a.blocked_at_ms));
+});
+app.post("/api/v1/blocked", (req, res) => {
+  const youtubeId = typeof req.body?.youtube_id === "string" ? req.body.youtube_id.trim() : null;
+  if (youtubeId === null) {
+    res.status(422).send("missing field `youtube_id`");
+    return;
+  }
+  const rows = videos.filter((v) => v.youtube_id === youtubeId);
+  if (rows.length === 0) {
+    res.status(404).send("no such song on this node");
+    return;
+  }
+  let stored = blockedSongs.find((b) => b.youtube_id === youtubeId);
+  if (!stored) {
+    const row = rows.find((v) => (v.song ?? "").trim() !== "") ?? rows[0];
+    stored = { youtube_id: youtubeId, title: shownTitle(row), blocked_at_ms: Date.now() };
+    blockedSongs.push(stored);
+  }
+  res.status(201).json(stored);
+});
+app.delete("/api/v1/blocked/:youtube_id", (req, res) => {
+  const before = blockedSongs.length;
+  blockedSongs = blockedSongs.filter((b) => b.youtube_id !== req.params.youtube_id);
+  if (blockedSongs.length === before) {
+    res.status(404).send("the song is not blocked");
+    return;
+  }
+  res.status(204).end();
+});
+app.post("/__mock/blocked-reset", (_req, res) => {
+  blockedSongs = [];
+  res.json({ blocked: blockedSongs });
+});
+
 // NDI genlock health (#150) — polled every 1 s by the dashboard's
 // GlobalLockBadge (which fills store.ndi_health for the per-card LockBadges).
 // Mirrors the real `GET /api/v1/ndi/health` array of PipelineHealthSnapshot:
