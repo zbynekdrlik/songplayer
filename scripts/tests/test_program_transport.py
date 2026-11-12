@@ -124,7 +124,7 @@ def test_to_pause_table():
     )
     assert (
         pt.to_pause(
-            {"source": 3, "transport": None}, {"source": 3, "transport": "Playing"}
+            {"source": 3, "transport": "Idle"}, {"source": 3, "transport": "Playing"}
         )
         == 3
     )
@@ -192,3 +192,17 @@ def test_the_restore_reads_the_deploy_jobs_record():
     ).read_text()
     assert "program_start: ${{ steps.program_start.outputs.program_start }}" in text
     assert "needs.deploy-resolume.outputs.program_start" in text
+
+
+def test_a_start_with_no_health_row_pauses_nothing(tmp_path):
+    """Review: a start whose playlist had no health row is unknown, never
+    "not playing": it may have played (the row came later)."""
+    end = Box(7, {7: "Playing"})
+    run(tmp_path, Box(7, {}), end)
+    assert end.posts == []
+    assert (
+        pt.to_pause(
+            {"source": 7, "transport": None}, {"source": 7, "transport": "Playing"}
+        )
+        is None
+    )
