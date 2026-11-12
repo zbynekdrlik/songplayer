@@ -1679,20 +1679,21 @@ difference with its UTC time.
   `type: dante` output only (any other: no failure), FOH's own per-window
   rule — `clock_ready` true at both reads, `live_flows` ≥ 1 at the second
   (a receiver, FOH, holds a flow), the `late_bins` sum grew (packets went
-  out; a device rebuilt in the minute counts from 0 and fails here), the
-  LAST TWO `late_bins` did not grow (dstack's `media::tx::LATE_EDGES_NS`
-  250 µs / 0.5 / 1 / 2 / 5 ms: bins 4 and 5 are packets 2 ms or more
-  late; bins that change length between the reads fail), `pump_late` /
-  `pump_missed` / `pump_overruns` +0. No `dante` on a running Dante output
-  fails naming the read. NOT gated: `late_max_us` / `send_max_us` (maxima
-  since the start: a start-up spike would fail every deploy). Each failure
+  out; a device rebuilt in the minute counts from 0 and fails here; bins
+  that change length between the reads fail), and `pump_missed` +0 (the
+  ledger's loss: a skipped block is silence). Logged, never failed
+  (`danteGateLog`, the line `[#285 dante] …`): the packets 2 ms or more
+  late (the LAST TWO `late_bins`, dstack's `media::tx::LATE_EDGES_NS`
+  250 µs / 0.5 / 1 / 2 / 5 ms), `pump_late`, `pump_overruns`. Why (dev CI
+  43124069179, 12.11.2026): under the E2E's load the gate failed on
+  `pump_late` 3 -> 4 in its minute, and out-4 sent 71 packets 2-5 ms late
+  and 1 over 5 ms in 17 min while FOH, at its 10 ms latency, reads late 0
+  (dstack's FOH report): risks in the ledger, not losses. A 25 s quiet
+  read before it had shown `pump_late` 0, a sample too short. No `dante`
+  on a running Dante output fails naming the read. NOT gated:
+  `late_max_us` / `send_max_us` (maxima since the start). Each failure
   names the output, the figure and both reads. In effect at SNV only (PP
-  has no Dante output). `pump_late` stays gated (ROZHODNUTÉ on #285,
-  measured 11.11.2026 23:28-23:29Z on out-4, dstack v0.6.72: `pump_late`,
-  `pump_missed`, `pump_overruns` all 0 since the restart and +0 over the
-  window, the two >= 2 ms bins unchanged at 2 / 0; the "38 % one block
-  behind" of `audio-faults.md` was read before v0.6.57's MMCSS move). A
-  red on it is decided again from that run's own reads.
+  has no Dante output).
 - Tests run the real stack on `ClockSource::System` (a test receiver over UDP,
   `ONE_DEVICE`: each binds the Dante ports). Not proven yet: Windows media
   threads at load, real PTP, a real receiver, Dante Controller.
