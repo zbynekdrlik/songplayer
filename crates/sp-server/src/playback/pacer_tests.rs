@@ -562,6 +562,41 @@ fn jitter_p99_is_computed_from_the_ring() {
     assert!(stats.max_late_us >= 7);
 }
 
+/// #289 step 0: every emit lands in the histogram's bucket of its own
+/// lateness against the boundary it serviced, cumulatively.
+#[test]
+fn every_emit_is_counted_in_the_lateness_histogram() {
+    let (mut pacer, clk) = anchored_pacer();
+    let frames = std::cell::RefCell::new(std::collections::VecDeque::new());
+    for j in 0..30i64 {
+        frames.borrow_mut().push_back(frame_due_at(b(j + 1)));
+    }
+    let mut sink = RecordingSink::default();
+    // 100 ns units: 7 µs, 110 µs (twice), 2.5 ms, 12 ms.
+    for (k, late) in [
+        (1i64, 70i64),
+        (2, 1_100),
+        (3, 1_100),
+        (4, 25_000),
+        (5, 120_000),
+    ] {
+        clk.set(b(k) + late);
+        pacer.service(|| frames.borrow_mut().pop_front(), &mut sink);
+    }
+
+    let hist = pacer.stats().emit_late_hist;
+    assert_eq!(
+        hist.edges_us,
+        crate::playback::emit_lateness::EDGES_US.to_vec()
+    );
+    let mut counts = vec![0u64; hist.edges_us.len()];
+    counts[0] = 1; // 7 µs
+    counts[1] = 2; // 110 µs
+    counts[5] = 1; // 2.5 ms
+    counts[10] = 1; // 12 ms
+    assert_eq!(hist.counts, counts);
+}
+
 // ---------------------------------------------------------------------------
 // Telemetry + genlock-off guard.
 // ---------------------------------------------------------------------------

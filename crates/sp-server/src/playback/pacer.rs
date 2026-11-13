@@ -268,6 +268,8 @@ pub struct Pacer {
     jitter_ring: [u64; JITTER_RING],
     jitter_len: usize,
     jitter_idx: usize,
+    /// #289 step 0: every emit's lateness, bucketed, for the pipeline's life.
+    late_hist: crate::playback::emit_lateness::EmitLateness,
     repeats: u64,
     resyncs: u64,
     /// #150: seeks counted at their first fresh frame
@@ -337,6 +339,7 @@ impl Pacer {
             jitter_ring: [0; JITTER_RING],
             jitter_len: 0,
             jitter_idx: 0,
+            late_hist: Default::default(),
             repeats: 0,
             resyncs: 0,
             seeks: 0,
@@ -758,6 +761,7 @@ impl Pacer {
         let late_100ns = (now_100ns - boundary_100ns).max(0);
         let late_us = (late_100ns / 10) as u64; // 100 ns → µs
         self.push_jitter(late_us);
+        self.late_hist.push(late_us);
         // #147 lane 3, change 3: an emit is "late" past the 2 ms threshold, not
         // only a full interval late — a decoder drifting a few ms/frame used to
         // register ZERO late frames while its lag grew unbounded.
@@ -835,6 +839,7 @@ impl Pacer {
             late_frames: self.late_frames,
             max_late_us: self.max_late_us,
             jitter_p99_us: self.jitter_p99_us(),
+            emit_late_hist: self.late_hist.report(),
             repeats: self.repeats,
             resyncs: self.resyncs,
             seeks: self.seeks,
