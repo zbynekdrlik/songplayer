@@ -153,7 +153,7 @@ impl HeldTail {
             None => (self.origin_ms, 0),
         };
         let at = base + held_offset_ms(first + self.steps, frame_rate);
-        let real = base;
+        let real = self.last_frame_ms.unwrap_or(base);
         if at > real + AUDIO_PAST_VIDEO_MAX_MS {
             return None;
         }

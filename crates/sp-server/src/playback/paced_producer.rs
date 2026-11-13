@@ -308,7 +308,7 @@ impl DecodeProducer {
         // #320: from the last REAL picture, never a late step's time.
         let at_ms = before_end
             .as_ref()
-            .map_or(self.real_ms.max(self.current_ms), |last| last.timestamp_ms);
+            .map_or(self.real_ms, |last| last.timestamp_ms);
         self.real_ms = at_ms;
         if let Some(early) = EarlyEnd::of(at_ms, decoder.video_duration_ms()) {
             self.early = Some(early);
