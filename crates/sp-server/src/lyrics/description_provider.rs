@@ -31,10 +31,10 @@ pub use prompts::{
 pub(crate) fn parse_claude_response(raw: &str) -> Result<Option<Vec<String>>> {
     let cleaned = crate::ai::client::strip_markdown_fences(raw);
     let v: serde_json::Value = serde_json::from_str(&cleaned)
-        .with_context(|| format!("failed to parse Claude response as JSON: {cleaned}"))?;
+        .with_context(|| format!("failed to parse the AI response as JSON: {cleaned}"))?;
     let lines = v
         .get("lines")
-        .ok_or_else(|| anyhow::anyhow!("missing 'lines' key in Claude response: {cleaned}"))?;
+        .ok_or_else(|| anyhow::anyhow!("missing 'lines' key in the AI response: {cleaned}"))?;
     if lines.is_null() {
         return Ok(None);
     }
@@ -221,10 +221,10 @@ pub async fn clean_lyrics_via_claude(
             if crate::ai::retry::content_filtered(&e) {
                 crate::lyrics::cleanup_refusal::remember(cache_path, raw_blob).await;
             }
-            return Err(e.context("Claude clean_lyrics chat failed"));
+            return Err(e.context("clean_lyrics AI chat failed"));
         }
     };
-    let parsed = parse_claude_response(&raw).context("Claude response malformed")?;
+    let parsed = parse_claude_response(&raw).context("AI response malformed")?;
 
     write_lyrics_cache(cache_path, parsed.as_deref()).await?;
     Ok(parsed)
@@ -277,7 +277,7 @@ pub async fn fetch_description_lyrics(
     {
         Ok(parsed) => Ok(parsed),
         Err(e) => {
-            warn!(youtube_id, %e, "description_provider: Claude cleanup failed");
+            warn!(youtube_id, %e, "description_provider: AI cleanup failed");
             Ok(None)
         }
     }
@@ -457,8 +457,6 @@ mod tests {
         assert!(!dir.path().join("novideo_description.txt").exists());
     }
 
-    use crate::ai::AiSettings;
-
     #[tokio::test]
     async fn fetch_description_lyrics_returns_cached_lines_with_no_claude_call() {
         let dir = tempfile::tempdir().unwrap();
@@ -478,12 +476,7 @@ mod tests {
 
         // AiClient pointed at an unreachable URL. If the code calls Claude, the
         // test hangs/errors and we'd notice.
-        let ai = AiClient::new(AiSettings {
-            api_url: "http://127.0.0.1:1/v1".into(),
-            api_key: Some("never-used".into()),
-            model: "stub".into(),
-            system_prompt_extra: None,
-        });
+        let ai = crate::ai::test_support::ai_client_at("http://127.0.0.1:1/v1").await;
 
         let bogus_ytdlp = Path::new("/definitely/does/not/exist/ytdlp");
         let out = fetch_description_lyrics(
@@ -515,12 +508,7 @@ mod tests {
             .await
             .unwrap();
 
-        let ai = AiClient::new(AiSettings {
-            api_url: "http://127.0.0.1:1/v1".into(),
-            api_key: Some("never-used".into()),
-            model: "stub".into(),
-            system_prompt_extra: None,
-        });
+        let ai = crate::ai::test_support::ai_client_at("http://127.0.0.1:1/v1").await;
         let bogus_ytdlp = Path::new("/definitely/does/not/exist/ytdlp");
 
         let out =
@@ -558,12 +546,7 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let ai = AiClient::new(AiSettings {
-            api_url: format!("{}/v1", mock.uri()),
-            api_key: Some("test".into()),
-            model: "claude-opus-4-20250514".into(),
-            system_prompt_extra: None,
-        });
+        let ai = crate::ai::test_support::ai_client_at(format!("{}/v1", mock.uri())).await;
         let bogus_ytdlp = Path::new("/definitely/does/not/exist/ytdlp");
 
         let out =
@@ -601,12 +584,7 @@ mod tests {
             )
             .mount(&mock)
             .await;
-        let ai = AiClient::new(AiSettings {
-            api_url: format!("{}/v1", mock.uri()),
-            api_key: Some("test".into()),
-            model: "stub".into(),
-            system_prompt_extra: None,
-        });
+        let ai = crate::ai::test_support::ai_client_at(format!("{}/v1", mock.uri())).await;
         let bogus_ytdlp = Path::new("/definitely/does/not/exist/ytdlp");
 
         let out =
@@ -647,12 +625,7 @@ mod tests {
             )
             .mount(&mock)
             .await;
-        let ai = AiClient::new(AiSettings {
-            api_url: format!("{}/v1", mock.uri()),
-            api_key: Some("test".into()),
-            model: "stub".into(),
-            system_prompt_extra: None,
-        });
+        let ai = crate::ai::test_support::ai_client_at(format!("{}/v1", mock.uri())).await;
         let bogus_ytdlp = Path::new("/definitely/does/not/exist/ytdlp");
 
         let out = fetch_description_lyrics(&ai, bogus_ytdlp, "vidBAD", dir.path(), "S", "A")
@@ -675,12 +648,7 @@ mod tests {
             .unwrap();
 
         // AiClient at unreachable URL — Claude must NOT be called for empty descriptions.
-        let ai = AiClient::new(AiSettings {
-            api_url: "http://127.0.0.1:1/v1".into(),
-            api_key: Some("never".into()),
-            model: "stub".into(),
-            system_prompt_extra: None,
-        });
+        let ai = crate::ai::test_support::ai_client_at("http://127.0.0.1:1/v1").await;
         let bogus_ytdlp = Path::new("/definitely/does/not/exist/ytdlp");
 
         let out = fetch_description_lyrics(&ai, bogus_ytdlp, "vidEMPTY", dir.path(), "S", "A")
@@ -715,12 +683,7 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let ai = AiClient::new(AiSettings {
-            api_url: format!("{}/v1", mock.uri()),
-            api_key: Some("test".into()),
-            model: "stub".into(),
-            system_prompt_extra: None,
-        });
+        let ai = crate::ai::test_support::ai_client_at(format!("{}/v1", mock.uri())).await;
 
         let out = clean_lyrics_via_claude(
             &ai,
@@ -755,12 +718,7 @@ mod tests {
         // Intentionally bogus AI URL — if the helper ignores cache and tries
         // to call Claude, the call will fail (and the test will fail with Err
         // instead of the expected cached value).
-        let ai = AiClient::new(AiSettings {
-            api_url: "http://127.0.0.1:1/v1".into(),
-            api_key: Some("test".into()),
-            model: "stub".into(),
-            system_prompt_extra: None,
-        });
+        let ai = crate::ai::test_support::ai_client_at("http://127.0.0.1:1/v1").await;
 
         let out = clean_lyrics_via_claude(
             &ai,
@@ -789,13 +747,9 @@ mod tests {
             .await;
 
         // #145: the refused call is retried; no test waits for real.
-        let ai = AiClient::new(AiSettings {
-            api_url: format!("{}/v1", mock.uri()),
-            api_key: Some("test".into()),
-            model: "stub".into(),
-            system_prompt_extra: None,
-        })
-        .with_retry_policy(crate::ai::retry::RetryPolicy::NO_WAIT);
+        let ai = crate::ai::test_support::ai_client_at(format!("{}/v1", mock.uri()))
+            .await
+            .with_retry_policy(crate::ai::retry::RetryPolicy::NO_WAIT);
 
         let out = clean_lyrics_via_claude(
             &ai,
@@ -833,12 +787,7 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let ai = AiClient::new(AiSettings {
-            api_url: format!("{}/v1", mock.uri()),
-            api_key: Some("test".into()),
-            model: "stub".into(),
-            system_prompt_extra: None,
-        });
+        let ai = crate::ai::test_support::ai_client_at(format!("{}/v1", mock.uri())).await;
 
         let out = clean_lyrics_via_claude(
             &ai,
@@ -948,12 +897,7 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let ai = AiClient::new(AiSettings {
-            api_url: format!("{}/v1", mock.uri()),
-            api_key: Some("test".into()),
-            model: "stub".into(),
-            system_prompt_extra: None,
-        });
+        let ai = crate::ai::test_support::ai_client_at(format!("{}/v1", mock.uri())).await;
 
         let _ = clean_lyrics_via_claude(
             &ai,

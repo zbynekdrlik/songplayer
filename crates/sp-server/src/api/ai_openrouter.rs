@@ -40,8 +40,7 @@ pub async fn ab_start(
     State(state): State<AppState>,
     Json(body): Json<AbRequest>,
 ) -> axum::response::Response {
-    let proxy_model = state.ai_client.settings().model.clone();
-    let (ids, candidates) = match translate_ab::checked(body, &proxy_model) {
+    let (ids, candidates) = match translate_ab::checked(body) {
         Ok(v) => v,
         Err(reason) => return (StatusCode::BAD_REQUEST, reason).into_response(),
     };
@@ -53,10 +52,7 @@ pub async fn ab_start(
     }
     // Paid calls on a route anyone on the LAN can reach: the models asked
     // for are logged (each call is bounded, `translate_ab::CALL_MAX_TOKENS`).
-    let models: Vec<String> = candidates
-        .iter()
-        .map(|c| format!("{}:{}", c.provider, c.model))
-        .collect();
+    let models: Vec<&str> = candidates.iter().map(|c| c.model.as_str()).collect();
     info!(songs = ids.len(), models = ?models, "translate A/B: started");
     let seed = translate_ab::random_seed();
     tokio::spawn(run_in_background(state, ids, candidates, seed));

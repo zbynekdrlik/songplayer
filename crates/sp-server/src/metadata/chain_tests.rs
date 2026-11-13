@@ -5,26 +5,26 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use super::*;
 use crate::metadata::get_metadata;
 use crate::metadata::test_support::{
-    ARTIST, SONG, TITLE, VIDEO, ai_client_at, claude_answers, claude_refuses, gemini_answer,
-    received_keys,
+    ARTIST, SONG, TITLE, VIDEO, ai_client_at, gemini_answer, openrouter_answers,
+    openrouter_refuses, received_keys,
 };
 use sp_core::metadata::MetadataSource;
 use wiremock::matchers::{header, method};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[tokio::test]
-async fn the_production_chain_is_claude_then_gemini() {
+async fn the_production_chain_is_openrouter_then_gemini() {
     let proxy = MockServer::start().await;
     let pool = crate::db::create_memory_pool().await.unwrap();
     crate::db::run_migrations(&pool).await.unwrap();
-    let chain = provider_chain(&pool, ai_client_at(&proxy), "k1,k2", "gemini-test");
+    let chain = provider_chain(&pool, ai_client_at(&proxy).await, "k1,k2", "gemini-test");
 
     let providers = chain.providers().await.expect("paid AI on: the providers");
     let names: Vec<&str> = providers.iter().map(|p| p.name()).collect();
-    assert_eq!(names, ["claude", "gemini"]);
+    assert_eq!(names, ["openrouter", "gemini"]);
     let health = chain.health();
     let health_names: Vec<&str> = health.iter().map(|h| h.name.as_str()).collect();
-    assert_eq!(health_names, ["claude", "gemini"]);
+    assert_eq!(health_names, ["openrouter", "gemini"]);
     assert!(
         health
             .iter()
@@ -38,9 +38,9 @@ async fn the_production_chain_is_claude_then_gemini() {
 /// `gemini_api_key` list (the whole CSV before #136 → refused by Google →
 /// the title parser's "Stand On Your Promise by The Emerging Sound (feat. …)").
 #[tokio::test]
-async fn a_refusing_claude_falls_through_to_gemini_on_one_key_of_the_list() {
+async fn a_refusing_openrouter_falls_through_to_gemini_on_one_key_of_the_list() {
     let proxy = MockServer::start().await;
-    claude_refuses(&proxy).await;
+    openrouter_refuses(&proxy).await;
     let google = MockServer::start().await;
     Mock::given(method("POST"))
         .and(header("x-goog-api-key", "k1"))
@@ -48,7 +48,7 @@ async fn a_refusing_claude_falls_through_to_gemini_on_one_key_of_the_list() {
         .mount(&google)
         .await;
     let chain = provider_chain_at(
-        ai_client_at(&proxy),
+        ai_client_at(&proxy).await,
         " k1 , k2 ",
         "gemini-test",
         &google.uri(),
@@ -70,16 +70,21 @@ async fn a_refusing_claude_falls_through_to_gemini_on_one_key_of_the_list() {
 }
 
 #[tokio::test]
-async fn an_answering_claude_is_asked_first_and_gemini_not_at_all() {
+async fn an_answering_openrouter_is_asked_first_and_gemini_not_at_all() {
     let proxy = MockServer::start().await;
-    claude_answers(&proxy, SONG, ARTIST).await;
+    openrouter_answers(&proxy, SONG, ARTIST).await;
     let google = MockServer::start().await;
     Mock::given(method("POST"))
         .respond_with(ResponseTemplate::new(500))
         .expect(0)
         .mount(&google)
         .await;
-    let chain = provider_chain_at(ai_client_at(&proxy), "k1", "gemini-test", &google.uri());
+    let chain = provider_chain_at(
+        ai_client_at(&proxy).await,
+        "k1",
+        "gemini-test",
+        &google.uri(),
+    );
 
     let meta = get_metadata(chain.providers().await.unwrap(), VIDEO, TITLE).await;
 
@@ -147,7 +152,7 @@ async fn the_production_chain_answers_no_provider_while_paid_ai_is_off() {
     let proxy = MockServer::start().await;
     let pool = crate::db::create_memory_pool().await.unwrap();
     crate::db::run_migrations(&pool).await.unwrap();
-    let chain = provider_chain(&pool, ai_client_at(&proxy), "k1", "gemini-test");
+    let chain = provider_chain(&pool, ai_client_at(&proxy).await, "k1", "gemini-test");
     crate::db::models::set_setting(&pool, "paid_ai_enabled", "false")
         .await
         .unwrap();
@@ -156,7 +161,12 @@ async fn the_production_chain_answers_no_provider_while_paid_ai_is_off() {
         .await
         .unwrap();
     assert_eq!(chain.providers().await.map(|p| p.len()), Some(2));
-    let ungated = provider_chain_at(ai_client_at(&proxy), "k1", "gemini-test", &proxy.uri());
+    let ungated = provider_chain_at(
+        ai_client_at(&proxy).await,
+        "k1",
+        "gemini-test",
+        &proxy.uri(),
+    );
     crate::db::models::set_setting(&pool, "paid_ai_enabled", "false")
         .await
         .unwrap();

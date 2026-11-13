@@ -8,8 +8,8 @@ use super::*;
 use crate::db;
 use crate::metadata::chain::provider_chain_at;
 use crate::metadata::test_support::{
-    ARTIST, SONG, TITLE, VIDEO, ai_client_at, claude_answers, claude_refuses, gemini_answer,
-    key_invalid_body, received_keys,
+    ARTIST, SONG, TITLE, VIDEO, ai_client_at, gemini_answer, key_invalid_body, openrouter_answers,
+    openrouter_refuses, received_keys,
 };
 use crate::metadata::{MetadataError, MetadataProvider};
 use async_trait::async_trait;
@@ -52,14 +52,19 @@ async fn row(pool: &SqlitePool, id: i64) -> (String, String, i64) {
 async fn an_answering_claude_repairs_the_row_through_the_production_chain() {
     let (pool, id) = pool_with_parser_row().await;
     let proxy = MockServer::start().await;
-    claude_answers(&proxy, SONG, ARTIST).await;
+    openrouter_answers(&proxy, SONG, ARTIST).await;
     let google = MockServer::start().await;
     Mock::given(method("POST"))
         .respond_with(ResponseTemplate::new(500))
         .expect(0)
         .mount(&google)
         .await;
-    let chain = provider_chain_at(ai_client_at(&proxy), "k1,k2", "gemini-test", &google.uri());
+    let chain = provider_chain_at(
+        ai_client_at(&proxy).await,
+        "k1,k2",
+        "gemini-test",
+        &google.uri(),
+    );
     let mut worker = ReprocessWorker::new(pool.clone(), chain, PathBuf::from("."));
 
     assert_eq!(worker.process_all().await.unwrap(), 1);
@@ -71,7 +76,7 @@ async fn an_answering_claude_repairs_the_row_through_the_production_chain() {
 async fn a_refusing_claude_repairs_the_row_through_gemini_on_the_next_key() {
     let (pool, id) = pool_with_parser_row().await;
     let proxy = MockServer::start().await;
-    claude_refuses(&proxy).await;
+    openrouter_refuses(&proxy).await;
     let google = MockServer::start().await;
     Mock::given(method("POST"))
         .and(header("x-goog-api-key", "k1"))
@@ -83,7 +88,12 @@ async fn a_refusing_claude_repairs_the_row_through_gemini_on_the_next_key() {
         .respond_with(ResponseTemplate::new(200).set_body_json(gemini_answer(SONG, ARTIST)))
         .mount(&google)
         .await;
-    let chain = provider_chain_at(ai_client_at(&proxy), "k1,k2", "gemini-test", &google.uri());
+    let chain = provider_chain_at(
+        ai_client_at(&proxy).await,
+        "k1,k2",
+        "gemini-test",
+        &google.uri(),
+    );
     let mut worker = ReprocessWorker::new(pool.clone(), chain.clone(), PathBuf::from("."));
 
     assert_eq!(worker.process_all().await.unwrap(), 1);

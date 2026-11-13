@@ -1,4 +1,5 @@
-//! Claude Opus metadata provider via CLIProxyAPI.
+//! The metadata chain's text-AI provider (#321: OpenRouter, the task's
+//! model `ai_model_metadata`, blank = the newest Gemini).
 
 use async_trait::async_trait;
 use sp_core::metadata::{MetadataSource, VideoMetadata};
@@ -16,21 +17,20 @@ struct TitleAnswer {
     artist: Option<String>,
 }
 
-/// Claude Opus metadata provider.
-///
-/// Uses the same prompt as Gemini but routes through CLIProxyAPI → Claude.
-pub struct ClaudeMetadataProvider {
+/// The text-AI metadata provider: the same `{song, artist}` question as
+/// the Gemini provider, through the metadata task's OpenRouter model.
+pub struct OpenRouterMetadataProvider {
     ai_client: Arc<AiClient>,
 }
 
-impl ClaudeMetadataProvider {
+impl OpenRouterMetadataProvider {
     pub fn new(ai_client: Arc<AiClient>) -> Self {
         Self { ai_client }
     }
 }
 
 #[async_trait]
-impl MetadataProvider for ClaudeMetadataProvider {
+impl MetadataProvider for OpenRouterMetadataProvider {
     #[cfg_attr(test, mutants::skip)]
     async fn extract(&self, _video_id: &str, title: &str) -> Result<VideoMetadata, MetadataError> {
         let system = "You extract song metadata from YouTube video titles. \
@@ -40,14 +40,14 @@ impl MetadataProvider for ClaudeMetadataProvider {
             'feat.', bracket content, etc. If the title is 'Artist - Song', \
             split accordingly. If uncertain, make your best guess.";
 
-        // #321: the task's route (the proxy or OpenRouter); the answer read
+        // #321: the metadata task's model on OpenRouter; the answer read
         // into a typed struct, never `serde_json::Value` (an untrusted body).
         let task = sp_core::ai_tasks::AiTask::Metadata;
         let response: TitleAnswer = self
             .ai_client
             .chat_json_for(task, system, title)
             .await
-            .map_err(|e| MetadataError::ApiError(e.to_string()))?;
+            .map_err(|e| MetadataError::ApiError(format!("{e:#}")))?;
 
         let song = response
             .song
@@ -76,19 +76,18 @@ impl MetadataProvider for ClaudeMetadataProvider {
     }
 
     fn name(&self) -> &str {
-        "claude"
+        "openrouter"
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::AiSettings;
 
-    #[test]
-    fn provider_name() {
-        let client = Arc::new(AiClient::new(AiSettings::default()));
-        let provider = ClaudeMetadataProvider::new(client);
-        assert_eq!(provider.name(), "claude");
+    #[tokio::test]
+    async fn provider_name() {
+        let client = Arc::new(crate::ai::test_support::ai_client_unused().await);
+        let provider = OpenRouterMetadataProvider::new(client);
+        assert_eq!(provider.name(), "openrouter");
     }
 }

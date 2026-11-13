@@ -92,7 +92,7 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
     let gemini_model = RwSignal::new(String::new());
     // #229 item C: this node's paid-AI switch (on unless it says off).
     let paid_ai = RwSignal::new(true);
-    // #321: each text AI task's provider + OpenRouter model, as shown.
+    // #321: each text AI task's OpenRouter model, as shown.
     let ai_tasks = RwSignal::new(HashMap::<String, String>::new());
     let cache_dir = RwSignal::new(String::new());
     let dub_voice = RwSignal::new(config::DEFAULT_DUB_VOICE.to_string());

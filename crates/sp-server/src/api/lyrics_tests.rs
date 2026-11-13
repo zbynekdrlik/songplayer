@@ -32,7 +32,7 @@ async fn test_state_with_cache_dir() -> (crate::AppState, tempfile::TempDir) {
     let (sync_tx, _) = mpsc::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
     let state = crate::AppState {
-        pool,
+        pool: pool.clone(),
         event_tx,
         engine_tx,
         obs_state: Arc::new(RwLock::new(crate::obs::ObsState::default())),
@@ -41,13 +41,7 @@ async fn test_state_with_cache_dir() -> (crate::AppState, tempfile::TempDir) {
         sync_tx,
         resolume_tx,
         cache_dir: cache_dir.clone(),
-        ai_proxy: Arc::new(crate::ai::proxy::ProxyManager::new(
-            cache_dir,
-            crate::ai::proxy::ProxyManager::default_port(),
-        )),
-        ai_client: Arc::new(crate::ai::client::AiClient::new(
-            crate::ai::AiSettings::default(),
-        )),
+        ai_client: Arc::new(crate::ai::client::AiClient::new(pool.clone())),
         presenter_client: None,
         resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
         ndi_health_registry: Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),

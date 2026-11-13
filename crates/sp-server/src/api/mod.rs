@@ -1,6 +1,5 @@
 //! HTTP API and WebSocket — Axum router, REST endpoints, and dashboard WebSocket.
 
-pub mod ai;
 pub mod ai_openrouter; // #321: the OpenRouter probe + the translation A/B
 pub mod audio; // #233: GET /api/v1/audio/asio-drivers (the ASIO driver list)
 pub mod audio_faults; // #257: GET /api/v1/audio/faults (the audio fault ledger)
@@ -331,21 +330,6 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         )
         // WebSocket
         .route("/api/v1/ws", axum::routing::get(websocket::ws_handler))
-        // AI proxy
-        .route(
-            "/api/v1/ai/proxy/start",
-            axum::routing::post(ai::proxy_start),
-        )
-        .route("/api/v1/ai/proxy/stop", axum::routing::post(ai::proxy_stop))
-        .route(
-            "/api/v1/ai/proxy/login",
-            axum::routing::post(ai::proxy_login),
-        )
-        .route(
-            "/api/v1/ai/proxy/complete-login",
-            axum::routing::post(ai::proxy_complete_login),
-        )
-        .route("/api/v1/ai/status", axum::routing::get(ai::ai_status))
         // #321: the OpenRouter text path's live gate and the translation A/B
         .route(
             "/api/v1/ai/openrouter/probe",

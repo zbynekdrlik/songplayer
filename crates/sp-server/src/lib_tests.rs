@@ -67,7 +67,7 @@ mod tests {
         let (resolume_tx, _) = mpsc::channel::<resolume::ResolumeCommand>(16);
 
         let state = AppState {
-            pool,
+            pool: pool.clone(),
             event_tx,
             engine_tx,
             obs_state,
@@ -76,11 +76,7 @@ mod tests {
             sync_tx,
             resolume_tx,
             cache_dir: PathBuf::from("cache"),
-            ai_proxy: Arc::new(ai::proxy::ProxyManager::new(
-                PathBuf::from("cache"),
-                ai::proxy::ProxyManager::default_port(),
-            )),
-            ai_client: Arc::new(ai::client::AiClient::new(ai::AiSettings::default())),
+            ai_client: Arc::new(crate::ai::client::AiClient::new(pool.clone())),
             presenter_client: None,
             resolume_registry: Arc::new(resolume::ResolumeRegistry::new()),
             ndi_health_registry: Arc::new(playback::ndi_health::NdiHealthRegistry::new()),
@@ -107,7 +103,7 @@ mod tests {
         let (resolume_tx, _) = mpsc::channel::<resolume::ResolumeCommand>(16);
 
         let state = AppState {
-            pool,
+            pool: pool.clone(),
             event_tx,
             engine_tx,
             obs_state: Arc::new(RwLock::new(obs::ObsState::default())),
@@ -116,11 +112,7 @@ mod tests {
             sync_tx,
             resolume_tx,
             cache_dir: PathBuf::from("cache"),
-            ai_proxy: Arc::new(ai::proxy::ProxyManager::new(
-                PathBuf::from("cache"),
-                ai::proxy::ProxyManager::default_port(),
-            )),
-            ai_client: Arc::new(ai::client::AiClient::new(ai::AiSettings::default())),
+            ai_client: Arc::new(crate::ai::client::AiClient::new(pool.clone())),
             presenter_client: None,
             resolume_registry: Arc::new(resolume::ResolumeRegistry::new()),
             ndi_health_registry: Arc::new(playback::ndi_health::NdiHealthRegistry::new()),

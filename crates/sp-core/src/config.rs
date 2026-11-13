@@ -490,45 +490,9 @@ pub fn dub_voice_label(voice: &str) -> String {
     }
 }
 
-// AI settings (CLIProxyAPI → Claude Opus 5.5)
-pub const SETTING_AI_API_URL: &str = "ai_api_url";
-pub const SETTING_AI_MODEL: &str = "ai_model";
-pub const DEFAULT_AI_API_URL: &str = "http://localhost:18787/v1";
-/// Claude model used for translation / text cleanup through CLIProxyAPI.
-/// `claude-opus-5-5` is the newest Claude flagship (owner, 29.9.2026). It
-/// needs the proxy to present Claude Code 2.1.280 or newer: CLIProxyAPI 7.3.1
-/// presented 2.1.258 and got HTTP 400, 8.0.4 (installed 29.9.2026, #145)
-/// answers HTTP 200 on the existing OAuth login. The post-deploy AI step makes
-/// a real completion with the model SongPlayer sends and fails when the proxy
-/// lists a newer `claude-opus-*`, so a model the proxy cannot serve, or a newer
-/// Opus nobody switched to, fails CI. Probe a candidate with
-/// `python C:\ProgramData\SongPlayer\proxy_probe.py <model>` before changing
-/// this — only ids the proxy's `/v1/models` lists will route.
-pub const DEFAULT_AI_MODEL: &str = "claude-opus-5-5";
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The default translation / cleanup model must be the current Claude
-    /// flagship that the installed CLIProxyAPI actually routes: Opus 5.5 (the
-    /// owner, 29.9.2026: "mal by sa pouzivat opus 5.5/sonnet 5.5"). Opus 5.5
-    /// needs the proxy to present Claude Code 2.1.280 or newer; CLIProxyAPI
-    /// 7.3.1 presented 2.1.258 and got HTTP 400, 8.0.4 (installed 29.9.2026,
-    /// #145) returns HTTP 200 on the existing OAuth login. Never one of the
-    /// earlier stop-gaps: `claude-fable-5-1` (#145, 13.9.), `claude-opus-4-6`
-    /// (#144) or the retired `claude-opus-4-20250514`.
-    #[test]
-    fn default_ai_model_is_current_flagship() {
-        assert_eq!(DEFAULT_AI_MODEL, "claude-opus-5-5");
-        for superseded in [
-            "claude-fable-5-1",
-            "claude-opus-4-6",
-            "claude-opus-4-20250514",
-        ] {
-            assert_ne!(DEFAULT_AI_MODEL, superseded, "superseded model id");
-        }
-    }
 
     #[test]
     fn dub_voice_setting_key_and_default_is_the_speaker() {

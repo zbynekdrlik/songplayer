@@ -10,7 +10,7 @@
 //!      (`run_g35t_transcript_branch`) for every song the reference stage did
 //!      not ship. The transcript and both tiers run from
 //!      `worker_text_tiers::run_text_tiers` (#144).
-//!   5. SK translation — Claude (CLIProxyAPI) only per `feedback_claude_only_translation.md`.
+//!   5. SK translation — the `translate` text AI task on OpenRouter (#321).
 //!   6. Persist JSON + DB row with pipeline_version.
 
 use anyhow::Result;
@@ -39,8 +39,8 @@ pub struct LyricsWorker {
     pub(crate) tools_dir: PathBuf,
     pub(crate) script_path: PathBuf,
     pub(crate) models_dir: PathBuf,
-    /// Claude AI client for EN→SK translation (CLIProxyAPI).
-    /// None if CLIProxyAPI is not configured.
+    /// The text AI client (#321: OpenRouter) for the EN→SK translation.
+    /// None in a test worker with no AI.
     pub(crate) ai_client: Option<Arc<AiClient>>,
     pub(crate) venv_python: tokio::sync::RwLock<Option<PathBuf>>,
     // pub(crate) so the sibling `worker_translation` module (#152) shares the
@@ -93,7 +93,7 @@ pub(crate) use crate::lyrics::gather::gather_sources_impl;
 /// only when ALL four guards are satisfied:
 /// - `spotify_track_id` is NULL (no resolved id yet)
 /// - `spotify_resolved_at` is NULL (no prior attempt recorded)
-/// - an AI client is configured (CLIProxyAPI present)
+/// - an AI client is configured
 /// - both `song` and `artist` are non-empty
 ///
 /// Extracted from `process_song` so the guards are pinned by unit tests

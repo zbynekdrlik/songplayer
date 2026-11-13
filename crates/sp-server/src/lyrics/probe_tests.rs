@@ -5,8 +5,6 @@
 //! under the file-size cap and lets each test file stay narrowly focused.
 
 use super::probe::probe_sources_impl;
-use crate::ai::AiSettings;
-use crate::ai::client::AiClient;
 use crate::db::models::VideoLyricsRow;
 
 fn fixture_row(song: &str, artist: &str, spotify_track_id: Option<&str>) -> VideoLyricsRow {
@@ -155,7 +153,7 @@ async fn probe_description_reports_error_when_fetch_fails() {
         .await
         .unwrap();
 
-    let ai = AiClient::new(AiSettings::default());
+    let ai = crate::ai::test_support::ai_client_unused().await;
     let report = probe_sources_impl(
         Some(&ai),
         std::path::Path::new("/nonexistent/ytdlp"),

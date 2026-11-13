@@ -1,5 +1,5 @@
 //! #321: the blind translation A/B — its checks, its lettering, and one
-//! whole run against a mock proxy and a mock OpenRouter.
+//! whole run against a mock OpenRouter.
 
 use sp_core::lyrics::{LyricsLine, LyricsTrack};
 use sqlx::SqlitePool;
@@ -10,18 +10,13 @@ use super::{
     AbRequest, Candidate, RunGuard, Song, begin, blind_sheet, checked, default_candidates,
     key_json, letter, random_seed, run, shuffled, song_orders, status, valid_youtube_id,
 };
-use crate::ai::AiSettings;
-use crate::ai::client::AiClient;
-use crate::ai::openrouter::OpenRouterClient;
-use crate::ai::retry::RetryPolicy;
-use crate::db::models::set_setting;
+use crate::ai::test_support::{ai_client_at, ai_client_on};
 use crate::lyrics::translator::SpeakerGender;
 
 const YT: &str = "abcdefghijk";
 
-fn cand(provider: &str, model: &str) -> Candidate {
+fn cand(model: &str) -> Candidate {
     Candidate {
-        provider: provider.into(),
         model: model.into(),
     }
 }
@@ -56,13 +51,13 @@ fn a_youtube_id_is_eleven_url_safe_characters() {
 }
 
 #[test]
-fn the_default_candidates_are_claude_carbon_and_hydrogen() {
+fn the_default_candidates_are_the_first_runs_three() {
     assert_eq!(
-        default_candidates("claude-opus-5-5"),
+        default_candidates(),
         vec![
-            cand("claude_proxy", "claude-opus-5-5"),
-            cand("openrouter", "google/gemini-4-carbon"),
-            cand("openrouter", "google/gemini-4-hydrogen"),
+            cand("anthropic/claude-opus-5.5"),
+            cand("google/gemini-4-carbon"),
+            cand("google/gemini-4-hydrogen"),
         ]
     );
 }
@@ -73,34 +68,24 @@ fn the_request_is_checked() {
         youtube_ids: ids.iter().map(|s| s.to_string()).collect(),
         candidates: c,
     };
-    let (ids, c) = checked(req(&[YT, " abcdefghijk ", "zzzzzzzzzzz"], None), "m").unwrap();
+    let (ids, c) = checked(req(&[YT, " abcdefghijk ", "zzzzzzzzzzz"], None)).unwrap();
     assert_eq!(ids, vec![YT.to_string(), "zzzzzzzzzzz".to_string()]);
     assert_eq!(c.len(), 3);
-    assert!(checked(req(&[], None), "m").is_err());
-    assert!(checked(req(&["bad"], None), "m").is_err());
+    assert!(checked(req(&[], None)).is_err());
+    assert!(checked(req(&["bad"], None)).is_err());
     let too_many: Vec<String> = (0..41).map(|i| format!("{i:011}")).collect();
     let refs: Vec<&str> = too_many.iter().map(String::as_str).collect();
-    assert!(checked(req(&refs, None), "m").is_err());
+    assert!(checked(req(&refs, None)).is_err());
     let forty: Vec<&str> = refs[..40].to_vec();
-    assert_eq!(checked(req(&forty, None), "m").unwrap().0.len(), 40);
-    assert!(checked(req(&[YT], Some(vec![cand("openrouter", "x")])), "m").is_err());
-    let six = vec![cand("openrouter", "x"); 6];
-    assert!(checked(req(&[YT], Some(six.clone())), "m").is_ok());
+    assert_eq!(checked(req(&forty, None)).unwrap().0.len(), 40);
+    assert!(checked(req(&[YT], Some(vec![cand("x")]))).is_err());
+    let six = vec![cand("x"); 6];
+    assert!(checked(req(&[YT], Some(six.clone()))).is_ok());
     let mut seven = six;
-    seven.push(cand("openrouter", "x"));
-    assert!(checked(req(&[YT], Some(seven)), "m").is_err());
-    let unknown = vec![cand("openrouter", "x"), cand("gemini", "y")];
-    assert!(checked(req(&[YT], Some(unknown)), "m").is_err());
-    let blank_provider = vec![cand("openrouter", "x"), cand(" ", "y")];
-    assert!(checked(req(&[YT], Some(blank_provider)), "m").is_err());
-    let blank_model = vec![cand("openrouter", "x"), cand("openrouter", " ")];
-    assert!(checked(req(&[YT], Some(blank_model)), "m").is_err());
-    // A proxy candidate names the proxy's own model, never another one
-    // (the key would lie: the proxy always sends `ai_model`).
-    let proxy_other = vec![cand("openrouter", "x"), cand("claude_proxy", "other")];
-    assert!(checked(req(&[YT], Some(proxy_other)), "m").is_err());
-    let proxy_own = vec![cand("openrouter", "x"), cand("claude_proxy", " m ")];
-    assert!(checked(req(&[YT], Some(proxy_own)), "m").is_ok());
+    seven.push(cand("x"));
+    assert!(checked(req(&[YT], Some(seven))).is_err());
+    let blank_model = vec![cand("x"), cand(" ")];
+    assert!(checked(req(&[YT], Some(blank_model))).is_err());
 }
 
 #[test]
@@ -144,10 +129,7 @@ fn the_sheet_names_no_model_nor_provider_and_the_key_maps_each_letter() {
         track: track(&["Line one", "Line two"]),
         gender: SpeakerGender::Male,
     };
-    let candidates = vec![
-        cand("claude_proxy", "claude-x"),
-        cand("openrouter", "google/g"),
-    ];
+    let candidates = vec![cand("anthropic/claude-x"), cand("google/g")];
     let results = || {
         vec![
             Ok(vec!["Claude jeden".to_string(), "Claude dva".to_string()]),
@@ -184,12 +166,12 @@ fn the_sheet_names_no_model_nor_provider_and_the_key_maps_each_letter() {
         key_json(&candidates, &songs, &orders),
         serde_json::json!({
             "abcdefghijk": {
-                "A": {"provider": "openrouter", "model": "google/g", "error": "OpenRouter refused (HTTP 500)"},
-                "B": {"provider": "claude_proxy", "model": "claude-x"}
+                "A": {"model": "google/g", "error": "OpenRouter refused (HTTP 500)"},
+                "B": {"model": "anthropic/claude-x"}
             },
             "zzzzzzzzzzz": {
-                "A": {"provider": "claude_proxy", "model": "claude-x"},
-                "B": {"provider": "openrouter", "model": "google/g", "error": "OpenRouter refused (HTTP 500)"}
+                "A": {"model": "anthropic/claude-x"},
+                "B": {"model": "google/g", "error": "OpenRouter refused (HTTP 500)"}
             }
         })
     );
@@ -231,58 +213,39 @@ async fn pool_with_song(gender: Option<&str>) -> SqlitePool {
     pool
 }
 
-/// A whole run: the production prompt (with the song's gender) through the
-/// proxy and through OpenRouter, the sheet blind, the key apart.
+/// A whole run: the production prompt (with the song's gender) through
+/// every candidate on OpenRouter, the sheet blind, the key apart.
 #[tokio::test]
 async fn a_run_writes_the_blind_sheet_and_its_key() {
     let pool = pool_with_song(Some("f")).await;
-    set_setting(
-        &pool,
-        "openrouter_api_key",
-        "example-openrouter-key-for-tests",
-    )
-    .await
-    .unwrap();
     let cache = tempfile::tempdir().unwrap();
     let json = serde_json::to_string(&track(&["I was lost", "Now found"])).unwrap();
     std::fs::write(cache.path().join(format!("{YT}_lyrics.json")), json).unwrap();
 
-    let proxy = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/v1/chat/completions"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "choices": [{"message": {"content": "1: Bola som stratená\n2: Teraz nájdená"}}]
-        })))
-        .expect(1)
-        .mount(&proxy)
-        .await;
     let openrouter = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/api/v1/chat/completions"))
-        .and(body_partial_json(
-            serde_json::json!({"model": "google/gemini-4-carbon", "max_tokens": 8000}),
-        ))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "choices": [{"message": {"content": "1: Stratená\n2: Nájdená"}}]
-        })))
-        .expect(1)
-        .mount(&openrouter)
-        .await;
-    let client = AiClient::new(AiSettings {
-        api_url: format!("{}/v1", proxy.uri()),
-        api_key: None,
-        model: "claude-test".into(),
-        system_prompt_extra: None,
-    })
-    .with_retry_policy(RetryPolicy::NO_WAIT)
-    .with_routing_to(
-        pool.clone(),
-        OpenRouterClient::new(format!("{}/api/v1", openrouter.uri()))
-            .with_retry_policy(RetryPolicy::NO_WAIT),
-    );
+    for (model, text) in [
+        (
+            "anthropic/claude-test",
+            "1: Bola som stratená\n2: Teraz nájdená",
+        ),
+        ("google/gemini-4-carbon", "1: Stratená\n2: Nájdená"),
+    ] {
+        Mock::given(method("POST"))
+            .and(path("/api/v1/chat/completions"))
+            .and(body_partial_json(
+                serde_json::json!({"model": model, "max_tokens": 8000}),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{"message": {"content": text}}]
+            })))
+            .expect(1)
+            .mount(&openrouter)
+            .await;
+    }
+    let client = ai_client_on(pool.clone(), format!("{}/api/v1", openrouter.uri())).await;
     let candidates = vec![
-        cand("claude_proxy", "claude-test"),
-        cand("openrouter", "google/gemini-4-carbon"),
+        cand("anthropic/claude-test"),
+        cand(" google/gemini-4-carbon "),
     ];
     let done = std::sync::Mutex::new(Vec::new());
     let progress = |n: usize| done.lock().unwrap().push(n);
@@ -301,8 +264,9 @@ async fn a_run_writes_the_blind_sheet_and_its_key() {
     assert!(dir.starts_with(cache.path().join("ab")));
 
     // Both prompts are the translator's, with the feminine directive.
-    for server in [&proxy, &openrouter] {
-        let req = &server.received_requests().await.unwrap()[0];
+    let requests = openrouter.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 2);
+    for req in &requests {
         let body = String::from_utf8(req.body.clone()).unwrap();
         assert!(body.contains("use feminine forms"), "{body}");
         assert!(body.contains("1: I was lost\\n2: Now found"), "{body}");
@@ -330,10 +294,13 @@ async fn a_run_writes_the_blind_sheet_and_its_key() {
         sheet.contains(&format!("   {carbon_letter}: Stratená\n")),
         "{sheet}"
     );
-    assert_eq!(key[YT][claude_letter.to_string()]["model"], "claude-test");
+    assert_eq!(
+        key[YT][claude_letter.to_string()]["model"],
+        "anthropic/claude-test"
+    );
     assert_eq!(
         key[YT][carbon_letter.to_string()]["model"],
-        "google/gemini-4-carbon"
+        " google/gemini-4-carbon "
     );
 }
 
@@ -348,18 +315,13 @@ async fn a_song_that_cannot_run_fails_the_run_before_any_call() {
     let empty = serde_json::to_string(&track(&[])).unwrap();
     std::fs::write(cache.path().join("zzzzzzzzzzz_lyrics.json"), &empty).unwrap();
     std::fs::write(cache.path().join(format!("{YT}_lyrics.json")), &empty).unwrap();
-    let proxy = MockServer::start().await;
+    let openrouter = MockServer::start().await;
     Mock::given(method("POST"))
         .respond_with(ResponseTemplate::new(200))
         .expect(0)
-        .mount(&proxy)
+        .mount(&openrouter)
         .await;
-    let client = AiClient::new(AiSettings {
-        api_url: format!("{}/v1", proxy.uri()),
-        api_key: None,
-        model: "m".into(),
-        system_prompt_extra: None,
-    });
+    let client = ai_client_at(format!("{}/v1", openrouter.uri())).await;
     let ids = [
         "yyyyyyyyyyy".to_string(),
         "zzzzzzzzzzz".to_string(),
@@ -370,7 +332,7 @@ async fn a_song_that_cannot_run_fails_the_run_before_any_call() {
         &pool,
         cache.path(),
         &ids,
-        &default_candidates("m"),
+        &default_candidates(),
         1,
         &|_| {},
     )

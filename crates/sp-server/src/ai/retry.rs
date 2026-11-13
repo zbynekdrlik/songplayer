@@ -1,24 +1,15 @@
-//! How the AI client waits between the attempts of a call the proxy refused
-//! with a 429 or a 5xx (#145, design record 5908861002).
-//!
-//! CLIProxyAPI (8.0.4, source read on #145) puts the one OAuth credential
-//! into a cooldown after an upstream 5xx — 60 s by default — and while it
-//! cools it refuses every request LOCALLY with a 503 `auth_unavailable`
-//! carrying `Retry-After` = the cooldown left. The old 1 s / 2 s retries
-//! landed inside that cooldown every time (503s in 4-15 ms, box log
-//! 30.9.2026), so a short upstream blip failed a Claude cleanup outright.
+//! How the AI client waits between the attempts of a refused call (#145,
+//! design record 5908861002; since #321 every text call goes to OpenRouter).
 //!
 //! - A `Retry-After` in seconds is honoured, capped at
 //!   [`RetryPolicy::retry_after_cap`] (120 s): the next attempt lands right
-//!   after the cooldown.
-//! - Without one (the upstream's 5xx relayed, an older proxy, cooling
-//!   disabled) the waits are [`RetryPolicy::fallback`] (5 s, 20 s, 60 s; its
-//!   length is the retry budget): 85 s in all outlasts the default 60 s
-//!   cooldown.
+//!   after the wait the provider names.
+//! - Without one the waits are [`RetryPolicy::fallback`] (5 s, 20 s, 60 s;
+//!   its length is the retry budget), 85 s in all. #321: an answer with no
+//!   text is retried on the same waits.
 //! - Only 429 and 5xx are retried; anything else fails at once. So does a
-//!   refusal by Claude's upstream content filter (#144,
-//!   [`is_content_filtered`]): the same output is refused again, and each
-//!   refusal costs the proxy's cooldown — ~60 s of every AI call refused.
+//!   moderation refusal ([`ContentFiltered`]): the same output is refused
+//!   again.
 //!
 //! Every caller today is background work (lyrics, translation, metadata), so
 //! the client uses [`RetryPolicy::SPANNING`]; a caller that cannot wait sets
@@ -44,7 +35,7 @@ pub struct RetryPolicy {
 }
 
 impl RetryPolicy {
-    /// Production: 3 retries after 5 s, 20 s, 60 s, or after the proxy's
+    /// Production: 3 retries after 5 s, 20 s, 60 s, or after the provider's
     /// `Retry-After` up to 120 s (the module doc).
     pub const SPANNING: Self = Self {
         fallback: &[
@@ -115,21 +106,13 @@ pub fn is_retried(status: u16) -> bool {
     status == 429 || (500..600).contains(&status)
 }
 
-/// #144: whether a refused call's body is Claude's upstream content filter
-/// ("Output blocked by content filtering policy", relayed by CLIProxyAPI as
-/// a 502). The same request is refused again, and every refusal puts the
-/// proxy's one credential into its cooldown, so the client never retries
-/// it.
-pub fn is_content_filtered(body: &str) -> bool {
-    body.contains("content filtering policy")
-}
-
-/// #144: a call Claude's upstream content filter refused
-/// ([`is_content_filtered`]): the client's error for it, typed so a caller
-/// asks [`content_filtered`] by type, never by an error's text.
+/// #144: a call the provider's content filter refused (since #321
+/// OpenRouter's moderation, `openrouter::is_moderation_refusal`): the
+/// client's error for it, typed so a caller asks [`content_filtered`] by
+/// type, never by an error's text. Final: the same output is refused again.
 #[derive(Debug)]
 pub struct ContentFiltered {
-    /// The refusal: its status and the proxy's body (or why it was not sent).
+    /// The refusal: its status and the provider's body (key cut out).
     pub detail: String,
 }
 

@@ -1,7 +1,9 @@
-//! #321: the blind A/B of the EN→SK translation (the flip's evidence).
+//! #321: the blind A/B of the EN→SK translation (the flip's evidence, kept
+//! for the next model choice).
 //!
-//! The owner's ruling (#232, 13.11.2026): the translation's default moves to
-//! OpenRouter only after a blind A/B on our songs shows it is no worse.
+//! The owner's ruling (#232, 13.11.2026): a task's model changes only after
+//! a blind A/B on our songs shows it is no worse (the first run: #321
+//! comment 6856550942).
 //! `POST /api/v1/ai/translate-ab {"youtube_ids", "candidates"?}` runs, on the
 //! box and through SongPlayer's own client (the key never leaves it), the
 //! production translator prompt (`translator::build_prompt` with the song's
@@ -13,16 +15,16 @@
 //!   from a seed of OS randomness (one unmasked letter unmasks one song);
 //!   a failed call reads a neutral `(chyba)` (an error's text would name
 //!   its provider);
-//! - `key.json`: per song, letter → provider + model (+ the call's error),
-//!   kept apart (open it only after the grading).
+//! - `key.json`: per song, letter → model (+ the call's error), kept apart
+//!   (open it only after the grading).
 //!
-//! Default candidates: the proxy's current Claude (`ai_model`),
-//! `google/gemini-4-carbon` and `google/gemini-4-hydrogen` on OpenRouter.
+//! Every candidate is an OpenRouter model (the Claude proxy is deleted).
+//! Default candidates: [`DEFAULT_CANDIDATES`], the first run's three.
 //! Every song is read (its lyrics, its row, at least one line) BEFORE the
 //! first paid call: a song that cannot run fails the run naming every such
 //! id, nothing spent. A failed call is written into its cells as
 //! `(chyba)` and the run goes on. Paid AI: the route refuses while it is
-//! off (both sides are paid). An OpenRouter call writes at most
+//! off. An OpenRouter call writes at most
 //! [`CALL_MAX_TOKENS`] (a song's translation needs far less).
 
 use std::path::{Path, PathBuf};
@@ -30,7 +32,6 @@ use std::sync::Mutex;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use sp_core::ai_tasks::AiProvider;
 use sp_core::lyrics::LyricsTrack;
 use sqlx::SqlitePool;
 
@@ -51,13 +52,18 @@ pub const CALL_TIMEOUT_S: u64 = 300;
 /// tokens).
 pub const CALL_MAX_TOKENS: u32 = 8_000;
 
-/// One model under test.
+/// One model under test: an OpenRouter model id.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Candidate {
-    /// `claude_proxy` or `openrouter`.
-    pub provider: String,
     pub model: String,
 }
+
+/// The default candidates: the first run's three (#321), all on OpenRouter.
+pub const DEFAULT_CANDIDATES: [&str; 3] = [
+    "anthropic/claude-opus-5.5",
+    "google/gemini-4-carbon",
+    "google/gemini-4-hydrogen",
+];
 
 /// The route's body.
 #[derive(Debug, Deserialize)]
@@ -96,29 +102,20 @@ pub fn valid_youtube_id(id: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
-/// The default candidates: the proxy's `proxy_model`, then Carbon and
-/// Hydrogen on OpenRouter.
-pub fn default_candidates(proxy_model: &str) -> Vec<Candidate> {
-    vec![
-        Candidate {
-            provider: AiProvider::ClaudeProxy.as_str().into(),
-            model: proxy_model.into(),
-        },
-        Candidate {
-            provider: AiProvider::OpenRouter.as_str().into(),
-            model: "google/gemini-4-carbon".into(),
-        },
-        Candidate {
-            provider: AiProvider::OpenRouter.as_str().into(),
-            model: "google/gemini-4-hydrogen".into(),
-        },
-    ]
+/// The default candidates ([`DEFAULT_CANDIDATES`]).
+pub fn default_candidates() -> Vec<Candidate> {
+    DEFAULT_CANDIDATES
+        .iter()
+        .map(|m| Candidate {
+            model: m.to_string(),
+        })
+        .collect()
 }
 
 /// The request checked: the ids (1..=[`MAX_SONGS`], each valid, each once,
-/// in order) and the candidates (2..=[`MAX_CANDIDATES`], each a known
-/// provider and a model). An error is the 400's text.
-pub fn checked(req: AbRequest, proxy_model: &str) -> Result<(Vec<String>, Vec<Candidate>), String> {
+/// in order) and the candidates (2..=[`MAX_CANDIDATES`], each a model). An
+/// error is the 400's text.
+pub fn checked(req: AbRequest) -> Result<(Vec<String>, Vec<Candidate>), String> {
     let mut ids: Vec<String> = Vec::new();
     for id in req.youtube_ids {
         let id = id.trim().to_string();
@@ -132,32 +129,12 @@ pub fn checked(req: AbRequest, proxy_model: &str) -> Result<(Vec<String>, Vec<Ca
     if ids.is_empty() || ids.len() > MAX_SONGS {
         return Err(format!("youtube_ids: 1 to {MAX_SONGS} ids"));
     }
-    let candidates = req
-        .candidates
-        .unwrap_or_else(|| default_candidates(proxy_model));
+    let candidates = req.candidates.unwrap_or_else(default_candidates);
     if candidates.len() < 2 || candidates.len() > MAX_CANDIDATES {
         return Err(format!("candidates: 2 to {MAX_CANDIDATES}"));
     }
-    for c in &candidates {
-        if c.provider.trim().is_empty() || AiProvider::parse(Some(&c.provider)).is_none() {
-            return Err(format!(
-                "candidate provider {:?}: claude_proxy or openrouter",
-                c.provider
-            ));
-        }
-        if c.model.trim().is_empty() {
-            return Err("a candidate has no model".into());
-        }
-        // The proxy always sends its own `ai_model`: another model named
-        // for it would be written into `key.json` under a false name.
-        if AiProvider::read(Some(&c.provider)) == AiProvider::ClaudeProxy
-            && c.model.trim() != proxy_model
-        {
-            return Err(format!(
-                "a claude_proxy candidate sends the proxy's model {proxy_model:?}, not {:?}",
-                c.model
-            ));
-        }
+    if candidates.iter().any(|c| c.model.trim().is_empty()) {
+        return Err("a candidate has no model".into());
     }
     Ok((ids, candidates))
 }
@@ -242,7 +219,6 @@ pub fn blind_sheet(started: &str, songs: &[(Song, SongResult)], orders: &[Vec<us
 /// One letter's entry in the key.
 #[derive(Serialize)]
 struct KeyEntry<'a> {
-    provider: &'a str,
     model: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<&'a str>,
@@ -259,7 +235,6 @@ pub fn key_json(
         let mut letters = serde_json::Map::new();
         for (place, &cand) in order.iter().enumerate() {
             let entry = KeyEntry {
-                provider: &candidates[cand].provider,
                 model: &candidates[cand].model,
                 error: results[cand].as_ref().err().map(String::as_str),
             };
@@ -327,14 +302,10 @@ pub async fn translate(
         .join("\n");
     let n = song.track.lines.len();
     let prompt = build_prompt(n, &numbered, song.gender);
-    let answer = match AiProvider::read(Some(&c.provider)) {
-        AiProvider::ClaudeProxy => client.chat_with_timeout("", &prompt, CALL_TIMEOUT_S).await,
-        AiProvider::OpenRouter => client
-            .openrouter_chat(&c.model, "", &prompt, CALL_TIMEOUT_S, CALL_MAX_TOKENS)
-            .await
-            .map(|c| c.text),
-    };
-    answer
+    client
+        .openrouter_chat(c.model.trim(), "", &prompt, CALL_TIMEOUT_S, CALL_MAX_TOKENS)
+        .await
+        .map(|c| c.text)
         .map(|text| parse_translation_response(&text, n))
         .map_err(|e| format!("{e:#}"))
 }

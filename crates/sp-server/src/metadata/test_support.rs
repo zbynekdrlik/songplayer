@@ -1,6 +1,6 @@
 //! Shared fixtures for the metadata-chain tests (#136): the fixed real video
 //! the post-deploy gate probes, and mock-server answers in the exact shapes
-//! CLIProxyAPI (OpenAI chat) and Gemini (`generateContent`) return.
+//! OpenRouter (OpenAI chat) and Gemini (`generateContent`) return.
 
 use std::sync::Arc;
 
@@ -8,7 +8,6 @@ use serde_json::{Value, json};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use crate::ai::AiSettings;
 use crate::ai::client::AiClient;
 
 /// The video of the #136 report (playlist ytfast, video 258).
@@ -26,19 +25,14 @@ pub fn gemini_answer(song: &str, artist: &str) -> Value {
     json!({"candidates": [{"content": {"role": "model", "parts": [{"text": text}]}}]})
 }
 
-/// An `AiClient` on `server` (CLIProxyAPI's OpenAI-compatible `/v1`).
-pub fn ai_client_at(server: &MockServer) -> Arc<AiClient> {
-    Arc::new(AiClient::new(AiSettings {
-        api_url: format!("{}/v1", server.uri()),
-        api_key: None,
-        model: "claude-test".into(),
-        system_prompt_extra: None,
-    }))
+/// An `AiClient` on `server` (OpenRouter's OpenAI-compatible root, `/v1`).
+pub async fn ai_client_at(server: &MockServer) -> Arc<AiClient> {
+    Arc::new(crate::ai::test_support::ai_client_at(format!("{}/v1", server.uri())).await)
 }
 
-/// Claude (through the proxy) answers every metadata prompt with `song` /
+/// The OpenRouter text provider answers every metadata prompt with `song` /
 /// `artist`.
-pub async fn claude_answers(server: &MockServer, song: &str, artist: &str) {
+pub async fn openrouter_answers(server: &MockServer, song: &str, artist: &str) {
     let content = json!({"song": song, "artist": artist}).to_string();
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
@@ -50,9 +44,9 @@ pub async fn claude_answers(server: &MockServer, song: &str, artist: &str) {
         .await;
 }
 
-/// Claude (through the proxy) refuses every prompt with a 400 (not retried
-/// by `AiClient`, so the chain moves on at once).
-pub async fn claude_refuses(server: &MockServer) {
+/// OpenRouter refuses every prompt with a 400 (not retried by `AiClient`,
+/// so the chain moves on at once).
+pub async fn openrouter_refuses(server: &MockServer) {
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
         .respond_with(ResponseTemplate::new(400).set_body_string("unknown provider for model"))

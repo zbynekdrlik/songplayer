@@ -207,8 +207,6 @@ fn new_provenance_source_literals_are_recognizable() {
 /// contains exactly one CandidateText with source == "description".
 #[tokio::test]
 async fn gather_sources_pushes_description_candidate_when_claude_returns_lyrics() {
-    use crate::ai::AiSettings;
-    use crate::ai::client::AiClient;
     use crate::db::models::VideoLyricsRow;
     use crate::lyrics::worker::gather_sources_impl;
 
@@ -239,12 +237,7 @@ async fn gather_sources_pushes_description_candidate_when_claude_returns_lyrics(
         .mount(&mock)
         .await;
 
-    let ai = AiClient::new(AiSettings {
-        api_url: format!("{}/v1", mock.uri()),
-        api_key: Some("test".into()),
-        model: "stub".into(),
-        system_prompt_extra: None,
-    });
+    let ai = crate::ai::test_support::ai_client_at(format!("{}/v1", mock.uri())).await;
 
     let row = VideoLyricsRow {
         id: 1,
@@ -304,8 +297,6 @@ async fn gather_sources_pushes_description_candidate_when_claude_returns_lyrics(
 /// clean empty `SongContext`, not an error.
 #[tokio::test]
 async fn gather_sources_skips_description_when_claude_returns_empty_array() {
-    use crate::ai::AiSettings;
-    use crate::ai::client::AiClient;
     use crate::db::models::VideoLyricsRow;
     use crate::lyrics::worker::gather_sources_impl;
 
@@ -332,12 +323,7 @@ async fn gather_sources_skips_description_when_claude_returns_empty_array() {
         )
         .mount(&mock)
         .await;
-    let ai = AiClient::new(AiSettings {
-        api_url: format!("{}/v1", mock.uri()),
-        api_key: Some("test".into()),
-        model: "stub".into(),
-        system_prompt_extra: None,
-    });
+    let ai = crate::ai::test_support::ai_client_at(format!("{}/v1", mock.uri())).await;
 
     let row = VideoLyricsRow {
         id: 2,

@@ -9,8 +9,6 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::{CheckOutcome, MAX_FAILED_CHECKS, PEER_SCAN_EVERY, checked_now, gives_up, scan_due};
-use crate::ai::AiSettings;
-use crate::ai::client::AiClient;
 use crate::lyrics::register_check::REGISTER_CHECK_VERSION;
 use crate::lyrics::worker::LyricsWorker;
 use crate::peer::rig::{TestNode, set};
@@ -68,12 +66,9 @@ async fn node(server: &MockServer, track: Option<&LyricsTrack>) -> (TestNode, Ly
     let (events, _) = broadcast::channel(16);
     let mut worker =
         LyricsWorker::new_for_test(node.pool().clone(), node.cache().to_path_buf(), events);
-    worker.ai_client = Some(Arc::new(AiClient::new(AiSettings {
-        api_url: format!("{}/v1", server.uri()),
-        api_key: None,
-        model: "claude-test".into(),
-        system_prompt_extra: None,
-    })));
+    worker.ai_client = Some(Arc::new(
+        crate::ai::test_support::ai_client_at(format!("{}/v1", server.uri())).await,
+    ));
     (node, worker, id)
 }
 
@@ -401,13 +396,9 @@ async fn node_with_a_broken_proxy() -> (MockServer, TestNode, LyricsWorker, i64)
         .await;
     let (node, mut worker, id) = node(&server, Some(&served())).await;
     worker.ai_client = Some(Arc::new(
-        AiClient::new(AiSettings {
-            api_url: format!("{}/v1", server.uri()),
-            api_key: None,
-            model: "claude-test".into(),
-            system_prompt_extra: None,
-        })
-        .with_retry_policy(crate::ai::retry::RetryPolicy::NO_WAIT),
+        crate::ai::test_support::ai_client_at(format!("{}/v1", server.uri()))
+            .await
+            .with_retry_policy(crate::ai::retry::RetryPolicy::NO_WAIT),
     ));
     (server, node, worker, id)
 }

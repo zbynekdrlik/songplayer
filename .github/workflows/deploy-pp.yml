@@ -189,7 +189,8 @@ jobs:
       # The phase-0 task `SongPlayer` (MultipleInstances=IgnoreNew): end the
       # task INSTANCE first, else Task Scheduler can still report it Running
       # after a taskkill and the later `schtasks /run` does nothing
-      # (ci-workflows.md). Then CLIProxyAPI, an orphan of the old process.
+      # (ci-workflows.md). Then a CLIProxyAPI a build from before #321 left
+      # (SongPlayer no longer runs it).
       # Each of the next two steps has its own bound: a hung stop or
       # installer fails its step in minutes (a plain step failure), and the
       # always() Start step brings SongPlayer back, instead of PP waiting

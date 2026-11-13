@@ -1,109 +1,52 @@
-//! #321: where each text AI task's call goes, read live per call.
+//! #321: each text AI task's call, read live per call.
 //!
 //! A child module of `client.rs` (it reaches `AiClient`'s private fields).
-//! `AiClient::with_routing(pool)` (production, `lib.rs`) makes every
-//! `chat_for(task, …)` read the task's two settings from the database
-//! (`sp_core::ai_tasks`): `ai_provider_<task>` unset / blank /
-//! `claude_proxy` → exactly the proxy call it was before #321
-//! (`chat_with_timeout`); `openrouter` → [`AiClient::openrouter_chat`] with
-//! `ai_model_<task>` (blank = the newest Gemini). A client with no routing
-//! (`AiClient::new`, every unit test of a call site) stays on the proxy.
+//! Every `chat_for(task, …)` reads the task's model from the database
+//! (`ai_model_<task>`, blank = [`sp_core::ai_tasks::DEFAULT_OPENROUTER_MODEL`])
+//! and sends it to OpenRouter ([`AiClient::openrouter_chat`]). An old
+//! `ai_provider_<task>` row (the deleted `claude_proxy` / `openrouter`
+//! choice) is no longer read: every task goes to OpenRouter.
 //!
-//! The OpenRouter path asks `paid_ai::enabled` itself before anything is
-//! sent (the call sites ask it too; this is the transport's own check, so a
-//! new call site can never bypass it) and reads `openrouter_api_key` live,
-//! so a key or switch change needs no restart.
+//! The call asks `paid_ai::enabled` itself before anything is sent (the call
+//! sites ask it too; this is the transport's own check, so a new call site
+//! can never bypass it) and reads `openrouter_api_key` live, so a key, model
+//! or switch change needs no restart.
 
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
-use sp_core::ai_tasks::{AiProvider, AiTask, SETTING_OPENROUTER_API_KEY, openrouter_model};
+use sp_core::ai_tasks::{AiTask, SETTING_OPENROUTER_API_KEY, openrouter_model};
 use sqlx::SqlitePool;
 use tracing::warn;
 
 use super::AiClient;
 use super::strip_markdown_fences;
-use crate::ai::openrouter::{Ask, Completion, OpenRouterClient};
+use crate::ai::openrouter::{Ask, Completion};
 
-/// The most a completion may write (the proxy client's bound).
+/// The most a task's completion may write.
 pub const MAX_TOKENS: u32 = 32_000;
 
-/// The routing an `AiClient` reads its tasks' settings with.
-pub struct Routing {
-    pub(super) pool: SqlitePool,
-    pub(super) openrouter: OpenRouterClient,
-}
-
-/// Where one task's call goes now.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Route {
-    /// Claude through CLIProxyAPI (the client's own `ai_model`).
-    Proxy,
-    /// OpenRouter with this model.
-    OpenRouter { model: String },
-}
-
-/// The route of a task from its two stored values (pure).
-pub fn plan(provider: Option<&str>, model: Option<&str>) -> Route {
-    match AiProvider::read(provider) {
-        AiProvider::ClaudeProxy => Route::Proxy,
-        AiProvider::OpenRouter => Route::OpenRouter {
-            model: openrouter_model(model),
-        },
-    }
-}
-
-/// The route of `task`, read from the database now. A failed read WARNs
-/// and stays on the proxy: the behaviour before #321.
-pub async fn route_of(pool: &SqlitePool, task: AiTask) -> Route {
-    let read = |key: String| async move { crate::db::models::get_setting(pool, &key).await };
-    match (
-        read(task.provider_setting()).await,
-        read(task.model_setting()).await,
-    ) {
-        (Ok(provider), Ok(model)) => plan(provider.as_deref(), model.as_deref()),
-        (Err(e), _) | (_, Err(e)) => {
-            warn!(task = task.as_str(), %e, "ai route: reading the task's settings failed - the proxy is asked");
-            Route::Proxy
+/// The OpenRouter model of `task`, read from the database now. A failed read
+/// WARNs and sends the default model.
+pub async fn model_of(pool: &SqlitePool, task: AiTask) -> String {
+    match crate::db::models::get_setting(pool, &task.model_setting()).await {
+        Ok(model) => openrouter_model(model.as_deref()),
+        Err(e) => {
+            let default = openrouter_model(None);
+            warn!(task = task.as_str(), %e, model = %default, "ai: reading the task's model failed - the default is sent");
+            default
         }
     }
 }
 
 impl AiClient {
-    /// The same client, routing each task by its settings in `pool`, with
-    /// OpenRouter at its public API root.
-    pub fn with_routing(self, pool: SqlitePool) -> Self {
-        self.with_routing_to(
-            pool,
-            OpenRouterClient::new(sp_core::ai_tasks::OPENROUTER_API_URL),
-        )
+    /// The model `task` sends now.
+    pub async fn model(&self, task: AiTask) -> String {
+        model_of(&self.pool, task).await
     }
 
-    /// The same client with routing through `openrouter` (tests: a mock).
-    pub fn with_routing_to(mut self, pool: SqlitePool, openrouter: OpenRouterClient) -> Self {
-        self.routing = Some(Routing { pool, openrouter });
-        self
-    }
-
-    /// Where `task` goes now: the proxy when this client has no routing.
-    pub async fn route(&self, task: AiTask) -> Route {
-        match &self.routing {
-            Some(r) => route_of(&r.pool, task).await,
-            None => Route::Proxy,
-        }
-    }
-
-    /// The provider and model of `route`, for a log line.
-    pub fn route_label(&self, route: &Route) -> String {
-        match route {
-            Route::Proxy => format!("claude_proxy:{}", self.settings.model),
-            Route::OpenRouter { model } => format!("openrouter:{model}"),
-        }
-    }
-
-    /// `task`'s chat completion, sent where its settings say now (the
-    /// module doc); the raw text.
+    /// `task`'s chat completion with its model read now; the raw text.
     pub async fn chat_for(
         &self,
         task: AiTask,
@@ -111,29 +54,26 @@ impl AiClient {
         user: &str,
         timeout_secs: u64,
     ) -> Result<String> {
-        let route = self.route(task).await;
-        self.chat_on(task, &route, system, user, timeout_secs).await
+        let model = self.model(task).await;
+        self.chat_with(task, &model, system, user, timeout_secs)
+            .await
     }
 
-    /// `task`'s chat completion on a route the caller read once
-    /// ([`Self::route`]), so a log line after the call names the route the
-    /// call took even when the setting changed meanwhile.
-    pub async fn chat_on(
+    /// `task`'s chat completion with a model the caller read once
+    /// ([`Self::model`]), so a log line after the call names the model the
+    /// call used even when the setting changed meanwhile.
+    pub async fn chat_with(
         &self,
         task: AiTask,
-        route: &Route,
+        model: &str,
         system: &str,
         user: &str,
         timeout_secs: u64,
     ) -> Result<String> {
-        match route {
-            Route::Proxy => self.chat_with_timeout(system, user, timeout_secs).await,
-            Route::OpenRouter { model } => self
-                .openrouter_chat(model, system, user, timeout_secs, MAX_TOKENS)
-                .await
-                .map(|c| c.text)
-                .with_context(|| format!("{} via OpenRouter ({model})", task.as_str())),
-        }
+        self.openrouter_chat(model, system, user, timeout_secs, MAX_TOKENS)
+            .await
+            .map(|c| c.text)
+            .with_context(|| format!("{} via OpenRouter ({model})", task.as_str()))
     }
 
     /// [`Self::chat_for`] parsed as JSON (markdown fences stripped).
@@ -150,7 +90,7 @@ impl AiClient {
     }
 
     /// One OpenRouter completion with `model`: refused (nothing sent) while
-    /// paid AI is off, with no routing, or with no key.
+    /// paid AI is off or with no key.
     pub async fn openrouter_chat(
         &self,
         model: &str,
@@ -159,13 +99,10 @@ impl AiClient {
         timeout_secs: u64,
         max_tokens: u32,
     ) -> Result<Completion> {
-        let Some(routing) = &self.routing else {
-            anyhow::bail!("this AI client has no OpenRouter routing");
-        };
-        if !crate::paid_ai::enabled(&routing.pool).await {
+        if !crate::paid_ai::enabled(&self.pool).await {
             anyhow::bail!(crate::paid_ai::OFF_REASON);
         }
-        let key = crate::db::models::get_setting(&routing.pool, SETTING_OPENROUTER_API_KEY)
+        let key = crate::db::models::get_setting(&self.pool, SETTING_OPENROUTER_API_KEY)
             .await
             .context("reading openrouter_api_key")?
             .unwrap_or_default();
@@ -181,7 +118,7 @@ impl AiClient {
             max_tokens,
             timeout: Duration::from_secs(timeout_secs),
         };
-        routing.openrouter.complete(&ask).await
+        self.openrouter.complete(&ask).await
     }
 }
 

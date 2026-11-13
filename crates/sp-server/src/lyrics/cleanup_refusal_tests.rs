@@ -2,14 +2,14 @@
 //! text (`cleanup_refusal.rs`) and never sent again until the text changes.
 
 use super::*;
-use crate::ai::AiSettings;
 use crate::ai::client::AiClient;
 use crate::ai::retry::{RetryPolicy, content_filtered};
 use crate::lyrics::description_provider::{CleanupMode, clean_lyrics_via_claude};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-const FILTER_BODY: &str = r#"{"error":{"message":"claude executor: upstream returned error event: Output blocked by content filtering policy","type":"server_error"}}"#;
+/// #321: OpenRouter's moderation refusal (final, typed `ContentFiltered`).
+const FILTER_BODY: &str = r#"{"error":{"code":403,"message":"Your input was flagged","metadata":{"reasons":["violence"],"flagged_input":"…"}}}"#;
 
 #[test]
 fn the_raw_text_is_known_by_its_sha256() {
@@ -44,17 +44,13 @@ async fn a_refused_cleanup_is_never_sent_again_for_the_same_text() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
-        .respond_with(ResponseTemplate::new(502).set_body_string(FILTER_BODY))
+        .respond_with(ResponseTemplate::new(403).set_body_string(FILTER_BODY))
         .expect(2)
         .mount(&server)
         .await;
-    let client = AiClient::new(AiSettings {
-        api_url: format!("{}/v1", server.uri()),
-        api_key: None,
-        model: "test".into(),
-        system_prompt_extra: None,
-    })
-    .with_retry_policy(RetryPolicy::NO_WAIT);
+    let client = crate::ai::test_support::ai_client_at(format!("{}/v1", server.uri()))
+        .await
+        .with_retry_policy(RetryPolicy::NO_WAIT);
     let dir = tempfile::tempdir().unwrap();
     let cache = dir.path().join("yt_lrclib_cleaned_v3.json");
 

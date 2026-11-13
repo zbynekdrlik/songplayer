@@ -1261,26 +1261,10 @@ function paidAiRefusal(body) {
   return ["", "true", "false"].includes(v) ? null : "paid_ai_enabled must be true or false";
 }
 
-// #321: as `sp_core::ai_tasks::checked_provider` — a task's provider
-// (`ai_provider_<task>`) is blank, `claude_proxy` or `openrouter` (trimmed,
-// any case, stored canonical); a task's model (`ai_model_<task>`) is stored
-// trimmed.
+// #321: as `sp_core::ai_tasks::checked_setting` — a task's OpenRouter model
+// (`ai_model_<task>`) is stored trimmed; every task goes to OpenRouter.
 const AI_TASKS = ["translate", "register", "metadata", "description", "cleanup", "spotify"];
-function aiProviderRefusal(body) {
-  for (const task of AI_TASKS) {
-    const key = `ai_provider_${task}`;
-    if (body[key] === undefined) continue;
-    const v = String(body[key]).trim().toLowerCase();
-    if (!["", "claude_proxy", "openrouter"].includes(v)) {
-      return `${key} must be claude_proxy or openrouter`;
-    }
-  }
-  return null;
-}
 function aiTaskValue(key, value) {
-  if (AI_TASKS.some((t) => key === `ai_provider_${t}`)) {
-    return String(value).trim().toLowerCase();
-  }
   if (AI_TASKS.some((t) => key === `ai_model_${t}`)) {
     return String(value).trim();
   }
@@ -1348,7 +1332,6 @@ app.patch("/api/v1/settings", (req, res) => {
   const refusal =
     outputsRefusal(req.body) ??
     paidAiRefusal(req.body) ??
-    aiProviderRefusal(req.body) ??
     lowLatencyRefusal(req.body) ??
     maxResolutionRefusal(req.body);
   if (refusal) {

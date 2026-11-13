@@ -1,13 +1,12 @@
-//! #321: each task's route, read live; the proxy unchanged by default.
+//! #321: every task goes to OpenRouter with its model, read live.
 
 use sp_core::ai_tasks::{AiTask, DEFAULT_OPENROUTER_MODEL, SETTING_OPENROUTER_API_KEY};
 use sp_core::config::SETTING_PAID_AI_ENABLED;
 use sqlx::SqlitePool;
-use wiremock::matchers::{body_partial_json, header, method, path};
+use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use super::{Route, plan, route_of};
-use crate::ai::AiSettings;
+use super::model_of;
 use crate::ai::client::AiClient;
 use crate::ai::openrouter::OpenRouterClient;
 use crate::ai::retry::RetryPolicy;
@@ -25,18 +24,9 @@ fn answer(text: &str) -> serde_json::Value {
     serde_json::json!({"choices": [{"message": {"content": text}}]})
 }
 
-/// A proxy mock and an OpenRouter mock, each answering its own word, and a
-/// routed client on both.
-async fn rig(pool: &SqlitePool) -> (MockServer, MockServer, AiClient) {
-    let proxy = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/v1/chat/completions"))
-        .and(body_partial_json(
-            serde_json::json!({"model": "claude-test"}),
-        ))
-        .respond_with(ResponseTemplate::new(200).set_body_json(answer("from the proxy")))
-        .mount(&proxy)
-        .await;
+/// An OpenRouter mock that answers a request carrying the key, and a client
+/// on it.
+async fn rig(pool: &SqlitePool) -> (MockServer, AiClient) {
     let openrouter = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/api/v1/chat/completions"))
@@ -44,19 +34,12 @@ async fn rig(pool: &SqlitePool) -> (MockServer, MockServer, AiClient) {
         .respond_with(ResponseTemplate::new(200).set_body_json(answer("from openrouter")))
         .mount(&openrouter)
         .await;
-    let client = AiClient::new(AiSettings {
-        api_url: format!("{}/v1", proxy.uri()),
-        api_key: None,
-        model: "claude-test".into(),
-        system_prompt_extra: None,
-    })
-    .with_retry_policy(RetryPolicy::NO_WAIT)
-    .with_routing_to(
+    let client = AiClient::with_openrouter(
         pool.clone(),
-        OpenRouterClient::new(format!("{}/api/v1", openrouter.uri()))
-            .with_retry_policy(RetryPolicy::NO_WAIT),
-    );
-    (proxy, openrouter, client)
+        OpenRouterClient::new(format!("{}/api/v1", openrouter.uri())),
+    )
+    .with_retry_policy(RetryPolicy::NO_WAIT);
+    (openrouter, client)
 }
 
 fn model_sent(server_requests: &[wiremock::Request]) -> Vec<String> {
@@ -72,80 +55,46 @@ fn model_sent(server_requests: &[wiremock::Request]) -> Vec<String> {
         .collect()
 }
 
-#[test]
-fn the_plan_of_a_task() {
-    assert_eq!(plan(None, Some("x/y")), Route::Proxy);
-    assert_eq!(plan(Some("claude_proxy"), None), Route::Proxy);
-    assert_eq!(plan(Some("bogus"), None), Route::Proxy);
-    assert_eq!(
-        plan(Some("openrouter"), None),
-        Route::OpenRouter {
-            model: DEFAULT_OPENROUTER_MODEL.into()
-        }
-    );
-    assert_eq!(
-        plan(Some("openrouter"), Some(" google/gemini-4-carbon ")),
-        Route::OpenRouter {
-            model: "google/gemini-4-carbon".into()
-        }
-    );
-}
-
-/// Nothing set: every task goes to the proxy, exactly as before #321.
+/// Nothing set: every task goes to OpenRouter with the newest Gemini — an
+/// old `ai_provider_<task>` row naming the deleted proxy is not read.
 #[tokio::test]
-async fn with_nothing_set_every_task_goes_to_the_proxy() {
+async fn with_nothing_set_every_task_goes_to_openrouter_with_the_default_model() {
     let pool = pool().await;
-    let (proxy, openrouter, client) = rig(&pool).await;
+    let (openrouter, client) = rig(&pool).await;
     set_setting(&pool, SETTING_OPENROUTER_API_KEY, KEY)
+        .await
+        .unwrap();
+    set_setting(&pool, "ai_provider_translate", "claude_proxy")
         .await
         .unwrap();
     for task in AiTask::ALL {
         assert_eq!(
             client.chat_for(task, "", "q", 10).await.unwrap(),
-            "from the proxy"
+            "from openrouter"
         );
-        assert_eq!(
-            client.route_label(&client.route(task).await),
-            "claude_proxy:claude-test"
-        );
+        assert_eq!(client.model(task).await, DEFAULT_OPENROUTER_MODEL);
     }
-    assert_eq!(proxy.received_requests().await.unwrap().len(), 6);
-    assert!(openrouter.received_requests().await.unwrap().is_empty());
+    assert_eq!(
+        model_sent(&openrouter.received_requests().await.unwrap()),
+        vec![DEFAULT_OPENROUTER_MODEL; 6]
+    );
 }
 
-/// One task switched: only that task goes to OpenRouter, with its model,
-/// read live (no restart); switched back, it is on the proxy again.
+/// A task's model is read live (no restart), trimmed; blank again = the
+/// default; another task keeps the default.
 #[tokio::test]
-async fn a_switched_task_goes_to_openrouter_with_its_model_read_live() {
+async fn a_tasks_model_is_read_live() {
     let pool = pool().await;
-    let (proxy, openrouter, client) = rig(&pool).await;
+    let (openrouter, client) = rig(&pool).await;
     set_setting(&pool, SETTING_OPENROUTER_API_KEY, KEY)
         .await
         .unwrap();
-    set_setting(&pool, "ai_provider_translate", "openrouter")
+    set_setting(&pool, "ai_model_translate", " google/gemini-4-carbon ")
         .await
         .unwrap();
-    set_setting(&pool, "ai_model_translate", "google/gemini-4-carbon")
-        .await
-        .unwrap();
-    assert_eq!(
-        client
-            .chat_for(AiTask::Translate, "", "q", 10)
-            .await
-            .unwrap(),
-        "from openrouter"
-    );
-    assert_eq!(
-        client.route_label(&client.route(AiTask::Translate).await),
-        "openrouter:google/gemini-4-carbon"
-    );
-    assert_eq!(
-        client
-            .chat_for(AiTask::Register, "", "q", 10)
-            .await
-            .unwrap(),
-        "from the proxy"
-    );
+    for task in [AiTask::Translate, AiTask::Register] {
+        client.chat_for(task, "", "q", 10).await.unwrap();
+    }
     set_setting(&pool, "ai_model_translate", "").await.unwrap();
     client
         .chat_for(AiTask::Translate, "", "q", 10)
@@ -153,30 +102,46 @@ async fn a_switched_task_goes_to_openrouter_with_its_model_read_live() {
         .unwrap();
     assert_eq!(
         model_sent(&openrouter.received_requests().await.unwrap()),
-        vec!["google/gemini-4-carbon", DEFAULT_OPENROUTER_MODEL]
+        vec![
+            "google/gemini-4-carbon",
+            DEFAULT_OPENROUTER_MODEL,
+            DEFAULT_OPENROUTER_MODEL
+        ]
     );
-    set_setting(&pool, "ai_provider_translate", "claude_proxy")
-        .await
-        .unwrap();
-    assert_eq!(
-        client
-            .chat_for(AiTask::Translate, "", "q", 10)
-            .await
-            .unwrap(),
-        "from the proxy"
-    );
-    assert_eq!(proxy.received_requests().await.unwrap().len(), 2);
 }
 
-/// Paid AI off: the OpenRouter path sends nothing and says why.
+/// A failed call names the task and the model.
 #[tokio::test]
-async fn openrouter_sends_nothing_while_paid_ai_is_off() {
+async fn a_failed_call_names_the_task_and_the_model() {
     let pool = pool().await;
-    let (_proxy, openrouter, client) = rig(&pool).await;
+    let openrouter = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(400).set_body_string("bad"))
+        .mount(&openrouter)
+        .await;
+    let client = AiClient::with_openrouter(
+        pool.clone(),
+        OpenRouterClient::new(format!("{}/api/v1", openrouter.uri())),
+    );
     set_setting(&pool, SETTING_OPENROUTER_API_KEY, KEY)
         .await
         .unwrap();
-    set_setting(&pool, "ai_provider_cleanup", "openrouter")
+    set_setting(&pool, "ai_model_spotify", "x/y").await.unwrap();
+    let err = client
+        .chat_for(AiTask::Spotify, "", "q", 10)
+        .await
+        .unwrap_err();
+    let text = format!("{err:#}");
+    assert!(text.contains("spotify via OpenRouter (x/y)"), "{text}");
+    assert!(text.contains("HTTP 400"), "{text}");
+}
+
+/// Paid AI off: nothing is sent, and the error says why.
+#[tokio::test]
+async fn nothing_is_sent_while_paid_ai_is_off() {
+    let pool = pool().await;
+    let (openrouter, client) = rig(&pool).await;
+    set_setting(&pool, SETTING_OPENROUTER_API_KEY, KEY)
         .await
         .unwrap();
     set_setting(&pool, SETTING_PAID_AI_ENABLED, "false")
@@ -192,12 +157,9 @@ async fn openrouter_sends_nothing_while_paid_ai_is_off() {
 
 /// No key: nothing sent, the error names the setting.
 #[tokio::test]
-async fn openrouter_with_no_key_sends_nothing() {
+async fn with_no_key_nothing_is_sent() {
     let pool = pool().await;
-    let (_proxy, openrouter, client) = rig(&pool).await;
-    set_setting(&pool, "ai_provider_metadata", "openrouter")
-        .await
-        .unwrap();
+    let (openrouter, client) = rig(&pool).await;
     set_setting(&pool, SETTING_OPENROUTER_API_KEY, "  ")
         .await
         .unwrap();
@@ -212,38 +174,22 @@ async fn openrouter_with_no_key_sends_nothing() {
     assert!(openrouter.received_requests().await.unwrap().is_empty());
 }
 
-/// A client with no routing (every call site's unit test) never reads a
-/// route and refuses an OpenRouter call.
+/// A database that cannot be read sends the default model.
 #[tokio::test]
-async fn a_client_with_no_routing_stays_on_the_proxy() {
-    let client = AiClient::new(AiSettings::default());
-    assert_eq!(client.route(AiTask::Translate).await, Route::Proxy);
-    let err = client
-        .openrouter_chat("m", "", "q", 5, 16)
-        .await
-        .unwrap_err()
-        .to_string();
-    assert!(err.contains("no OpenRouter routing"), "{err}");
-}
-
-/// A database that cannot be read keeps the task on the proxy.
-#[tokio::test]
-async fn an_unreadable_route_is_the_proxy() {
+async fn an_unreadable_model_is_the_default() {
     let pool = pool().await;
-    set_setting(&pool, "ai_provider_spotify", "openrouter")
-        .await
-        .unwrap();
-    assert!(matches!(
-        route_of(&pool, AiTask::Spotify).await,
-        Route::OpenRouter { .. }
-    ));
+    set_setting(&pool, "ai_model_spotify", "x/y").await.unwrap();
+    assert_eq!(model_of(&pool, AiTask::Spotify).await, "x/y");
     pool.close().await;
-    assert_eq!(route_of(&pool, AiTask::Spotify).await, Route::Proxy);
+    assert_eq!(
+        model_of(&pool, AiTask::Spotify).await,
+        DEFAULT_OPENROUTER_MODEL
+    );
 }
 
-/// `chat_json_for` strips the fences and parses the routed answer.
+/// `chat_json_for` strips the fences and parses the answer.
 #[tokio::test]
-async fn chat_json_for_parses_the_routed_answer() {
+async fn chat_json_for_parses_the_answer() {
     let pool = pool().await;
     let openrouter = MockServer::start().await;
     Mock::given(method("POST"))
@@ -253,14 +199,11 @@ async fn chat_json_for_parses_the_routed_answer() {
         )
         .mount(&openrouter)
         .await;
-    let client = AiClient::new(AiSettings::default()).with_routing_to(
+    let client = AiClient::with_openrouter(
         pool.clone(),
         OpenRouterClient::new(format!("{}/api/v1", openrouter.uri())),
     );
     set_setting(&pool, SETTING_OPENROUTER_API_KEY, KEY)
-        .await
-        .unwrap();
-    set_setting(&pool, "ai_provider_metadata", "openrouter")
         .await
         .unwrap();
     #[derive(serde::Deserialize)]

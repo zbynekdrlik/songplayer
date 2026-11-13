@@ -19,7 +19,7 @@
 //!
 //! The prompt is the translator's sibling: numbered lines in, numbered lines
 //! out, nothing else (`translator.rs` "Prompt design" — the content-policy
-//! classifier of Claude via CLIProxyAPI is why).
+//! classifier Claude via CLIProxyAPI ran before #321 is why).
 
 use anyhow::Result;
 use sp_core::lyrics::{LyricsTrack, RegisterCheck, RegisterLine, RegisterVerdict};
@@ -269,7 +269,7 @@ pub async fn check_via_claude(
     let answer = match ai_client.chat_for(task, "", &prompt, 300).await {
         Ok(answer) => answer,
         Err(e) if crate::ai::retry::content_filtered(&e) => return Ok(refused()),
-        Err(e) => return Err(e.context("register check: the Claude call failed")),
+        Err(e) => return Err(e.context("register check: the AI call failed")),
     };
     match read_answer(&answer, track.lines.len())? {
         Some(findings) => Ok(apply(track, findings)),

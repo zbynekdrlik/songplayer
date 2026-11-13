@@ -12,9 +12,10 @@
  * This spec asks EACH provider of the chain the deployed build really uses
  * (`POST /api/v1/metadata/probe` — every provider on its own, nothing written
  * to the DB) to name one fixed real video. A broken key format, a retired
- * model or an unauthenticated proxy now fails the deploy. It calls the two
- * paid providers once per deploy (Claude through CLIProxyAPI, one grounded
- * Gemini search + its clean-up pass).
+ * model or a refused OpenRouter key now fails the deploy. It calls the two
+ * paid providers once per deploy (the OpenRouter text provider with the
+ * metadata task's model, #321; one grounded Gemini search + its clean-up
+ * pass).
  *
  * It replaces the old "at least one normalized video has Gemini metadata"
  * assertion of post-deploy-flac.spec.ts, which PASSED on 29.9.2026 with 108
@@ -36,7 +37,7 @@ const WANT_SONG = "Stand On Your Promise";
 const WANT_ARTIST_PART = "Emerging Sound";
 
 /** The production chain, in order (`metadata::provider_chain`). */
-const CHAIN = ["claude", "gemini"];
+const CHAIN = ["openrouter", "gemini"];
 
 interface ProbeOutcome {
   name: string;
@@ -56,7 +57,7 @@ interface ProviderHealth {
 test.describe("metadata provider chain (#136)", () => {
   test("every provider of the chain names the fixed real video", async ({ request }) => {
     // One grounded Gemini search + clean-up pass (≤ 90 s per request by the
-    // provider's own bound) runs concurrently with Claude.
+    // provider's own bound) runs concurrently with OpenRouter.
     test.setTimeout(240_000);
 
     const resp = await request.post("/api/v1/metadata/probe", {
@@ -75,7 +76,7 @@ test.describe("metadata provider chain (#136)", () => {
     expect(body.youtube_id).toBe(VIDEO.youtube_id);
     expect(
       body.providers.map((p) => p.name),
-      "the deployed chain must be Claude, then Gemini",
+      "the deployed chain must be OpenRouter, then Gemini",
     ).toEqual(CHAIN);
     for (const p of body.providers) {
       expect(p.error, `${p.name} must answer (its error)`).toBeNull();

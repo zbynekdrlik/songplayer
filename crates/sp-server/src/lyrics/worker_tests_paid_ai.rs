@@ -9,8 +9,6 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::*;
-use crate::ai::AiSettings;
-use crate::ai::client::AiClient;
 use crate::lyrics::translator::SpeakerGender;
 use crate::peer::rig::{TestNode, set};
 use crate::test_log::{Captured, capturing};
@@ -73,12 +71,9 @@ async fn pp_with_claude(server: &MockServer) -> (TestNode, LyricsWorker, i64) {
     let mut worker =
         LyricsWorker::new_for_test(pp.pool().clone(), pp.cache().to_path_buf(), events)
             .with_peer(pp.ex.clone());
-    worker.ai_client = Some(Arc::new(AiClient::new(AiSettings {
-        api_url: format!("{}/v1", server.uri()),
-        api_key: None,
-        model: "claude-test".into(),
-        system_prompt_extra: None,
-    })));
+    worker.ai_client = Some(Arc::new(
+        crate::ai::test_support::ai_client_at(format!("{}/v1", server.uri())).await,
+    ));
     (pp, worker, todo)
 }
 
@@ -146,12 +141,9 @@ async fn a_translation_pass_holds_only_a_song_it_would_translate() {
     let (events, _) = broadcast::channel(16);
     let mut idle =
         LyricsWorker::new_for_test(empty.pool().clone(), empty.cache().to_path_buf(), events);
-    idle.ai_client = Some(Arc::new(AiClient::new(AiSettings {
-        api_url: format!("{}/v1", server.uri()),
-        api_key: None,
-        model: "claude-test".into(),
-        system_prompt_extra: None,
-    })));
+    idle.ai_client = Some(Arc::new(
+        crate::ai::test_support::ai_client_at(format!("{}/v1", server.uri())).await,
+    ));
     idle.retry_missing_translations().await;
     idle.retranslate_next_stale().await;
     assert_eq!(holds(&cap), Vec::<String>::new(), "nothing to translate");
@@ -191,12 +183,9 @@ async fn a_stale_translation_with_no_track_is_stamped_forward_not_held_while_off
     let (events, _) = broadcast::channel(16);
     let mut worker =
         LyricsWorker::new_for_test(pp.pool().clone(), pp.cache().to_path_buf(), events);
-    worker.ai_client = Some(Arc::new(AiClient::new(AiSettings {
-        api_url: format!("{}/v1", server.uri()),
-        api_key: None,
-        model: "claude-test".into(),
-        system_prompt_extra: None,
-    })));
+    worker.ai_client = Some(Arc::new(
+        crate::ai::test_support::ai_client_at(format!("{}/v1", server.uri())).await,
+    ));
     worker.retranslate_next_stale().await;
     let version: i64 =
         sqlx::query_scalar("SELECT lyrics_translation_version FROM videos WHERE id = ?")

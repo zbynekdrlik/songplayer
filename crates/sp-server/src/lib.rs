@@ -1,7 +1,6 @@
 //! SongPlayer server — all business logic.
 
 pub mod ai;
-mod ai_proxy_watchdog;
 pub mod api;
 pub mod audio_faults; // #257: every audio path's faults, persisted (the ledger)
 pub mod audio_host; // #233: every ASIO output runs in the sp-audio-host process (spawns nothing)
@@ -87,7 +86,6 @@ pub struct AppState {
     pub resolume_tx: mpsc::Sender<resolume::ResolumeCommand>,
     /// Directory where cached media and lyrics JSON files are stored.
     pub cache_dir: PathBuf,
-    pub ai_proxy: Arc<ai::proxy::ProxyManager>,
     pub ai_client: Arc<ai::client::AiClient>,
     /// Presenter HTTP client; None = push disabled. See `presenter` module.
     pub presenter_client: Option<Arc<presenter::PresenterClient>>,
@@ -240,22 +238,9 @@ pub async fn start(
     let (sync_tx, mut sync_rx) = mpsc::channel::<SyncRequest>(64);
     let (resolume_cmd_tx, mut resolume_cmd_rx) = mpsc::channel::<resolume::ResolumeCommand>(64);
 
-    // Read AI settings from DB or use defaults
-    let ai_api_url = db::models::get_setting(&pool, sp_core::config::SETTING_AI_API_URL)
-        .await?
-        .unwrap_or_else(|| sp_core::config::DEFAULT_AI_API_URL.to_string());
-    let ai_model = db::models::get_setting(&pool, sp_core::config::SETTING_AI_MODEL)
-        .await?
-        .unwrap_or_else(|| sp_core::config::DEFAULT_AI_MODEL.to_string());
-
-    let ai_settings = ai::AiSettings {
-        api_url: ai_api_url,
-        api_key: None,
-        model: ai_model,
-        system_prompt_extra: None,
-    };
-    let ai_client = ai::client::AiClient::new(ai_settings).with_routing(pool.clone()); // #321
-    let ai_client = Arc::new(ai_client);
+    // #321: every text AI task goes to OpenRouter, its model, the key and
+    // the paid-AI switch read live from the database at every call.
+    let ai_client = Arc::new(ai::client::AiClient::new(pool.clone()));
     let presenter_client = presenter::build_from_settings(&pool).await?;
 
     // 3b. NDI health registry — constructed before AppState so both the engine
@@ -333,10 +318,6 @@ pub async fn start(
         sync_tx: sync_tx.clone(),
         resolume_tx: resolume_cmd_tx.clone(),
         cache_dir: config.cache_dir.clone(),
-        ai_proxy: Arc::new(ai::proxy::ProxyManager::new(
-            config.cache_dir.clone(),
-            ai::proxy::ProxyManager::default_port(),
-        )),
         ai_client: ai_client.clone(),
         presenter_client: presenter_client.clone(),
         resolume_registry: resolume_registry.clone(),
@@ -373,25 +354,6 @@ pub async fn start(
         shutdown_tx.subscribe(),
     )
     .await;
-
-    // Auto-start the CLIProxyAPI child process + start a watchdog that
-    // periodically re-launches it if it dies. Without this, every
-    // SongPlayer restart (including CI deploys) leaves the proxy
-    // unstarted — the description provider, text-merge, and all other
-    // Claude calls silently fall through to "no text sources available"
-    // for most songs (2026-04-19 event: 100% of in-flight songs failed
-    // gather_sources until POST /api/v1/ai/proxy/start was hit manually).
-    if state.ai_proxy.is_claude_authenticated() {
-        match state.ai_proxy.start().await {
-            Ok(()) => info!("ai_proxy: auto-started CLIProxyAPI at boot"),
-            Err(e) => warn!("ai_proxy: auto-start failed (watchdog will retry): {e}"),
-        }
-        let watchdog_proxy = state.ai_proxy.clone();
-        let watchdog_shutdown = shutdown_tx.subscribe();
-        tokio::spawn(ai_proxy_watchdog::run(watchdog_proxy, watchdog_shutdown));
-    } else {
-        info!("ai_proxy: not authenticated, skipping auto-start + watchdog");
-    }
 
     // 5. Tools manager
     let tools_dir = config.cache_dir.join("tools");

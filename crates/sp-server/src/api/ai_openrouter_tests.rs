@@ -1,4 +1,4 @@
-//! #321: the OpenRouter probe, the A/B route's refusals and the provider
+//! #321: the OpenRouter probe, the A/B route's refusals and the task model
 //! settings' PATCH, through the real router.
 
 use std::sync::Arc;
@@ -11,7 +11,6 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::AppState;
-use crate::ai::AiSettings;
 use crate::ai::client::AiClient;
 use crate::ai::openrouter::OpenRouterClient;
 use crate::ai::retry::RetryPolicy;
@@ -20,7 +19,7 @@ use crate::db::models::{get_setting, set_setting};
 
 const KEY: &str = "example-openrouter-key-for-tests";
 
-/// A state whose AI client routes through a mock OpenRouter answering `ok`.
+/// A state whose AI client sends to a mock OpenRouter answering `ok`.
 async fn routed_state() -> (AppState, MockServer) {
     let mut state = test_state().await;
     let server = MockServer::start().await;
@@ -33,11 +32,11 @@ async fn routed_state() -> (AppState, MockServer) {
         .mount(&server)
         .await;
     state.ai_client = Arc::new(
-        AiClient::new(AiSettings::default()).with_routing_to(
+        AiClient::with_openrouter(
             state.pool.clone(),
-            OpenRouterClient::new(format!("{}/api/v1", server.uri()))
-                .with_retry_policy(RetryPolicy::NO_WAIT),
-        ),
+            OpenRouterClient::new(format!("{}/api/v1", server.uri())),
+        )
+        .with_retry_policy(RetryPolicy::NO_WAIT),
     );
     (state, server)
 }
@@ -178,38 +177,18 @@ async fn the_ab_status_route_answers_a_state() {
     assert!(v["state"].is_string(), "{v}");
 }
 
+/// A task's model is stored trimmed through the settings PATCH.
 #[tokio::test]
-async fn a_provider_setting_takes_only_a_known_provider() {
+async fn a_tasks_model_is_stored_trimmed() {
     let state = test_state().await;
     let (status, _) = send(
         state.clone(),
         "PATCH",
         "/api/v1/settings",
-        r#"{"ai_provider_translate":"gemini"}"#,
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(
-        get_setting(&state.pool, "ai_provider_translate")
-            .await
-            .unwrap(),
-        None
-    );
-    let (status, _) = send(
-        state.clone(),
-        "PATCH",
-        "/api/v1/settings",
-        r#"{"ai_provider_translate":" OpenRouter ","ai_model_translate":" google/gemini-4-carbon "}"#,
+        r#"{"ai_model_translate":" google/gemini-4-carbon "}"#,
     )
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
-    assert_eq!(
-        get_setting(&state.pool, "ai_provider_translate")
-            .await
-            .unwrap()
-            .as_deref(),
-        Some("openrouter")
-    );
     assert_eq!(
         get_setting(&state.pool, "ai_model_translate")
             .await

@@ -318,17 +318,12 @@ mod tests {
 #[cfg(test)]
 mod integration_tests {
     use super::*;
-    use crate::ai::AiSettings;
 
     /// #145: a refused call is retried with no real wait in a test.
-    fn ai_client_pointed_at(uri: &str) -> AiClient {
-        AiClient::new(AiSettings {
-            api_url: format!("{uri}/v1"),
-            api_key: Some("test".into()),
-            model: "stub".into(),
-            system_prompt_extra: None,
-        })
-        .with_retry_policy(crate::ai::retry::RetryPolicy::NO_WAIT)
+    async fn ai_client_pointed_at(uri: &str) -> AiClient {
+        crate::ai::test_support::ai_client_at(format!("{uri}/v1"))
+            .await
+            .with_retry_policy(crate::ai::retry::RetryPolicy::NO_WAIT)
     }
 
     #[tokio::test]
@@ -376,7 +371,7 @@ mod integration_tests {
         }
 
         let resolver = SpotifyResolver::new();
-        let ai = ai_client_pointed_at(&claude_mock.uri());
+        let ai = ai_client_pointed_at(&claude_mock.uri()).await;
         let outcome = resolver
             .resolve(&ai, "Test Song", "Test Artist", "aaaaaaaaaaa")
             .await;
@@ -408,7 +403,7 @@ mod integration_tests {
             .await;
 
         let resolver = SpotifyResolver::new();
-        let ai = ai_client_pointed_at(&claude_mock.uri());
+        let ai = ai_client_pointed_at(&claude_mock.uri()).await;
         let outcome = resolver
             .resolve(&ai, "Test Song", "Test Artist", "aaaaaaaaaaa")
             .await;
@@ -445,7 +440,7 @@ mod integration_tests {
         }
 
         let resolver = SpotifyResolver::new();
-        let ai = ai_client_pointed_at(&claude_mock.uri());
+        let ai = ai_client_pointed_at(&claude_mock.uri()).await;
         let outcome = resolver
             .resolve(&ai, "Test Song", "Test Artist", "aaaaaaaaaaa")
             .await;
@@ -495,7 +490,7 @@ mod integration_tests {
         }
 
         let resolver = SpotifyResolver::new();
-        let ai = ai_client_pointed_at(&claude_mock.uri());
+        let ai = ai_client_pointed_at(&claude_mock.uri()).await;
         let outcome = resolver
             .resolve(&ai, "Test Song", "Test Artist", "aaaaaaaaaaa")
             .await;
@@ -520,7 +515,7 @@ mod integration_tests {
             .await;
 
         let resolver = SpotifyResolver::new();
-        let ai = ai_client_pointed_at(&claude_mock.uri());
+        let ai = ai_client_pointed_at(&claude_mock.uri()).await;
         let outcome = resolver
             .resolve(&ai, "Test Song", "Test Artist", "aaaaaaaaaaa")
             .await;
@@ -608,7 +603,7 @@ mod integration_tests {
         let resolver = SpotifyResolver::new();
         resolver.note_failure();
 
-        let ai = ai_client_pointed_at(&claude_mock.uri());
+        let ai = ai_client_pointed_at(&claude_mock.uri()).await;
         let outcome = resolver.resolve(&ai, "Song", "Artist", "aaaaaaaaaaa").await;
         assert!(
             matches!(outcome, ResolveOutcome::Error(_)),

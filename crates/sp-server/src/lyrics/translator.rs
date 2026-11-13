@@ -1,13 +1,12 @@
-//! EN→SK lyrics translator — Claude-only via CLIProxyAPI.
+//! EN→SK lyrics translator — the `translate` text AI task on OpenRouter
+//! (#321: `ai_model_translate`, blank = the newest Gemini; chosen by a blind
+//! A/B, #321 comment 6856550942). The Claude-via-CLIProxyAPI path it ran on
+//! until 13.11.2026 is deleted. The right response to a refusal is to tune
+//! the prompt here, never a second fallback model.
 //!
-//! The user pays a Claude Max Plus subscription (unlimited at that tier);
-//! Gemini quota is expensive and reserved for alignment. Translation MUST
-//! stay on Claude even when a specific song refuses — the right response
-//! to a refusal is to tune the prompt here, not to add a Gemini fallback.
+//! ## Prompt design (hard-won, measured on Claude before #321)
 //!
-//! ## Prompt design (hard-won)
-//!
-//! Claude via CLIProxyAPI OAuth runs a content-policy classifier that flags
+//! Claude via CLIProxyAPI OAuth ran a content-policy classifier that flagged
 //! numbered English lines containing worship-style phrases as "copyrighted
 //! song lyrics" and refuses to translate them. Trigger words:
 //! `lyrics`, `song`, `worship`, `karaoke`, `church`, `copyright`, and
@@ -116,18 +115,18 @@ pub async fn translate_via_claude(
     let line_count = track.lines.len();
     let user = build_prompt(line_count, &numbered, gender);
 
-    // No system prompt — cloaked Claude behaves best with everything in the user message.
-    // #321: the route read once, so the refusal log below names the route
-    // this call took.
+    // No system prompt: everything in the user message.
+    // #321: the model read once, so the refusal log below names the model
+    // this call used.
     let task = sp_core::ai_tasks::AiTask::Translate;
-    let route = ai_client.route(task).await;
+    let model = ai_client.model(task).await;
     let response = ai_client
-        .chat_on(task, &route, "", &user, 300)
+        .chat_with(task, &model, "", &user, 300)
         .await
         // #144: the client's error stays the cause (a content-filter refusal
         // is told apart by type, `ai::retry::content_filtered`).
         .map_err(|e| {
-            let msg = format!("Claude translation failed: {e}");
+            let msg = format!("translation failed: {e}");
             e.context(msg)
         })?;
 
@@ -141,7 +140,6 @@ pub async fn translate_via_claude(
         // 5-hour OAuth quota wall, etc.). The response is bounded at 4000
         // characters so a verbose Claude refusal doesn't blow up the log
         // line beyond what `tracing` will keep in memory comfortably.
-        let model = ai_client.route_label(&route);
         let snippet: String = response.chars().take(4000).collect();
         let truncated = response.chars().count() > 4000;
         // #145: classify + log a REFUSAL distinctly (with the model id) instead
@@ -155,9 +153,9 @@ pub async fn translate_via_claude(
                     line_count,
                     truncated,
                     response = %snippet,
-                    "translate_via_claude: Claude REFUSED translation on content-policy grounds — tune translator::build_prompt (#145)"
+                    "translate_via_claude: the model REFUSED translation on content-policy grounds — tune translator::build_prompt (#145)"
                 );
-                return Err(anyhow!("Claude refused translation (model {model})"));
+                return Err(anyhow!("the model refused translation (model {model})"));
             }
             _ => {
                 tracing::warn!(
@@ -167,10 +165,10 @@ pub async fn translate_via_claude(
                     response_len = response.chars().count(),
                     truncated,
                     response = %snippet,
-                    "translate_via_claude: parse returned 0 translations — raw Claude response logged for diagnosis"
+                    "translate_via_claude: parse returned 0 translations — raw AI response logged for diagnosis"
                 );
                 return Err(anyhow!(
-                    "Claude translation returned no translations (model {model})"
+                    "the translation returned no translations (model {model})"
                 ));
             }
         }
@@ -509,8 +507,6 @@ mod tests {
 
     #[tokio::test]
     async fn translate_via_claude_returns_parsed_translations() {
-        use crate::ai::AiSettings;
-        use crate::ai::client::AiClient;
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -528,12 +524,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = AiClient::new(AiSettings {
-            api_url: format!("{}/v1", server.uri()),
-            api_key: None,
-            model: "claude-opus-4-20250514".into(),
-            system_prompt_extra: None,
-        });
+        let client = crate::ai::test_support::ai_client_at(format!("{}/v1", server.uri())).await;
 
         let track = make_track(&["Line one", "Line two", "Line three"]);
         let result = translate_via_claude(&client, &track, SpeakerGender::Male).await;
@@ -551,8 +542,6 @@ mod tests {
 
     #[tokio::test]
     async fn translate_via_claude_errors_on_policy_refusal() {
-        use crate::ai::AiSettings;
-        use crate::ai::client::AiClient;
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -568,12 +557,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = AiClient::new(AiSettings {
-            api_url: format!("{}/v1", server.uri()),
-            api_key: None,
-            model: "claude-opus-4-20250514".into(),
-            system_prompt_extra: None,
-        });
+        let client = crate::ai::test_support::ai_client_at(format!("{}/v1", server.uri())).await;
 
         let track = make_track(&["Line one", "Line two"]);
         let result = translate_via_claude(&client, &track, SpeakerGender::Male).await;
@@ -589,8 +573,6 @@ mod tests {
         // #145 regression: when Claude REFUSES on content-policy grounds, the
         // failure must be surfaced AS a refusal and must carry the model id —
         // never a generic "returned no translations" that hides the cause.
-        use crate::ai::AiSettings;
-        use crate::ai::client::AiClient;
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -608,12 +590,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = AiClient::new(AiSettings {
-            api_url: format!("{}/v1", server.uri()),
-            api_key: None,
-            model: "claude-fable-5-1".into(),
-            system_prompt_extra: None,
-        });
+        let client = crate::ai::test_support::ai_client_at(format!("{}/v1", server.uri())).await;
 
         let track = make_track(&["Line one", "Line two"]);
         let err = translate_via_claude(&client, &track, SpeakerGender::Male)
@@ -625,17 +602,14 @@ mod tests {
             "a content-policy refusal must be surfaced as a refusal, got: {msg}"
         );
         assert!(
-            msg.contains("claude-fable-5-1"),
+            msg.contains(sp_core::ai_tasks::DEFAULT_OPENROUTER_MODEL),
             "a refusal error must name the model id, got: {msg}"
         );
     }
 
     #[tokio::test]
     async fn translate_via_claude_empty_track_returns_empty() {
-        use crate::ai::AiSettings;
-        use crate::ai::client::AiClient;
-
-        let client = AiClient::new(AiSettings::default());
+        let client = crate::ai::test_support::ai_client_unused().await;
         let track = make_track(&[]);
         let result = translate_via_claude(&client, &track, SpeakerGender::Male)
             .await

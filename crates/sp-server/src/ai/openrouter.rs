@@ -149,8 +149,8 @@ pub fn redacted_excerpt(body: &str, key: &str) -> String {
 /// Whether a refused call is OpenRouter's moderation refusal: a 403 whose
 /// error carries the moderation's `reasons` / `flagged_input` (OpenRouter's
 /// documented moderation error) or names moderation. It is typed
-/// [`ContentFiltered`] like the proxy's content filter, so a caller treats
-/// it as final (`retry::content_filtered`) whichever way the task goes.
+/// [`ContentFiltered`], so a caller treats it as final
+/// (`retry::content_filtered`).
 pub fn is_moderation_refusal(status: u16, body: &str) -> bool {
     if status != 403 {
         return false;
