@@ -1094,10 +1094,15 @@ slot). Both lists are empty until the pipeline's first emit, so a pacer
 that never emitted still reports the default `PacingStats`. It sizes the
 #289 rebuild's one-slot audio lead from data (design 6814927800 §3): read
 it twice and diff the counts for a window (≥ 24 h on resolume-snv). The
-ring figures cover only the last 256 emits; this one never forgets.
+ring figures cover only the last 256 emits; this one never forgets. A
+count that went DOWN between two reads is a new pipeline (a restart, a
+rebuilt pipeline): take the second read as the whole window then.
+Live gate: `post-deploy.spec.ts`'s genlock-badge test runs
+`ndi-health-gate.ts::emitLateHistFailures` (every paced row: the 14 edges,
+an emit counted) and logs every row's counts (`[#289 emit lateness]`).
 Tests: `emit_lateness_tests.rs`, `pacer_tests.rs`
 (`every_emit_is_counted_in_the_lateness_histogram`),
-`routes_tests_pacing.rs`.
+`routes_tests_pacing.rs`, `ndi-health-gate.spec.ts`.
 
 ## `av_frame_offset` — SongPlayer's own emitted A/V relation (#148 v5)
 

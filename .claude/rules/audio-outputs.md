@@ -147,7 +147,14 @@ nothing audible, it only measures what the later steps are sized from:
   before the first open and for VBAN (its receiver's buffer is unknown to
   SongPlayer: it goes into `delay_ms` from the wall-vs-FOH measurement).
   Crosses the host pipe (`WireStatus`, `#[serde(default)]`). Step 4
-  subtracts it from the servo's target; until then it is read only.
+  subtracts it from the servo's target; until then it is read only. Step
+  4 must take it from the RUNNING worker (`Run::driver_latency_frames`),
+  never from the status: the status keeps the last open's value while the
+  output waits, and a reopen can be at another rate.
+- Live gate: `post-deploy-audio-asio.spec.ts` logs each measured output's
+  `[#289 device]` figure and runs `audio-outputs-gate.ts::deviceLatencyFailures`
+  (a running ASIO / Dante output: a finite number ≥ 0 — a driver may
+  report 0; a VBAN output: null).
 - The pacer's emit-lateness histogram: `genlock.md`, "Emit lateness,
   bucketed".
 - Tests: `asio_out_tests_timing.rs`
