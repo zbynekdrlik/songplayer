@@ -1108,12 +1108,24 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   send_at_us_p50/p99/max, send_late,
   vblank_output, vblank_state, vblank_tracking, vblank_period_ns, vblank_phase_us,
   compose_phase_us, send_off_grid, send_phase_us_p50/p99,
-  compose_phase_us_p50/p99, compose_late, slot_repicks, device_resets,
-  sender_backoffs, spout_name, adapter, list_holder, fhd}` (`MaxStatus`;
+  compose_phase_us_p50/p99, compose_late, late_events, slot_repicks,
+  device_resets, sender_backoffs, spout_name, adapter, list_holder, fhd}`
+  (`MaxStatus`;
   #251: `compose_phase_us` = the setting, `compose_phase_us_*` = where
   after the vblank the aligned boundaries' composes started, over the same
   window as the send phase, `compose_late` = grid boundaries whose job came
   after their compose instant;
+  #317: `late_events` = the last `MAX_LATE_EVENTS` (32) late steps, oldest
+  first, `{utc_ms, kind, late_us, after_offer_us}` (`program_max_late.rs`,
+  a pure child of `program_max.rs`, fed by `finish_max` from the instants
+  `send_max` already had): `utc_ms` = the boundary's stamp / 10 000, the
+  line of `program/trace` and `ndi.readback_late_events`; `kind` `compose`
+  (counted in `compose_late`) or `send` (counted in `send_late`); `late_us`
+  = the step's start − its instant (`compose_at` / `due`); `after_offer_us`
+  = that start − the offer, so the step happened ≈ `utc_ms` +
+  `after_offer_us` / 1000 (the offer is at the boundary). One boundary can
+  give both. Read it next to wall-bridge's `/api/status` `slow_shows` to
+  place a slow show on a song's open or its title text-set (#317);
   `list_holder` = #243 follow-up, above; `fhd` = #239,
   "The FHD Spout sender" below;
   `send_at_us_*` = send done − offer over the window, `send_late` = composes
