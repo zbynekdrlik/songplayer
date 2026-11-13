@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 /// Each bucket's lower edge, µs: bucket i holds `[EDGES_US[i],
 /// EDGES_US[i + 1])`, the last one everything from one slot (33 333 µs) up.
 pub const EDGES_US: [u64; 14] = [
-    0, 120, 250, 500, 1_000, 2_000, 3_000, 5_000, 7_500, 10_000, 15_000, 20_000, 25_000, 33_333,
+    0, 100, 250, 500, 1_000, 2_000, 3_000, 5_000, 7_500, 10_000, 15_000, 20_000, 25_000, 33_333,
 ];
 
 /// The bucket of a lateness of `late_us`: the last edge at or under it.
