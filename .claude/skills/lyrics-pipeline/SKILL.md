@@ -3,7 +3,7 @@ name: lyrics-pipeline
 description: >
   Songplayer lyrics pipeline rules. Load when working on lyrics processing,
   alignment providers, pipeline versioning, translation, or the lyrics worker.
-  Covers: provider discipline (Gemini, Claude, yt_subs), timing gates,
+  Covers: provider discipline (Gemini, the OpenRouter text AI, yt_subs), timing gates,
   translation rules, pipeline-version bump discipline, sanitization invariants,
   and worker/reprocess behaviour.
 user-invocable: false

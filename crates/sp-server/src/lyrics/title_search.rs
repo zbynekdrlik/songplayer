@@ -69,7 +69,7 @@ pub struct TitleCandidate {
     pub record_duration_s: Option<f32>,
     pub lyrics: LyricsTrack,
     /// LRCLIB synced lyrics (a timed candidate, used as is); otherwise the
-    /// text is a scraped plain lyric that goes through the Claude cleanup.
+    /// text is a scraped plain lyric that goes through the text-AI cleanup.
     pub synced: bool,
 }
 
@@ -136,7 +136,7 @@ pub fn lines_overlap_score<'a>(lines: impl Iterator<Item = &'a str>, words: &[As
 /// The indices of the scores at or above `MIN_TITLE_MATCH_SCORE`, best
 /// first; a tie keeps the earlier candidate first (the search's own
 /// order). The caller takes the first one whose lyric
-/// it can use (a plain lyric the Claude cleanup rejects passes to the next).
+/// it can use (a plain lyric the text-AI cleanup rejects passes to the next).
 pub fn rank_above_floor(scores: &[f64]) -> Vec<usize> {
     let mut ranked: Vec<usize> = (0..scores.len())
         .filter(|&i| scores[i] >= MIN_TITLE_MATCH_SCORE)
@@ -167,7 +167,7 @@ pub async fn remove_audit(cache_dir: &Path, youtube_id: &str) {
     let _ = tokio::fs::remove_file(audit_path(cache_dir, youtube_id)).await;
 }
 
-/// The cache file of the Claude cleanup of a chosen plain candidate, keyed by
+/// The cache file of the text-AI cleanup of a chosen plain candidate, keyed by
 /// the candidate itself (a later search may choose another lyric) and kept
 /// apart from the artist+title lookups' `{yt}_lrclib_cleaned_v3.json`.
 pub fn cleanup_cache_name(youtube_id: &str, cand: &TitleCandidate) -> String {
@@ -235,7 +235,7 @@ impl TitleSearchEndpoints {
 /// The inputs of one title search.
 pub struct TitleSearch<'a> {
     pub client: &'a reqwest::Client,
-    /// The Claude client for the cleanup of a plain lyric (`None`: only a
+    /// The text-AI client for the cleanup of a plain lyric (`None`: only a
     /// synced LRCLIB lyric can be used).
     pub ai: Option<&'a crate::ai::client::AiClient>,
     pub cache_dir: &'a Path,
@@ -351,7 +351,7 @@ impl TitleSearch<'_> {
     }
 
     /// The chosen lyric as a reference-text candidate: a synced LRCLIB lyric
-    /// as is, a plain one through the Claude cleanup.
+    /// as is, a plain one through the text-AI cleanup.
     async fn candidate_from(
         &self,
         cand: &TitleCandidate,

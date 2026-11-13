@@ -56,7 +56,8 @@ fn model_sent(server_requests: &[wiremock::Request]) -> Vec<String> {
 }
 
 /// Nothing set: every task goes to OpenRouter with the newest Gemini — an
-/// old `ai_provider_<task>` row naming the deleted proxy is not read.
+/// old `ai_provider_<task>` row naming the deleted proxy is not read (V45
+/// deletes such rows; this one is written straight to the table).
 #[tokio::test]
 async fn with_nothing_set_every_task_goes_to_openrouter_with_the_default_model() {
     let pool = pool().await;

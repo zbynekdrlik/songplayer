@@ -1,6 +1,6 @@
-//! #144: Claude's content filter refusing a song's translation is final —
+//! #144: the text AI's content filter refusing a song's translation is final —
 //! the song keeps its English lines and the next song goes on; an outage
-//! still backs off. Claude is a wiremock that refuses every request naming
+//! still backs off. The text AI is a wiremock that refuses every request naming
 //! the refused song's line.
 
 use std::sync::Arc;
@@ -32,7 +32,7 @@ fn untranslated(en: &str) -> LyricsTrack {
     }
 }
 
-/// A Claude that refuses (content filter, or `refusal_status` with no
+/// A text AI that refuses (content filter, or `refusal_status` with no
 /// filter body) every request naming "refused line", and translates the
 /// rest.
 async fn text_ai(refusal_status: u16, refusal_body: &'static str) -> MockServer {

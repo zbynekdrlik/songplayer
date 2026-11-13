@@ -5,7 +5,9 @@
 //! (`ai_model_<task>`, blank = [`sp_core::ai_tasks::DEFAULT_OPENROUTER_MODEL`])
 //! and sends it to OpenRouter ([`AiClient::openrouter_chat`]). An old
 //! `ai_provider_<task>` row (the deleted `claude_proxy` / `openrouter`
-//! choice) is no longer read: every task goes to OpenRouter.
+//! choice) is no longer read: every task goes to OpenRouter. V45 deletes such
+//! rows and a settings PATCH refuses them
+//! (`sp_core::ai_tasks::is_retired_setting`).
 //!
 //! The call asks `paid_ai::enabled` itself before anything is sent (the call
 //! sites ask it too; this is the transport's own check, so a new call site

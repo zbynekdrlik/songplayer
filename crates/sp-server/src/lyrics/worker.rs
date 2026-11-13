@@ -788,7 +788,7 @@ impl LyricsWorker {
         let Some(ai_client) = &self.ai_client else {
             return;
         };
-        // Claude-only by design (see `translate_track` doc comment). #152: the
+        // The text AI alone (see `translate_track` doc comment). #152: the
         // song's gender picks masculine (default) / feminine Slovak forms.
         let gender = self.resolve_gender(video_id).await;
         let result: Result<()> = match translator::translate_via_ai(ai_client, &track, gender).await

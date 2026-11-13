@@ -1,5 +1,5 @@
 //! #250: the lyrics worker's register check — the stale pass over a served
-//! track, through a wiremock Claude that counts.
+//! track, through a wiremock text AI that counts.
 
 use std::sync::Arc;
 
@@ -37,7 +37,7 @@ fn served() -> LyricsTrack {
     }
 }
 
-/// A Claude that answers every request with `answer`.
+/// A text AI that answers every request with `answer`.
 async fn text_ai(answer: &str) -> MockServer {
     let server = MockServer::start().await;
     let body = serde_json::json!({"choices": [{"message": {"content": answer}}]});
@@ -50,7 +50,7 @@ async fn text_ai(answer: &str) -> MockServer {
 }
 
 /// A node with one served song (`track` as its JSON, `None` = no file) and
-/// a worker whose Claude is `server`.
+/// a worker whose text AI is `server`.
 async fn node(server: &MockServer, track: Option<&LyricsTrack>) -> (TestNode, LyricsWorker, i64) {
     let node = TestNode::start("snv", None).await;
     let id = node.add_video(YT).await;
@@ -385,7 +385,7 @@ fn the_worker_checks_a_fresh_track_between_its_translation_and_its_persist() {
     );
 }
 
-/// A worker whose Claude answers every request with HTTP 500, retried with
+/// A worker whose text AI answers every request with HTTP 500, retried with
 /// no real wait.
 async fn node_with_a_broken_proxy() -> (MockServer, TestNode, LyricsWorker, i64) {
     let server = MockServer::start().await;

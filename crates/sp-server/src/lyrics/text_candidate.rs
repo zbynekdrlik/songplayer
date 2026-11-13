@@ -3,7 +3,7 @@
 //! `title_search.rs`), so both build a candidate the same way.
 //!
 //! A TIMED source (LRCLIB synced lyrics, YouTube captions) is used as is. A
-//! plain scraped text (LRCLIB plain lyrics) first goes through the Claude cleanup that drops ad-libs and
+//! plain scraped text (LRCLIB plain lyrics) first goes through the text-AI cleanup that drops ad-libs and
 //! hype intros and keeps every sung repeat
 //! (`description_provider::clean_lyrics_via_ai`, `ScrapedLyrics` mode).
 
@@ -23,7 +23,7 @@ pub(crate) fn timed_candidate(source: &str, track: &LyricsTrack) -> CandidateTex
     }
 }
 
-/// A text-only candidate from a scraped plain lyric, cleaned by Claude.
+/// A text-only candidate from a scraped plain lyric, cleaned by the text AI.
 /// `Ok(None)` when the cleanup finds no lyric in it. The cleanup result is
 /// cached at `cache_path` (a cached decision is reused without a call).
 pub(crate) async fn cleaned_text_candidate(
@@ -61,7 +61,7 @@ pub(crate) async fn cleaned_text_candidate(
 
 /// #144: what a scraped-lyrics cleanup's answer (`cleaned_text_candidate`)
 /// makes of its candidate in `gather`: the cleaned candidate; `None` when
-/// Claude's upstream content filter refused the cleanup (the same text is
+/// The text AI's upstream content filter refused the cleanup (the same text is
 /// refused every time, so only THIS candidate is left out and the pass goes
 /// on with the other sources); else an error that fails the pass — the
 /// cleanup found no lyric, or it failed (an outage, which the backoff waits

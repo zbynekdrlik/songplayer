@@ -203,7 +203,7 @@ fn new_provenance_source_literals_are_recognizable() {
 
 /// Description provider is wired as the 4th candidate source.
 /// Seeds a raw-description cache file so yt-dlp is never invoked,
-/// stubs Claude via wiremock, and asserts the returned SongContext
+/// stubs the text AI via wiremock, and asserts the returned SongContext
 /// contains exactly one CandidateText with source == "description".
 #[tokio::test]
 async fn gather_sources_pushes_description_candidate_when_the_text_ai_returns_lyrics() {
@@ -220,7 +220,7 @@ async fn gather_sources_pushes_description_candidate_when_the_text_ai_returns_ly
     .await
     .unwrap();
 
-    // Stub Claude: return a valid JSON lyrics response.
+    // Stub the text AI: return a valid JSON lyrics response.
     let mock = wiremock::MockServer::start().await;
     wiremock::Mock::given(wiremock::matchers::method("POST"))
         .and(wiremock::matchers::path("/v1/chat/completions"))
@@ -286,7 +286,7 @@ async fn gather_sources_pushes_description_candidate_when_the_text_ai_returns_ly
     assert!(!ctx.candidate_texts[0].has_timing);
 }
 
-/// Regression: when Claude returns `{"lines": []}` for a song that has no
+/// Regression: when the text AI returns `{"lines": []}` for a song that has no
 /// lyrics in its description, the description block must NOT push an empty
 /// CandidateText. The match guard `!lines.is_empty()` prevents that. With
 /// every source missing, `gather_sources_impl` returns Ok with an EMPTY
@@ -345,7 +345,7 @@ async fn gather_sources_skips_description_when_the_text_ai_returns_empty_array()
     // gather_sources_impl should return Ok with an EMPTY candidate list because:
     // - yt_subs: yt-dlp path bogus, returns None
     // - lrclib: artist empty, skipped
-    // - description: Claude returns empty array, match guard skips push
+    // - description: the text AI returns empty array, match guard skips push
     // So candidate_texts is empty — the #120 follow-up returns Ok(empty) here
     // (not a bail), so the song goes on to the title search, else the g35t
     // base tier.
@@ -678,7 +678,7 @@ fn gather_uses_lyrics_ovh_and_no_genius() {
 
     // The lrclib-plain branch still uses the shared cleanup helper — since
     // #144 through `text_candidate::cleaned_text_candidate`, which the title
-    // search shares (the Claude call itself lives in text_candidate.rs).
+    // search shares (the text-AI call itself lives in text_candidate.rs).
     let helper = include_str!("text_candidate.rs");
     assert!(
         src.contains(
@@ -744,7 +744,7 @@ fn gather_uses_lyrics_ovh_and_no_genius() {
 
 // ---------------------------------------------------------------------
 // #76 — pin the four guards of the Spotify pre-gather hook so dropping
-// any one of them surfaces in CI instead of silently hammering Claude
+// any one of them surfaces in CI instead of silently hammering the text AI
 // or panicking on missing fields.
 // ---------------------------------------------------------------------
 
@@ -817,7 +817,7 @@ fn should_resolve_spotify_blocks_when_artist_empty() {
 /// Structural guard: the call site in `process_song` MUST route through
 /// `should_resolve_spotify`. If a future change inlines the four checks
 /// back into `process_song`, this test fires so the regression is
-/// blocked at PR review instead of after Claude has been hammered for a
+/// blocked at PR review instead of after the text AI has been hammered for a
 /// few hours under a worker outage.
 #[test]
 fn process_song_routes_through_should_resolve_spotify() {

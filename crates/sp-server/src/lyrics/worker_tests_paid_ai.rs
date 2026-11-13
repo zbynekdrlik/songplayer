@@ -1,6 +1,6 @@
 //! #229 item C: the lyrics worker calls no paid AI while this node's switch
 //! is off — not for a song (held by the exchange, `peer::lyrics`), not for
-//! a translation (`translation_allowed`). Claude is a wiremock that counts.
+//! a translation (`translation_allowed`). The text AI is a wiremock that counts.
 
 use std::sync::Arc;
 
@@ -34,7 +34,7 @@ fn untranslated() -> LyricsTrack {
     }
 }
 
-/// A Claude that answers every translation with one SK line.
+/// A text AI that answers every translation with one SK line.
 async fn text_ai() -> MockServer {
     let server = MockServer::start().await;
     let body = serde_json::json!({"choices": [{"message": {"content": "1: Cestu robíš"}}]});
@@ -46,7 +46,7 @@ async fn text_ai() -> MockServer {
     server
 }
 
-/// PP alone (no peer, the exchange wired) with its Claude on `server`, one
+/// PP alone (no peer, the exchange wired) with its text AI on `server`, one
 /// active song with lyrics but no SK line (its JSON in the cache), and one
 /// song still to be processed.
 async fn pp_with_text_ai(server: &MockServer) -> (TestNode, LyricsWorker, i64) {
@@ -85,7 +85,7 @@ fn cached_sk(pp: &TestNode) -> Option<String> {
     track.lines[0].sk.clone()
 }
 
-/// Off: the song is held and nothing is translated — Claude hears nothing.
+/// Off: the song is held and nothing is translated — the text AI hears nothing.
 #[tokio::test]
 async fn no_paid_ai_call_while_the_switch_is_off() {
     let _lk = crate::lyrics::heavy_slot::DUB_FLAG_SERIAL.lock().await;
@@ -114,7 +114,7 @@ async fn no_paid_ai_call_while_the_switch_is_off() {
     assert!(next.is_some(), "picked again later");
 }
 
-/// On: the same pass translates the song through Claude, once.
+/// On: the same pass translates the song through the text AI, once.
 #[tokio::test]
 async fn the_translation_pass_calls_the_text_ai_while_the_switch_is_on() {
     let server = text_ai().await;
@@ -206,7 +206,7 @@ async fn a_stale_translation_with_no_track_is_stamped_forward_not_held_while_off
 }
 
 /// #230: while the background is held the lyrics tick starts nothing — not
-/// a song, not a translation pass (Claude hears nothing); after the release
+/// a song, not a translation pass (the text AI hears nothing); after the release
 /// the same tick translates the song.
 #[tokio::test]
 async fn a_held_background_starts_no_lyrics_work_until_released() {

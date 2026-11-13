@@ -3,10 +3,10 @@
 //! Returns a per-provider `available` bool + line-count estimate for the
 //! five text-source providers used by `gather_sources_impl`. Two cost tiers:
 //! cheap raw-fetch for yt_subs / lyrics.ovh / lrclib / spotify, and
-//! a Claude-validated fetch for `description` (because the YouTube description
+//! a text-AI-checked fetch for `description` (because the YouTube description
 //! field contains promo / social / sponsor text on most channels — a raw
 //! "non-empty after trim" check is not enough to know if it's actually
-//! lyrics). The Claude call goes through `fetch_description_lyrics` which
+//! lyrics). The text-AI call goes through `fetch_description_lyrics` which
 //! caches results in `{youtube_id}_description_lyrics.json`, so subsequent
 //! probes are instant.
 //!
@@ -51,7 +51,7 @@ pub struct ProbeReport {
 
 /// Probe all five text-source providers.
 ///
-/// `description` provider validates the YouTube description through Claude
+/// `description` provider validates the YouTube description through the text AI
 /// when `ai_client` is `Some` (cached on disk so repeat probes are cheap);
 /// returns unavailable when `ai_client` is None because raw non-empty text
 /// is not a reliable signal — most YouTube descriptions contain only promo
@@ -97,13 +97,13 @@ pub async fn probe_sources_impl(
     };
     probes.push(yt_subs_result);
 
-    // 2. description (Claude-validated — raw non-empty is not enough)
+    // 2. description (text-AI-checked — raw non-empty is not enough)
     //
     // 2026-05-13 Jesus Saves id=175 was the trigger: yt description was an
     // Air1 promo blurb + social links, 14 non-empty lines but zero lyrics.
     // Raw-availability check passed; reprocess would have wasted Demucs +
     // transcription cycles before description_provider cleanup said no lyrics.
-    // Probe now consults the same Claude-cleanup path the worker uses, with
+    // Probe now consults the same text-AI cleanup path the worker uses, with
     // the same `{youtube_id}_description_lyrics.json` cache so subsequent
     // probes are instant. Without ai_client the probe is conservative and
     // reports unavailable, because honest "unknown" defaults to "skip" per

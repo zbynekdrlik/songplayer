@@ -31,11 +31,10 @@ impl LyricsWorker {
     }
 
     /// EN→SK step of the pipeline. Silent on failure — the UI degrades to
-    /// English-only. Claude-only by design: the user pays a Max Plus
-    /// subscription (unlimited at that tier) and Gemini quota is reserved for
-    /// alignment; a refusal is fixed by tuning `translator::build_prompt`, not
-    /// a Gemini fallback. `gender` picks masculine (default) / feminine Slovak
-    /// first-person forms (#152).
+    /// English-only. One transport by design: the text AI on OpenRouter
+    /// (#321, the `translate` task's model, paid AI); a refusal is fixed by
+    /// tuning `translator::build_prompt`, never by a fallback model. `gender`
+    /// picks masculine (default) / feminine Slovak first-person forms (#152).
     #[cfg_attr(test, mutants::skip)]
     pub(crate) async fn translate_track(
         &self,
@@ -55,7 +54,7 @@ impl LyricsWorker {
         }
     }
 
-    /// #144: `e` is Claude's content filter refusing this song's translation
+    /// #144: `e` is the text AI's content filter refusing this song's translation
     /// (`ai::retry::content_filtered`)? Then it is final — the same text is
     /// refused again and every refusal costs the proxy's 60 s cooldown — so
     /// the song keeps its English lines, is skipped by the missing pass for
@@ -73,7 +72,7 @@ impl LyricsWorker {
         true
     }
 
-    /// #229 item C: the translation of `youtube_id` calls Claude — paid AI
+    /// #229 item C: the translation of `youtube_id` calls the text AI — paid AI
     /// — so it runs only while this node's switch is on (`paid_ai::enabled`,
     /// read live); while it is off the song's translation is held
     /// (`paid_ai::hold`, one INFO per song): its SK lines come with a peer's
@@ -102,8 +101,8 @@ impl LyricsWorker {
     /// `LYRICS_TRANSLATION_VERSION`) under the current prompt + the song's
     /// gender, rewrite the `sk` lines in the persisted JSON, and stamp the
     /// version. Translation only — no alignment, no `lyrics_pipeline_version`
-    /// change. Shares the Claude-translation backoff with
-    /// `retry_missing_translations` so a refusing / rate-limited Claude is not
+    /// change. Shares the text-AI translation backoff with
+    /// `retry_missing_translations` so a refusing / rate-limited text AI is not
     /// hammered. Runs only when the priority queue is empty (lowest priority).
     #[cfg_attr(test, mutants::skip)]
     pub(crate) async fn retranslate_next_stale(&self) {
@@ -181,7 +180,7 @@ impl LyricsWorker {
             Err(e) => {
                 // Leave the version unstamped (retry after backoff). Mirrors
                 // `retry_missing_translations`' exponential backoff so a
-                // refusing / rate-limited Claude is not hammered every tick.
+                // refusing / rate-limited text AI is not hammered every tick.
                 debug!("lyrics_worker: retranslation failed for {youtube_id}: {e}");
                 let mut backoff = self.retry_backoff.lock().await;
                 backoff.consecutive_failures = backoff.consecutive_failures.saturating_add(1);

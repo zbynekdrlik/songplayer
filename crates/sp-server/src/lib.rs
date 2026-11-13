@@ -295,7 +295,7 @@ pub async fn start(
         &shutdown_tx,
     ));
 
-    // 4. The ONE metadata provider chain (#136): Claude, then Gemini on the
+    // 4. The ONE metadata provider chain (#136): the OpenRouter text AI, then Gemini on the
     // `gemini_api_key` key list. The download worker, the reprocess worker and
     // the API share this `Arc` — no second, divergent provider list.
     let gemini_key = db::models::get_setting(&pool, "gemini_api_key")
