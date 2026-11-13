@@ -393,3 +393,19 @@ fn the_rules_are_judged_by_the_group_that_holds_them() {
     assert_eq!(group(2, 0), Some(FirewallGroup::Dstack155));
     assert_eq!(group(2, 3), None);
 }
+
+/// #322: `scripts/setup-prod-pc.ps1` judges the same generic rules by name
+/// and the same two groups.
+#[test]
+fn the_setup_script_knows_dstacks_generic_rules() {
+    use sp_core::prod_env::firewall::{DANTE_LEG_GROUP, DANTE_LEG_RULE_NAMES, DSTACK_GROUP};
+    let script = include_str!("../../../scripts/setup-prod-pc.ps1");
+    let line = |names: &[&str]| {
+        let quoted: Vec<String> = names.iter().map(|n| format!("'{n}'")).collect();
+        format!("return @({})", quoted.join(", "))
+    };
+    let names = line(&DANTE_LEG_RULE_NAMES);
+    assert!(script.contains(&names), "{names}");
+    let groups = line(&[DSTACK_GROUP, DANTE_LEG_GROUP]);
+    assert!(script.contains(&groups), "{groups}");
+}

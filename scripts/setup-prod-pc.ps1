@@ -39,8 +39,9 @@
 #      Disable{RealtimeMonitoring,BehaviorMonitoring,OnAccessProtection,
 #      ScanOnRealtimeEnable,IOAVProtection} = 1. The firewall is never
 #      changed (issue 255, dstack#155, 10.11.2026): every profile off (a PC
-#      with no Dante leg) or dstack's two-network standard holds, anything
-#      else is a blocker. Tamper Protection blocks the Defender
+#      with no Dante leg) or dstack's two-network standard holds (its group
+#      dstack155 or, issue 322 / dstack#264, the generic "dstack Dante
+#      leg"), anything else is a blocker. Tamper Protection blocks the Defender
 #      changes: it is turned off by hand in Windows Security (Virus & threat
 #      protection > Manage settings), and this script says so and fails.
 #   6. Every wired adapter, USB ones included (issue 285, the owner's rule of
@@ -570,27 +571,47 @@ function Add-ProdPcEveryNicReview {
 
 # The firewall (issue 255, dstack#155, the owner's ruling of 10.11.2026):
 # dstack's two-network standard (dstack docs/two-networks.md section 3)
-# replaces issue 233's "every profile off" on a PC with a Dante leg. Two
+# replaces issue 233's "every profile off" on a PC with a Dante leg. Three
 # states hold: every profile off (a PC with no Dante leg), or dstack's
 # standard: every profile on, its default actions Allow, every enabled Block
-# rule in the group dstack155, which holds exactly 14 enabled Block rules,
-# each bound to the Dante leg (InterfaceAlias Dante70), none naming
-# SongPlayer.exe. This script NEVER turns a profile off and never makes the
-# group (dstack does): anything else is a blocker naming what differs. The
-# same "attempted" rule as SongPlayer's own check (prod_env_firewall.rs): a
-# profile on with no group rule and no default Allow is a firewall that is
-# simply on (firewall_on), nothing more.
-# (The group's name, its 14 rules and the leg's alias are written as
+# rule in ONE of dstack's groups, each rule bound to the Dante leg
+# (InterfaceAlias Dante70) alone, none naming SongPlayer.exe:
+#   - dstack155, the per-box group: exactly 14 enabled Block rules;
+#   - "dstack Dante leg" (issue 322, dstack#264, dstack v0.6.123's
+#     tools/windows/dante-leg.ps1), the generic group that replaces it:
+#     exactly its 10 rules by display name, every one enabled Block.
+# Both groups at once (the switch half done) is a blocker of its own. This
+# script NEVER turns a profile off and never makes a group (dstack does):
+# anything else is a blocker naming what differs. The same "attempted" rule
+# as SongPlayer's own check (prod_env_firewall.rs): a profile on with no
+# group rule and no default Allow is a firewall that is simply on
+# (firewall_on), nothing more.
+# (The groups' names, their rules and the leg's alias are written as
 # literals: the tests load only this file's functions.)
 
-# Whether a rule of the facts' block_rules belongs to dstack's group.
-function Test-ProdPcDstackRule {
+# dstack's two groups (issue 322), the per-box one first.
+function Get-ProdPcFirewallGroups {
+    return @('dstack155', 'dstack Dante leg')
+}
+
+# The generic group's rules by display name, as dstack v0.6.123's
+# dante-leg.ps1 (Get-DanteLegRules) creates them (issue 322; Rust's
+# sp_core::prod_env::firewall::DANTE_LEG_RULE_NAMES, a test compares them).
+function Get-ProdPcDanteLegRuleNames {
+    return @('dstack Dante leg: TCP in', 'dstack Dante leg: TCP out', 'dstack Dante leg: UDP in', 'dstack Dante leg: UDP in, ephemeral ports', 'dstack Dante leg: svchost.exe UDP inbound', 'dstack Dante leg: svchost.exe UDP outbound', 'dstack Dante leg: mDNSResponder.exe UDP inbound', 'dstack Dante leg: mDNSResponder.exe UDP outbound', 'dstack Dante leg: mDNSResponder.exe (x86) UDP inbound', 'dstack Dante leg: mDNSResponder.exe (x86) UDP outbound')
+}
+
+# Which of dstack's groups a rule of the facts' block_rules belongs to (by
+# its group or its display group, padding and case ignored), or $null.
+function Get-ProdPcRuleGroup {
     param($Rule)
-    foreach ($field in @('group', 'display_group')) {
-        $value = [string](Get-ProdPcField $Rule $field)
-        if ($value.Trim() -eq 'dstack155') { return $true }
+    foreach ($group in @(Get-ProdPcFirewallGroups)) {
+        foreach ($field in @('group', 'display_group')) {
+            $value = [string](Get-ProdPcField $Rule $field)
+            if ($value.Trim() -eq $group) { return $group }
+        }
     }
-    return $false
+    return $null
 }
 
 # A profile's two default actions, both Allow.
@@ -640,29 +661,53 @@ function Add-ProdPcFirewallReview {
             $Blockers.Add((New-ProdPcBlocker "firewall_default_block:$($profileName.ToLower())" "the $profileName firewall profile's default actions are inbound $(Get-ProdPcField $profileDefaults 'inbound'), outbound $(Get-ProdPcField $profileDefaults 'outbound'): dstack's standard wants Allow both ways"))
         }
     }
-    $outside = @($blockRules | Where-Object { -not (Test-ProdPcDstackRule $_) } | ForEach-Object {
+    $outside = @($blockRules | Where-Object { $null -eq (Get-ProdPcRuleGroup $_) } | ForEach-Object {
             $name = [string](Get-ProdPcField $_ 'display_name')
             if ($name -eq '') { [string](Get-ProdPcField $_ 'name') } else { $name }
         })
     if ($outside.Count -gt 0) {
-        $Blockers.Add((New-ProdPcBlocker 'firewall_block_outside_group' "enabled Block rules outside the group dstack155: $($outside -join ', ')"))
+        $Blockers.Add((New-ProdPcBlocker 'firewall_block_outside_group' "enabled Block rules outside dstack's groups (dstack Dante leg, dstack155): $($outside -join ', ')"))
     }
-    $groupBlocks = @($groupRules | Where-Object { $true -eq (Get-ProdPcField $_ 'enabled') -and [string](Get-ProdPcField $_ 'action') -eq 'Block' })
-    if ($groupBlocks.Count -ne 14 -or $groupBlocks.Count -ne $groupRules.Count) {
-        $Blockers.Add((New-ProdPcBlocker 'firewall_group_incomplete' "the group dstack155 holds $($groupRules.Count) rule(s), $($groupBlocks.Count) of them enabled Block: dstack's standard wants exactly 14, all enabled Block"))
+    # Issue 322: each group rule carries its group (the read names it).
+    $oldRules = @($groupRules | Where-Object { [string](Get-ProdPcField $_ 'group') -eq 'dstack155' })
+    $newRules = @($groupRules | Where-Object { [string](Get-ProdPcField $_ 'group') -eq 'dstack Dante leg' })
+    $unknown = @($groupRules | Where-Object { @(Get-ProdPcFirewallGroups) -notcontains [string](Get-ProdPcField $_ 'group') } | ForEach-Object { [string](Get-ProdPcField $_ 'name') })
+    if ($unknown.Count -gt 0) {
+        $Blockers.Add((New-ProdPcBlocker 'unreadable:firewall_rules' "group rules read with no group of dstack's: $($unknown -join ', ')"))
+    }
+    $enabledBlock = { param($rules) @($rules | Where-Object { $true -eq (Get-ProdPcField $_ 'enabled') -and [string](Get-ProdPcField $_ 'action') -eq 'Block' }) }
+    if ($oldRules.Count -gt 0 -and $newRules.Count -gt 0) {
+        $Blockers.Add((New-ProdPcBlocker 'firewall_groups_mixed' "both of dstack's groups hold rules (dstack Dante leg: $($newRules.Count), dstack155: $($oldRules.Count)): the switch to the generic filter is half done; dstack's dante-leg.ps1 -RemoveGroup dstack155 removes the old one"))
+    } elseif ($oldRules.Count -gt 0) {
+        $blocks = @(& $enabledBlock $oldRules)
+        if ($blocks.Count -ne 14 -or $blocks.Count -ne $oldRules.Count) {
+            $Blockers.Add((New-ProdPcBlocker 'firewall_group_incomplete' "the group dstack155 holds $($oldRules.Count) rule(s), $($blocks.Count) of them enabled Block: dstack's standard wants exactly 14, all enabled Block"))
+        }
+    } else {
+        $blocks = @(& $enabledBlock $newRules)
+        $wanted = @(Get-ProdPcDanteLegRuleNames)
+        $names = @($newRules | ForEach-Object { [string](Get-ProdPcField $_ 'display_name') })
+        $missing = @($wanted | Where-Object { $names -notcontains $_ })
+        $unexpected = @($names | Where-Object { $wanted -notcontains $_ })
+        if ($blocks.Count -ne $wanted.Count -or $blocks.Count -ne $newRules.Count -or $missing.Count -gt 0 -or $unexpected.Count -gt 0) {
+            $detail = ''
+            if ($missing.Count -gt 0) { $detail += "; missing: $($missing -join ', ')" }
+            if ($unexpected.Count -gt 0) { $detail += "; not dstack's: $($unexpected -join ', ')" }
+            $Blockers.Add((New-ProdPcBlocker 'firewall_group_incomplete' "the group dstack Dante leg holds $($newRules.Count) rule(s), $($blocks.Count) of them enabled Block: dstack's generic filter wants exactly its $($wanted.Count), all enabled Block$detail"))
+        }
     }
     $unbound = @($groupRules | Where-Object {
             $aliases = @(Get-ProdPcList $_ 'interface_alias')
             -not ($aliases.Count -eq 1 -and [string]$aliases[0] -eq 'Dante70')
         } | ForEach-Object { [string](Get-ProdPcField $_ 'name') })
     if ($unbound.Count -gt 0) {
-        $Blockers.Add((New-ProdPcBlocker 'firewall_group_interface' "rules of the group dstack155 not bound to the Dante leg (Dante70) alone: $($unbound -join ', ')"))
+        $Blockers.Add((New-ProdPcBlocker 'firewall_group_interface' "rules of dstack's group not bound to the Dante leg (Dante70) alone: $($unbound -join ', ')"))
     }
     $songplayer = @($groupRules | Where-Object {
             @(Get-ProdPcList $_ 'programs' | Where-Object { ([string]$_ -split '[\\/]')[-1] -eq 'SongPlayer.exe' }).Count -gt 0
         } | ForEach-Object { [string](Get-ProdPcField $_ 'name') })
     if ($songplayer.Count -gt 0) {
-        $Blockers.Add((New-ProdPcBlocker 'firewall_group_songplayer' "rules of the group dstack155 name SongPlayer.exe (it holds the native Dante device): $($songplayer -join ', ')"))
+        $Blockers.Add((New-ProdPcBlocker 'firewall_group_songplayer' "rules of dstack's group name SongPlayer.exe (it holds the native Dante device): $($songplayer -join ', ')"))
     }
 }
 
@@ -1035,8 +1080,9 @@ function Get-ProdPcFirewallRules {
 
 # Issue 255 (dstack#155): the facts dstack's standard is judged by, from the
 # ACTIVE store: each profile's default actions, every enabled Block rule
-# (name and group), and every rule of dstack's group with its interface and
-# program filters. Read only: creating the group is dstack's job.
+# (name and group), and every rule of dstack's groups (issue 322: dstack155
+# and "dstack Dante leg", each rule with its group) with its interface and
+# program filters. Read only: creating a group is dstack's job.
 function Read-ProdPcFirewallStandard {
     $defaults = [ordered]@{}
     foreach ($fwProfile in @(Get-NetFirewallProfile -PolicyStore ActiveStore)) {
@@ -1055,17 +1101,20 @@ function Read-ProdPcFirewallStandard {
             })
     }
     $groupRules = New-Object System.Collections.Generic.List[object]
-    foreach ($rule in @(Get-ProdPcFirewallRules @{ Group = 'dstack155' })) {
-        $interfaces = @(@($rule | Get-NetFirewallInterfaceFilter) | ForEach-Object { @($_.InterfaceAlias) } | ForEach-Object { [string]$_ })
-        $programs = @(@($rule | Get-NetFirewallApplicationFilter) | ForEach-Object { [string]$_.Program })
-        $groupRules.Add([ordered]@{
-                name = [string]$rule.Name
-                display_name = [string]$rule.DisplayName
-                enabled = ([string]$rule.Enabled -eq 'True')
-                action = [string]$rule.Action
-                interface_alias = $interfaces
-                programs = $programs
-            })
+    foreach ($group in @(Get-ProdPcFirewallGroups)) {
+        foreach ($rule in @(Get-ProdPcFirewallRules @{ Group = $group })) {
+            $interfaces = @(@($rule | Get-NetFirewallInterfaceFilter) | ForEach-Object { @($_.InterfaceAlias) } | ForEach-Object { [string]$_ })
+            $programs = @(@($rule | Get-NetFirewallApplicationFilter) | ForEach-Object { [string]$_.Program })
+            $groupRules.Add([ordered]@{
+                    name = [string]$rule.Name
+                    display_name = [string]$rule.DisplayName
+                    group = $group
+                    enabled = ([string]$rule.Enabled -eq 'True')
+                    action = [string]$rule.Action
+                    interface_alias = $interfaces
+                    programs = $programs
+                })
+        }
     }
     return [ordered]@{ defaults = $defaults; block_rules = $blockRules.ToArray(); group_rules = $groupRules.ToArray() }
 }

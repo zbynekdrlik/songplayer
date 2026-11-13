@@ -55,20 +55,20 @@
       { "name": "dstack155-TCP-Out", "display_name": "dstack155 block TCP out on Dante70", "group": "dstack155", "display_group": "dstack155" }
     ],
     "group_rules": [
-      { "name": "dstack155-obs64.exe-In", "display_name": "dstack155 block obs64.exe in on Dante70", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe"] },
-      { "name": "dstack155-obs64.exe-Out", "display_name": "dstack155 block obs64.exe out on Dante70", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe"] },
-      { "name": "dstack155-Arena.exe-In", "display_name": "dstack155 block Arena.exe in on Dante70", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\Resolume Arena\\Arena.exe"] },
-      { "name": "dstack155-Arena.exe-Out", "display_name": "dstack155 block Arena.exe out on Dante70", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\Resolume Arena\\Arena.exe"] },
-      { "name": "dstack155-python.exe-In", "display_name": "dstack155 block python.exe in on Dante70", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Python312\\python.exe"] },
-      { "name": "dstack155-python.exe-Out", "display_name": "dstack155 block python.exe out on Dante70", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Python312\\python.exe"] },
-      { "name": "dstack155-RustDesk.exe-In", "display_name": "dstack155 block RustDesk.exe in on Dante70", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\RustDesk\\RustDesk.exe"] },
-      { "name": "dstack155-RustDesk.exe-Out", "display_name": "dstack155 block RustDesk.exe out on Dante70", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\RustDesk\\RustDesk.exe"] },
-      { "name": "dstack155-svchost.exe-In", "display_name": "dstack155 block svchost.exe in on Dante70", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["%SystemRoot%\\System32\\svchost.exe"] },
-      { "name": "dstack155-svchost.exe-Out", "display_name": "dstack155 block svchost.exe out on Dante70", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["%SystemRoot%\\System32\\svchost.exe"] },
-      { "name": "dstack155-mDNSResponder.exe-In", "display_name": "dstack155 block mDNSResponder.exe in on Dante70", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\Bonjour\\mDNSResponder.exe"] },
-      { "name": "dstack155-mDNSResponder.exe-Out", "display_name": "dstack155 block mDNSResponder.exe out on Dante70", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\Bonjour\\mDNSResponder.exe"] },
-      { "name": "dstack155-TCP-In", "display_name": "dstack155 block TCP in on Dante70", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["Any"] },
-      { "name": "dstack155-TCP-Out", "display_name": "dstack155 block TCP out on Dante70", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["Any"] }
+      { "name": "dstack155-obs64.exe-In", "display_name": "dstack155 block obs64.exe in on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe"] },
+      { "name": "dstack155-obs64.exe-Out", "display_name": "dstack155 block obs64.exe out on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe"] },
+      { "name": "dstack155-Arena.exe-In", "display_name": "dstack155 block Arena.exe in on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\Resolume Arena\\Arena.exe"] },
+      { "name": "dstack155-Arena.exe-Out", "display_name": "dstack155 block Arena.exe out on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\Resolume Arena\\Arena.exe"] },
+      { "name": "dstack155-python.exe-In", "display_name": "dstack155 block python.exe in on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Python312\\python.exe"] },
+      { "name": "dstack155-python.exe-Out", "display_name": "dstack155 block python.exe out on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Python312\\python.exe"] },
+      { "name": "dstack155-RustDesk.exe-In", "display_name": "dstack155 block RustDesk.exe in on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\RustDesk\\RustDesk.exe"] },
+      { "name": "dstack155-RustDesk.exe-Out", "display_name": "dstack155 block RustDesk.exe out on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\RustDesk\\RustDesk.exe"] },
+      { "name": "dstack155-svchost.exe-In", "display_name": "dstack155 block svchost.exe in on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["%SystemRoot%\\System32\\svchost.exe"] },
+      { "name": "dstack155-svchost.exe-Out", "display_name": "dstack155 block svchost.exe out on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["%SystemRoot%\\System32\\svchost.exe"] },
+      { "name": "dstack155-mDNSResponder.exe-In", "display_name": "dstack155 block mDNSResponder.exe in on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\Bonjour\\mDNSResponder.exe"] },
+      { "name": "dstack155-mDNSResponder.exe-Out", "display_name": "dstack155 block mDNSResponder.exe out on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\Bonjour\\mDNSResponder.exe"] },
+      { "name": "dstack155-TCP-In", "display_name": "dstack155 block TCP in on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["Any"] },
+      { "name": "dstack155-TCP-Out", "display_name": "dstack155 block TCP out on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["Any"] }
     ]
   }
 }
