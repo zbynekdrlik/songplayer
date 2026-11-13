@@ -946,17 +946,21 @@ the test that kills each one BEFORE CI's mutation gate runs.
   a test that waits 20 s for a counter a mutant never moves hits
   cargo-mutants' auto timeout (~20 s on these runners) and reads TIMEOUT,
   which fails the gate like a survivor. Bound such waits at ~5 s.
-- **The `dante_device` tests collide under nextest** (#322, measured on
-  dev1 with dstack v0.6.109 AND v0.6.123, 5–8 of 17 failing every run):
-  each starts a device on the routed address, which binds ARC UDP 4440;
-  their `ONE_DEVICE` mutex serializes threads of ONE process, but nextest
-  (the mutation gate's `test_tool`) runs every test in its own process, so
-  they fail `ARC on UDP 4440: Address already in use`. With
-  `fail-fast = { max-fail = 1, terminate = "immediate" }` that makes every
-  sp-server mutant read CAUGHT for the wrong reason (the gate runs
-  `--baseline=skip`). Until fixed, a local `cargo mutants` of sp-server says
-  nothing: name each mutant's killer by reading, and run the named tests
-  with `cargo test`.
+- **An in-process lock serializes nothing under nextest** (#322 / #323).
+  nextest (the mutation gate's `test_tool`) runs every test in its own
+  process, and the gate runs two mutants at once (`--jobs 2`), so a test
+  resource shared across processes (a fixed port, a file) needs a
+  cross-process claim. With `fail-fast = { max-fail = 1, terminate =
+  "immediate" }` one such collision reads every mutant of the crate CAUGHT
+  for the wrong reason (the gate runs `--baseline=skip`). The
+  `dante_device` tests had it: every device bound Dante's ARC UDP 4440
+  (5–8 of 17 failing each run, and on dev1 another account may hold 4440).
+  Now each test that starts a device takes a dstack slot 1-14 of its own
+  (`claim_slot`: ARC 4440+k, CMC 8800+k, flows 4455+k, process id k),
+  claimed by holding UDP 127.0.0.1:(29700 + k) for the test's life, its
+  ports checked free first; `DanteParams.ports` carries it (`None` = Dante's
+  defaults, the output's). A new device test uses `claim_slot` + `on_slot`
+  and asks a flow on `slot.ports.flows`, never `flows::control::PORT`.
 - **A NEW file is missing from `git diff <base>` until git tracks it**
   (#221 L2b): listing uncommitted work with `git diff 5ad0178f > range.diff`
   showed no mutant at all for the new `remote/codec.rs`. `git add -N
