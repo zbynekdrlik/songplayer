@@ -179,6 +179,12 @@ message to worker` before blaming a person.
 ## Mutation gate (`.cargo/mutants.toml` + ci.yml `mutation-testing`)
 
 - PR gate is diff-scoped + HARD-bounded to `timeout-minutes: 20` (mutation-testing.md).
+- Running it locally on dev1 (#321): pass `--baseline skip` like CI. The unmutated
+  baseline FAILS there on `dante_device::tests::dropping_a_running_device_stops_its_stack`
+  (`ARC on UDP 4440: Address already in use`: another account on the shared box holds the
+  port) and cargo-mutants then tests nothing. `git diff <base> -- crates > diff.patch`,
+  `-j 3`: ~170 mutants in ~30 min. Wait on the real `cargo-mutants` pid, not a `setsid`
+  wrapper's (it exits at once, so `tail --pid` returns immediately).
   Prebuilt binaries via `taiki-e/install-action` (`cargo-mutants@27.1.0,cargo-nextest@0.9.140`),
   `cargo mutants --in-diff pr.diff --baseline=skip --test-tool=nextest --jobs 2`.
 - Profile + test tool + ALL exclusions live in `.cargo/mutants.toml` (`profile="mutants"`,
