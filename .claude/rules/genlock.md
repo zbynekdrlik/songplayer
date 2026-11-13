@@ -1618,6 +1618,76 @@ exactly the 24 000 frames left).
   paused position (never `the decoder refused the seek`, never 0), and
   the song summary of the resume reads `underruns_end=0`.
 
+## A blocked video read never starves the audio (#318)
+
+**The finding** (SNV 13.11.2026, A/B/A on #318): a GPU display
+reconfiguration (wall-bridge's Display.Core acquire) held Media
+Foundation's D3D11 decoder 0.5–0.75 s. The producer read video and audio
+on ONE thread (`next_synced`: the picture, then its audio up to pts +
+250 ms), so it read no audio either, and once the 12 queued frames and
+the lead were used up the grid zero-filled (`underruns_mid` 3–26).
+Software decode did not stall, and is banned on SNV anyway
+(`video-decode.md`).
+
+**The rule:** the audio never waits for the picture.
+
+- **The video reader has its own thread** (`sp_decoder::video_thread::
+  ThreadedVideo`, cross-platform, mutation-gated): its `open` closure
+  opens the MF reader ON that thread, which reads, seeks and drops it there
+  (the apartment rule above still holds: one thread per reader, no longer
+  the producer's). `pipeline_paced::run_decode_producer` starts it through
+  `spawn_decode_thread` (`paced-video-<id>`).
+  - A rendezvous hand-off: at most ONE picture read ahead, so a
+    GPU-resident pipeline holds at most one ring slot more than before
+    (`video-decode.md`'s 20-slot budget).
+  - A seek is sent to the thread with an epoch and WAITS for its reply, so
+    a refused seek still reports (#217) and keeps the stream as it was; an
+    accepted one drops every picture read before it. A seek that lands
+    while the thread is inside a blocked read waits for that read (a stall
+    then delays the seek, never the audio already queued).
+  - Drop never waits: the channels close, the thread ends once its read
+    returns and drops the reader on its own thread. A thread that died is
+    an error (`the video reader thread is gone`), never a hang.
+- **The producer waits for the picture only until it is due**
+  (`paced_producer::poll_item(.., Some(LATE_POLL), late)`, 5 ms looks,
+  the queue's seek / stop read between them by `SharedQueue::producer_look`).
+  `picture_is_late` (pure): the emit thread took its last item at least
+  `LATE_AFTER_PERCENT` (90 %) of a source frame period ago AND the queue
+  is empty, or, once a late run began (`SplitSyncedDecoder::in_late_run`),
+  holds fewer than `LATE_QUEUE_DEPTH` (3). Before the first pop nothing is
+  late (the pre-roll). One step per pop would supply less than real time
+  at 24 fps on the 30 fps grid and at 60 fps: the depth is what keeps the
+  supply ≥ the demand.
+- **A late step** (`SplitSyncedDecoder::next_late`): the held picture
+  again (an `Arc` bump, a ring frame itself) at the next source-cadence
+  time after the frame the run started on, with the audio up to it + the
+  lead through the same G5-gated take, the #257 held step's shape. None
+  before any frame since the open or a seek, after the video's end (the
+  tail's job), or once the audio ended. A run whose step would lie past
+  `AUDIO_PAST_VIDEO_MAX_MS` (15 s) fails the song (`DecoderError::Decode`
+  → the producer's decode-error path).
+- **The picture catches up, the audio never pauses:** when pictures come
+  back, every frame at or before the last late step is dropped (decoded,
+  never shown, `late_counts().1`); the first one past it ends the run. A
+  video that ends during a run holds on from the last step (the #257 tail
+  continues from it). A seek ends the run.
+- Log: one WARN `paced producer: the next picture is late - the audio
+  goes on on the held picture (#318)` per run, one INFO `the picture is
+  back` with `late_steps` / `late_frames_dropped` (cumulative).
+- **Tests:** `pacer_tests_video_stall.rs` (the real decoder, producer,
+  rule and pacer on the virtual boundary clock: a ~1 s stall at 30 / 60 /
+  23.976 fps plays every sample once with 0 underruns, the held frame
+  through the stall, no frame shown behind its audio line after it; a
+  seek and a skip during the stall; a stall into the video's end),
+  `split_sync_tests_late.rs`, `paced_producer_tests_late.rs` (the rule's
+  table; a GPU ring frame across the real reader thread, its late frames'
+  slots freed), `video_thread_tests.rs` (blocked reads with a gate, seek,
+  refused seek, drop during a blocked read, a dead thread),
+  `pacer_queue_tests.rs` (`producer_look`).
+- **Box check:** through an announced, graceful wall-bridge restart on the
+  hardware-decode side, `/api/v1/ndi/health` `audio.underruns_mid` +0 and
+  the log's late-run WARN / INFO pair around the acquire.
+
 ## Merge gate for pacing/decode/NDI/audio changes: the post-deploy A/V gate (#147)
 A change to pacing, the submitter, decode, the mixer, NDI or the audio path
 merges only with `e2e/post-deploy-av-sync.spec.ts` green. That spec records the

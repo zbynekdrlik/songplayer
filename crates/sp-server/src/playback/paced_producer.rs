@@ -69,7 +69,7 @@ pub const LATE_POLL: Duration = Duration::from_millis(5);
 /// after which the next picture is late (#318, [`picture_is_late`]): just
 /// under one period, so the late step is queued about when the emit thread
 /// pulls its next item.
-pub const LATE_AFTER_PERCENT: u64 = 100_000;
+pub const LATE_AFTER_PERCENT: u64 = 90;
 
 /// The items a late run keeps queued (#318): one late step per pop would
 /// supply less than real time whenever the emit thread pops less often than
