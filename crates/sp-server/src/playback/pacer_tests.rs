@@ -593,7 +593,7 @@ fn every_emit_is_counted_in_the_lateness_histogram() {
     counts[0] = 1; // 7 µs
     counts[1] = 2; // 110 µs
     counts[5] = 1; // 2.5 ms
-    counts[10] = 1; // 12 ms
+    counts[9] = 1; // 12 ms, in [10, 15) ms
     assert_eq!(hist.counts, counts);
 }
 
