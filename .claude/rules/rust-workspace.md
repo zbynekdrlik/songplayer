@@ -1415,6 +1415,14 @@ standby while the rig built 2×4, caught only by a review pass (it would have
 reddened 6 CI tests). Fail loudly when an anchor is missing
 (`if old not in s: sys.exit(...)`), or use the Edit tool, and re-read the result.
 
+A multi-file edit script that exits halfway has already WRITTEN the files
+before the failing one (#321): re-running it then trips its own anchors. Do not
+make it "idempotent" by skipping an edit whose NEW text is already there when
+that new text CONTAINS the old one (an append): the old anchor still matches
+and every re-run appends again (#321 wrote one doc paragraph four times).
+Check every anchor of every file first, then write, or re-read the diff after
+any re-run.
+
 In a worktree lane the Bash guard may refuse a long `python3 - <<'EOF' … EOF`
 edit chained with `git` or `cargo` ("too complex to verify that it stays inside
 the worktree"), and not every time (#221 L4a). Write the anchor-asserted edit

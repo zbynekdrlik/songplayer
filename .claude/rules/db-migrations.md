@@ -51,3 +51,13 @@ the scratchpad, never in the repo; a review dispatch reuses it.
 A version test pins its migration's place in the list as `assert!(latest >= N)`,
 never `assert_eq!(MIGRATIONS.last().unwrap().0, N)`: an exact pin fails the next
 lane's V(N+1) on correct code (#233 ruling 4's V32 shipped one; review round 15).
+
+## Retiring a setting: delete its rows AND refuse it in the PATCH (#321 V45)
+
+A setting no code reads any more goes in two steps, as V45 did (V32 did the delete only): a
+migration `DELETE FROM settings WHERE …`, and the settings PATCH refusing the
+key (a `checked` fn in `api/settings.rs::prepare` returning `Err` → 400,
+nothing written; the e2e mock refuses it too), or any client re-creates it.
+Match a key PREFIX with `GLOB 'ai_provider_*'`, never `LIKE 'ai_provider_%'`:
+in LIKE `_` is a one-character wildcard (and case-insensitive), so it would
+also delete e.g. `aiXproviderY…`; GLOB's `_` is literal.
