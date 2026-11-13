@@ -407,3 +407,13 @@ fn a_video_that_ends_during_a_late_run_ends_the_run() {
     let (at, _) = dec.next_held().unwrap().expect("the tail goes on");
     assert_eq!(at, 200, "from the last late step");
 }
+
+/// The stall bound's edge (#318): a picture away exactly as long as the bound
+/// is still within it, one nanosecond more fails the song.
+#[test]
+fn a_stall_exactly_at_the_bound_is_not_over_it() {
+    let limit = Duration::from_millis(AUDIO_PAST_VIDEO_MAX_MS);
+    assert!(!super::stall_over(limit, limit));
+    assert!(super::stall_over(limit + Duration::from_nanos(1), limit));
+    assert!(!super::stall_over(Duration::ZERO, limit));
+}

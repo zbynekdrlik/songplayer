@@ -456,7 +456,7 @@ impl SplitSyncedDecoder {
     fn not_ready(&mut self) -> Result<Synced, DecoderError> {
         let since = *self.stall_since.get_or_insert_with(Instant::now);
         let away = since.elapsed();
-        if away > self.stall_limit {
+        if stall_over(away, self.stall_limit) {
             return Err(DecoderError::Decode(format!(
                 "the video gave no picture for {} ms (#318)",
                 away.as_millis()
@@ -635,6 +635,12 @@ impl SplitSyncedDecoder {
 // ---------------------------------------------------------------------------
 // Tests — cross-platform, use mock readers.
 // ---------------------------------------------------------------------------
+
+/// Whether a picture away for `away` ran past the stall bound (#318): only a
+/// stall LONGER than the bound fails the song, never one exactly at it.
+fn stall_over(away: Duration, limit: Duration) -> bool {
+    away > limit
+}
 
 #[cfg(test)]
 #[path = "split_sync_tests.rs"]
