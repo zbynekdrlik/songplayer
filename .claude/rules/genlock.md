@@ -1083,6 +1083,22 @@ Now:
 - **Layout.** `PacingStats` lives in `playback/pacing_stats.rs` (split out of
   `ndi_health.rs` for the 1000-line cap) and is re-exported from `ndi_health`.
 
+## Emit lateness, bucketed (#289 step 0)
+
+`pacing.emit_late_hist {edges_us, counts}` on `/api/v1/ndi/health`: every
+emit's lateness against the boundary it serviced (`Pacer::on_emit`, the
+same `late_us` as `max_late_us` / `jitter_p99_us`), counted since the
+pipeline started into fixed buckets (`playback/emit_lateness.rs`,
+`EDGES_US`: 0, 100, 250, 500 µs, 1, 2, 3, 5, 7.5, 10, 15, 20, 25 ms, one
+slot). Both lists are empty until the pipeline's first emit, so a pacer
+that never emitted still reports the default `PacingStats`. It sizes the
+#289 rebuild's one-slot audio lead from data (design 6814927800 §3): read
+it twice and diff the counts for a window (≥ 24 h on resolume-snv). The
+ring figures cover only the last 256 emits; this one never forgets.
+Tests: `emit_lateness_tests.rs`, `pacer_tests.rs`
+(`every_emit_is_counted_in_the_lateness_histogram`),
+`routes_tests_pacing.rs`.
+
 ## `av_frame_offset` — SongPlayer's own emitted A/V relation (#148 v5)
 
 Measurement only (design comment 5833341193). It was added to find out whether

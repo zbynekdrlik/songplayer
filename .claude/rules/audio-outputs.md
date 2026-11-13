@@ -132,6 +132,28 @@ start):
   `settings_tests_audio.rs` (the PATCH); `program_tests_outputs.rs` (the
   top-level field).
 
+## The timestamped-audio rebuild, step 0: measure (#289, design 6814927800)
+
+Six steps, one deploy each (ROZHODNUTÉ 6860359169); step 0 changes
+nothing audible, it only measures what the later steps are sized from:
+
+- `outputs[i].device_latency_ms` (and `asio.device_latency_ms`): the
+  device's own output latency after the worker hands it a frame —
+  `AsioDevice::output_latency_frames` at the worker's rate
+  (`asio_state::device_latency_ms`): an ASIO driver's `getLatencies`
+  output at its rate, dlink's whole TX path for Dante at 48 kHz (the
+  worker's rate there). Set at each open and every publish (so
+  `kAsioLatenciesChanged` shows), kept while the output waits, `null`
+  before the first open and for VBAN (its receiver's buffer is unknown to
+  SongPlayer: it goes into `delay_ms` from the wall-vs-FOH measurement).
+  Crosses the host pipe (`WireStatus`, `#[serde(default)]`). Step 4
+  subtracts it from the servo's target; until then it is read only.
+- The pacer's emit-lateness histogram: `genlock.md`, "Emit lateness,
+  bucketed".
+- Tests: `asio_out_tests_timing.rs`
+  (`the_device_latency_is_the_drivers_own_and_follows_its_change`),
+  `wire_status_tests.rs`, `audio_out_tests.rs`, `program_tests_outputs.rs`.
+
 ## The drift servo and the ASRC (`asrc_servo.rs`, `asrc.rs`) — lane 2
 
 Pure modules, no thread, no I/O: the ASIO worker (and the Dante output
