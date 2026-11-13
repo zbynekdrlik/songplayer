@@ -1671,7 +1671,7 @@ Software decode did not stall, and is banned on SNV anyway
     naming the file, and `status.video_decode.stuck_video_readers` (since
     the start) / `stuck_video_readers_now` +1; if its read ever returns,
     one INFO and `_now` −1. A watcher waits as long as its stuck thread
-    (one parked thread more per leak, nothing per normal song). Tests:
+    (one short-lived watcher per dropped reader, parked only per leak). Tests:
     `video_thread_watch_tests.rs`, `video_thread_tests.rs`
     `a_dropped_reader_whose_read_never_returns_is_counted_stuck`. Box
     check: `stuck_video_readers` stays 0; a non-zero one names its file in

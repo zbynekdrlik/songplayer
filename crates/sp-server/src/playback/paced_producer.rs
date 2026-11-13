@@ -386,12 +386,14 @@ impl DecodeProducer {
         );
         if moved {
             self.held = None;
+            // #320: a refused seek moved nothing, so the last real picture
+            // stays where it was (a late run's `current_ms` is no picture).
+            self.real_ms = real;
         }
         // #277: the video plays again from here.
         self.early = None;
         self.pts_offset_ms = real;
         self.current_ms = real;
-        self.real_ms = real;
         self.epoch = epoch;
         real
     }

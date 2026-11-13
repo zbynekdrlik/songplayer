@@ -50,11 +50,14 @@ impl DetachedReaders {
         }
     }
 
-    /// The counts now.
+    /// The counts now. `stuck_now` is read first and both counts are
+    /// `SeqCst` (the watcher adds to `stuck` before `stuck_now`), so a read
+    /// never shows `stuck_now` above `stuck`.
     pub fn snapshot(&self) -> DetachedCounts {
+        let stuck_now = self.stuck_now.load(Ordering::SeqCst);
         DetachedCounts {
-            stuck: self.stuck.load(Ordering::Relaxed),
-            stuck_now: self.stuck_now.load(Ordering::Relaxed),
+            stuck: self.stuck.load(Ordering::SeqCst),
+            stuck_now,
         }
     }
 }
@@ -100,8 +103,8 @@ pub(crate) fn watch(
     if verdict == Detached::Ended {
         return verdict;
     }
-    counts.stuck.fetch_add(1, Ordering::Relaxed);
-    counts.stuck_now.fetch_add(1, Ordering::Relaxed);
+    counts.stuck.fetch_add(1, Ordering::SeqCst);
+    counts.stuck_now.fetch_add(1, Ordering::SeqCst);
     warn!(
         file,
         after_ms = after.as_millis() as u64,
@@ -110,7 +113,7 @@ pub(crate) fn watch(
     );
     // Nothing is sent: this returns when the thread ends, if ever.
     let _ = done.recv();
-    counts.stuck_now.fetch_sub(1, Ordering::Relaxed);
+    counts.stuck_now.fetch_sub(1, Ordering::SeqCst);
     info!(
         file,
         "video reader: a stuck reader's read returned - its thread ended (#319)"
