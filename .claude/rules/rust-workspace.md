@@ -942,6 +942,10 @@ the test that kills each one BEFORE CI's mutation gate runs.
   script with the Write tool (`grep -rnIF --exclude-dir=…` inside it) and run
   `bash <scratch>/refs.sh`; likewise `gh … -q '"\(.x)"'` jq interpolation:
   dump with a Python script that calls `gh … --json` and parses it.
+- **A test's own wait must end well under the mutant's timeout** (#319):
+  a test that waits 20 s for a counter a mutant never moves hits
+  cargo-mutants' auto timeout (~20 s on these runners) and reads TIMEOUT,
+  which fails the gate like a survivor. Bound such waits at ~5 s.
 - **A NEW file is missing from `git diff <base>` until git tracks it**
   (#221 L2b): listing uncommitted work with `git diff 5ad0178f > range.diff`
   showed no mutant at all for the new `remote/codec.rs`. `git add -N
