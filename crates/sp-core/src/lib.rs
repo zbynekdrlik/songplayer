@@ -2,6 +2,7 @@
 //!
 //! This crate is WASM-safe — no OS-specific dependencies.
 
+pub mod ai_tasks; // #321: the text AI tasks, their provider and OpenRouter model settings
 pub mod asio_resampling; // #233: a running ASIO output's chips (the owner's resampling row)
 pub mod audio_faults; // #257: the audio fault ledger's answer, the HealthBar segment, the panel's texts
 pub mod audio_faults_timeline; // #257: the panel's timeline (buckets, bars, axis)

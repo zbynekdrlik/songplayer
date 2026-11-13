@@ -190,7 +190,8 @@ impl SpotifyResolver {
             ));
         }
 
-        let raw = match ai_client.chat(&system, &user).await {
+        let task = sp_core::ai_tasks::AiTask::Spotify;
+        let raw = match ai_client.chat_for(task, &system, &user, 300).await {
             Ok(s) => s,
             Err(e) => {
                 self.note_failure();

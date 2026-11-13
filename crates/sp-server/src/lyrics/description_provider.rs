@@ -215,7 +215,7 @@ pub async fn clean_lyrics_via_claude(
         CleanupMode::Description => build_description_extraction_prompt(title, artist, raw_blob),
         CleanupMode::ScrapedLyrics => build_scraped_lyrics_cleanup_prompt(title, artist, raw_blob),
     };
-    let raw = match ai.chat_with_timeout(&system, &user, 180).await {
+    let raw = match ai.chat_for(mode.task(), &system, &user, 180).await {
         Ok(raw) => raw,
         Err(e) => {
             if crate::ai::retry::content_filtered(&e) {

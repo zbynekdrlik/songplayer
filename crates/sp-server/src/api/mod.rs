@@ -1,6 +1,7 @@
 //! HTTP API and WebSocket — Axum router, REST endpoints, and dashboard WebSocket.
 
 pub mod ai;
+pub mod ai_openrouter; // #321: the OpenRouter probe + the translation A/B
 pub mod audio; // #233: GET /api/v1/audio/asio-drivers (the ASIO driver list)
 pub mod audio_faults; // #257: GET /api/v1/audio/faults (the audio fault ledger)
 pub mod blocked; // #265: GET/POST /api/v1/blocked + DELETE /api/v1/blocked/{youtube_id}
@@ -345,6 +346,15 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             axum::routing::post(ai::proxy_complete_login),
         )
         .route("/api/v1/ai/status", axum::routing::get(ai::ai_status))
+        // #321: the OpenRouter text path's live gate and the translation A/B
+        .route(
+            "/api/v1/ai/openrouter/probe",
+            axum::routing::post(ai_openrouter::probe),
+        )
+        .route(
+            "/api/v1/ai/translate-ab",
+            axum::routing::get(ai_openrouter::ab_status).post(ai_openrouter::ab_start),
+        )
         // Custom playlist set list + click-to-play.
         .route(
             "/api/v1/playlists/{id}/items",

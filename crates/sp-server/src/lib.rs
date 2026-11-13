@@ -254,7 +254,8 @@ pub async fn start(
         model: ai_model,
         system_prompt_extra: None,
     };
-    let ai_client = Arc::new(ai::client::AiClient::new(ai_settings));
+    let ai_client = ai::client::AiClient::new(ai_settings).with_routing(pool.clone()); // #321
+    let ai_client = Arc::new(ai_client);
     let presenter_client = presenter::build_from_settings(&pool).await?;
 
     // 3b. NDI health registry — constructed before AppState so both the engine

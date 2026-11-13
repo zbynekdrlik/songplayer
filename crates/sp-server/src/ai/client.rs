@@ -10,11 +10,18 @@ use tracing::{debug, warn};
 use super::AiSettings;
 use super::retry::{RetryPolicy, body_excerpt, is_content_filtered, is_retried};
 
+// #321: each text task's route (the proxy or OpenRouter), read live per call.
+#[path = "route.rs"]
+pub mod route;
+
 pub struct AiClient {
     http: reqwest::Client,
     settings: AiSettings,
     /// #145: the waits between the attempts of a refused call.
     retry: RetryPolicy,
+    /// #321: the database the tasks' routes are read from; `None` = every
+    /// task goes to the proxy (a test's client).
+    routing: Option<route::Routing>,
 }
 
 impl AiClient {
@@ -25,6 +32,7 @@ impl AiClient {
             http: reqwest::Client::new(),
             settings,
             retry: RetryPolicy::SPANNING,
+            routing: None,
         }
     }
 

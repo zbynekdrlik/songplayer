@@ -265,7 +265,8 @@ pub async fn check_via_claude(
         return Ok(apply(track, Vec::new()));
     }
     let prompt = build_prompt(&numbered_lines(track));
-    let answer = match ai_client.chat("", &prompt).await {
+    let task = sp_core::ai_tasks::AiTask::Register;
+    let answer = match ai_client.chat_for(task, "", &prompt, 300).await {
         Ok(answer) => answer,
         Err(e) if crate::ai::retry::content_filtered(&e) => return Ok(refused()),
         Err(e) => return Err(e.context("register check: the Claude call failed")),

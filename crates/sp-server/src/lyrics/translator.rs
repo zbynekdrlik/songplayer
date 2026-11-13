@@ -118,7 +118,7 @@ pub async fn translate_via_claude(
 
     // No system prompt — cloaked Claude behaves best with everything in the user message.
     let response = ai_client
-        .chat("", &user)
+        .chat_for(sp_core::ai_tasks::AiTask::Translate, "", &user, 300)
         .await
         // #144: the client's error stays the cause (a content-filter refusal
         // is told apart by type, `ai::retry::content_filtered`).
@@ -137,7 +137,7 @@ pub async fn translate_via_claude(
         // 5-hour OAuth quota wall, etc.). The response is bounded at 4000
         // characters so a verbose Claude refusal doesn't blow up the log
         // line beyond what `tracing` will keep in memory comfortably.
-        let model = ai_client.settings().model.clone();
+        let model = ai_client.route_label(sp_core::ai_tasks::AiTask::Translate).await;
         let snippet: String = response.chars().take(4000).collect();
         let truncated = response.chars().count() > 4000;
         // #145: classify + log a REFUSAL distinctly (with the model id) instead

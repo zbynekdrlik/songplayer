@@ -22,6 +22,16 @@ pub enum CleanupMode {
     ScrapedLyrics,
 }
 
+impl CleanupMode {
+    /// #321: the text AI task this cleanup is (its own provider and model).
+    pub fn task(self) -> sp_core::ai_tasks::AiTask {
+        match self {
+            Self::Description => sp_core::ai_tasks::AiTask::Description,
+            Self::ScrapedLyrics => sp_core::ai_tasks::AiTask::Cleanup,
+        }
+    }
+}
+
 /// Build the Claude extraction prompt for a single video description.
 ///
 /// Empty system prompt — soft-framing in user message instead. Mirrors the

@@ -1,8 +1,11 @@
 //! AI infrastructure: CLIProxyAPI proxy manager + OpenAI-compatible client.
 
 pub mod client;
+pub mod openrouter; // #321: the text-LLM client over OpenRouter's chat API
+pub mod openrouter_probe; // #321: the OpenRouter path's live gate
 pub mod proxy;
 pub mod retry; // #145: the waits of a refused call, against the proxy's cooldown
+pub mod translate_ab; // #321: the blind A/B of the translation
 
 use serde::{Deserialize, Serialize};
 

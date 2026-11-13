@@ -7,6 +7,15 @@ use std::sync::Arc;
 use super::{MetadataError, MetadataProvider};
 use crate::ai::client::AiClient;
 
+/// The model's `{song, artist}` answer (#321: typed, unknown fields skipped).
+#[derive(serde::Deserialize)]
+struct TitleAnswer {
+    #[serde(default)]
+    song: Option<String>,
+    #[serde(default)]
+    artist: Option<String>,
+}
+
 /// Claude Opus metadata provider.
 ///
 /// Uses the same prompt as Gemini but routes through CLIProxyAPI → Claude.
@@ -31,21 +40,22 @@ impl MetadataProvider for ClaudeMetadataProvider {
             'feat.', bracket content, etc. If the title is 'Artist - Song', \
             split accordingly. If uncertain, make your best guess.";
 
-        let response: serde_json::Value = self
+        // #321: the task's route (the proxy or OpenRouter); the answer read
+        // into a typed struct, never `serde_json::Value` (an untrusted body).
+        let task = sp_core::ai_tasks::AiTask::Metadata;
+        let response: TitleAnswer = self
             .ai_client
-            .chat_json(system, title)
+            .chat_json_for(task, system, title)
             .await
             .map_err(|e| MetadataError::ApiError(e.to_string()))?;
 
-        let song = response["song"]
-            .as_str()
-            .ok_or_else(|| MetadataError::InvalidResponse("missing 'song' field".into()))?
-            .to_string();
+        let song = response
+            .song
+            .ok_or_else(|| MetadataError::InvalidResponse("missing 'song' field".into()))?;
 
-        let artist = response["artist"]
-            .as_str()
-            .ok_or_else(|| MetadataError::InvalidResponse("missing 'artist' field".into()))?
-            .to_string();
+        let artist = response
+            .artist
+            .ok_or_else(|| MetadataError::InvalidResponse("missing 'artist' field".into()))?;
 
         if song.is_empty() || artist.is_empty() {
             return Err(MetadataError::InvalidResponse(
