@@ -262,3 +262,37 @@ fn shared_queue_reports_a_failure_at_the_stream_end() {
     q.request_seek(0);
     assert_eq!(q.failure(), None);
 }
+
+#[test]
+fn producer_look_sees_the_queue_the_last_pop_a_seek_and_a_stop() {
+    // #318: the producer's one look while its next picture is not ready.
+    let q = SharedQueue::<u32>::new(4);
+    let look = q.producer_look();
+    assert_eq!(look.action, ProducerAction::Continue);
+    assert_eq!(
+        (look.queued, look.since_last_pop_us),
+        (0, None),
+        "no pop yet"
+    );
+    assert_eq!(q.producer_push(1, 0), ProducerAction::Continue);
+    assert_eq!(q.producer_push(2, 0), ProducerAction::Continue);
+    assert_eq!(q.producer_look().queued, 2);
+    assert_eq!(q.consumer_pop(), Some(1));
+    let look = q.producer_look();
+    assert_eq!(look.queued, 1);
+    assert!(look.since_last_pop_us.is_some_and(|us| us < 10_000_000));
+    // A seek is taken by the look, once.
+    q.request_seek(700);
+    let look = q.producer_look();
+    assert!(matches!(
+        look.action,
+        ProducerAction::Seek {
+            position_ms: 700,
+            ..
+        }
+    ));
+    assert_eq!(look.queued, 0, "the seek flushed the queue");
+    assert_eq!(q.producer_look().action, ProducerAction::Continue);
+    q.stop();
+    assert_eq!(q.producer_look().action, ProducerAction::Stop);
+}

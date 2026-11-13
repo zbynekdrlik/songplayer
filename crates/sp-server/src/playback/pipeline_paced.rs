@@ -19,7 +19,9 @@ use tracing::{debug, error, info, warn};
 use crate::playback::decode_thread::spawn_decode_thread;
 use crate::playback::ndi_health::{AudioStats, PacingStats, PlaybackStateLabel};
 use crate::playback::paced_output::{InstalledBus, PacedFeed, PipelineOutput, SharedHandoff};
-use crate::playback::paced_producer::{DecodeProducer, QueuedFrame};
+use crate::playback::paced_producer::{
+    DecodeProducer, LATE_POLL, Next, QueuedFrame, picture_is_late,
+};
 use crate::playback::pacer::{
     Pacer, PrerollGate, ServiceOutcome, Standby, StandbyBlack, open_paced_decoder, plan_sleep_100ns,
 };
@@ -245,7 +247,18 @@ fn run_decode_producer(
         sp_decoder::DecodeMode::GpuResident(producer) => Some(Arc::clone(producer)),
         _ => None,
     };
-    let video_reader = match MediaFoundationVideoReader::open_with(&video_path, mode, cap) {
+    // #318: the video reader on its own thread (open / read / seek / drop all
+    // there), so a blocked read never holds up the audio.
+    let open_path = video_path.clone();
+    let opened = sp_decoder::ThreadedVideo::spawn(
+        |body| spawn_decode_thread(format!("paced-video-{playlist_id}"), body).map(drop),
+        move || {
+            let reader = MediaFoundationVideoReader::open_with(&open_path, mode, cap)?;
+            let codec = reader.codec();
+            Ok((Box::new(reader) as Box<dyn sp_decoder::VideoStream>, codec))
+        },
+    );
+    let (video_reader, codec) = match opened {
         Ok(v) => v,
         Err(e) => {
             let _ = open_tx.send(Err(format!(
@@ -255,7 +268,6 @@ fn run_decode_producer(
             return;
         }
     };
-    let codec = video_reader.codec();
     // #14/#186: karaoke-aware audio source (plain mix or live StemMixReader with mix fallback).
     let audio_stream = match crate::stems::reader::open_audio_stream(
         &audio_path,
@@ -310,11 +322,40 @@ fn run_decode_producer(
         return; // the emit thread is already gone
     }
 
+    // #318: the next picture is waited for only while it is not due; then
+    // the audio goes on on the held picture (`paced_producer::poll_item`).
+    let period_ms = decoder.frame_period_ms();
+    let mut late_seen = (decoder.late_counts(), false);
     loop {
+        let look = shared.producer_look();
+        match look.action {
+            ProducerAction::Continue => {}
+            ProducerAction::Seek {
+                position_ms,
+                epoch: new_epoch,
+            } => {
+                producer_seek(
+                    &mut decoder,
+                    &mut items,
+                    position_ms,
+                    new_epoch,
+                    &event_tx,
+                    playlist_id,
+                );
+                continue;
+            }
+            ProducerAction::Stop => return,
+        }
+        let in_run = decoder.in_late_run();
+        let late = picture_is_late(look.queued, look.since_last_pop_us, period_ms, in_run);
         // #15/#178: each item is offered to BOTH preview taps here, on the
         // PRODUCER thread. No viewer => a couple of relaxed atomic loads.
-        match items.next_item(&mut decoder, &taps) {
-            Ok(Some(item)) => {
+        let next = items.poll_item(&mut decoder, &taps, Some(LATE_POLL), late);
+        let item = matches!(next, Ok(Next::Item(_)));
+        log_late_run(&mut late_seen, decoder.late_counts(), item, playlist_id);
+        match next {
+            Ok(Next::NotReady) => {}
+            Ok(Next::Item(item)) => {
                 // #279 P3a: the song's first frame's kind, and a fall back.
                 if let Some(kind) = items.take_kind_change() {
                     let ring = producer.as_ref().map(|p| p.stats());
@@ -343,7 +384,7 @@ fn run_decode_producer(
                     ProducerAction::Stop => return,
                 }
             }
-            Ok(None) => {
+            Ok(Next::End) => {
                 // #277: the picture stopped long before the video's own
                 // duration: the song FAILED (`early_end.rs`), never ended.
                 if let Some(early) = items.early_end() {
@@ -372,6 +413,32 @@ fn run_decode_producer(
             }
         }
     }
+}
+
+/// #318: one WARN when the next picture became late and the audio went on
+/// on the held picture, one INFO at the first item after it that is no late
+/// step (the picture is back). `seen` = the decoder's `late_counts` at the
+/// last look and whether a late run is open.
+#[cfg_attr(test, mutants::skip)]
+fn log_late_run(seen: &mut ((u64, u64), bool), now: (u64, u64), item: bool, playlist_id: i64) {
+    let late_step = now.0 > seen.0.0;
+    if late_step && !seen.1 {
+        warn!(
+            playlist_id,
+            late_steps = now.0,
+            "paced producer: the next picture is late - the audio goes on on the held picture (#318)"
+        );
+        seen.1 = true;
+    } else if !late_step && item && seen.1 {
+        info!(
+            playlist_id,
+            late_steps = now.0,
+            late_frames_dropped = now.1,
+            "paced producer: the picture is back - the late frames before the audio line dropped (#318)"
+        );
+        seen.1 = false;
+    }
+    seen.0 = now;
 }
 
 /// Apply a producer-side seek ([`DecodeProducer::seek`]: the decoder, the new

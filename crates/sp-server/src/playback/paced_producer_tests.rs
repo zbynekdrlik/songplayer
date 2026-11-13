@@ -485,3 +485,7 @@ mod early;
 /// #279 P3a: GPU-resident frames (a child module over these mocks).
 #[path = "paced_producer_tests_gpu.rs"]
 mod gpu;
+
+/// #318: a late picture (a child module over these mocks).
+#[path = "paced_producer_tests_late.rs"]
+mod late;

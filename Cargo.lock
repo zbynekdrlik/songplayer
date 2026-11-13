@@ -2380,6 +2380,7 @@ dependencies = [
 name = "sp-decoder"
 version = "0.93.0-dev.1"
 dependencies = [
+ "crossbeam-channel",
  "mutants",
  "sp-core",
  "sp-gpu",

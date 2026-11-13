@@ -2,12 +2,38 @@
 //! with audio-as-master-clock. Cross-platform.
 
 use std::collections::VecDeque;
+use std::time::Duration;
 
 use tracing::debug;
 
 use crate::error::DecoderError;
-use crate::stream::{AudioStream, VideoStream};
+use crate::stream::{AudioStream, FramePoll, VideoStream};
 use crate::types::{DecodedAudioFrame, DecodedVideoFrame};
+
+/// What [`SplitSyncedDecoder::next_synced_within`] found (#318).
+#[derive(Debug)]
+pub enum Synced {
+    /// The next frame and its audio (as [`SplitSyncedDecoder::next_synced`]).
+    Frame(DecodedVideoFrame, Vec<DecodedAudioFrame>),
+    /// The video ended (since the last seek).
+    Ended,
+    /// The next picture was not ready within the wait: the audio may go on
+    /// on the held picture ([`SplitSyncedDecoder::next_late`]).
+    NotReady,
+}
+
+/// The steps held while the next picture is late (#318,
+/// [`SplitSyncedDecoder::next_late`]): where they count from, how many went
+/// out, and the audio line the picture must pass to be shown again.
+#[derive(Debug, Default)]
+struct LateRun {
+    /// The last frame delivered when the run began.
+    base_ms: Option<u64>,
+    /// Steps handed out in this run.
+    steps: u64,
+    /// The last step's time: a frame at or before it is dropped.
+    line_ms: Option<u64>,
+}
 
 /// Default tolerance for pairing audio chunks to a video frame (ms).
 pub const DEFAULT_TOLERANCE_MS: u64 = 40;
@@ -164,6 +190,16 @@ pub struct SplitSyncedDecoder {
     /// The last frame a seek's fast-forward decoded before the video ended
     /// (#257): the picture a seek to or past the last frame holds.
     frame_before_end: Option<DecodedVideoFrame>,
+    /// Pre-target frames a seek's fast-forward discarded so far (#318: the
+    /// fast-forward survives a picture that is not ready yet).
+    seek_discarded: u32,
+    /// The last of them: [`frame_before_end`](Self::take_frame_before_end)
+    /// when the video ends before the target.
+    seek_skipped: Option<DecodedVideoFrame>,
+    /// The steps held while the next picture is late (#318).
+    late: LateRun,
+    /// Late steps handed out and late frames dropped since the open (#318).
+    late_counts: (u64, u64),
 }
 
 impl std::fmt::Debug for SplitSyncedDecoder {
@@ -239,7 +275,30 @@ impl SplitSyncedDecoder {
             audio_eos: false,
             held: HeldTail::default(),
             frame_before_end: None,
+            seek_discarded: 0,
+            seek_skipped: None,
+            late: LateRun::default(),
+            late_counts: (0, 0),
         })
+    }
+
+    /// One source frame period (ms) as the held steps count it (#318: what
+    /// "the next picture is due" means to the producer): `⌊1000·den/num⌋`,
+    /// 30 fps for a rate outside 10–120 fps.
+    pub fn frame_period_ms(&self) -> u64 {
+        held_offset_ms(1, self.video.frame_rate())
+    }
+
+    /// Late steps handed out and late frames dropped since the open (#318,
+    /// [`next_late`](Self::next_late)).
+    pub fn late_counts(&self) -> (u64, u64) {
+        self.late_counts
+    }
+
+    /// A late run is open (#318): a late step went out and no picture past
+    /// its line came since (a seek ends it too).
+    pub fn in_late_run(&self) -> bool {
+        self.late.line_ms.is_some()
     }
 
     /// The audio read-ahead deadline past each video frame (ms).
@@ -313,6 +372,10 @@ impl SplitSyncedDecoder {
         // #257: the video plays again from here, and its held tail with it.
         self.held = HeldTail::from_origin(position_ms);
         self.frame_before_end = None;
+        // #318: a new fast-forward, and no late run past the seek.
+        self.seek_discarded = 0;
+        self.seek_skipped = None;
+        self.late = LateRun::default();
         Ok(())
     }
 
@@ -325,12 +388,31 @@ impl SplitSyncedDecoder {
     pub fn next_synced(
         &mut self,
     ) -> Result<Option<(DecodedVideoFrame, Vec<DecodedAudioFrame>)>, DecoderError> {
-        if self.held.video_ended {
-            return Ok(None);
+        match self.next_synced_within(None)? {
+            Synced::Frame(video, audio) => Ok(Some((video, audio))),
+            // `NotReady` needs a wait; with none the read blocks.
+            Synced::Ended | Synced::NotReady => Ok(None),
         }
-        let Some(video) = self.next_target_video_frame()? else {
-            self.held.video_ended = true;
-            return Ok(None);
+    }
+
+    /// [`next_synced`](Self::next_synced) that waits for the next picture
+    /// at most `wait` (#318; `None`: as long as the read takes).
+    /// [`Synced::NotReady`] when no picture came within it: nothing was
+    /// read or consumed, ask again (or hand out a late step,
+    /// [`next_late`](Self::next_late)). A picture at or before the last late
+    /// step is dropped (decoded, never shown): the picture catches up to the
+    /// audio, the audio never waits for it.
+    pub fn next_synced_within(&mut self, wait: Option<Duration>) -> Result<Synced, DecoderError> {
+        if self.held.video_ended {
+            return Ok(Synced::Ended);
+        }
+        let video = match self.next_target_video_frame(wait)? {
+            FramePoll::Ready(Some(video)) => video,
+            FramePoll::Ready(None) => {
+                self.held.video_ended = true;
+                return Ok(Synced::Ended);
+            }
+            FramePoll::NotReady => return Ok(Synced::NotReady),
         };
         self.held.last_frame_ms = Some(video.timestamp_ms);
         let audio_frames = self.take_audio_until(video.timestamp_ms + self.audio_lead_ms)?;
@@ -341,7 +423,45 @@ impl SplitSyncedDecoder {
             "SplitSyncedDecoder paired frame"
         );
 
-        Ok(Some((video, audio_frames)))
+        Ok(Synced::Frame(video, audio_frames))
+    }
+
+    /// One step while the next picture is late (#318): the time (ms) the
+    /// held picture shows at and the audio up to it plus the lead, exactly as
+    /// a held step past the video's end takes its own
+    /// ([`next_held`](Self::next_held)). The steps follow the source cadence
+    /// from the last frame delivered when the picture became late; a frame at
+    /// or before the last step is dropped once the video gives pictures again
+    /// ([`next_synced_within`](Self::next_synced_within)). `None` before any
+    /// frame since the open or the last seek (no picture to hold), once the
+    /// video ended, and once every audio sample went out (nothing to carry).
+    ///
+    /// # Errors
+    ///
+    /// A step more than [`AUDIO_PAST_VIDEO_MAX_MS`] past the run's base: a
+    /// video that gives no picture for that long fails the song.
+    pub fn next_late(&mut self) -> Result<Option<(u64, Vec<DecodedAudioFrame>)>, DecoderError> {
+        if self.held.video_ended || self.audio_ended() {
+            return Ok(None);
+        }
+        let Some(last) = self.held.last_frame_ms else {
+            return Ok(None);
+        };
+        let base = *self.late.base_ms.get_or_insert(last);
+        let at_ms = base + held_offset_ms(self.late.steps + 1, self.video.frame_rate());
+        if at_ms > base + AUDIO_PAST_VIDEO_MAX_MS {
+            return Err(DecoderError::Decode(format!(
+                "the video gave no picture for {} ms past {base} ms (#318)",
+                at_ms - base
+            )));
+        }
+        self.late.steps += 1;
+        self.late.line_ms = Some(at_ms);
+        self.late_counts.0 += 1;
+        // A video that ends during the run holds on from the last step.
+        self.held.last_frame_ms = Some(at_ms);
+        let audio = self.take_audio_until(at_ms + self.audio_lead_ms)?;
+        Ok(Some((at_ms, audio)))
     }
 
     /// One step past the video's end (#257): the time (ms) the held picture,
@@ -418,29 +538,55 @@ impl SplitSyncedDecoder {
     /// decoded for [`take_frame_before_end`](Self::take_frame_before_end)
     /// (#257). With no pending target the plain next frame is returned. The
     /// target is cleared once consumed.
-    fn next_target_video_frame(&mut self) -> Result<Option<DecodedVideoFrame>, DecoderError> {
-        let Some(target) = self.pending_video_target_ms else {
-            return self.video.next_frame();
-        };
-        // Consume the target now; the frame we return below is the first at or past
-        // it (or the bound-exhausted frame, or end-of-stream).
-        self.pending_video_target_ms = None;
-        let mut skipped = None;
-        for _ in 0..MAX_SEEK_DISCARD_FRAMES {
-            match self.video.next_frame()? {
-                Some(v) if v.timestamp_ms >= target => return Ok(Some(v)),
-                // A pre-target frame (a keyframe-landing artefact) — discard it.
-                Some(v) => skipped = Some(v),
+    ///
+    /// #318: each read waits at most `wait` (`None`: as long as it takes); a
+    /// picture not ready returns [`FramePoll::NotReady`] and the fast-forward
+    /// goes on where it was at the next call. After a late run a frame at or
+    /// before its last step is dropped, the first one past it ends the run.
+    fn next_target_video_frame(
+        &mut self,
+        wait: Option<Duration>,
+    ) -> Result<FramePoll, DecoderError> {
+        loop {
+            let polled = match wait {
+                None => FramePoll::Ready(self.video.next_frame()?),
+                Some(wait) => self.video.poll_frame(wait)?,
+            };
+            let FramePoll::Ready(frame) = polled else {
+                return Ok(FramePoll::NotReady);
+            };
+            let Some(v) = frame else {
                 // End-of-stream before reaching the target: no frame left, and
                 // the last one decoded is what the audio past it plays on (#257).
-                None => {
-                    self.frame_before_end = skipped;
-                    return Ok(None);
+                if self.pending_video_target_ms.take().is_some() {
+                    self.frame_before_end = self.seek_skipped.take();
                 }
+                return Ok(FramePoll::Ready(None));
+            };
+            if let Some(target) = self.pending_video_target_ms {
+                if v.timestamp_ms < target {
+                    // A pre-target frame (a keyframe-landing artefact) — discard it.
+                    self.seek_discarded += 1;
+                    if self.seek_discarded == MAX_SEEK_DISCARD_FRAMES {
+                        // Bound reached: deliver whatever comes next rather than spinning.
+                        self.pending_video_target_ms = None;
+                        self.seek_skipped = None;
+                    } else {
+                        self.seek_skipped = Some(v);
+                    }
+                    continue;
+                }
+                self.pending_video_target_ms = None;
+                self.seek_skipped = None;
             }
+            if self.late.line_ms.is_some_and(|line| v.timestamp_ms <= line) {
+                // #318: older than the audio line the late steps carried.
+                self.late_counts.1 += 1;
+                continue;
+            }
+            self.late = LateRun::default();
+            return Ok(FramePoll::Ready(Some(v)));
         }
-        // Bound reached: deliver whatever comes next rather than spinning.
-        self.video.next_frame()
     }
 }
 
@@ -463,3 +609,7 @@ mod tests_end;
 #[cfg(test)]
 #[path = "split_sync_tests_held.rs"]
 mod tests_held;
+
+#[cfg(test)]
+#[path = "split_sync_tests_late.rs"]
+mod tests_late;

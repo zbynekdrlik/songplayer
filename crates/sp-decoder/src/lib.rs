@@ -21,6 +21,7 @@ mod peak_limiter; // #184: the stem mix's peak limiter (pure, mutation-tested), 
 pub mod split_sync;
 pub mod stream;
 pub mod subtype; // #223 S0: an MF video subtype GUID as codec text (AV01, VP90, H264)
+pub mod video_thread; // #318: the video reader on its own thread (cross-platform, Linux-tested)
 
 #[cfg(windows)]
 pub mod video;
@@ -36,9 +37,10 @@ pub use hw_decode::{
 };
 pub use level_probe::{LevelProbe, LevelReading, PROBE_INTERVAL};
 pub use peak_limiter::{LIMIT_CEILING, PeakLimiter};
-pub use split_sync::SplitSyncedDecoder;
-pub use stream::{AudioStream, MediaStream, VideoStream};
+pub use split_sync::{SplitSyncedDecoder, Synced};
+pub use stream::{AudioStream, FramePoll, MediaStream, VideoStream};
 pub use types::{DecodedAudioFrame, DecodedVideoFrame, PixelFormat, VideoStreamInfo};
+pub use video_thread::ThreadedVideo;
 
 #[cfg(windows)]
 pub use video::MediaFoundationVideoReader;

@@ -28,11 +28,23 @@
 //! song's first frame's, a fall back mid-song) is reported once
 //! ([`DecodeProducer::take_kind_change`]) for the GPU-resident table.
 //!
+//! #318: a video read that blocks (a GPU display reconfiguration held Media
+//! Foundation's D3D11 decoder 0.5–0.75 s on SNV) must never starve the
+//! audio. The video reader runs on its own thread (`sp_decoder::video_thread`)
+//! and [`DecodeProducer::poll_item`] waits for the next picture only while it
+//! is not due ([`picture_is_late`]); once it is, it hands out a LATE step:
+//! the held picture again with the audio up to the step's time plus the lead
+//! (`SplitSyncedDecoder::next_late`, the same item shape as the #257 tail).
+//! When pictures come back, those at or before the last late step are
+//! dropped: the picture catches up to the audio, the audio never waits.
+//!
 //! The Windows producer thread (`pipeline_paced::run_decode_producer`) only
 //! opens the readers and pushes what this hands it, so every item is built
 //! and tested here, on Linux.
 
-use sp_decoder::{DecodedAudioFrame, DecodedVideoFrame, DecoderError, SplitSyncedDecoder};
+use std::time::Duration;
+
+use sp_decoder::{DecodedAudioFrame, DecodedVideoFrame, DecoderError, SplitSyncedDecoder, Synced};
 use sp_gpu::GpuFrame;
 
 use crate::playback::early_end::EarlyEnd;
@@ -47,6 +59,53 @@ use crate::playback::preview::preview_stream::DecodeTaps;
 /// events, and whether the decoder had handed out the song's last audio sample
 /// with it (#257, `SplitSyncedDecoder::audio_ended`).
 pub type QueuedFrame = (PacedFrame, u64, bool);
+
+/// How long the producer waits for the next picture in one look while it is
+/// not due yet (#318): the queue and a seek or a stop are looked at between
+/// two looks.
+pub const LATE_POLL: Duration = Duration::from_millis(5);
+
+/// The share of a frame period (%) since the emit thread last took an item
+/// after which the next picture is late (#318, [`picture_is_late`]): just
+/// under one period, so the late step is queued about when the emit thread
+/// pulls its next item.
+pub const LATE_AFTER_PERCENT: u64 = 100_000;
+
+/// The items a late run keeps queued (#318): one late step per pop would
+/// supply less than real time whenever the emit thread pops less often than
+/// a source frame period (a 24 fps song on the 30 fps grid pops every one or
+/// two boundaries) or more than one item a boundary (60 fps), so the run
+/// tops the queue up to this depth instead.
+pub const LATE_QUEUE_DEPTH: usize = 3;
+
+/// Whether the next picture is late (#318): the emit thread took its last
+/// item at least [`LATE_AFTER_PERCENT`] of a frame period (`period_ms`) ago,
+/// so it is about to pull one more, AND the queue is empty, or, once a late
+/// run began (`in_late_run`, `SplitSyncedDecoder::in_late_run`), holds fewer
+/// than [`LATE_QUEUE_DEPTH`] items. Before the emit thread took any item
+/// (`None`: the pre-roll) nothing is late.
+pub fn picture_is_late(
+    queued: usize,
+    since_last_pop_us: Option<u64>,
+    period_ms: u64,
+    in_late_run: bool,
+) -> bool {
+    let room = queued == 0 || (in_late_run && queued < LATE_QUEUE_DEPTH);
+    room && since_last_pop_us
+        .is_some_and(|us| us.saturating_mul(100) >= period_ms * 1000 * LATE_AFTER_PERCENT)
+}
+
+/// What [`DecodeProducer::poll_item`] hands out (#318).
+#[derive(Debug)]
+pub enum Next {
+    /// An item for the queue.
+    Item(QueuedFrame),
+    /// The song's end ([`DecodeProducer::next_item`]'s `None`).
+    End,
+    /// The next picture is not here and no late step was asked for (or there
+    /// is nothing to hold, or no audio left to carry): look again.
+    NotReady,
+}
 
 /// The picture the held steps repeat (#257): the last frame handed on,
 /// shared by `Arc`.
@@ -170,18 +229,72 @@ impl DecodeProducer {
         decoder: &mut SplitSyncedDecoder,
         taps: &DecodeTaps,
     ) -> Result<Option<QueuedFrame>, DecoderError> {
-        if let Some((video, audio)) = decoder.next_synced()? {
-            match &video.gpu {
-                None => taps.offer_frame(&video, &audio),
-                Some(frame) => offer_gpu(&mut self.preview_misses, taps, frame, &audio),
-            }
-            self.note_kind(&video);
-            let ms = video.timestamp_ms;
-            self.current_ms = ms;
-            let frame = to_paced_frame(video, audio, self.pts_offset_ms);
-            self.held = Some(Held::of(&frame));
-            return Ok(Some((frame, ms, decoder.audio_ended())));
+        match self.poll_item(decoder, taps, None, false)? {
+            Next::Item(item) => Ok(Some(item)),
+            // With no wait the read blocks: never `NotReady`.
+            Next::End | Next::NotReady => Ok(None),
         }
+    }
+
+    /// [`next_item`](Self::next_item) that waits for the next picture at
+    /// most `wait` (#318; `None`: as long as the read takes). When no
+    /// picture came within it: with `late` (the picture is due,
+    /// [`picture_is_late`]) a late step, the held picture with the audio up
+    /// to its time plus the lead; else (or with no picture to hold, or no
+    /// audio left) [`Next::NotReady`].
+    pub fn poll_item(
+        &mut self,
+        decoder: &mut SplitSyncedDecoder,
+        taps: &DecodeTaps,
+        wait: Option<Duration>,
+        late: bool,
+    ) -> Result<Next, DecoderError> {
+        let ended = match decoder.next_synced_within(wait)? {
+            Synced::Frame(video, audio) => {
+                let item = self.frame(video, audio, decoder.audio_ended(), taps);
+                return Ok(Next::Item(item));
+            }
+            Synced::NotReady => false,
+            Synced::Ended => true,
+        };
+        if !ended {
+            if !late || self.held.is_none() {
+                return Ok(Next::NotReady);
+            }
+            let Some((ms, audio)) = decoder.next_late()? else {
+                return Ok(Next::NotReady);
+            };
+            return Ok(self.held_step(ms, audio, decoder.audio_ended(), taps));
+        }
+        self.after_the_video(decoder, taps)
+    }
+
+    /// A decoded frame as a queue item, offered to the taps.
+    fn frame(
+        &mut self,
+        video: DecodedVideoFrame,
+        audio: Vec<DecodedAudioFrame>,
+        audio_ended: bool,
+        taps: &DecodeTaps,
+    ) -> QueuedFrame {
+        match &video.gpu {
+            None => taps.offer_frame(&video, &audio),
+            Some(frame) => offer_gpu(&mut self.preview_misses, taps, frame, &audio),
+        }
+        self.note_kind(&video);
+        let ms = video.timestamp_ms;
+        self.current_ms = ms;
+        let frame = to_paced_frame(video, audio, self.pts_offset_ms);
+        self.held = Some(Held::of(&frame));
+        (frame, ms, audio_ended)
+    }
+
+    /// Past the video's end: the held tail (#257), or the song's end.
+    fn after_the_video(
+        &mut self,
+        decoder: &mut SplitSyncedDecoder,
+        taps: &DecodeTaps,
+    ) -> Result<Next, DecoderError> {
         // A seek to or past the last frame: the last frame its fast-forward
         // decoded is the picture to hold.
         let before_end = decoder.take_frame_before_end();
@@ -190,16 +303,31 @@ impl DecodeProducer {
             .map_or(self.current_ms, |last| last.timestamp_ms);
         if let Some(early) = EarlyEnd::of(at_ms, decoder.video_duration_ms()) {
             self.early = Some(early);
-            return Ok(None);
+            return Ok(Next::End);
         }
         if let Some(last) = before_end {
             self.held = Some(Held::of(&to_paced_frame(last, Vec::new(), 0)));
         }
-        let Some(held) = &self.held else {
-            return Ok(None);
-        };
+        if self.held.is_none() {
+            return Ok(Next::End);
+        }
         let Some((ms, audio)) = decoder.next_held()? else {
-            return Ok(None);
+            return Ok(Next::End);
+        };
+        Ok(self.held_step(ms, audio, decoder.audio_ended(), taps))
+    }
+
+    /// A step on the held picture at `ms` with `audio` (#257's tail, #318's
+    /// late steps); [`Next::End`] with no picture held.
+    fn held_step(
+        &mut self,
+        ms: u64,
+        audio: Vec<DecodedAudioFrame>,
+        audio_ended: bool,
+        taps: &DecodeTaps,
+    ) -> Next {
+        let Some(held) = &self.held else {
+            return Next::End;
         };
         // #279 P2: a held GPU picture gives the taps no picture (P3b), only
         // its audio.
@@ -218,7 +346,7 @@ impl DecodeProducer {
             video: held.video.clone(),
             audio: paced_audio(audio, self.pts_offset_ms),
         };
-        Ok(Some((frame, ms, decoder.audio_ended())))
+        Next::Item((frame, ms, audio_ended))
     }
 
     /// Seek the decoder and adopt where the song really plays on from (#217,
