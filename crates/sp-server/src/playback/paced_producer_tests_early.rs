@@ -56,22 +56,24 @@ impl VideoStream for Long {
 /// A decoder over frames at `video` ms in a video `duration_ms` long, and
 /// chunks at `audio` ms.
 fn long(video: &[u64], duration_ms: u64, audio: &[u64]) -> SplitSyncedDecoder {
-    long_polled(video, duration_ms, audio, &[])
+    long_polled(video, duration_ms, audio, &[], SeekAnswer::Lands)
 }
 
-/// [`long`] whose video polls answer `polls` first.
+/// [`long`] whose video polls answer `polls` first and whose video
+/// answers a seek as `seeks`.
 fn long_polled(
     video: &[u64],
     duration_ms: u64,
     audio: &[u64],
     polls: &[bool],
+    seeks: SeekAnswer,
 ) -> SplitSyncedDecoder {
     SplitSyncedDecoder::new(
         Box::new(Long {
             frames: Video {
                 ms: video.to_vec(),
                 next: 0,
-                seeks: SeekAnswer::Lands,
+                seeks,
             },
             duration_ms,
             polls: polls.to_vec(),
@@ -197,7 +199,13 @@ fn a_seek_clears_an_early_end_and_the_video_plays_again() {
 fn an_early_end_after_a_late_run_is_measured_from_the_last_real_picture() {
     let mut polls = vec![true];
     polls.extend([false; 50]);
-    let mut dec = long_polled(&[0, 100], 15_000, &every(0, 6_000, 100), &polls);
+    let mut dec = long_polled(
+        &[0, 100],
+        15_000,
+        &every(0, 6_000, 100),
+        &polls,
+        SeekAnswer::Lands,
+    );
     let mut p = DecodeProducer::new(0);
     let taps = taps();
     let zero = Some(Duration::ZERO);
@@ -222,5 +230,46 @@ fn an_early_end_after_a_late_run_is_measured_from_the_last_real_picture() {
         dec.late_counts(),
         (50, 1),
         "frame 100 dropped behind the line"
+    );
+}
+
+/// #320 review: a seek REFUSED during a late run moves nothing, so it
+/// leaves the last real picture where it was (0 ms). The song plays on from
+/// the last late step (#217: `current_ms`, 5 000 ms), but the early end is
+/// still measured from the real picture: an early end, never the natural
+/// end a measure from 5 000 ms would read.
+#[test]
+fn a_refused_seek_during_a_late_run_keeps_the_real_picture_for_the_early_end() {
+    let mut polls = vec![true];
+    polls.extend([false; 50]);
+    let mut dec = long_polled(
+        &[0, 100],
+        15_000,
+        &every(0, 6_000, 100),
+        &polls,
+        SeekAnswer::Refuses,
+    );
+    let mut p = DecodeProducer::new(0);
+    let taps = taps();
+    let zero = Some(Duration::ZERO);
+    for _ in 0..=50 {
+        assert!(matches!(
+            p.poll_item(&mut dec, &taps, zero, true).unwrap(),
+            Next::Item(_)
+        ));
+    }
+    assert_eq!(
+        p.seek(&mut dec, 2_000, 1, 1),
+        5_000,
+        "refused: on from there"
+    );
+    let end = p.poll_item(&mut dec, &taps, zero, true).unwrap();
+    assert!(matches!(end, Next::End), "no held tail: {end:?}");
+    assert_eq!(
+        p.early_end(),
+        Some(EarlyEnd {
+            at_ms: 0,
+            duration_ms: 15_000
+        })
     );
 }
