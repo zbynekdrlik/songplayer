@@ -2,6 +2,10 @@
 paths:
   - "crates/sp-server/src/ai/**"
   - "crates/sp-core/src/config.rs"
+  - "crates/sp-core/src/ai_tasks*.rs"
+  - "crates/sp-server/src/api/ai_openrouter*.rs"
+  - "sp-ui/src/components/ai_task_settings.rs"
+  - "e2e/*openrouter*.ts"
 ---
 # CLIProxyAPI (Claude via OAuth) — lifecycle + model default
 
@@ -161,3 +165,35 @@ refresh being refused, not the 60 s cooldown the step waits out.
   5. Verify with `proxy_probe.py` → 200, then re-run the CI E2E job.
 - Until then, every CI E2E on win-resolume stops at that step, and the
   post-deploy specs after it do not run: a release waits for the re-login.
+
+## Per-task routing: the proxy or OpenRouter (#321)
+
+- Every text AI call goes through `AiClient::chat_for(task, …)` /
+  `chat_json_for` (`ai/route.rs`, a child of `client.rs`), never a bare
+  `chat` / `chat_json` — a new text call site names its `AiTask`
+  (`sp_core::ai_tasks`: translate, register, metadata, description, cleanup,
+  spotify). The route is read LIVE per call from `ai_provider_<task>`
+  (unset / blank / hand-edited = `claude_proxy`, the pre-#321 call
+  bit-identical) and `ai_model_<task>` (OpenRouter only; blank =
+  `DEFAULT_OPENROUTER_MODEL`). The proxy keeps `ai_model`: a per-task model
+  never reaches the proxy. A PATCH refuses any other provider word (400,
+  nothing written, `ai_tasks::checked_provider`).
+- `ai/openrouter.rs` is the ONE OpenRouter client: Bearer
+  `openrouter_api_key` read live (blank = refused, nothing sent), the
+  paid-AI switch asked again at the transport (`openrouter_chat`), the
+  answer decoded into typed structs (never `serde_json::Value`'s own
+  Deserialize), 429 / 5xx through the same `RetryPolicy` as the proxy, an
+  error naming the status + `redacted_excerpt` (the key cut out BEFORE the
+  300-char cut). The proxy's content-filter cooldown logic does not apply.
+- The live gate is `POST /api/v1/ai/openrouter/probe {"model"?}` (always
+  200, `ok:false` + why) and `e2e/post-deploy-openrouter.spec.ts` on SNV
+  (decision `e2e/openrouter-gate.ts`); PP's subset does not run it.
+- The blind translation A/B (the flip's evidence, the owner's ruling on
+  #232): `POST /api/v1/ai/translate-ab {"youtube_ids", "candidates"?}`
+  (409 while paid AI is off or a run holds it; a `claude_proxy` candidate
+  must name the proxy's own `ai_model`), `GET` = the state; it writes
+  `<cache>/ab/translate-<ms>/blind.md` (letters only) and `key.json`
+  (letter → provider/model) apart — open the key only after grading.
+- Nastavenia "Textové AI (OpenRouter)" (`ai_task_settings.rs`) sends each
+  task setting only when changed against the loaded value
+  (`form_values` / `settings_to_send`); mock spec `settings-ai-tasks.spec.ts`.

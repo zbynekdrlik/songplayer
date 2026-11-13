@@ -218,3 +218,10 @@ worker may be switched on again: it only takes SNV's copies. Nothing in
 `deploy-pp.yml` checks the ordering before it stops PP: a pre-stop read
 needs a running SongPlayer, and would block a deploy that restores a PP
 whose SongPlayer is down.
+
+## OpenRouter asks the switch itself (#321)
+
+A text task routed to OpenRouter (`ai/route.rs`) asks `paid_ai::enabled`
+again at the transport (`AiClient::openrouter_chat`) before anything is sent,
+so a new call site can never bypass it; OFF = refused with `OFF_REASON`. The
+probe answers `ok:false` then, the translation A/B is refused 409.
