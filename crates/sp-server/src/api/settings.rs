@@ -94,7 +94,7 @@ pub async fn prepare(
     for key in keys {
         let value = crate::playback::audio_out_config::checked(key, &sent[key])?;
         let value = crate::paid_ai::checked(key, &value)?;
-        let value = sp_core::ai_tasks::checked_setting(key, &value); // #321
+        let value = sp_core::ai_tasks::checked_setting(key, &value)?; // #321
         let value = sp_core::audio_latency::checked(key, &value)?;
         let value = crate::downloader::format::checked(key, &value)?;
         let value = crate::peer::config::checked(pool, key, &value, &sent).await?;

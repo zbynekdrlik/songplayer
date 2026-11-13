@@ -149,3 +149,38 @@ test("a Nastavenia tab opened before a model was changed elsewhere never changes
 
   expect(realConsoleErrors()).toEqual([]);
 });
+
+test("a retired text-AI setting is refused, and a Nastavenia save never sends one (#321)", async ({
+  page,
+  request,
+}) => {
+  // The server refuses the deleted proxy path's settings (V45 deleted the
+  // rows): 400 naming the key, nothing written.
+  for (const key of ["ai_model", "ai_api_url", "ai_provider_translate"]) {
+    const refused = await request.patch("/api/v1/settings", {
+      data: { [key]: "openrouter", ai_model_register: "google/x" },
+    });
+    expect(refused.status(), key).toBe(400);
+    expect(await refused.text()).toContain(key);
+  }
+  const before = await (await request.get("/api/v1/settings")).json();
+  expect(before.ai_model).toBeUndefined();
+  expect(before.ai_provider_translate).toBeUndefined();
+  expect(before.ai_model_register).toBeUndefined();
+
+  // A real save from the page carries none of them and is accepted.
+  const patches = settingsPatches(page);
+  await openSettings(page);
+  const model = page.locator('[data-testid="settings-ai-model-cleanup"]');
+  await model.click();
+  await model.fill("google/gemini-4-carbon");
+  await save(page);
+  expect(patches).toHaveLength(1);
+  const retired = Object.keys(patches[0]).filter(
+    (k) => k === "ai_model" || k === "ai_api_url" || k.startsWith("ai_provider_"),
+  );
+  expect(retired).toEqual([]);
+  expect(aiKeys(patches[0])).toEqual(["ai_model_cleanup"]);
+
+  expect(realConsoleErrors()).toEqual([]);
+});

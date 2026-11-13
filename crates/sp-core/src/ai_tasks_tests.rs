@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use super::{
-    AiTask, DEFAULT_OPENROUTER_MODEL, checked_setting, form_values, openrouter_model,
-    settings_to_send,
+    AiTask, DEFAULT_OPENROUTER_MODEL, RETIRED_PROVIDER_PREFIX, RETIRED_SETTINGS, checked_setting,
+    form_values, is_retired_setting, openrouter_model, settings_to_send,
 };
 
 #[test]
@@ -50,13 +50,64 @@ fn a_blank_model_is_the_newest_gemini() {
 
 #[test]
 fn the_patch_trims_a_tasks_model_and_passes_anything_else() {
-    assert_eq!(checked_setting("ai_model_register", "  x/y  "), "x/y");
-    assert_eq!(checked_setting("ai_model_spotify", "  "), "");
-    assert_eq!(checked_setting("ai_model", "  keep  "), "  keep  ");
     assert_eq!(
-        checked_setting("ai_provider_translate", " openrouter "),
-        " openrouter "
+        checked_setting("ai_model_register", "  x/y  ").unwrap(),
+        "x/y"
     );
+    assert_eq!(checked_setting("ai_model_spotify", "  ").unwrap(), "");
+    assert_eq!(
+        checked_setting("ai_models", "  keep  ").unwrap(),
+        "  keep  "
+    );
+    assert_eq!(
+        checked_setting("gemini_model", " keep ").unwrap(),
+        " keep ",
+        "a key that only looks like a task's model passes as sent"
+    );
+}
+
+/// #321: the deleted proxy path's settings are refused, whatever the value
+/// (a blank one too: it would re-create the row), naming the key, never the
+/// value; a task's model and look-alike keys are not.
+#[test]
+fn the_patch_refuses_every_retired_text_ai_setting() {
+    for key in [
+        "ai_model",
+        "ai_api_url",
+        "ai_provider_translate",
+        "ai_provider_spotify",
+        "ai_provider_",
+        "ai_provider_anything",
+    ] {
+        assert!(is_retired_setting(key), "{key}");
+        for value in ["openrouter-secret-example", ""] {
+            let reason = checked_setting(key, value).unwrap_err();
+            assert!(
+                reason.starts_with(&format!("{key} is no longer a setting")),
+                "{reason}"
+            );
+            assert!(reason.contains("ai_model_<task>"), "{reason}");
+            if !value.is_empty() {
+                assert!(
+                    !reason.contains(value),
+                    "the value is never echoed: {reason}"
+                );
+            }
+        }
+    }
+    for key in [
+        "ai_model_translate",
+        "ai_models",
+        "ai_api_urls",
+        "ai_provider",
+        "xai_model",
+        "openrouter_api_key",
+    ] {
+        assert!(!is_retired_setting(key), "{key}");
+        assert!(checked_setting(key, "v").is_ok(), "{key}");
+    }
+    assert_eq!(RETIRED_SETTINGS, ["ai_model", "ai_api_url"]);
+    assert_eq!(RETIRED_PROVIDER_PREFIX, "ai_provider_");
 }
 
 fn stored(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {

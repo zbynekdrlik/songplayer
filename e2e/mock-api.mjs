@@ -1271,6 +1271,18 @@ function aiTaskValue(key, value) {
   return undefined;
 }
 
+// #321: as `sp_core::ai_tasks::checked_setting` — the deleted Claude proxy
+// path's settings (`ai_model`, `ai_api_url`, `ai_provider_<task>`; V45
+// deleted the rows) refuse the whole PATCH, naming the key.
+function retiredAiRefusal(body) {
+  const key = Object.keys(body).find(
+    (k) => k === "ai_model" || k === "ai_api_url" || k.startsWith("ai_provider_"),
+  );
+  return key === undefined
+    ? null
+    : `${key} is no longer a setting: every text AI task goes to OpenRouter, its model is ai_model_<task>`;
+}
+
 // #289: as `sp_core::audio_latency::low_latency` — only "true" (trimmed,
 // any case) is on; unset, blank or anything else is off.
 function lowLatency(raw) {
@@ -1332,6 +1344,7 @@ app.patch("/api/v1/settings", (req, res) => {
   const refusal =
     outputsRefusal(req.body) ??
     paidAiRefusal(req.body) ??
+    retiredAiRefusal(req.body) ??
     lowLatencyRefusal(req.body) ??
     maxResolutionRefusal(req.body);
   if (refusal) {

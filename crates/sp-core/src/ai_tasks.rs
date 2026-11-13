@@ -11,9 +11,11 @@
 //!
 //! The owner's ruling (#232, 13.11.2026) and the blind translation A/B
 //! (#321 comment 6856550942): every text task on OpenRouter, default the
-//! newest Gemini; the Claude-through-CLIProxyAPI path is deleted (an old
-//! `ai_provider_<task>` row is no longer read). WASM-safe: the dashboard
-//! names the same tasks and checks the same values.
+//! newest Gemini; the Claude-through-CLIProxyAPI path is deleted. Its
+//! settings (`ai_model`, `ai_api_url`, `ai_provider_<task>`) are retired:
+//! V45 deleted the rows and a settings PATCH refuses them
+//! ([`is_retired_setting`]). WASM-safe: the dashboard names the same tasks
+//! and checks the same values.
 
 /// The OpenRouter model a task sends when its `ai_model_<task>` is blank:
 /// the newest Gemini on OpenRouter's model list (13.11.2026, #321).
@@ -86,13 +88,36 @@ pub fn openrouter_model(raw: Option<&str>) -> String {
     }
 }
 
+/// The settings of the deleted Claude proxy path that nothing reads (#321):
+/// its model and its URL. With [`RETIRED_PROVIDER_PREFIX`] they are the
+/// retired text-AI settings.
+pub const RETIRED_SETTINGS: [&str; 2] = ["ai_model", "ai_api_url"];
+
+/// The prefix of the retired per-task transport choice, `ai_provider_<task>`
+/// (any suffix: V45 deletes every such row).
+pub const RETIRED_PROVIDER_PREFIX: &str = "ai_provider_";
+
+/// Whether `key` is a retired text-AI setting: V45 deleted these rows and a
+/// settings PATCH refuses them, so nothing re-creates a setting no code reads.
+pub fn is_retired_setting(key: &str) -> bool {
+    RETIRED_SETTINGS.contains(&key) || key.starts_with(RETIRED_PROVIDER_PREFIX)
+}
+
 /// A settings PATCH value for `key`: a task's model setting is stored
-/// trimmed; any other key passes as it is.
-pub fn checked_setting(key: &str, value: &str) -> String {
-    if AiTask::ALL.into_iter().any(|t| t.model_setting() == key) {
-        return value.trim().to_string();
+/// trimmed; a retired text-AI setting ([`is_retired_setting`]) is refused
+/// with the reason (it names the key, never the value); any other key passes
+/// as it is.
+pub fn checked_setting(key: &str, value: &str) -> Result<String, String> {
+    if is_retired_setting(key) {
+        return Err(format!(
+            "{key} is no longer a setting: every text AI task goes to OpenRouter, \
+             its model is ai_model_<task>"
+        ));
     }
-    value.to_string()
+    if AiTask::ALL.into_iter().any(|t| t.model_setting() == key) {
+        return Ok(value.trim().to_string());
+    }
+    Ok(value.to_string())
 }
 
 /// What Nastavenia's "Textové AI (OpenRouter)" section shows for the stored
