@@ -1642,12 +1642,22 @@ Software decode did not stall, and is banned on SNV anyway
     (`video-decode.md`'s 20-slot budget).
   - A seek is sent to the thread with an epoch and WAITS for its reply, so
     a refused seek still reports (#217) and keeps the stream as it was; an
-    accepted one drops every picture read before it. A seek that lands
+    accepted one drops the picture in the thread's hand (the rendezvous:
+    nothing read before the seek can still be on its way). A seek that lands
     while the thread is inside a blocked read waits for that read (a stall
     then delays the seek, never the audio already queued).
   - Drop never waits: the channels close, the thread ends once its read
     returns and drops the reader on its own thread. A thread that died is
     an error (`the video reader thread is gone`), never a hang.
+  - **Known bound:** joining the producer no longer means the song's
+    reader is gone. A reader stuck in a read outlives its song: the
+    pipeline's next song opens its own reader meanwhile (two readers, two
+    file handles; GPU-resident: both on the pipeline's one producer, one
+    ring slot each, the ring's lock serialising their writes), and the old
+    file stays open until that read returns (a `SONG_FILES` rename or swap
+    of it waits for Windows' share rules, `song-files.md`). A read that
+    NEVER returns leaks its thread, file handle and producer lease (before
+    #318 it hung the producer, visibly).
 - **The producer waits for the picture only until it is due**
   (`paced_producer::poll_item(.., Some(LATE_POLL), late)`, 5 ms looks,
   the queue's seek / stop read between them by `SharedQueue::producer_look`).
@@ -1671,9 +1681,15 @@ Software decode did not stall, and is banned on SNV anyway
   never shown, `late_counts().1`); the first one past it ends the run. A
   video that ends during a run holds on from the last step (the #257 tail
   continues from it). A seek ends the run.
+- **Known bounds of a run that meets the video's end:** the #257 tail's
+  15 s counts from the last late step, not the last real frame, so one
+  frozen picture can last a 15 s late run plus a 15 s tail (~30 s), and
+  #277's early-end check is judged at the last late step, so an early end
+  shorter than the stall before it is not seen as one.
 - Log: one WARN `paced producer: the next picture is late - the audio
-  goes on on the held picture (#318)` per run, one INFO `the picture is
-  back` with `late_steps` / `late_frames_dropped` (cumulative).
+  goes on on the held picture (#318)` per run, one INFO `the late run
+  ended` (the picture is back, or a seek moved on) with `late_steps` /
+  `late_frames_dropped` (cumulative).
 - **Tests:** `pacer_tests_video_stall.rs` (the real decoder, producer,
   rule and pacer on the virtual boundary clock: a ~1 s stall at 30 / 60 /
   23.976 fps plays every sample once with 0 underruns, the held frame
@@ -1686,7 +1702,9 @@ Software decode did not stall, and is banned on SNV anyway
   `pacer_queue_tests.rs` (`producer_look`).
 - **Box check:** through an announced, graceful wall-bridge restart on the
   hardware-decode side, `/api/v1/ndi/health` `audio.underruns_mid` +0 and
-  the log's late-run WARN / INFO pair around the acquire.
+  the log's late-run WARN / INFO pair around the acquire; on a
+  GPU-resident pipeline also `status.video_decode.pipelines[].ring.full`
+  +0 (`waits` reported: the reader's one picture read ahead is a slot).
 
 ## Merge gate for pacing/decode/NDI/audio changes: the post-deploy A/V gate (#147)
 A change to pacing, the submitter, decode, the mixer, NDI or the audio path

@@ -351,8 +351,8 @@ fn run_decode_producer(
         // #15/#178: each item is offered to BOTH preview taps here, on the
         // PRODUCER thread. No viewer => a couple of relaxed atomic loads.
         let next = items.poll_item(&mut decoder, &taps, Some(LATE_POLL), late);
-        let item = matches!(next, Ok(Next::Item(_)));
-        log_late_run(&mut late_seen, decoder.late_counts(), item, playlist_id);
+        let in_run = decoder.in_late_run();
+        log_late_run(&mut late_seen, decoder.late_counts(), in_run, playlist_id);
         match next {
             Ok(Next::NotReady) => {}
             Ok(Next::Item(item)) => {
@@ -416,25 +416,25 @@ fn run_decode_producer(
 }
 
 /// #318: one WARN when the next picture became late and the audio went on
-/// on the held picture, one INFO at the first item after it that is no late
-/// step (the picture is back). `seen` = the decoder's `late_counts` at the
-/// last look and whether a late run is open.
+/// on the held picture, one INFO once the decoder's late run ended (a
+/// picture past its line, or a seek). `seen` = the decoder's `late_counts`
+/// at the last look and whether this log saw the run open; `in_run` =
+/// `SplitSyncedDecoder::in_late_run` after the look.
 #[cfg_attr(test, mutants::skip)]
-fn log_late_run(seen: &mut ((u64, u64), bool), now: (u64, u64), item: bool, playlist_id: i64) {
-    let late_step = now.0 > seen.0.0;
-    if late_step && !seen.1 {
+fn log_late_run(seen: &mut ((u64, u64), bool), now: (u64, u64), in_run: bool, playlist_id: i64) {
+    if now.0 > seen.0.0 && !seen.1 {
         warn!(
             playlist_id,
             late_steps = now.0,
             "paced producer: the next picture is late - the audio goes on on the held picture (#318)"
         );
         seen.1 = true;
-    } else if !late_step && item && seen.1 {
+    } else if seen.1 && !in_run {
         info!(
             playlist_id,
             late_steps = now.0,
             late_frames_dropped = now.1,
-            "paced producer: the picture is back - the late frames before the audio line dropped (#318)"
+            "paced producer: the late run ended - the picture is back or a seek moved on, the late frames dropped (#318)"
         );
         seen.1 = false;
     }

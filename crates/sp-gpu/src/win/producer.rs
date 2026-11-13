@@ -34,9 +34,12 @@ use crate::ring::{GpuFrame, RingCore, RingStats};
 use crate::ring_state::RING_CAPACITY;
 
 /// A pipeline's producer device and its ring of [`RING_CAPACITY`] slots.
-/// `Send + Sync`: the device is thread-safe, and the ring's writes go
-/// through one lock (one decode thread writes at a time: a pipeline opens
-/// its songs one after another).
+/// `Send + Sync`: the device is thread-safe (multithread-protected), and
+/// the ring's writes go through one lock. Usually one video reader thread
+/// writes at a time (a pipeline opens its songs one after another), but a
+/// reader stuck in a read outlives its song (#318, `sp_decoder::
+/// video_thread`), so the next song's reader can write meanwhile: the lock
+/// serialises them.
 pub struct ProducerGpu {
     device: ID3D11Device,
     adapter: AdapterInfo,

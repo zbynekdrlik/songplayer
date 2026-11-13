@@ -708,12 +708,16 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
     preview slot (`preview.md`).
 - **The ring's 20 slots** (`RING_CAPACITY`, P2's sizing kept by P3a's
   design) hold, from ONE pipeline: the 12 queued frames, the producer's
-  frame waiting to be pushed, the decoder's `frame_before_end`, the held
+  frame waiting to be pushed, #318: the video reader thread's one picture
+  read ahead (waiting in its rendezvous hand-off, `sp_decoder::
+  video_thread`), the decoder's `frame_before_end`, the held
   step, the pacer's shown / next frame, the handoff's 2, and the bus's
   pending reorder entries and submit queue (`PROGRAM_PENDING_BOUND` 16,
   `PROGRAM_QUEUE_BOUND` 10, normally 1-3), MAX's queue and the
-  compositor's open slots. The steady state is ~16-18; a catch-up or a
-  bus stall can reach 20, and a copy then waits `RING_WAIT` (100 ms,
+  compositor's open slots. The steady state is ~17-19 (#318 added the
+  reader's one); a catch-up or a bus stall can reach 21 (and a reader
+  stuck in a read past its song's end keeps its slot while the next
+  song's reader runs, `genlock.md` #318), and a copy then waits `RING_WAIT` (100 ms,
   counted in `waits`) and, past it, is a decode error: the song goes on in
   software (`full` +1). The box gate reads `ring.full` (+0 required) and
   reports `waits`.
