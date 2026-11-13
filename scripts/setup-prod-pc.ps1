@@ -586,6 +586,12 @@ function Add-ProdPcEveryNicReview {
 # as SongPlayer's own check (prod_env_firewall.rs): a profile on with no
 # group rule and no default Allow is a firewall that is simply on
 # (firewall_on), nothing more.
+# The generic group is checked by NAME (and enabled Block, the adapter, no
+# SongPlayer.exe), never by its ports, addresses or programs: dstack's own
+# dante-leg.ps1 -Mode check is the full verdict of the rule shapes. A rule
+# of either group counts here whether enabled or not (a disabled leftover
+# dstack155 rule is firewall_groups_mixed); SongPlayer's in-process check
+# sees only enabled Block rules.
 # (The groups' names, their rules and the leg's alias are written as
 # literals: the tests load only this file's functions.)
 
@@ -668,7 +674,8 @@ function Add-ProdPcFirewallReview {
     if ($outside.Count -gt 0) {
         $Blockers.Add((New-ProdPcBlocker 'firewall_block_outside_group' "enabled Block rules outside dstack's groups (dstack Dante leg, dstack155): $($outside -join ', ')"))
     }
-    # Issue 322: each group rule carries its group (the read names it).
+    # Issue 322: each group rule carries its group (the read names it; facts
+    # saved by an older -SaveFacts have none: read the box again).
     $oldRules = @($groupRules | Where-Object { [string](Get-ProdPcField $_ 'group') -eq 'dstack155' })
     $newRules = @($groupRules | Where-Object { [string](Get-ProdPcField $_ 'group') -eq 'dstack Dante leg' })
     $unknown = @($groupRules | Where-Object { @(Get-ProdPcFirewallGroups) -notcontains [string](Get-ProdPcField $_ 'group') } | ForEach-Object { [string](Get-ProdPcField $_ 'name') })

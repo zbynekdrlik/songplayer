@@ -30,7 +30,10 @@ pub const DANTE_LEG_GROUP: &str = "dstack Dante leg";
 
 /// The rules of [`DANTE_LEG_GROUP`] by `DisplayName`, as dstack v0.6.123's
 /// `dante-leg.ps1` (`Get-DanteLegRules`) creates them, every one an enabled
-/// Block rule bound to the Dante adapter alone.
+/// Block rule bound to the Dante adapter alone. The in-process check counts
+/// the group's rules only; `scripts/setup-prod-pc.ps1` judges them by these
+/// names (a test pins its list to this one) and dstack's own
+/// `dante-leg.ps1 -Mode check` by their shapes.
 pub const DANTE_LEG_RULE_NAMES: [&str; 10] = [
     "dstack Dante leg: TCP in",
     "dstack Dante leg: TCP out",

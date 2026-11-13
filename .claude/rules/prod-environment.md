@@ -125,7 +125,17 @@ process for this.
     (`DANTE_LEG_RULE_NAMES`). `dante-leg.ps1 -InterfaceAlias Dante70
     -RemoveGroup dstack155` switches a PC; `-Mode check -InterfaceAlias
     <adapter>` is dstack's own verdict (exit 0, else one `ERROR` line per
-    problem). The old `dstack155` state is deleted once every PC moved.
+    problem). The old `dstack155` state is deleted once every PC moved
+    (#322's checklist). The install creates the new rules before it removes
+    the old group, so a check that lands in those seconds reads
+    `firewall_groups_mixed` once (one ERROR, then the INFO when it clears):
+    expected at the switch, never a deploy's state.
+  - Depth of each check: the in-process one COUNTS each group's enabled
+    Block rules; the setup script judges the generic group by its rule
+    NAMES (any rule of a group, enabled or not, counts there: a disabled
+    leftover `dstack155` rule is `firewall_groups_mixed` for the script
+    only); neither judges ports / addresses / programs — that is dstack's
+    `-Mode check`, not run by SongPlayer or the deploy yet.
   - A rule belongs to a group by its `RuleGroup` or `DisplayGroup`
     (`FirewallGroup::of`); both groups holding rules (a switch half done) is
     `firewall_groups_mixed`, never either standard; the rules are judged by
