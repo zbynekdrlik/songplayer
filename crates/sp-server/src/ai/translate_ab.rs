@@ -107,10 +107,7 @@ pub fn default_candidates(proxy_model: &str) -> Vec<Candidate> {
 /// The request checked: the ids (1..=[`MAX_SONGS`], each valid, each once,
 /// in order) and the candidates (2..=[`MAX_CANDIDATES`], each a known
 /// provider and a model). An error is the 400's text.
-pub fn checked(
-    req: AbRequest,
-    proxy_model: &str,
-) -> Result<(Vec<String>, Vec<Candidate>), String> {
+pub fn checked(req: AbRequest, proxy_model: &str) -> Result<(Vec<String>, Vec<Candidate>), String> {
     let mut ids: Vec<String> = Vec::new();
     for id in req.youtube_ids {
         let id = id.trim().to_string();
@@ -132,10 +129,23 @@ pub fn checked(
     }
     for c in &candidates {
         if c.provider.trim().is_empty() || AiProvider::parse(Some(&c.provider)).is_none() {
-            return Err(format!("candidate provider {:?}: claude_proxy or openrouter", c.provider));
+            return Err(format!(
+                "candidate provider {:?}: claude_proxy or openrouter",
+                c.provider
+            ));
         }
         if c.model.trim().is_empty() {
             return Err("a candidate has no model".into());
+        }
+        // The proxy always sends its own `ai_model`: another model named
+        // for it would be written into `key.json` under a false name.
+        if AiProvider::read(Some(&c.provider)) == AiProvider::ClaudeProxy
+            && c.model.trim() != proxy_model
+        {
+            return Err(format!(
+                "a claude_proxy candidate sends the proxy's model {proxy_model:?}, not {:?}",
+                c.model
+            ));
         }
     }
     Ok((ids, candidates))
@@ -237,7 +247,11 @@ pub async fn load_song(pool: &SqlitePool, cache_dir: &Path, youtube_id: &str) ->
 }
 
 /// One candidate's translation of `song` with the production prompt.
-pub async fn translate(client: &AiClient, c: &Candidate, song: &Song) -> Result<Vec<String>, String> {
+pub async fn translate(
+    client: &AiClient,
+    c: &Candidate,
+    song: &Song,
+) -> Result<Vec<String>, String> {
     let numbered: String = song
         .track
         .lines
@@ -278,7 +292,8 @@ pub async fn run(
     let mut songs = Vec::new();
     for (i, id) in ids.iter().enumerate() {
         let song = load_song(pool, cache_dir, id).await?;
-        let results = futures::future::join_all(candidates.iter().map(|c| translate(client, c, &song))).await;
+        let results =
+            futures::future::join_all(candidates.iter().map(|c| translate(client, c, &song))).await;
         songs.push((song, results));
         progress(i + 1);
     }

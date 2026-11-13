@@ -28,6 +28,7 @@ pub mod preview_video;
 pub mod program_control; // #209 the Program control (NDI SP-program)
 pub mod resolume_hosts;
 pub mod selection;
+pub mod ai_task_settings; // #321 Nastavenia "Textové AI (OpenRouter)"
 pub mod settings_form;
 pub mod song_row;
 pub mod state_block;

@@ -1,5 +1,8 @@
+use std::collections::HashMap;
+
 use super::{
-    AiProvider, AiTask, DEFAULT_OPENROUTER_MODEL, checked_provider, openrouter_model, to_send,
+    AiProvider, AiTask, DEFAULT_OPENROUTER_MODEL, checked_provider, form_values, openrouter_model,
+    settings_to_send,
 };
 
 #[test]
@@ -106,13 +109,72 @@ fn the_patch_takes_only_a_known_provider_in_its_canonical_word() {
         checked_provider("ai_model_register", "  x/y  "),
         Ok("x/y".to_string())
     );
-    assert_eq!(checked_provider("ai_model", "  keep  "), Ok("  keep  ".into()));
+    assert_eq!(
+        checked_provider("ai_model", "  keep  "),
+        Ok("  keep  ".into())
+    );
+}
+
+fn stored(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+    let map: HashMap<String, String> = pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    move |k: &str| map.get(k).cloned()
+}
+
+#[test]
+fn the_form_shows_each_provider_as_the_server_reads_it() {
+    let values = form_values(stored(&[
+        ("ai_provider_translate", "OpenRouter "),
+        ("ai_provider_register", "nonsense"),
+        ("ai_model_translate", " google/x "),
+    ]));
+    assert_eq!(values.len(), 12);
+    assert_eq!(values["ai_provider_translate"], "openrouter");
+    // A hand-edited value routes to the proxy, so the form says so.
+    assert_eq!(values["ai_provider_register"], "claude_proxy");
+    assert_eq!(values["ai_provider_spotify"], "claude_proxy");
+    assert_eq!(values["ai_model_translate"], "google/x");
+    assert_eq!(values["ai_model_cleanup"], "");
 }
 
 #[test]
 fn a_save_sends_only_a_changed_value() {
-    assert_eq!(to_send("openrouter", "openrouter"), None);
-    assert_eq!(to_send("a", " a "), None);
-    assert_eq!(to_send("", "openrouter"), Some("openrouter".to_string()));
-    assert_eq!(to_send("x", ""), Some(String::new()));
+    let loaded = form_values(stored(&[("ai_model_metadata", "m")]));
+    // Untouched: nothing — a blank provider stays unset (never written as
+    // `claude_proxy` by a save that changed nothing).
+    assert!(settings_to_send(&loaded, &loaded).is_empty());
+    let mut edited = loaded.clone();
+    edited.insert("ai_provider_translate".into(), "openrouter".into());
+    edited.insert(
+        "ai_model_translate".into(),
+        " google/gemini-4-carbon ".into(),
+    );
+    edited.insert("ai_model_metadata".into(), " m ".into());
+    edited.insert("ai_model_spotify".into(), "".into());
+    let mut sent = settings_to_send(&loaded, &edited);
+    sent.sort();
+    assert_eq!(
+        sent,
+        vec![
+            (
+                "ai_model_translate".to_string(),
+                "google/gemini-4-carbon".to_string()
+            ),
+            (
+                "ai_provider_translate".to_string(),
+                "openrouter".to_string()
+            ),
+        ]
+    );
+    // A model cleared back to blank is sent as blank (= the default).
+    let mut cleared = loaded.clone();
+    cleared.insert("ai_model_metadata".into(), "  ".into());
+    assert_eq!(
+        settings_to_send(&loaded, &cleared),
+        vec![("ai_model_metadata".to_string(), String::new())]
+    );
+    // A key missing from the edit is the loaded value: nothing sent.
+    assert!(settings_to_send(&loaded, &HashMap::new()).is_empty());
 }

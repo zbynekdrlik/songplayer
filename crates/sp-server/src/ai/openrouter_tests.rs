@@ -20,7 +20,8 @@ fn ask<'a>(system: &'a str, user: &'a str) -> Ask<'a> {
 }
 
 fn client(server: &MockServer) -> OpenRouterClient {
-    OpenRouterClient::new(format!("{}/api/v1", server.uri())).with_retry_policy(RetryPolicy::NO_WAIT)
+    OpenRouterClient::new(format!("{}/api/v1", server.uri()))
+        .with_retry_policy(RetryPolicy::NO_WAIT)
 }
 
 fn answer(text: &str) -> serde_json::Value {
@@ -52,7 +53,10 @@ async fn a_completion_sends_the_tasks_prompt_with_the_key_and_reads_the_text() {
         .expect(1)
         .mount(&server)
         .await;
-    let got = client(&server).complete(&ask("sys", "hello")).await.unwrap();
+    let got = client(&server)
+        .complete(&ask("sys", "hello"))
+        .await
+        .unwrap();
     assert_eq!(
         got,
         Completion {
@@ -162,7 +166,8 @@ async fn an_answer_with_no_text_is_an_error() {
 #[test]
 fn an_answer_is_read_into_typed_fields_only() {
     // A raw-value key at the top is an unknown field, skipped unparsed.
-    let body = r#"{"$serde_json::private::RawValue":"[[[[1]]]]","choices":[{"message":{"content":"t"}}]}"#;
+    let body =
+        r#"{"$serde_json::private::RawValue":"[[[[1]]]]","choices":[{"message":{"content":"t"}}]}"#;
     assert_eq!(
         read_answer(body).unwrap(),
         Completion {

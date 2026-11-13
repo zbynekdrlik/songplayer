@@ -95,6 +95,12 @@ fn the_request_is_checked() {
     assert!(checked(req(&[YT], Some(blank_provider)), "m").is_err());
     let blank_model = vec![cand("openrouter", "x"), cand("openrouter", " ")];
     assert!(checked(req(&[YT], Some(blank_model)), "m").is_err());
+    // A proxy candidate names the proxy's own model, never another one
+    // (the key would lie: the proxy always sends `ai_model`).
+    let proxy_other = vec![cand("openrouter", "x"), cand("claude_proxy", "other")];
+    assert!(checked(req(&[YT], Some(proxy_other)), "m").is_err());
+    let proxy_own = vec![cand("openrouter", "x"), cand("claude_proxy", " m ")];
+    assert!(checked(req(&[YT], Some(proxy_own)), "m").is_ok());
 }
 
 #[test]
@@ -122,14 +128,20 @@ fn the_sheet_names_no_model_and_the_key_maps_each_letter() {
         track: track(&["Line one", "Line two"]),
         gender: SpeakerGender::Male,
     };
-    let candidates = vec![cand("claude_proxy", "claude-x"), cand("openrouter", "google/g")];
+    let candidates = vec![
+        cand("claude_proxy", "claude-x"),
+        cand("openrouter", "google/g"),
+    ];
     let results = vec![
         Ok(vec!["Claude jeden".to_string(), "Claude dva".to_string()]),
         Err("HTTP 500".to_string()),
     ];
     let order = vec![1, 0];
     let sheet = blind_sheet("2026-11-13T00:00:00.000Z", &[(song, results)], &order);
-    assert!(!sheet.contains("claude-x") && !sheet.contains("google/g"), "{sheet}");
+    assert!(
+        !sheet.contains("claude-x") && !sheet.contains("google/g"),
+        "{sheet}"
+    );
     assert!(sheet.contains("## Song — Artist (abcdefghijk)"), "{sheet}");
     assert!(
         sheet.contains("1. EN: Line one\n   A: (chyba: HTTP 500)\n   B: Claude jeden\n"),
@@ -172,9 +184,13 @@ async fn pool_with_song(gender: Option<&str>) -> SqlitePool {
 #[tokio::test]
 async fn a_run_writes_the_blind_sheet_and_its_key() {
     let pool = pool_with_song(Some("f")).await;
-    set_setting(&pool, "openrouter_api_key", "example-openrouter-key-for-tests")
-        .await
-        .unwrap();
+    set_setting(
+        &pool,
+        "openrouter_api_key",
+        "example-openrouter-key-for-tests",
+    )
+    .await
+    .unwrap();
     let cache = tempfile::tempdir().unwrap();
     let json = serde_json::to_string(&track(&["I was lost", "Now found"])).unwrap();
     std::fs::write(cache.path().join(format!("{YT}_lyrics.json")), json).unwrap();
@@ -191,7 +207,9 @@ async fn a_run_writes_the_blind_sheet_and_its_key() {
     let openrouter = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/api/v1/chat/completions"))
-        .and(body_partial_json(serde_json::json!({"model": "google/gemini-4-carbon"})))
+        .and(body_partial_json(
+            serde_json::json!({"model": "google/gemini-4-carbon"}),
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "choices": [{"message": {"content": "1: Stratená\n2: Nájdená"}}]
         })))
@@ -241,15 +259,30 @@ async fn a_run_writes_the_blind_sheet_and_its_key() {
     let sheet = std::fs::read_to_string(dir.join("blind.md")).unwrap();
     let key: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(dir.join("key.json")).unwrap()).unwrap();
-    assert!(sheet.contains("## Way Maker — Sinach (abcdefghijk)"), "{sheet}");
-    assert!(!sheet.contains("claude-test") && !sheet.contains("gemini"), "{sheet}");
+    assert!(
+        sheet.contains("## Way Maker — Sinach (abcdefghijk)"),
+        "{sheet}"
+    );
+    assert!(
+        !sheet.contains("claude-test") && !sheet.contains("gemini"),
+        "{sheet}"
+    );
     let order = shuffled(2, 42);
     let claude_letter = letter(order.iter().position(|&c| c == 0).unwrap());
     let carbon_letter = letter(order.iter().position(|&c| c == 1).unwrap());
-    assert!(sheet.contains(&format!("   {claude_letter}: Bola som stratená\n")), "{sheet}");
-    assert!(sheet.contains(&format!("   {carbon_letter}: Stratená\n")), "{sheet}");
+    assert!(
+        sheet.contains(&format!("   {claude_letter}: Bola som stratená\n")),
+        "{sheet}"
+    );
+    assert!(
+        sheet.contains(&format!("   {carbon_letter}: Stratená\n")),
+        "{sheet}"
+    );
     assert_eq!(key[claude_letter.to_string()]["model"], "claude-test");
-    assert_eq!(key[carbon_letter.to_string()]["model"], "google/gemini-4-carbon");
+    assert_eq!(
+        key[carbon_letter.to_string()]["model"],
+        "google/gemini-4-carbon"
+    );
 }
 
 /// A song with no lyrics file fails the run with its id (no sheet).
@@ -269,5 +302,8 @@ async fn a_song_with_no_lyrics_fails_the_run_naming_it() {
     )
     .await
     .unwrap_err();
-    assert!(format!("{err:#}").contains("abcdefghijk: no lyrics file"), "{err:#}");
+    assert!(
+        format!("{err:#}").contains("abcdefghijk: no lyrics file"),
+        "{err:#}"
+    );
 }

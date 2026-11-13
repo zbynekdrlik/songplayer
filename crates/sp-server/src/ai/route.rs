@@ -58,7 +58,10 @@ pub fn plan(provider: Option<&str>, model: Option<&str>) -> Route {
 /// and stays on the proxy: the behaviour before #321.
 pub async fn route_of(pool: &SqlitePool, task: AiTask) -> Route {
     let read = |key: String| async move { crate::db::models::get_setting(pool, &key).await };
-    match (read(task.provider_setting()).await, read(task.model_setting()).await) {
+    match (
+        read(task.provider_setting()).await,
+        read(task.model_setting()).await,
+    ) {
         (Ok(provider), Ok(model)) => plan(provider.as_deref(), model.as_deref()),
         (Err(e), _) | (_, Err(e)) => {
             warn!(task = task.as_str(), %e, "ai route: reading the task's settings failed - the proxy is asked");

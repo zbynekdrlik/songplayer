@@ -1261,6 +1261,32 @@ function paidAiRefusal(body) {
   return ["", "true", "false"].includes(v) ? null : "paid_ai_enabled must be true or false";
 }
 
+// #321: as `sp_core::ai_tasks::checked_provider` — a task's provider
+// (`ai_provider_<task>`) is blank, `claude_proxy` or `openrouter` (trimmed,
+// any case, stored canonical); a task's model (`ai_model_<task>`) is stored
+// trimmed.
+const AI_TASKS = ["translate", "register", "metadata", "description", "cleanup", "spotify"];
+function aiProviderRefusal(body) {
+  for (const task of AI_TASKS) {
+    const key = `ai_provider_${task}`;
+    if (body[key] === undefined) continue;
+    const v = String(body[key]).trim().toLowerCase();
+    if (!["", "claude_proxy", "openrouter"].includes(v)) {
+      return `${key} must be claude_proxy or openrouter`;
+    }
+  }
+  return null;
+}
+function aiTaskValue(key, value) {
+  if (AI_TASKS.some((t) => key === `ai_provider_${t}`)) {
+    return String(value).trim().toLowerCase();
+  }
+  if (AI_TASKS.some((t) => key === `ai_model_${t}`)) {
+    return String(value).trim();
+  }
+  return undefined;
+}
+
 // #289: as `sp_core::audio_latency::low_latency` — only "true" (trimmed,
 // any case) is on; unset, blank or anything else is off.
 function lowLatency(raw) {
@@ -1322,6 +1348,7 @@ app.patch("/api/v1/settings", (req, res) => {
   const refusal =
     outputsRefusal(req.body) ??
     paidAiRefusal(req.body) ??
+    aiProviderRefusal(req.body) ??
     lowLatencyRefusal(req.body) ??
     maxResolutionRefusal(req.body);
   if (refusal) {
@@ -1334,6 +1361,8 @@ app.patch("/api/v1/settings", (req, res) => {
     }
     if (key === "paid_ai_enabled" || key === "audio_low_latency") {
       settings[key] = String(value).trim().toLowerCase();
+    } else if (aiTaskValue(key, value) !== undefined) {
+      settings[key] = aiTaskValue(key, value);
     } else if (key === "max_resolution") {
       settings[key] = String(value).trim(); // stored trimmed, as `format::checked` does
     } else {

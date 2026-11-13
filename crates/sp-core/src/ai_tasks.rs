@@ -156,12 +156,42 @@ pub fn checked_provider(key: &str, value: &str) -> Result<String, String> {
     Ok(value.to_string())
 }
 
-/// What a Nastavenia save sends for one task setting: the edited value
-/// only when it differs from the value the page loaded (trimmed), so a
-/// tab opened before a change elsewhere never puts the old value back.
-pub fn to_send(loaded: &str, edited: &str) -> Option<String> {
-    let edited = edited.trim();
-    (edited != loaded.trim()).then(|| edited.to_string())
+/// What Nastavenia's "Textové AI" section shows for the stored settings
+/// `stored(key)`: per task its provider as the server reads it (a blank or
+/// hand-edited value = `claude_proxy`) and its model as stored (blank =
+/// the default, shown as the field's placeholder).
+pub fn form_values(
+    stored: impl Fn(&str) -> Option<String>,
+) -> std::collections::HashMap<String, String> {
+    let mut values = std::collections::HashMap::new();
+    for task in AiTask::ALL {
+        let provider = AiProvider::read(stored(&task.provider_setting()).as_deref());
+        values.insert(task.provider_setting(), provider.as_str().to_string());
+        let model = stored(&task.model_setting()).unwrap_or_default();
+        values.insert(task.model_setting(), model.trim().to_string());
+    }
+    values
+}
+
+/// What a Nastavenia save sends of the section: only each value that
+/// differs from what the page loaded (`form_values` of the loaded
+/// settings), trimmed — a tab opened before a change elsewhere never puts
+/// the old value back, and an untouched blank provider stays unset.
+pub fn settings_to_send(
+    loaded: &std::collections::HashMap<String, String>,
+    edited: &std::collections::HashMap<String, String>,
+) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for task in AiTask::ALL {
+        for key in [task.provider_setting(), task.model_setting()] {
+            let before = loaded.get(&key).map(|v| v.trim()).unwrap_or("");
+            let after = edited.get(&key).map(|v| v.trim()).unwrap_or(before);
+            if after != before {
+                out.push((key, after.to_string()));
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]

@@ -16,6 +16,7 @@ use leptos::prelude::*;
 use sp_core::config;
 
 use crate::api;
+use crate::components::ai_task_settings::AiTaskSettings;
 use crate::components::video_settings::VideoSettings;
 use crate::store::DashboardStore;
 
@@ -91,6 +92,8 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
     let gemini_model = RwSignal::new(String::new());
     // #229 item C: this node's paid-AI switch (on unless it says off).
     let paid_ai = RwSignal::new(true);
+    // #321: each text AI task's provider + OpenRouter model, as shown.
+    let ai_tasks = RwSignal::new(HashMap::<String, String>::new());
     let cache_dir = RwSignal::new(String::new());
     let dub_voice = RwSignal::new(config::DEFAULT_DUB_VOICE.to_string());
     let dub_model = RwSignal::new(config::DEFAULT_DUB_MODEL.to_string());
@@ -146,6 +149,7 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                 .get(config::SETTING_PAID_AI_ENABLED)
                 .map(String::as_str),
         ));
+        ai_tasks.set(sp_core::ai_tasks::form_values(|k| settings.get(k).cloned()));
         cache_dir.set(setting_value(
             &settings,
             config::SETTING_CACHE_DIR,
@@ -237,6 +241,13 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
             .with_untracked(|s| s.get(config::SETTING_PAID_AI_ENABLED).cloned());
         if let Some(value) = config::paid_ai_to_send(loaded_paid_ai.as_deref(), paid_ai.get()) {
             settings.insert(config::SETTING_PAID_AI_ENABLED.to_string(), value);
+        }
+        // #321: each text AI task setting only when it was changed here.
+        let loaded_ai = store
+            .settings
+            .with_untracked(|s| sp_core::ai_tasks::form_values(|k| s.get(k).cloned()));
+        for (key, value) in sp_core::ai_tasks::settings_to_send(&loaded_ai, &ai_tasks.get()) {
+            settings.insert(key, value);
         }
         settings.insert(config::SETTING_CACHE_DIR.to_string(), cache_dir.get());
         settings.insert(config::SETTING_DUB_VOICE.to_string(), dub_voice.get());
@@ -384,6 +395,8 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                     "Povoliť platené AI spracovanie"
                 </label>
             </fieldset>
+
+            <AiTaskSettings values=ai_tasks />
 
             <fieldset>
                 <legend>"Dabing"</legend>

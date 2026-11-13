@@ -31,7 +31,9 @@ async fn rig(pool: &SqlitePool) -> (MockServer, MockServer, AiClient) {
     let proxy = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
-        .and(body_partial_json(serde_json::json!({"model": "claude-test"})))
+        .and(body_partial_json(
+            serde_json::json!({"model": "claude-test"}),
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(answer("from the proxy")))
         .mount(&proxy)
         .await;
@@ -94,7 +96,9 @@ fn the_plan_of_a_task() {
 async fn with_nothing_set_every_task_goes_to_the_proxy() {
     let pool = pool().await;
     let (proxy, openrouter, client) = rig(&pool).await;
-    set_setting(&pool, SETTING_OPENROUTER_API_KEY, KEY).await.unwrap();
+    set_setting(&pool, SETTING_OPENROUTER_API_KEY, KEY)
+        .await
+        .unwrap();
     for task in AiTask::ALL {
         assert_eq!(
             client.chat_for(task, "", "q", 10).await.unwrap(),
@@ -112,7 +116,9 @@ async fn with_nothing_set_every_task_goes_to_the_proxy() {
 async fn a_switched_task_goes_to_openrouter_with_its_model_read_live() {
     let pool = pool().await;
     let (proxy, openrouter, client) = rig(&pool).await;
-    set_setting(&pool, SETTING_OPENROUTER_API_KEY, KEY).await.unwrap();
+    set_setting(&pool, SETTING_OPENROUTER_API_KEY, KEY)
+        .await
+        .unwrap();
     set_setting(&pool, "ai_provider_translate", "openrouter")
         .await
         .unwrap();
@@ -164,7 +170,9 @@ async fn a_switched_task_goes_to_openrouter_with_its_model_read_live() {
 async fn openrouter_sends_nothing_while_paid_ai_is_off() {
     let pool = pool().await;
     let (_proxy, openrouter, client) = rig(&pool).await;
-    set_setting(&pool, SETTING_OPENROUTER_API_KEY, KEY).await.unwrap();
+    set_setting(&pool, SETTING_OPENROUTER_API_KEY, KEY)
+        .await
+        .unwrap();
     set_setting(&pool, "ai_provider_cleanup", "openrouter")
         .await
         .unwrap();
@@ -187,7 +195,9 @@ async fn openrouter_with_no_key_sends_nothing() {
     set_setting(&pool, "ai_provider_metadata", "openrouter")
         .await
         .unwrap();
-    set_setting(&pool, SETTING_OPENROUTER_API_KEY, "  ").await.unwrap();
+    set_setting(&pool, SETTING_OPENROUTER_API_KEY, "  ")
+        .await
+        .unwrap();
     let err = client
         .chat_for(AiTask::Metadata, "", "q", 10)
         .await
@@ -244,7 +254,9 @@ async fn chat_json_for_parses_the_routed_answer() {
         pool.clone(),
         OpenRouterClient::new(format!("{}/api/v1", openrouter.uri())),
     );
-    set_setting(&pool, SETTING_OPENROUTER_API_KEY, KEY).await.unwrap();
+    set_setting(&pool, SETTING_OPENROUTER_API_KEY, KEY)
+        .await
+        .unwrap();
     set_setting(&pool, "ai_provider_metadata", "openrouter")
         .await
         .unwrap();

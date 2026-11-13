@@ -161,7 +161,11 @@ impl OpenRouterClient {
         let url = format!("{}/chat/completions", self.api_url);
         let body = request_body(ask);
         for attempt in 0..self.retry.attempts() {
-            debug!(attempt, model = ask.model, "openrouter: sending a chat completion");
+            debug!(
+                attempt,
+                model = ask.model,
+                "openrouter: sending a chat completion"
+            );
             let resp = self
                 .http
                 .post(&url)
@@ -172,7 +176,9 @@ impl OpenRouterClient {
                 .await
                 .context("openrouter: the request was not sent")?;
             let status = resp.status();
-            let delay = self.retry.after_response(status, resp.headers(), attempt + 1);
+            let delay = self
+                .retry
+                .after_response(status, resp.headers(), attempt + 1);
             let text = resp
                 .text()
                 .await
@@ -198,10 +204,7 @@ impl OpenRouterClient {
                 }
             }
         }
-        anyhow::bail!(
-            "OpenRouter refused: all {} attempts",
-            self.retry.attempts()
-        )
+        anyhow::bail!("OpenRouter refused: all {} attempts", self.retry.attempts())
     }
 }
 

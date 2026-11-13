@@ -32,11 +32,13 @@ async fn routed_state() -> (AppState, MockServer) {
         })))
         .mount(&server)
         .await;
-    state.ai_client = Arc::new(AiClient::new(AiSettings::default()).with_routing_to(
-        state.pool.clone(),
-        OpenRouterClient::new(format!("{}/api/v1", server.uri()))
-            .with_retry_policy(RetryPolicy::NO_WAIT),
-    ));
+    state.ai_client = Arc::new(
+        AiClient::new(AiSettings::default()).with_routing_to(
+            state.pool.clone(),
+            OpenRouterClient::new(format!("{}/api/v1", server.uri()))
+                .with_retry_policy(RetryPolicy::NO_WAIT),
+        ),
+    );
     (state, server)
 }
 
@@ -49,7 +51,9 @@ async fn send(state: AppState, m: &str, uri: &str, body: &str) -> (StatusCode, S
         .unwrap();
     let resp = app(state).oneshot(req).await.unwrap();
     let status = resp.status();
-    let bytes = axum::body::to_bytes(resp.into_body(), 64 * 1024).await.unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+        .await
+        .unwrap();
     (status, String::from_utf8(bytes.to_vec()).unwrap())
 }
 
@@ -62,7 +66,9 @@ async fn probe(state: AppState, body: &str) -> Value {
 #[tokio::test]
 async fn the_probe_answers_with_the_default_model() {
     let (state, server) = routed_state().await;
-    set_setting(&state.pool, "openrouter_api_key", KEY).await.unwrap();
+    set_setting(&state.pool, "openrouter_api_key", KEY)
+        .await
+        .unwrap();
     let r = probe(state, "{}").await;
     assert_eq!(r["ok"], true, "{r}");
     assert_eq!(r["model"], "google/gemini-4-hydrogen");
@@ -78,9 +84,14 @@ async fn the_probe_answers_with_the_default_model() {
 #[tokio::test]
 async fn the_probe_sends_the_model_asked_for() {
     let (state, server) = routed_state().await;
-    set_setting(&state.pool, "openrouter_api_key", KEY).await.unwrap();
+    set_setting(&state.pool, "openrouter_api_key", KEY)
+        .await
+        .unwrap();
     let r = probe(state, r#"{"model":"google/gemini-4-carbon"}"#).await;
-    assert_eq!((r["ok"].clone(), r["model"].clone()), (json!(true), json!("google/gemini-4-carbon")));
+    assert_eq!(
+        (r["ok"].clone(), r["model"].clone()),
+        (json!(true), json!("google/gemini-4-carbon"))
+    );
     let sent = &server.received_requests().await.unwrap()[0];
     let body: Value = serde_json::from_slice(&sent.body).unwrap();
     assert_eq!(body["model"], "google/gemini-4-carbon");
@@ -92,14 +103,24 @@ async fn the_probe_sends_nothing_while_paid_ai_is_off_or_with_no_key() {
     let r = probe(state.clone(), "{}").await;
     assert_eq!(r["ok"], false);
     assert!(
-        r["error"].as_str().unwrap().contains("openrouter_api_key is not set"),
+        r["error"]
+            .as_str()
+            .unwrap()
+            .contains("openrouter_api_key is not set"),
         "{r}"
     );
-    set_setting(&state.pool, "openrouter_api_key", KEY).await.unwrap();
-    set_setting(&state.pool, "paid_ai_enabled", "false").await.unwrap();
+    set_setting(&state.pool, "openrouter_api_key", KEY)
+        .await
+        .unwrap();
+    set_setting(&state.pool, "paid_ai_enabled", "false")
+        .await
+        .unwrap();
     let r = probe(state, "{}").await;
     assert_eq!(r["ok"], false);
-    assert!(r["error"].as_str().unwrap().contains("paid AI is off"), "{r}");
+    assert!(
+        r["error"].as_str().unwrap().contains("paid AI is off"),
+        "{r}"
+    );
     assert!(server.received_requests().await.unwrap().is_empty());
 }
 
@@ -115,7 +136,9 @@ async fn the_ab_route_refuses_a_bad_body_and_paid_ai_off() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{text}");
     assert!(text.contains("not a YouTube id"), "{text}");
-    set_setting(&state.pool, "paid_ai_enabled", "false").await.unwrap();
+    set_setting(&state.pool, "paid_ai_enabled", "false")
+        .await
+        .unwrap();
     let (status, text) = send(
         state,
         "POST",
@@ -147,7 +170,9 @@ async fn a_provider_setting_takes_only_a_known_provider() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(
-        get_setting(&state.pool, "ai_provider_translate").await.unwrap(),
+        get_setting(&state.pool, "ai_provider_translate")
+            .await
+            .unwrap(),
         None
     );
     let (status, _) = send(
@@ -159,11 +184,17 @@ async fn a_provider_setting_takes_only_a_known_provider() {
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     assert_eq!(
-        get_setting(&state.pool, "ai_provider_translate").await.unwrap().as_deref(),
+        get_setting(&state.pool, "ai_provider_translate")
+            .await
+            .unwrap()
+            .as_deref(),
         Some("openrouter")
     );
     assert_eq!(
-        get_setting(&state.pool, "ai_model_translate").await.unwrap().as_deref(),
+        get_setting(&state.pool, "ai_model_translate")
+            .await
+            .unwrap()
+            .as_deref(),
         Some("google/gemini-4-carbon")
     );
 }

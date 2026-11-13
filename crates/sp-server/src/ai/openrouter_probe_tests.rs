@@ -31,5 +31,8 @@ fn a_failure_is_not_ok_and_names_every_cause() {
     let r = report("m".into(), Err(err), 7);
     assert!(!r.ok);
     assert_eq!(r.error.as_deref(), Some("probe: HTTP 401"));
-    assert_eq!((r.answered_model, r.sample.as_str(), r.latency_ms), (None, "", 7));
+    assert_eq!(
+        (r.answered_model, r.sample.as_str(), r.latency_ms),
+        (None, "", 7)
+    );
 }
