@@ -226,3 +226,46 @@ fn the_excerpt_cuts_the_key_before_the_cut_and_keeps_one_line() {
     assert_eq!(redacted_excerpt("a\nb", ""), "a b");
     assert_eq!(redacted_excerpt("k=abc", "abc"), "k=[REDACTED]");
 }
+
+/// #321 (the A/B's failed song): a 200 whose choice carries no text is a
+/// RETRYABLE failure through the policy, never a silent empty result — an
+/// empty answer, then a real one: the real one is read.
+#[tokio::test]
+async fn an_answer_with_no_text_is_asked_again() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{"message": {"role": "assistant", "content": ""}}]
+        })))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(answer("druhý pokus")))
+        .mount(&server)
+        .await;
+    let got = client(&server).complete(&ask("", "q")).await.unwrap();
+    assert_eq!(got.text, "druhý pokus");
+}
+
+/// #321: an answer with no text every time gets the first request and the
+/// policy's 3 retries, then fails naming the model, never the key.
+#[tokio::test]
+async fn an_answer_with_no_text_every_time_fails_naming_the_model_not_the_key() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{"message": {"role": "assistant"}}]
+        })))
+        .expect(4)
+        .mount(&server)
+        .await;
+    let err = client(&server)
+        .complete(&ask("", "q"))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("google/gemini-4-hydrogen"), "{err}");
+    assert!(err.contains("no text"), "{err}");
+    assert!(!err.contains(KEY), "{err}");
+}
