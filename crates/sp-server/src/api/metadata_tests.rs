@@ -124,11 +124,11 @@ async fn status_reports_the_repair_queue_and_every_provider_of_the_chain() {
     let json: crate::api::routes::StatusResponse = serde_json::from_slice(&body).unwrap();
     let metadata = json.metadata;
     assert_eq!(metadata.failed_videos, Some(2));
-    let [claude, gemini] = metadata.providers.as_slice() else {
+    let [openrouter, gemini] = metadata.providers.as_slice() else {
         panic!("two providers in chain order: {:?}", metadata.providers);
     };
     assert_eq!(
-        claude,
+        openrouter,
         &ProviderHealth {
             name: "openrouter".into(),
             last_ok_at_ms: None,
@@ -174,16 +174,16 @@ async fn the_probe_asks_every_provider_on_its_own_and_writes_nothing() {
         ["openrouter", "gemini"],
         "chain order, every provider"
     );
-    let [claude, gemini] = resp.providers.as_slice() else {
+    let [openrouter, gemini] = resp.providers.as_slice() else {
         unreachable!()
     };
-    assert!(!claude.ok);
+    assert!(!openrouter.ok);
     assert_eq!(
-        (claude.song.as_deref(), claude.artist.as_deref()),
+        (openrouter.song.as_deref(), openrouter.artist.as_deref()),
         (None, None)
     );
     assert_eq!(
-        claude.error.as_deref(),
+        openrouter.error.as_deref(),
         Some("API request failed: chat completion failed (HTTP 502)")
     );
     // Every provider answers for itself, whatever the one before it did.

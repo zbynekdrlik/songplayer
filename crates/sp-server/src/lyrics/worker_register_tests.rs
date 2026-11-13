@@ -38,7 +38,7 @@ fn served() -> LyricsTrack {
 }
 
 /// A Claude that answers every request with `answer`.
-async fn claude(answer: &str) -> MockServer {
+async fn text_ai(answer: &str) -> MockServer {
     let server = MockServer::start().await;
     let body = serde_json::json!({"choices": [{"message": {"content": answer}}]});
     Mock::given(method("POST"))
@@ -93,7 +93,7 @@ async fn requests(server: &MockServer) -> usize {
 
 #[tokio::test]
 async fn the_stale_pass_fixes_a_served_track_in_place_and_stamps_it() {
-    let server = claude("2 | I will dwell in the house | Budem prebývať v dome").await;
+    let server = text_ai("2 | I will dwell in the house | Budem prebývať v dome").await;
     let (node, worker, id) = node(&server, Some(&served())).await;
     worker.recheck_next_stale_register().await;
     assert_eq!(requests(&server).await, 1);
@@ -115,7 +115,7 @@ async fn the_stale_pass_fixes_a_served_track_in_place_and_stamps_it() {
 
 #[tokio::test]
 async fn a_track_that_already_carries_the_check_is_stamped_without_a_call() {
-    let server = claude("NONE").await;
+    let server = text_ai("NONE").await;
     let mut track = served();
     track.register = Some(RegisterCheck {
         version: REGISTER_CHECK_VERSION,
@@ -138,7 +138,7 @@ async fn a_track_that_already_carries_the_check_is_stamped_without_a_call() {
 
 #[tokio::test]
 async fn an_unreadable_track_is_stamped_forward_with_no_verdict() {
-    let server = claude("NONE").await;
+    let server = text_ai("NONE").await;
     let (node, worker, id) = node(&server, None).await;
     worker.recheck_next_stale_register().await;
     assert_eq!(requests(&server).await, 0);
@@ -150,7 +150,7 @@ async fn an_unreadable_track_is_stamped_forward_with_no_verdict() {
 
 #[tokio::test]
 async fn no_check_while_paid_ai_is_off() {
-    let server = claude("NONE").await;
+    let server = text_ai("NONE").await;
     let (node, worker, id) = node(&server, Some(&served())).await;
     set(node.pool(), "paid_ai_enabled", "false").await;
     worker.recheck_next_stale_register().await;
@@ -161,7 +161,7 @@ async fn no_check_while_paid_ai_is_off() {
 
 #[tokio::test]
 async fn an_answer_in_another_shape_is_asked_again_after_a_backoff() {
-    let server = claude("Here is my review of the text.").await;
+    let server = text_ai("Here is my review of the text.").await;
     let (node, worker, id) = node(&server, Some(&served())).await;
     worker.recheck_next_stale_register().await;
     assert_eq!(requests(&server).await, 1);
@@ -174,7 +174,7 @@ async fn an_answer_in_another_shape_is_asked_again_after_a_backoff() {
 
 #[tokio::test]
 async fn a_refusal_is_recorded_and_keeps_the_track() {
-    let server = claude("I can't help with reviewing this text.").await;
+    let server = text_ai("I can't help with reviewing this text.").await;
     let (node, worker, id) = node(&server, Some(&served())).await;
     worker.recheck_next_stale_register().await;
     let track = cached(&node);
@@ -188,7 +188,7 @@ async fn a_refusal_is_recorded_and_keeps_the_track() {
 
 #[tokio::test]
 async fn a_fresh_track_is_checked_before_it_is_persisted() {
-    let server = claude("NONE").await;
+    let server = text_ai("NONE").await;
     let (_node, worker, _id) = node(&server, None).await;
     let mut track = served();
     assert_eq!(
@@ -252,7 +252,7 @@ fn peer_checked() -> LyricsTrack {
 
 #[tokio::test]
 async fn with_paid_ai_off_only_a_peers_check_is_stamped_and_nothing_is_asked() {
-    let server = claude("NONE").await;
+    let server = text_ai("NONE").await;
     // The lowest row has no check: it must not hold up the rows behind it.
     let (node, worker, unchecked) = node(&server, Some(&served())).await;
     let from_peer = add_served(&node, "reg_check_2", &peer_checked()).await;
@@ -280,7 +280,7 @@ async fn with_paid_ai_off_only_a_peers_check_is_stamped_and_nothing_is_asked() {
 
 #[tokio::test]
 async fn a_node_with_no_ai_client_stamps_its_peers_checks() {
-    let server = claude("NONE").await;
+    let server = text_ai("NONE").await;
     let (node, mut worker, id) = node(&server, Some(&peer_checked())).await;
     worker.ai_client = None;
     worker.recheck_next_stale_register().await;
@@ -292,7 +292,7 @@ async fn a_node_with_no_ai_client_stamps_its_peers_checks() {
 
 #[tokio::test]
 async fn after_a_refusal_the_next_song_waits_out_the_backoff() {
-    let server = claude("I can't help with reviewing this text.").await;
+    let server = text_ai("I can't help with reviewing this text.").await;
     let (node, worker, _id) = node(&server, Some(&served())).await;
     let next = add_served(&node, "reg_check_2", &served()).await;
     worker.recheck_next_stale_register().await;
@@ -308,7 +308,7 @@ async fn after_a_refusal_the_next_song_waits_out_the_backoff() {
 
 #[tokio::test]
 async fn a_song_whose_answers_cannot_be_read_is_left_unchecked_after_three_tries() {
-    let server = claude("Here is my review of the text.").await;
+    let server = text_ai("Here is my review of the text.").await;
     let (node, worker, id) = node(&server, Some(&served())).await;
     for attempt in 1..=MAX_FAILED_CHECKS {
         assert_eq!(stamped(&node, id).await, (0, None), "before try {attempt}");
@@ -424,7 +424,7 @@ async fn a_proxy_outage_never_gives_a_song_up() {
 
 #[tokio::test]
 async fn a_track_that_cannot_be_written_backs_off_and_is_given_up() {
-    let server = claude("NONE").await;
+    let server = text_ai("NONE").await;
     let (node, worker, id) = node(&server, Some(&served())).await;
     let file = node.cache().join(format!("{YT}_lyrics.json"));
     let mut perms = std::fs::metadata(&file).unwrap().permissions();

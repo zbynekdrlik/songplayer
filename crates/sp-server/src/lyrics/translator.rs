@@ -35,17 +35,17 @@
 use anyhow::{Result, anyhow};
 use sp_core::lyrics::LyricsTrack;
 
-/// Why a Claude translation response yielded ZERO usable numbered lines (#145).
+/// Why a text-AI translation response yielded ZERO usable numbered lines (#145).
 ///
 /// Distinguishing a content-policy REFUSAL from any other empty result is the
 /// point: before #145 both were logged identically as
-/// `translate_via_claude: parse returned 0 translations`, so a refusal — the
+/// `translate_via_ai: parse returned 0 translations`, so a refusal — the
 /// dominant failure after a model switch — was invisible in the logs. Now a
 /// refusal is classified and logged as such, with the model id, so a future
 /// model/prompt regression surfaces loudly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TranslationFailure {
-    /// Claude declined on content-policy grounds ("I can't…", "I cannot…",
+    /// The text AI declined on content-policy grounds ("I can't…", "I cannot…",
     /// "not able to…", "unable to…") and returned no numbered lines.
     Refused,
     /// Zero numbered lines for another reason: an empty body, malformed
@@ -74,7 +74,7 @@ pub fn is_refusal_shaped(response: &str) -> bool {
     MARKERS.iter().any(|m| low.contains(m))
 }
 
-/// Classify a Claude response that parsed into `parsed_count` numbered lines.
+/// Classify a text-AI response that parsed into `parsed_count` numbered lines.
 /// Returns `None` when at least one line parsed (a full or partial success);
 /// otherwise a [`TranslationFailure`] describing WHY nothing parsed (#145).
 pub fn classify_zero_translation(
@@ -91,11 +91,11 @@ pub fn classify_zero_translation(
     }
 }
 
-/// Translate English lines in `track` to Slovak via Claude. Returns a Vec
-/// aligned 1:1 with `track.lines`; empty strings mark lines Claude did not
+/// Translate English lines in `track` to Slovak via the text AI. Returns a Vec
+/// aligned 1:1 with `track.lines`; empty strings mark lines the text AI did not
 /// return a translation for.
 #[cfg_attr(test, mutants::skip)]
-pub async fn translate_via_claude(
+pub async fn translate_via_ai(
     ai_client: &crate::ai::client::AiClient,
     track: &LyricsTrack,
     gender: SpeakerGender,
@@ -134,11 +134,11 @@ pub async fn translate_via_claude(
 
     let non_empty = translations.iter().filter(|t| !t.is_empty()).count();
     if non_empty == 0 && line_count > 0 {
-        // Surface the raw Claude response in the application log so an
+        // Surface the raw text-AI response in the application log so an
         // operator can see EXACTLY why parsing produced zero translations
         // (content-policy refusal text, empty body, malformed numbering,
         // 5-hour OAuth quota wall, etc.). The response is bounded at 4000
-        // characters so a verbose Claude refusal doesn't blow up the log
+        // characters so a verbose text-AI refusal doesn't blow up the log
         // line beyond what `tracing` will keep in memory comfortably.
         let snippet: String = response.chars().take(4000).collect();
         let truncated = response.chars().count() > 4000;
@@ -153,7 +153,7 @@ pub async fn translate_via_claude(
                     line_count,
                     truncated,
                     response = %snippet,
-                    "translate_via_claude: the model REFUSED translation on content-policy grounds — tune translator::build_prompt (#145)"
+                    "translate_via_ai: the model REFUSED translation on content-policy grounds — tune translator::build_prompt (#145)"
                 );
                 return Err(anyhow!("the model refused translation (model {model})"));
             }
@@ -165,7 +165,7 @@ pub async fn translate_via_claude(
                     response_len = response.chars().count(),
                     truncated,
                     response = %snippet,
-                    "translate_via_claude: parse returned 0 translations — raw AI response logged for diagnosis"
+                    "translate_via_ai: parse returned 0 translations — raw AI response logged for diagnosis"
                 );
                 return Err(anyhow!(
                     "the translation returned no translations (model {model})"
@@ -506,7 +506,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn translate_via_claude_returns_parsed_translations() {
+    async fn translate_via_ai_returns_parsed_translations() {
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -527,7 +527,7 @@ mod tests {
         let client = crate::ai::test_support::ai_client_at(format!("{}/v1", server.uri())).await;
 
         let track = make_track(&["Line one", "Line two", "Line three"]);
-        let result = translate_via_claude(&client, &track, SpeakerGender::Male).await;
+        let result = translate_via_ai(&client, &track, SpeakerGender::Male).await;
 
         assert!(
             result.is_ok(),
@@ -541,7 +541,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn translate_via_claude_errors_on_policy_refusal() {
+    async fn translate_via_ai_errors_on_policy_refusal() {
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -560,7 +560,7 @@ mod tests {
         let client = crate::ai::test_support::ai_client_at(format!("{}/v1", server.uri())).await;
 
         let track = make_track(&["Line one", "Line two"]);
-        let result = translate_via_claude(&client, &track, SpeakerGender::Male).await;
+        let result = translate_via_ai(&client, &track, SpeakerGender::Male).await;
 
         assert!(
             result.is_err(),
@@ -569,7 +569,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn translate_via_claude_refusal_error_names_refusal_and_model() {
+    async fn translate_via_ai_refusal_error_names_refusal_and_model() {
         // #145 regression: when Claude REFUSES on content-policy grounds, the
         // failure must be surfaced AS a refusal and must carry the model id —
         // never a generic "returned no translations" that hides the cause.
@@ -593,7 +593,7 @@ mod tests {
         let client = crate::ai::test_support::ai_client_at(format!("{}/v1", server.uri())).await;
 
         let track = make_track(&["Line one", "Line two"]);
-        let err = translate_via_claude(&client, &track, SpeakerGender::Male)
+        let err = translate_via_ai(&client, &track, SpeakerGender::Male)
             .await
             .expect_err("a refusal must be an error");
         let msg = err.to_string().to_lowercase();
@@ -608,10 +608,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn translate_via_claude_empty_track_returns_empty() {
+    async fn translate_via_ai_empty_track_returns_empty() {
         let client = crate::ai::test_support::ai_client_unused().await;
         let track = make_track(&[]);
-        let result = translate_via_claude(&client, &track, SpeakerGender::Male)
+        let result = translate_via_ai(&client, &track, SpeakerGender::Male)
             .await
             .unwrap();
         assert!(result.is_empty());

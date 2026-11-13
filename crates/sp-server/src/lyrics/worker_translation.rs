@@ -49,9 +49,9 @@ impl LyricsWorker {
         if !self.translation_allowed(youtube_id).await {
             return;
         }
-        match translator::translate_via_claude(ai_client, track, gender).await {
+        match translator::translate_via_ai(ai_client, track, gender).await {
             Ok(translations) => Self::apply_translations(track, translations),
-            Err(e) => warn!("worker: Claude translation failed for {youtube_id}: {e}"),
+            Err(e) => warn!("worker: the text-AI translation failed for {youtube_id}: {e}"),
         }
     }
 
@@ -66,7 +66,7 @@ impl LyricsWorker {
         }
         warn!(
             youtube_id,
-            "lyrics_worker: Claude's content filter refused this song's translation — it keeps its English lines, the next song goes on"
+            "lyrics_worker: the text AI's content filter refused this song's translation — it keeps its English lines, the next song goes on"
         );
         let mut backoff = self.retry_backoff.lock().await;
         backoff.refused_translations.insert(youtube_id.to_string());
@@ -154,7 +154,7 @@ impl LyricsWorker {
         info!(
             "lyrics_worker: retranslating {youtube_id} (gender={gender:?}, v{LYRICS_TRANSLATION_VERSION})"
         );
-        match translator::translate_via_claude(ai_client, &track, gender).await {
+        match translator::translate_via_ai(ai_client, &track, gender).await {
             Ok(translations) => {
                 Self::apply_translations(&mut track, translations);
                 let json = serde_json::to_vec(&track).unwrap_or_default();

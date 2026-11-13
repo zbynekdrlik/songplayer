@@ -37,10 +37,19 @@ setting, the `claude_proxy` provider choice, CI's proxy gate,
   …)` (the translator's refusal log). An error carries `"<task> via
   OpenRouter (<model>)"` as its context: format it with `{e:#}` where it
   is reported (the metadata provider does), else only the context shows.
-- An old stored `ai_provider_<task>` row (`claude_proxy` / `openrouter`)
-  is no longer read: every task goes to OpenRouter. A settings PATCH stores
-  a task's model trimmed (`ai_tasks::checked_setting`); any other key
-  passes as before.
+- The deleted proxy path's settings are RETIRED (`ai_tasks::
+  is_retired_setting`: `ai_model`, `ai_api_url`, any `ai_provider_<task>`):
+  V45 deleted their rows, and a settings PATCH naming one is refused whole
+  (400 naming the key, nothing written; the e2e mock does the same), so no
+  client re-creates a setting nothing reads. The PATCH stores a task's
+  model trimmed (`ai_tasks::checked_setting`, now a `Result`); any other
+  key passes as before.
+- Names are provider-neutral (#321): `translator::translate_via_ai`,
+  `description_provider::{clean_lyrics_via_ai, parse_ai_response}`,
+  `register_check::check_via_ai`; a test's OpenRouter mock is `text_ai(…)`
+  / `ai_mock`, and a log line says "the text AI", never "Claude" (the
+  model is a setting). `lyrics::claude_merge` is no AI call (a pure
+  candidate picker) and keeps its historical name.
 - `ai/openrouter.rs` is the ONE transport: Bearer key, the request
   `{model, messages, temperature 0.1, max_tokens}`, the answer decoded into
   typed structs (never `serde_json::Value`'s own Deserialize), an error
@@ -128,7 +137,7 @@ deploy steps (ci.yml "Deploy SongPlayer" + the E2E restart,
 deploy-pp.yml "Stop SongPlayer") still `taskkill` such a leftover, so it
 never runs on unowned; those lines go once SNV and PP both run a build of
 0.93.0 or later. `C:\ProgramData\SongPlayer\cache\.cli-proxy-api\` (the old
-Claude OAuth tokens) and the old `ai_model` / `ai_api_url` /
-`ai_provider_<task>` settings rows are no longer read by anything; the
-session's revocation and the rows' removal are the owner's / a migration's
-follow-up, never a deploy step.
+Claude OAuth tokens) is no longer read by anything; the session's
+revocation is the owner's follow-up, never a deploy step. The old
+`ai_model` / `ai_api_url` / `ai_provider_<task>` settings rows go with V45
+at the first start of the build that carries it.

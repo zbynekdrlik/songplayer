@@ -35,7 +35,7 @@ fn untranslated() -> LyricsTrack {
 }
 
 /// A Claude that answers every translation with one SK line.
-async fn claude() -> MockServer {
+async fn text_ai() -> MockServer {
     let server = MockServer::start().await;
     let body = serde_json::json!({"choices": [{"message": {"content": "1: Cestu robíš"}}]});
     Mock::given(method("POST"))
@@ -49,7 +49,7 @@ async fn claude() -> MockServer {
 /// PP alone (no peer, the exchange wired) with its Claude on `server`, one
 /// active song with lyrics but no SK line (its JSON in the cache), and one
 /// song still to be processed.
-async fn pp_with_claude(server: &MockServer) -> (TestNode, LyricsWorker, i64) {
+async fn pp_with_text_ai(server: &MockServer) -> (TestNode, LyricsWorker, i64) {
     let pp = TestNode::start("pp", None).await;
     let done = pp.add_video(YT).await;
     // Done at the current pipeline version: the lyrics queue never takes it.
@@ -90,8 +90,8 @@ fn cached_sk(pp: &TestNode) -> Option<String> {
 async fn no_paid_ai_call_while_the_switch_is_off() {
     let _lk = crate::lyrics::heavy_slot::DUB_FLAG_SERIAL.lock().await;
     crate::lyrics::heavy_slot::set_dub_slot_wanted(false);
-    let server = claude().await;
-    let (pp, worker, todo) = pp_with_claude(&server).await;
+    let server = text_ai().await;
+    let (pp, worker, todo) = pp_with_text_ai(&server).await;
     set(pp.pool(), "paid_ai_enabled", "false").await;
     worker.process_next().await;
     worker.retry_missing_translations().await;
@@ -116,9 +116,9 @@ async fn no_paid_ai_call_while_the_switch_is_off() {
 
 /// On: the same pass translates the song through Claude, once.
 #[tokio::test]
-async fn the_translation_pass_calls_claude_while_the_switch_is_on() {
-    let server = claude().await;
-    let (pp, worker, _todo) = pp_with_claude(&server).await;
+async fn the_translation_pass_calls_the_text_ai_while_the_switch_is_on() {
+    let server = text_ai().await;
+    let (pp, worker, _todo) = pp_with_text_ai(&server).await;
     worker.retry_missing_translations().await;
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
     assert_eq!(cached_sk(&pp).as_deref(), Some("Cestu robíš"));
@@ -136,7 +136,7 @@ fn holds(cap: &Captured) -> Vec<String> {
 async fn a_translation_pass_holds_only_a_song_it_would_translate() {
     let cap = Captured::default();
     let _log = tracing::subscriber::set_default(capturing(&cap));
-    let server = claude().await;
+    let server = text_ai().await;
     let empty = TestNode::start("pp", None).await;
     set(empty.pool(), "paid_ai_enabled", "false").await;
     let (events, _) = broadcast::channel(16);
@@ -149,7 +149,7 @@ async fn a_translation_pass_holds_only_a_song_it_would_translate() {
     idle.retry_missing_translations().await;
     idle.retranslate_next_stale().await;
     assert_eq!(holds(&cap), Vec::<String>::new(), "nothing to translate");
-    let (pp, worker, _todo) = pp_with_claude(&server).await;
+    let (pp, worker, _todo) = pp_with_text_ai(&server).await;
     set(pp.pool(), "paid_ai_enabled", "false").await;
     worker.retry_missing_translations().await;
     let held = holds(&cap);
@@ -169,7 +169,7 @@ async fn a_translation_pass_holds_only_a_song_it_would_translate() {
 async fn a_stale_translation_with_no_track_is_stamped_forward_not_held_while_off() {
     let cap = Captured::default();
     let _log = tracing::subscriber::set_default(capturing(&cap));
-    let server = claude().await;
+    let server = text_ai().await;
     let pp = TestNode::start("pp", None).await;
     set(pp.pool(), "paid_ai_enabled", "false").await;
     let id = pp.add_video("trn_paid_03").await;
@@ -212,8 +212,8 @@ async fn a_stale_translation_with_no_track_is_stamped_forward_not_held_while_off
 async fn a_held_background_starts_no_lyrics_work_until_released() {
     let _lk = crate::lyrics::heavy_slot::DUB_FLAG_SERIAL.lock().await;
     crate::lyrics::heavy_slot::set_dub_slot_wanted(false);
-    let server = claude().await;
-    let (pp, worker, todo) = pp_with_claude(&server).await;
+    let server = text_ai().await;
+    let (pp, worker, todo) = pp_with_text_ai(&server).await;
     // The queue empty: an unheld tick runs the translation passes.
     sqlx::query("DELETE FROM videos WHERE id = ?")
         .bind(todo)

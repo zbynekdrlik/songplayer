@@ -1,13 +1,13 @@
 //! Spotify track ID auto-resolver.
 //!
-//! Per `feedback_llm_over_heuristics.md` — uses a single Claude call to map
+//! Per `feedback_llm_over_heuristics.md` — uses a single text-AI call to map
 //! a YouTube song to its canonical Spotify track ID. Replaces PR #70's
 //! manual UI: operators don't paste URLs anymore.
 //!
 //! The resolver is gated by the worker: it only fires when both
 //! `spotify_track_id IS NULL` and `spotify_resolved_at IS NULL`. Once a
 //! resolution attempt is recorded (success OR no-match), the gate keeps
-//! the worker from re-querying Claude on every reprocess.
+//! the worker from re-querying the text AI on every reprocess.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -45,9 +45,9 @@ struct BackoffState {
 /// Outcome of a single resolve attempt.
 #[derive(Debug)]
 pub enum ResolveOutcome {
-    /// Claude returned a 22-char ID and the proxy verified ≥10 LINE_SYNCED lines.
+    /// The text AI returned a 22-char ID and the proxy verified ≥10 LINE_SYNCED lines.
     Resolved(String),
-    /// Claude returned `NONE` literally, OR Claude returned an ID but the proxy
+    /// The text AI returned `NONE` literally, OR the text AI returned an ID but the proxy
     /// failed to verify (404 / error:true / non-LINE_SYNCED / <10 lines).
     /// Caller persists `spotify_track_id = NULL, spotify_resolved_at = now()`.
     NoMatch,
@@ -59,7 +59,7 @@ pub enum ResolveOutcome {
 
 pub struct SpotifyResolver {
     fetcher: SpotifyLyricsFetcher,
-    /// Process-wide cool-down so a Claude outage doesn't burn one call per
+    /// Process-wide cool-down so a text-AI outage doesn't burn one call per
     /// active song per ~5s worker tick. `std::sync::Mutex` (not the tokio
     /// async variant) — no `.await` is held under the lock, and a sync
     /// mutex makes `in_backoff` non-async so the worker's pre-gather hook
@@ -86,7 +86,7 @@ impl SpotifyResolver {
     /// `true` while the resolver is in cool-down after a recent transport
     /// failure (#75). Callers (the worker pre-gather hook) MUST query this
     /// before `resolve()` to skip the call entirely instead of paying for
-    /// another Claude round-trip during an ongoing outage.
+    /// another text-AI round-trip during an ongoing outage.
     pub fn in_backoff(&self) -> bool {
         let s = self.backoff.lock().expect("backoff mutex poisoned");
         matches!(s.silent_until, Some(t) if Instant::now() < t)
@@ -104,22 +104,22 @@ impl SpotifyResolver {
         s.silent_until = Some(Instant::now() + Duration::from_secs(secs));
     }
 
-    /// Clear the cool-down state after Claude responds (success OR NoMatch).
+    /// Clear the cool-down state after the text AI responds (success OR NoMatch).
     fn note_recovery(&self) {
         let mut s = self.backoff.lock().expect("backoff mutex poisoned");
         s.consecutive_failures = 0;
         s.silent_until = None;
     }
 
-    /// Build the prompt that asks Claude for the canonical Spotify track ID.
+    /// Build the prompt that asks the text AI for the canonical Spotify track ID.
     ///
     /// Prompt design rationale:
     /// - Constrain output strictly: 22-char alphanumeric ID OR the literal
     ///   string `NONE`. Anything else is treated as `NoMatch`.
-    /// - Explicitly tell Claude to return `NONE` for cover/remix/live versions
+    /// - Explicitly tell the text AI to return `NONE` for cover/remix/live versions
     ///   that aren't on Spotify as the canonical recording.
-    /// - Give Claude (song, artist, youtube_id). The youtube_id alone lets
-    ///   Claude look up the YouTube video title if it needs disambiguation;
+    /// - Give the text AI (song, artist, youtube_id). The youtube_id alone lets
+    ///   the text AI look up the YouTube video title if it needs disambiguation;
     ///   threading the title through `VideoLyricsRow` was rejected as not
     ///   worth the plumbing cost.
     pub(crate) fn build_prompt(song: &str, artist: &str, youtube_id: &str) -> (String, String) {
@@ -139,7 +139,7 @@ impl SpotifyResolver {
         (system, user)
     }
 
-    /// Parse a Claude reply.
+    /// Parse a text-AI reply.
     ///
     /// Acceptable inputs (all case-insensitive on `NONE`):
     /// - `"3n3Ppam7vgaVa1iaRUc9Lp"` → `Some("3n3Ppam7vgaVa1iaRUc9Lp")`
@@ -157,9 +157,9 @@ impl SpotifyResolver {
         None
     }
 
-    /// Resolve a song. Single Claude call + single proxy verification call.
+    /// Resolve a song. Single text-AI call + single proxy verification call.
     /// Returns `ResolveOutcome::Resolved(id)` on a confirmed canonical match,
-    /// `NoMatch` on Claude-NONE or proxy-rejected, `Error` on transport-level
+    /// `NoMatch` on the text AI's NONE or proxy-rejected, `Error` on transport-level
     /// failure (which the caller treats as "retry next time").
     ///
     /// mutants::skip: orchestration body is exercised by 5 wiremock
@@ -181,7 +181,7 @@ impl SpotifyResolver {
         let (system, user) = Self::build_prompt(song, artist, youtube_id);
 
         // Defense in depth: even if a caller skips the in_backoff() gate,
-        // refuse to hit Claude while we're in cool-down. The worker's
+        // refuse to hit the text AI while we're in cool-down. The worker's
         // pre-gather hook normally checks first; this branch covers other
         // call sites (admin endpoints, future scripts).
         if self.in_backoff() {
@@ -199,7 +199,7 @@ impl SpotifyResolver {
             }
         };
 
-        // Claude responded — even if its reply is unparseable, the API
+        // The text AI responded — even if its reply is unparseable, the API
         // itself is healthy. Clear the cool-down so the next song doesn't
         // pay an unnecessary backoff.
         self.note_recovery();
@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn parse_reply_returns_none_for_prose_response() {
-        // Defensive: if Claude ignores the "no prose" instruction.
+        // Defensive: if the text AI ignores the "no prose" instruction.
         assert_eq!(
             SpotifyResolver::parse_reply("Sorry, I cannot determine the track ID"),
             None
@@ -297,7 +297,7 @@ mod tests {
         // youtube_title was dropped from the resolver contract pre-merge —
         // VideoLyricsRow has no title field, threading it through 3 SELECTs
         // + 6 fixture literals isn't worth the disambiguation benefit.
-        // Claude can fetch the video title from youtube_id if it needs to.
+        // The text AI can fetch the video title from youtube_id if it needs to.
         let (_system, user) = SpotifyResolver::build_prompt("S", "A", "abc");
         assert!(
             !user.contains("youtube_title"),
@@ -326,8 +326,8 @@ mod integration_tests {
 
     #[tokio::test]
     #[serial_test::serial]
-    async fn resolves_when_claude_returns_id_and_proxy_verifies() {
-        let claude_mock = wiremock::MockServer::start().await;
+    async fn resolves_when_the_text_ai_returns_id_and_proxy_verifies() {
+        let ai_mock = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("POST"))
             .and(wiremock::matchers::path("/v1/chat/completions"))
             .respond_with(
@@ -340,7 +340,7 @@ mod integration_tests {
                     }]
                 })),
             )
-            .mount(&claude_mock)
+            .mount(&ai_mock)
             .await;
 
         let proxy_mock = wiremock::MockServer::start().await;
@@ -369,7 +369,7 @@ mod integration_tests {
         }
 
         let resolver = SpotifyResolver::new();
-        let ai = ai_client_pointed_at(&claude_mock.uri()).await;
+        let ai = ai_client_pointed_at(&ai_mock.uri()).await;
         let outcome = resolver
             .resolve(&ai, "Test Song", "Test Artist", "aaaaaaaaaaa")
             .await;
@@ -386,8 +386,8 @@ mod integration_tests {
 
     #[tokio::test]
     #[serial_test::serial]
-    async fn no_match_when_claude_returns_none() {
-        let claude_mock = wiremock::MockServer::start().await;
+    async fn no_match_when_the_text_ai_returns_none() {
+        let ai_mock = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("POST"))
             .and(wiremock::matchers::path("/v1/chat/completions"))
             .respond_with(
@@ -397,25 +397,25 @@ mod integration_tests {
                     }]
                 })),
             )
-            .mount(&claude_mock)
+            .mount(&ai_mock)
             .await;
 
         let resolver = SpotifyResolver::new();
-        let ai = ai_client_pointed_at(&claude_mock.uri()).await;
+        let ai = ai_client_pointed_at(&ai_mock.uri()).await;
         let outcome = resolver
             .resolve(&ai, "Test Song", "Test Artist", "aaaaaaaaaaa")
             .await;
 
         assert!(
             matches!(outcome, ResolveOutcome::NoMatch),
-            "expected NoMatch on Claude NONE, got {outcome:?}"
+            "expected NoMatch on the text AI's NONE, got {outcome:?}"
         );
     }
 
     #[tokio::test]
     #[serial_test::serial]
     async fn no_match_when_proxy_returns_404() {
-        let claude_mock = wiremock::MockServer::start().await;
+        let ai_mock = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("POST"))
             .and(wiremock::matchers::path("/v1/chat/completions"))
             .respond_with(
@@ -425,7 +425,7 @@ mod integration_tests {
                     }]
                 })),
             )
-            .mount(&claude_mock)
+            .mount(&ai_mock)
             .await;
 
         let proxy_mock = wiremock::MockServer::start().await;
@@ -438,7 +438,7 @@ mod integration_tests {
         }
 
         let resolver = SpotifyResolver::new();
-        let ai = ai_client_pointed_at(&claude_mock.uri()).await;
+        let ai = ai_client_pointed_at(&ai_mock.uri()).await;
         let outcome = resolver
             .resolve(&ai, "Test Song", "Test Artist", "aaaaaaaaaaa")
             .await;
@@ -455,7 +455,7 @@ mod integration_tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn no_match_when_proxy_returns_too_few_lines() {
-        let claude_mock = wiremock::MockServer::start().await;
+        let ai_mock = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("POST"))
             .and(wiremock::matchers::path("/v1/chat/completions"))
             .respond_with(
@@ -465,7 +465,7 @@ mod integration_tests {
                     }]
                 })),
             )
-            .mount(&claude_mock)
+            .mount(&ai_mock)
             .await;
 
         let proxy_mock = wiremock::MockServer::start().await;
@@ -488,7 +488,7 @@ mod integration_tests {
         }
 
         let resolver = SpotifyResolver::new();
-        let ai = ai_client_pointed_at(&claude_mock.uri()).await;
+        let ai = ai_client_pointed_at(&ai_mock.uri()).await;
         let outcome = resolver
             .resolve(&ai, "Test Song", "Test Artist", "aaaaaaaaaaa")
             .await;
@@ -504,23 +504,23 @@ mod integration_tests {
 
     #[tokio::test]
     #[serial_test::serial]
-    async fn error_when_claude_transport_fails() {
-        let claude_mock = wiremock::MockServer::start().await;
+    async fn error_when_the_ai_transport_fails() {
+        let ai_mock = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("POST"))
             .and(wiremock::matchers::path("/v1/chat/completions"))
             .respond_with(wiremock::ResponseTemplate::new(500))
-            .mount(&claude_mock)
+            .mount(&ai_mock)
             .await;
 
         let resolver = SpotifyResolver::new();
-        let ai = ai_client_pointed_at(&claude_mock.uri()).await;
+        let ai = ai_client_pointed_at(&ai_mock.uri()).await;
         let outcome = resolver
             .resolve(&ai, "Test Song", "Test Artist", "aaaaaaaaaaa")
             .await;
 
         assert!(
             matches!(outcome, ResolveOutcome::Error(_)),
-            "expected Error on Claude HTTP 500, got {outcome:?}"
+            "expected Error on the text AI's HTTP 500, got {outcome:?}"
         );
     }
 
@@ -553,7 +553,7 @@ mod integration_tests {
         resolver.note_recovery();
         assert!(
             !resolver.in_backoff(),
-            "successful Claude reply must clear the cool-down"
+            "a successful text-AI reply must clear the cool-down"
         );
     }
 
@@ -583,29 +583,29 @@ mod integration_tests {
     #[tokio::test]
     async fn resolve_short_circuits_with_error_when_in_backoff() {
         // After a manually-armed cool-down the resolver MUST refuse to
-        // call Claude — even if the AiClient would have succeeded. The
+        // call the text AI — even if the AiClient would have succeeded. The
         // wiremock has expect(0) so any HTTP call would fail the test.
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
-        let claude_mock = MockServer::start().await;
+        let ai_mock = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "choices": [{ "message": { "role": "assistant", "content": "NONE" }}]
             })))
             .expect(0)
-            .mount(&claude_mock)
+            .mount(&ai_mock)
             .await;
 
         let resolver = SpotifyResolver::new();
         resolver.note_failure();
 
-        let ai = ai_client_pointed_at(&claude_mock.uri()).await;
+        let ai = ai_client_pointed_at(&ai_mock.uri()).await;
         let outcome = resolver.resolve(&ai, "Song", "Artist", "aaaaaaaaaaa").await;
         assert!(
             matches!(outcome, ResolveOutcome::Error(_)),
-            "in-backoff resolve must short-circuit with Error (no Claude call), got {outcome:?}"
+            "in-backoff resolve must short-circuit with Error (no text-AI call), got {outcome:?}"
         );
     }
 }

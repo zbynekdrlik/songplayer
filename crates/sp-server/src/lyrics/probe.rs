@@ -125,7 +125,7 @@ pub async fn probe_sources_impl(
                 available: true,
                 line_count: lines.len(),
                 note: format!(
-                    "Claude extracted {} lyric lines from description",
+                    "the text AI extracted {} lyric lines from description",
                     lines.len()
                 ),
             },
@@ -134,7 +134,7 @@ pub async fn probe_sources_impl(
                 provider_url: yt_video_url.clone(),
                 available: false,
                 line_count: 0,
-                note: "YouTube description has no lyrics (Claude-validated)".into(),
+                note: "YouTube description has no lyrics (checked by the text AI)".into(),
             },
             Err(e) => ProbeResult {
                 provider: "description".into(),
@@ -149,7 +149,7 @@ pub async fn probe_sources_impl(
             provider_url: yt_video_url.clone(),
             available: false,
             line_count: 0,
-            note: "skipped (no ai_client — cannot Claude-validate description)".into(),
+            note: "skipped (no ai_client — the text AI cannot check the description)".into(),
         },
     };
     probes.push(descr_result);

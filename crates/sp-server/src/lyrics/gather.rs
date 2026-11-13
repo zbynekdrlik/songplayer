@@ -29,8 +29,8 @@ pub(crate) fn lrclib_track_has_real_timing(t: &sp_core::lyrics::LyricsTrack) -> 
 /// without constructing a full `LyricsWorker`.
 ///
 /// mutants::skip: legacy LRCLIB guards + description match guard are
-/// exercised end-to-end by `gather_sources_pushes_description_candidate_when_claude_returns_lyrics`
-/// and `gather_sources_skips_description_when_claude_returns_empty_array` integration tests
+/// exercised end-to-end by `gather_sources_pushes_description_candidate_when_the_text_ai_returns_lyrics`
+/// and `gather_sources_skips_description_when_the_text_ai_returns_empty_array` integration tests
 /// (plus the structural call-order test further down); individual mutations in these
 /// I/O-bound branches cannot be killed by unit tests without a full mock harness for
 /// yt-dlp/LRCLIB, which is out of scope.
@@ -187,7 +187,7 @@ pub(crate) async fn gather_sources_impl(
             let Some(ai) = ai_client else {
                 anyhow::bail!(
                     "gather: lrclib-plain candidate present but ai_client is None for {youtube_id}; \
-                     cannot run Claude cleanup"
+                     cannot run the text-AI cleanup"
                 );
             };
             // _v3 (#144): the cleanup keeps every sung repeat; a v2 decision was
@@ -201,7 +201,7 @@ pub(crate) async fn gather_sources_impl(
                     %youtube_id,
                     raw_count = t.lines.len(),
                     cleaned_count = cleaned.lines.len(),
-                    "gather: lrclib-plain Claude cleanup complete"
+                    "gather: lrclib-plain text-AI cleanup complete"
                 );
                 candidate_texts.push(cleaned);
             }

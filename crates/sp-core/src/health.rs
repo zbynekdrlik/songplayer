@@ -201,7 +201,7 @@ pub fn paid_ai_label(
         return None;
     }
     let tip = if held.is_empty() {
-        format!("Tento uzol nevolá platené AI (Gemini, Claude) — {FROM_PEER}")
+        format!("Tento uzol nevolá platené AI (Gemini, OpenRouter) — {FROM_PEER}")
     } else {
         format!(
             "Čaká, kým sa platené AI zapne: {} ({FROM_PEER})",
@@ -541,7 +541,7 @@ mod tests {
         );
         assert_eq!(
             tip,
-            "Tento uzol nevolá platené AI (Gemini, Claude) — texty a metadáta berie medzitým \
+            "Tento uzol nevolá platené AI (Gemini, OpenRouter) — texty a metadáta berie medzitým \
              od susedného uzla"
         );
         let held: Vec<String> = ["dub", "lyrics", "metadata", "translation", "x"]

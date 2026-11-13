@@ -206,7 +206,7 @@ fn new_provenance_source_literals_are_recognizable() {
 /// stubs Claude via wiremock, and asserts the returned SongContext
 /// contains exactly one CandidateText with source == "description".
 #[tokio::test]
-async fn gather_sources_pushes_description_candidate_when_claude_returns_lyrics() {
+async fn gather_sources_pushes_description_candidate_when_the_text_ai_returns_lyrics() {
     use crate::db::models::VideoLyricsRow;
     use crate::lyrics::worker::gather_sources_impl;
 
@@ -296,7 +296,7 @@ async fn gather_sources_pushes_description_candidate_when_claude_returns_lyrics(
 /// empty-array description is skipped, and the zero-candidate result is a
 /// clean empty `SongContext`, not an error.
 #[tokio::test]
-async fn gather_sources_skips_description_when_claude_returns_empty_array() {
+async fn gather_sources_skips_description_when_the_text_ai_returns_empty_array() {
     use crate::db::models::VideoLyricsRow;
     use crate::lyrics::worker::gather_sources_impl;
 
@@ -687,8 +687,8 @@ fn gather_uses_lyrics_ovh_and_no_genius() {
         "gather.rs must clean lrclib-plain through text_candidate::cleaned_text_candidate"
     );
     assert!(
-        helper.contains("description_provider::clean_lyrics_via_claude"),
-        "text_candidate.rs must call description_provider::clean_lyrics_via_claude"
+        helper.contains("description_provider::clean_lyrics_via_ai"),
+        "text_candidate.rs must call description_provider::clean_lyrics_via_ai"
     );
     assert!(
         src.contains("_lrclib_cleaned_v3.json"),
@@ -720,7 +720,7 @@ fn gather_uses_lyrics_ovh_and_no_genius() {
     // Synced-lrclib arm: must branch via `if real_timing {`.
     assert!(
         src.contains("if real_timing {"),
-        "gather.rs lrclib branch must split via `if real_timing {{` so synced bypasses Claude cleanup"
+        "gather.rs lrclib branch must split via `if real_timing {{` so synced bypasses the text-AI cleanup"
     );
     // Synced-lrclib arm: must push a TIMED candidate inside the synced block
     // (`text_candidate::timed_candidate` sets `has_timing: true`, #144).

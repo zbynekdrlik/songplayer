@@ -62,8 +62,8 @@ async fn a_refusing_openrouter_falls_through_to_gemini_on_one_key_of_the_list() 
     assert!(!meta.gemini_failed);
     assert_eq!(received_keys(&google).await, ["k1", "k1"]);
     let health = chain.health();
-    let claude_error = health[0].last_error.as_deref().unwrap_or_default();
-    assert!(claude_error.contains("HTTP 400"), "{health:?}");
+    let openrouter_error = health[0].last_error.as_deref().unwrap_or_default();
+    assert!(openrouter_error.contains("HTTP 400"), "{health:?}");
     assert_eq!(health[0].last_ok_at_ms, None);
     assert!(health[1].last_ok_at_ms.is_some(), "{health:?}");
     assert_eq!(health[1].last_error, None);

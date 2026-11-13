@@ -365,7 +365,7 @@ impl TitleSearch<'_> {
             ));
         }
         let Some(ai) = self.ai else {
-            warn!(youtube_id = %row.youtube_id, "title search: no Claude client for the cleanup");
+            warn!(youtube_id = %row.youtube_id, "title search: no text-AI client for the cleanup");
             return None;
         };
         let cache_path = self

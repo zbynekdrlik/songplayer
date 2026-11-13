@@ -70,7 +70,7 @@ async fn a_scraped_text_is_cleaned_into_a_text_candidate() {
     let c = cleaned_text_candidate(&ai, "Jesus Be the Name", "", "lrclib", &t, &cache)
         .await
         .unwrap()
-        .expect("Claude returned lyric lines");
+        .expect("the text AI returned lyric lines");
     assert_eq!(c.source, "lrclib");
     assert_eq!(c.lines, vec!["You never fail", "You never will"]);
     assert!(!c.has_timing);
@@ -123,14 +123,14 @@ fn cleaned() -> CandidateText {
 }
 
 /// The error a cleanup refused by Claude's upstream content filter carries
-/// up to `gather`, as `AiClient::chat` and `clean_lyrics_via_claude` build it
+/// up to `gather`, as `AiClient::chat` and `clean_lyrics_via_ai` build it
 /// (SNV log 10.10.2026): the client's typed refusal, under the cleanup's
 /// context.
 fn content_filtered() -> anyhow::Error {
     anyhow::Error::new(crate::ai::retry::ContentFiltered {
         detail: "HTTP 502 Bad Gateway: Output blocked by content filtering policy".into(),
     })
-    .context("Claude clean_lyrics chat failed")
+    .context("clean_lyrics AI chat failed")
 }
 
 /// #144: a cleanup Claude's upstream content filter refuses leaves out THAT

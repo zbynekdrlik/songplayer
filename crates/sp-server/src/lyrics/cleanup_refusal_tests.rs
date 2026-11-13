@@ -4,7 +4,7 @@
 use super::*;
 use crate::ai::client::AiClient;
 use crate::ai::retry::content_filtered;
-use crate::lyrics::description_provider::{CleanupMode, clean_lyrics_via_claude};
+use crate::lyrics::description_provider::{CleanupMode, clean_lyrics_via_ai};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -32,7 +32,7 @@ async fn a_cleanups_answer_records_no_refusal() {
 
 /// The cleanup of `text` into `cache`, which must fail.
 async fn refused(client: &AiClient, cache: &std::path::Path, text: &str) -> anyhow::Error {
-    clean_lyrics_via_claude(client, "S", "A", text, cache, CleanupMode::ScrapedLyrics)
+    clean_lyrics_via_ai(client, "S", "A", text, cache, CleanupMode::ScrapedLyrics)
         .await
         .unwrap_err()
 }

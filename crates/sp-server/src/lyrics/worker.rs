@@ -681,7 +681,7 @@ impl LyricsWorker {
         )
         .await;
 
-        // EN→SK translation — Claude-only (per feedback_claude_only_translation.md).
+        // EN→SK translation — the text AI on OpenRouter (#321).
         // #152: gender picks masculine (default) / feminine Slovak first-person forms.
         let gender = self.resolve_gender(video_id).await;
         self.translate_track(&mut track, &youtube_id, gender).await;
@@ -791,14 +791,14 @@ impl LyricsWorker {
         // Claude-only by design (see `translate_track` doc comment). #152: the
         // song's gender picks masculine (default) / feminine Slovak forms.
         let gender = self.resolve_gender(video_id).await;
-        let result: Result<()> =
-            match translator::translate_via_claude(ai_client, &track, gender).await {
-                Ok(t) => {
-                    Self::apply_translations(&mut track, t);
-                    Ok(())
-                }
-                Err(e) => Err(e),
-            };
+        let result: Result<()> = match translator::translate_via_ai(ai_client, &track, gender).await
+        {
+            Ok(t) => {
+                Self::apply_translations(&mut track, t);
+                Ok(())
+            }
+            Err(e) => Err(e),
+        };
 
         match result {
             Ok(()) => {

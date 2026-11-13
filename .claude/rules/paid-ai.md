@@ -203,7 +203,7 @@ round 13).
   `a_dub_switched_off_after_its_pick_is_held_never_failed` (+ the guard
   `a_dub_with_no_key_is_deferred`).
 - `api/lyrics_g35t.rs::probe_route_sends_nothing_while_paid_ai_is_off`,
-  `api/lyrics_tests.rs::probe_sources_asks_no_claude_while_paid_ai_is_off`.
+  `api/lyrics_tests.rs::probe_sources_asks_no_text_ai_while_paid_ai_is_off`.
 - The log captures go through `crate::test_log` (one `Captured` writer +
   `capturing(&cap)`, test-only). `capturing` installs a global no-op
   default once, so a capture is never the only registered dispatcher

@@ -1,4 +1,4 @@
-//! #250: the register check — ONE Claude call per track, made while the track
+//! #250: the register check — ONE text-AI call per track, made while the track
 //! is processed (right after its translation, before it is persisted), never
 //! at display. Owner, 11.10.2026: the songs are Christian worship songs, and a
 //! transcript that misheard "I will dwell in the house of the Lord" as "I
@@ -253,11 +253,11 @@ pub fn unreadable(error: &anyhow::Error) -> bool {
     error.chain().any(|cause| cause.is::<UnreadableAnswer>())
 }
 
-/// Ask Claude and apply its answer to `track`. A refusal (in its answer, or
-/// Claude's upstream content filter) is a [`RegisterVerdict::Refused`] check;
+/// Ask the text AI and apply its answer to `track`. A refusal (in its answer, or
+/// the text AI's upstream content filter) is a [`RegisterVerdict::Refused`] check;
 /// any other failure is an error and the track is left as it was.
 #[cfg_attr(test, mutants::skip)] // HTTP glue; its parts are tested
-pub async fn check_via_claude(
+pub async fn check_via_ai(
     ai_client: &crate::ai::client::AiClient,
     track: &mut LyricsTrack,
 ) -> Result<RegisterCheck> {

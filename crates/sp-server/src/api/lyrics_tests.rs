@@ -610,7 +610,7 @@ async fn the_one_reprocess_path_keeps_the_served_lyrics_and_sets_manual_priority
 /// probe is skipped, no Claude call (empty song and artist keep the other
 /// probes off the network).
 #[tokio::test]
-async fn probe_sources_asks_no_claude_while_paid_ai_is_off() {
+async fn probe_sources_asks_no_text_ai_while_paid_ai_is_off() {
     use axum::body::Body;
     use axum::http::Request;
     use tower::ServiceExt;

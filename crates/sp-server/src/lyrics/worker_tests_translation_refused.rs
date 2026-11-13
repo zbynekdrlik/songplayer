@@ -35,7 +35,7 @@ fn untranslated(en: &str) -> LyricsTrack {
 /// A Claude that refuses (content filter, or `refusal_status` with no
 /// filter body) every request naming "refused line", and translates the
 /// rest.
-async fn claude(refusal_status: u16, refusal_body: &'static str) -> MockServer {
+async fn text_ai(refusal_status: u16, refusal_body: &'static str) -> MockServer {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
@@ -98,7 +98,7 @@ fn sk(dir: &tempfile::TempDir, yt: &str) -> Option<String> {
 
 #[tokio::test]
 async fn a_refused_translation_is_final_and_the_next_song_goes_on() {
-    let server = claude(403, FILTER_BODY).await;
+    let server = text_ai(403, FILTER_BODY).await;
     let (worker, dir, _) = two_songs(&server).await;
     worker.retry_missing_translations().await;
     worker.retry_missing_translations().await;
@@ -117,7 +117,7 @@ async fn a_refused_translation_is_final_and_the_next_song_goes_on() {
 
 #[tokio::test]
 async fn an_outage_still_backs_off_and_is_asked_again_later() {
-    let server = claude(500, "upstream down").await;
+    let server = text_ai(500, "upstream down").await;
     let (worker, dir, _) = two_songs(&server).await;
     worker.retry_missing_translations().await;
     worker.retry_missing_translations().await;
@@ -129,7 +129,7 @@ async fn an_outage_still_backs_off_and_is_asked_again_later() {
 
 #[tokio::test]
 async fn a_refused_stale_translation_is_stamped_forward() {
-    let server = claude(403, FILTER_BODY).await;
+    let server = text_ai(403, FILTER_BODY).await;
     let (worker, _dir, refused) = two_songs(&server).await;
     worker.retranslate_next_stale().await;
     let version: i64 =

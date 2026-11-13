@@ -5,7 +5,7 @@
 //! A TIMED source (LRCLIB synced lyrics, YouTube captions) is used as is. A
 //! plain scraped text (LRCLIB plain lyrics) first goes through the Claude cleanup that drops ad-libs and
 //! hype intros and keeps every sung repeat
-//! (`description_provider::clean_lyrics_via_claude`, `ScrapedLyrics` mode).
+//! (`description_provider::clean_lyrics_via_ai`, `ScrapedLyrics` mode).
 
 use std::path::Path;
 
@@ -40,7 +40,7 @@ pub(crate) async fn cleaned_text_candidate(
         .map(|l| l.en.as_str())
         .collect::<Vec<_>>()
         .join("\n");
-    let cleaned = crate::lyrics::description_provider::clean_lyrics_via_claude(
+    let cleaned = crate::lyrics::description_provider::clean_lyrics_via_ai(
         ai,
         song,
         artist,
@@ -78,7 +78,7 @@ pub(crate) fn cleanup_candidate(
             tracing::warn!(
                 youtube_id,
                 what,
-                "gather: Claude's content filter refused the cleanup — this candidate is left out, the pass goes on"
+                "gather: the text AI's content filter refused the cleanup — this candidate is left out, the pass goes on"
             );
             Ok(None)
         }

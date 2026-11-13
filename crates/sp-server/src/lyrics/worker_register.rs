@@ -56,7 +56,7 @@ fn log_check(youtube_id: &str, check: &RegisterCheck) {
         ),
         RegisterVerdict::Refused => warn!(
             youtube_id,
-            "register check: Claude refused the check - the track is kept as it is"
+            "register check: the text AI refused the check - the track is kept as it is"
         ),
     }
 }
@@ -78,7 +78,7 @@ impl LyricsWorker {
         if !self.translation_allowed(youtube_id).await {
             return CheckOutcome::NotAsked;
         }
-        match register_check::check_via_claude(ai_client, track).await {
+        match register_check::check_via_ai(ai_client, track).await {
             Ok(check) => {
                 log_check(youtube_id, &check);
                 track.register = Some(check);

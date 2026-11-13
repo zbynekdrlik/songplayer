@@ -390,7 +390,7 @@ pub fn peer_serve_max_mbps(raw: Option<&str>) -> u32 {
 }
 
 /// #229 item C (the owner's ruling, 8.10.2026): whether this node may call
-/// paid AI (Gemini, Claude) — the ONE switch sp-server's `paid_ai` gates
+/// paid AI (Gemini, the text AI on OpenRouter) — the ONE switch sp-server's `paid_ai` gates
 /// every such call on. Not a secret.
 pub const SETTING_PAID_AI_ENABLED: &str = "paid_ai_enabled";
 

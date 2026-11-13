@@ -113,7 +113,7 @@ fn a_content_filter_refusal_is_found_by_type_in_an_errors_causes() {
     let refused = anyhow::Error::new(ContentFiltered {
         detail: "HTTP 502: Output blocked by content filtering policy".into(),
     })
-    .context("Claude clean_lyrics chat failed");
+    .context("clean_lyrics AI chat failed");
     assert!(content_filtered(&refused));
     assert!(
         refused
@@ -121,9 +121,9 @@ fn a_content_filter_refusal_is_found_by_type_in_an_errors_causes() {
             .any(|c| c.to_string().contains("upstream content filter"))
     );
     let outage = anyhow::anyhow!("chat completion failed (HTTP 503): auth_unavailable")
-        .context("Claude clean_lyrics chat failed");
+        .context("clean_lyrics AI chat failed");
     assert!(!content_filtered(&outage));
     let quoting = anyhow::anyhow!("malformed answer: Output blocked by content filtering policy")
-        .context("Claude response malformed");
+        .context("AI response malformed");
     assert!(!content_filtered(&quoting));
 }
