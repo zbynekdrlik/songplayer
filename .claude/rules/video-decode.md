@@ -1820,3 +1820,13 @@ transform". Before blaming the reader, check `Get-AppxPackage -AllUsers` for
 1.2.20.0 and AV1 2.0.35.0. `win-resolume-ops` "PP site" has the winget
 install.
 
+
+## Never toggle `video_hw_decode` for an A/B on resolume-snv (#317, 13.11.2026)
+
+Software decode (`video_hw_decode` = false) tripled SP-program's NDI submit
+time for as long as it ran (20–29 ms max per 15 s bucket vs 6.8–7.6 ms on the
+D3D11 path), and the one Dante pump loss of 12–13.11 (`out-4`, `missed=5`)
+came 22 s after a software-decoded open. The cause is not separated (a
+Dante-network change elsewhere ran the same night), but the audio risk is
+real, so this setting is no A/B lever on SNV. Separate the steps of a song
+change another way (timestamps, or moving the title text-set in time).
