@@ -576,6 +576,18 @@ picture, so deploys went green over a juddering wall. Design: #272 comment
   exits 5 ("not in whole 60 Hz refreshes"). After such a boot press TELKY on,
   wait for wall-bridge's acquire (~1 min), then the gate measures; TELKY off
   afterwards is fine.
+- **"nothing captured" on BOTH clips while `SP-program-MAX` reads clean =
+  Arena keeps its Spout mutex ABANDONED** (#318, 13.11.2026): a reader
+  killed while it held `Arena - Screen 2_SpoutAccessMutex` (wall-bridge's
+  engine, `Stop-Process -Force`) leaves it to an Arena thread that never
+  releases it (Spout 2.007.017), and SpoutGL waits it out on every poll.
+  wall-bridge ≥ 0.2.16 reads past it (`lock_bypassed` > 0 in its windows),
+  so the wall stays up while the gate is blind. Freed by ONE Arena relaunch
+  while wall-bridge runs (its 0 ms probes take the abandoned mutex and
+  release it before the new sender opens; `lock_bypassed` 0 after), then the
+  look back through Companion's scene (the reload connects no clip,
+  `reference_companion_snv`). Any A/B that restarts a Spout reader stops it
+  gracefully (wall-bridge ≥ 0.2.17: `POST 127.0.0.1:8930/api/stop`).
 - **What it does not see.** The bridge, Surround and the LED processor: a
   clean take says nothing about the screens. A clean take covers only its
   40 s, and the judder comes in waves. `--dxcam` stays for a wall on the
