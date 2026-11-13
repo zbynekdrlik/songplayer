@@ -107,11 +107,15 @@ impl DanteParams {
     /// state file, and the channels carry DVS's names: a receiver subscribed
     /// to `01@resolume-snv` needs no change.
     pub fn config(&self) -> Config {
-        Config::new(self.device.clone(), self.dir.join("state.toml"))
+        let config = Config::new(self.device.clone(), self.dir.join("state.toml"))
             .tx(["01", "02"])
             .sample_rate(self.rate)
             .network_rate(self.network_rate)
-            .product("New Level", "SongPlayer")
+            .product("New Level", "SongPlayer");
+        match self.ports {
+            Some((ports, id)) => config.ports(ports).process_id(id),
+            None => config,
+        }
     }
 }
 
