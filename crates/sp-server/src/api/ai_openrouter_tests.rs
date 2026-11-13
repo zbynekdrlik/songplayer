@@ -81,6 +81,26 @@ async fn the_probe_answers_with_the_default_model() {
     assert_eq!(body["max_tokens"], 1000);
 }
 
+/// The body is optional: a bare POST (no body, no content type) probes
+/// the default model and answers 200, as the route's doc says.
+#[tokio::test]
+async fn a_bare_post_probes_the_default_model() {
+    let (state, server) = routed_state().await;
+    set_setting(&state.pool, "openrouter_api_key", KEY)
+        .await
+        .unwrap();
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/ai/openrouter/probe")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app(state).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let sent = &server.received_requests().await.unwrap()[0];
+    let body: Value = serde_json::from_slice(&sent.body).unwrap();
+    assert_eq!(body["model"], "google/gemini-4-hydrogen");
+}
+
 #[tokio::test]
 async fn the_probe_sends_the_model_asked_for() {
     let (state, server) = routed_state().await;

@@ -15,8 +15,10 @@ use crate::ai::translate_ab::{self, AbRequest};
 /// always 200 with the report (`ok: false` + why when it failed).
 pub async fn probe(
     State(state): State<AppState>,
-    Json(body): Json<ProbeRequest>,
+    body: Option<Json<ProbeRequest>>,
 ) -> impl IntoResponse {
+    // The body is optional (`{"model"?}`): none = the default model.
+    let body = body.map(|Json(b)| b).unwrap_or_default();
     let report = run_probe(&state.ai_client, body.model.as_deref()).await;
     if report.ok {
         info!(model = %report.model, latency_ms = report.latency_ms, "openrouter probe: answered");
@@ -49,7 +51,14 @@ pub async fn ab_start(
     if !translate_ab::begin(ids.len()) {
         return (StatusCode::CONFLICT, "an A/B run is running").into_response();
     }
-    let seed = crate::peer::wire::now_ms() as u64;
+    // Paid calls on a route anyone on the LAN can reach: the models asked
+    // for are logged (each call is bounded, `translate_ab::CALL_MAX_TOKENS`).
+    let models: Vec<String> = candidates
+        .iter()
+        .map(|c| format!("{}:{}", c.provider, c.model))
+        .collect();
+    info!(songs = ids.len(), models = ?models, "translate A/B: started");
+    let seed = translate_ab::random_seed();
     tokio::spawn(run_in_background(state, ids, candidates, seed));
     (StatusCode::ACCEPTED, Json(translate_ab::status())).into_response()
 }
@@ -62,6 +71,8 @@ async fn run_in_background(
     candidates: Vec<translate_ab::Candidate>,
     seed: u64,
 ) {
+    // A panic or a drop of this task leaves the slot `failed`, never `running`.
+    let _guard = translate_ab::RunGuard;
     let progress = |done: usize| translate_ab::update(|s| s.songs_done = done);
     let outcome = translate_ab::run(
         &state.ai_client,

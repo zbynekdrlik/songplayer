@@ -94,9 +94,9 @@ impl AiClient {
         }
     }
 
-    /// The provider and model `task` goes to now, for a log line.
-    pub async fn route_label(&self, task: AiTask) -> String {
-        match self.route(task).await {
+    /// The provider and model of `route`, for a log line.
+    pub fn route_label(&self, route: &Route) -> String {
+        match route {
             Route::Proxy => format!("claude_proxy:{}", self.settings.model),
             Route::OpenRouter { model } => format!("openrouter:{model}"),
         }
@@ -111,10 +111,25 @@ impl AiClient {
         user: &str,
         timeout_secs: u64,
     ) -> Result<String> {
-        match self.route(task).await {
+        let route = self.route(task).await;
+        self.chat_on(task, &route, system, user, timeout_secs).await
+    }
+
+    /// `task`'s chat completion on a route the caller read once
+    /// ([`Self::route`]), so a log line after the call names the route the
+    /// call took even when the setting changed meanwhile.
+    pub async fn chat_on(
+        &self,
+        task: AiTask,
+        route: &Route,
+        system: &str,
+        user: &str,
+        timeout_secs: u64,
+    ) -> Result<String> {
+        match route {
             Route::Proxy => self.chat_with_timeout(system, user, timeout_secs).await,
             Route::OpenRouter { model } => self
-                .openrouter_chat(&model, system, user, timeout_secs, MAX_TOKENS)
+                .openrouter_chat(model, system, user, timeout_secs, MAX_TOKENS)
                 .await
                 .map(|c| c.text)
                 .with_context(|| format!("{} via OpenRouter ({model})", task.as_str())),

@@ -184,16 +184,30 @@ refresh being refused, not the 60 s cooldown the step waits out.
   answer decoded into typed structs (never `serde_json::Value`'s own
   Deserialize), 429 / 5xx through the same `RetryPolicy` as the proxy, an
   error naming the status + `redacted_excerpt` (the key cut out BEFORE the
-  300-char cut). The proxy's content-filter cooldown logic does not apply.
+  300-char cut). The proxy's content-filter cooldown logic does not apply,
+  but OpenRouter's moderation refusal (a 403 naming `reasons` /
+  `flagged_input` / moderation, `is_moderation_refusal`) is typed
+  `ContentFiltered`, so every call site's `retry::content_filtered` treats
+  it as final on either route.
+- A log line about a call names the route the call TOOK: read it once
+  (`route(task)`), send with `chat_on(task, &route, …)`, label with
+  `route_label(&route)` (the translator's refusal log).
 - The live gate is `POST /api/v1/ai/openrouter/probe {"model"?}` (always
   200, `ok:false` + why) and `e2e/post-deploy-openrouter.spec.ts` on SNV
   (decision `e2e/openrouter-gate.ts`); PP's subset does not run it.
 - The blind translation A/B (the flip's evidence, the owner's ruling on
   #232): `POST /api/v1/ai/translate-ab {"youtube_ids", "candidates"?}`
   (409 while paid AI is off or a run holds it; a `claude_proxy` candidate
-  must name the proxy's own `ai_model`), `GET` = the state; it writes
-  `<cache>/ab/translate-<ms>/blind.md` (letters only) and `key.json`
-  (letter → provider/model) apart — open the key only after grading.
+  must name the proxy's own `ai_model`), `GET` = the state. Every song is
+  read (lyrics file, row, ≥ 1 line) BEFORE the first paid call — a bad id
+  fails the run naming every such id, nothing spent. It writes
+  `<cache>/ab/translate-<ms>/blind.md` (letters shuffled afresh PER SONG
+  from an OS-random seed, never the clock; a failed call is a neutral
+  `(chyba)` — an error text names its provider) and `key.json` (per song,
+  letter → provider/model + the call's error) apart — open the key only
+  after grading. An OpenRouter call writes ≤ `CALL_MAX_TOKENS` (8 000);
+  the run logs its models at start; a `RunGuard` frees the slot if the
+  task dies (a panic would leave it `running` until a restart).
 - Nastavenia "Textové AI (OpenRouter)" (`ai_task_settings.rs`) sends each
   task setting only when changed against the loaded value
   (`form_values` / `settings_to_send`); mock spec `settings-ai-tasks.spec.ts`.

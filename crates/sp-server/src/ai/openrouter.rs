@@ -20,7 +20,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
-use super::retry::{RetryPolicy, body_excerpt, is_retried};
+use super::retry::{ContentFiltered, RetryPolicy, body_excerpt, is_retried};
 
 /// One completion's answer: its text and the model OpenRouter names (it may
 /// name the exact version it routed to).
@@ -132,6 +132,19 @@ pub fn redacted_excerpt(body: &str, key: &str) -> String {
     body_excerpt(&body).replace('\n', " ")
 }
 
+/// Whether a refused call is OpenRouter's moderation refusal: a 403 whose
+/// error carries the moderation's `reasons` / `flagged_input` (OpenRouter's
+/// documented moderation error) or names moderation. It is typed
+/// [`ContentFiltered`] like the proxy's content filter, so a caller treats
+/// it as final (`retry::content_filtered`) whichever way the task goes.
+pub fn is_moderation_refusal(status: u16, body: &str) -> bool {
+    if status != 403 {
+        return false;
+    }
+    let lower = body.to_ascii_lowercase();
+    lower.contains("\"reasons\"") || lower.contains("flagged_input") || lower.contains("moderation")
+}
+
 /// The OpenRouter client: an API root and the waits of a refused call.
 pub struct OpenRouterClient {
     http: reqwest::Client,
@@ -187,6 +200,12 @@ impl OpenRouterClient {
                 return read_answer(&text);
             }
             let excerpt = redacted_excerpt(&text, ask.key);
+            if is_moderation_refusal(status.as_u16(), &text) {
+                warn!(status = %status, body = %excerpt, model = ask.model, "openrouter: refused by moderation");
+                return Err(anyhow::Error::new(ContentFiltered {
+                    detail: format!("OpenRouter HTTP {status}: {excerpt}"),
+                }));
+            }
             match delay {
                 Some(delay) if is_retried(status.as_u16()) => {
                     warn!(

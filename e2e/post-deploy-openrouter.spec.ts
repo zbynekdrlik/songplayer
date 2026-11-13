@@ -25,11 +25,14 @@ import { OpenRouterProbe, openRouterGateFailures } from "./openrouter-gate";
 test.describe("OpenRouter live gate (#321)", () => {
   test("the box's OpenRouter path answers with the default model", async ({ request }) => {
     // The probe bounds one request at 60 s (`openrouter_probe::PROBE_TIMEOUT_S`)
-    // and retries a 429 / 5xx after the policy's waits (5 / 20 / 60 s).
-    test.setTimeout(380_000);
+    // and retries a 429 / 5xx after the policy's waits: its `Retry-After` up
+    // to 120 s, else 5 / 20 / 60 s. Worst case 4 × 60 s + 3 × 120 s = 600 s,
+    // so a slow refusal fails with the probe's own named error, never as a
+    // Playwright timeout.
+    test.setTimeout(700_000);
     const resp = await request.post("/api/v1/ai/openrouter/probe", {
       data: {},
-      timeout: 360_000, // 4 attempts × 60 s + 85 s of waits = 325 s worst case
+      timeout: 660_000,
     });
     expect(resp.status(), "POST /api/v1/ai/openrouter/probe").toBe(200);
     const probe = (await resp.json()) as OpenRouterProbe;

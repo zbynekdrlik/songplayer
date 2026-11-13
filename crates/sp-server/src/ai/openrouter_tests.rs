@@ -145,6 +145,42 @@ async fn a_refused_key_fails_at_once_and_never_names_the_key() {
     assert!(!err.contains(KEY), "{err}");
 }
 
+/// OpenRouter's moderation refusal is typed as a content-filter refusal
+/// (final, never retried), the key cut out; any other 403 is not.
+#[tokio::test]
+async fn a_moderation_refusal_is_a_content_filter_refusal() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(403).set_body_string(format!(
+            "{{\"error\":{{\"code\":403,\"message\":\"flagged {KEY}\",\"metadata\":{{\"reasons\":[\"x\"],\"flagged_input\":\"q\"}}}}}}"
+        )))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let err = client(&server).complete(&ask("", "q")).await.unwrap_err();
+    assert!(crate::ai::retry::content_filtered(&err));
+    let text = format!("{err:#}");
+    assert!(!text.contains(KEY));
+    assert!(text.contains("HTTP 403"), "{text}");
+
+    assert!(super::is_moderation_refusal(
+        403,
+        r#"{"error":{"message":"Moderation"}}"#
+    ));
+    assert!(super::is_moderation_refusal(
+        403,
+        r#"{"metadata":{"flagged_input":"q"}}"#
+    ));
+    assert!(!super::is_moderation_refusal(
+        403,
+        r#"{"error":{"message":"forbidden"}}"#
+    ));
+    assert!(!super::is_moderation_refusal(
+        400,
+        r#"{"metadata":{"reasons":[]}}"#
+    ));
+}
+
 /// A 200 whose choice has no text is an error, never an empty translation.
 #[tokio::test]
 async fn an_answer_with_no_text_is_an_error() {

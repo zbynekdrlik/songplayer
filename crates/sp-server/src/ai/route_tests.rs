@@ -104,7 +104,10 @@ async fn with_nothing_set_every_task_goes_to_the_proxy() {
             client.chat_for(task, "", "q", 10).await.unwrap(),
             "from the proxy"
         );
-        assert_eq!(client.route_label(task).await, "claude_proxy:claude-test");
+        assert_eq!(
+            client.route_label(&client.route(task).await),
+            "claude_proxy:claude-test"
+        );
     }
     assert_eq!(proxy.received_requests().await.unwrap().len(), 6);
     assert!(openrouter.received_requests().await.unwrap().is_empty());
@@ -133,7 +136,7 @@ async fn a_switched_task_goes_to_openrouter_with_its_model_read_live() {
         "from openrouter"
     );
     assert_eq!(
-        client.route_label(AiTask::Translate).await,
+        client.route_label(&client.route(AiTask::Translate).await),
         "openrouter:google/gemini-4-carbon"
     );
     assert_eq!(
