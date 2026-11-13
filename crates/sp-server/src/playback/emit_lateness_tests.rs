@@ -62,3 +62,14 @@ fn the_report_round_trips_through_its_json() {
     let back: EmitLateHist = serde_json::from_value(json).unwrap();
     assert_eq!(back, h.report());
 }
+
+/// Before its first emit a pacer reports the default `PacingStats` (a
+/// disabled pacer's stats ARE the default): the histogram is empty until
+/// an emit is counted, then carries every edge.
+#[test]
+fn a_histogram_with_no_emit_reports_nothing() {
+    let mut h = EmitLateness::default();
+    assert_eq!(h.report(), EmitLateHist::default());
+    h.push(0);
+    assert_eq!(h.report().edges_us.len(), EDGES_US.len());
+}
