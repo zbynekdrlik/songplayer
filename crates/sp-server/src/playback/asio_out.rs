@@ -51,6 +51,7 @@ use tracing::{debug, info, warn};
 
 use crate::playback::asio_format::AsioSample;
 use crate::playback::asio_loop::{LoopFeed, LoopLink, LoopTaps, StartLoop, spawn_loop_thread};
+use crate::playback::asio_state::device_latency_ms as device_ms;
 use crate::playback::asio_state::{
     ClockStep, DeviceEvents, POLL_100NS, RateWatch, Reason, StallWatch, admit_rate,
     asio_latency_ms, backoff_100ns, buffer_note, clock_step, close_reason, failures_after_close,
@@ -649,6 +650,7 @@ impl AsioWorker {
                     l.status.out_channels = o.out_channels;
                     l.status.sample_type = o.sample.name();
                     l.status.retry_in_s = None;
+                    l.status.device_latency_ms = Some(device_ms(run.driver_latency_frames, o.rate));
                 });
                 self.state = State::Running(Box::new(run));
                 self.run_loop(out, feed);
@@ -906,6 +908,7 @@ fn publish(
         l.status.rate_ppm = servo.rate_ppm;
         l.status.locked = servo.locked;
         l.status.latency_ms = latency;
+        l.status.device_latency_ms = Some(device_ms(run.driver_latency_frames, run.opened.rate));
         l.status.offset_ms = servo.offset_ms;
         l.status.slew_eta_s = servo.slew_eta_s;
         l.status.cushion_ms = servo.cushion_ms;

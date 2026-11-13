@@ -300,9 +300,15 @@ async fn an_asio_entry_off_windows_waits_and_says_why() {
         "fast_callbacks",
         "last_late_callback",
         "loop",
+        "device_latency_ms",
     ] {
         assert!(a.get(key).is_some(), "asio.{key}");
     }
+    // #289 step 0: never opened (off Windows): no device latency yet.
+    assert_eq!(
+        (&o["device_latency_ms"], &a["device_latency_ms"]),
+        (&serde_json::Value::Null, &serde_json::Value::Null)
+    );
     // #233 (the SoundGrid loop check): off for an entry that does not ask.
     assert_eq!(a["loop"]["state"], "off");
     assert_eq!(a["loop"]["recent"], serde_json::json!([]));

@@ -113,6 +113,11 @@ pub struct OutputStatus {
     pub channels: u32,
     pub delay_ms: u32,
     pub latency_ms: f64,
+    /// #289 step 0: the output device's own latency, ms, after SongPlayer
+    /// hands it a block (ASIO / Dante: `asio.device_latency_ms`); `None` for
+    /// VBAN, whose receiver's buffer SongPlayer cannot read, and before an
+    /// ASIO / Dante device's first open.
+    pub device_latency_ms: Option<f64>,
     pub blocks_sent: u64,
     pub blocks_dropped: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -256,6 +261,7 @@ impl RunningOutput {
                 self.built_rate,
                 out.is_some_and(|out| out.low_latency()),
             ),
+            device_latency_ms: None,
             blocks_sent: telemetry.as_ref().map_or(0, |s| s.blocks_sent),
             blocks_dropped: telemetry.as_ref().map_or(0, |s| s.blocks_dropped),
             vban: telemetry,
@@ -303,6 +309,7 @@ impl RunningOutput {
             channels: 2,
             delay_ms: e.delay_ms,
             latency_ms: status.as_ref().map_or(0.0, |s| s.latency_ms),
+            device_latency_ms: status.as_ref().and_then(|s| s.device_latency_ms),
             blocks_sent: snap.as_ref().map_or(0, |s| s.blocks_sent),
             blocks_dropped: snap.as_ref().map_or(0, |s| s.blocks_dropped),
             vban: None,

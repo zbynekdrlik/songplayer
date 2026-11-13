@@ -55,6 +55,7 @@ fn full() -> AsioSnapshot {
             rate_ppm: 3.25,
             locked: true,
             latency_ms: 71.125,
+            device_latency_ms: Some(1.3333),
             offset_ms: -2.5,
             slew_eta_s: Some(45.5),
             cushion_ms: 13.25,
@@ -256,4 +257,22 @@ fn the_loop_check_crosses_the_pipe() {
     assert!(!text.contains("loop_status"), "{text}");
     let back: WireSnapshot = serde_json::from_str(&text).unwrap();
     assert_eq!(back.status.loop_status, LoopStatus::default());
+}
+
+/// #289 step 0: the device's own latency crosses the pipe, a non-finite one
+/// as 0, and a host that predates it (no field) reads none.
+#[test]
+fn the_device_latency_crosses_the_pipe() {
+    assert_eq!(through_json(&full()).status.device_latency_ms, Some(1.3333));
+    let mut s = full();
+    s.status.device_latency_ms = Some(f64::INFINITY);
+    assert_eq!(through_json(&s).status.device_latency_ms, Some(0.0));
+    s.status.device_latency_ms = None;
+    assert_eq!(through_json(&s).status.device_latency_ms, None);
+    let text = serde_json::to_string(&WireSnapshot::of(&full(), None))
+        .unwrap()
+        .replace(",\"device_latency_ms\":1.3333", "");
+    assert!(!text.contains("device_latency_ms"), "{text}");
+    let back: WireSnapshot = serde_json::from_str(&text).unwrap();
+    assert_eq!(back.status.device_latency_ms, None);
 }

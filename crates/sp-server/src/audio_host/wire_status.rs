@@ -52,6 +52,9 @@ pub struct WireStatus {
     pub rate_ppm: f64,
     pub locked: bool,
     pub latency_ms: f64,
+    /// #289 step 0; none from a host that predates it.
+    #[serde(default)]
+    pub device_latency_ms: Option<f64>,
     pub offset_ms: f64,
     pub slew_eta_s: Option<f64>,
     pub cushion_ms: f64,
@@ -184,6 +187,7 @@ impl WireSnapshot {
                 rate_ppm: finite(t.rate_ppm),
                 locked: t.locked,
                 latency_ms: finite(t.latency_ms),
+                device_latency_ms: t.device_latency_ms.map(finite),
                 offset_ms: finite(t.offset_ms),
                 slew_eta_s: t.slew_eta_s.map(finite),
                 cushion_ms: finite(t.cushion_ms),
@@ -236,6 +240,7 @@ impl WireSnapshot {
                 rate_ppm: t.rate_ppm,
                 locked: t.locked,
                 latency_ms: t.latency_ms,
+                device_latency_ms: t.device_latency_ms,
                 offset_ms: t.offset_ms,
                 slew_eta_s: t.slew_eta_s,
                 cushion_ms: t.cushion_ms,

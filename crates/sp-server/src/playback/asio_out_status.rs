@@ -26,6 +26,10 @@ pub struct AsioStatus {
     /// The output's latency from the boundary, ms (`asio_latency_ms`; 0
     /// until the servo measured its first window, and while waiting).
     pub latency_ms: f64,
+    /// #289 step 0: the device's own output latency, ms (`device_latency_ms`:
+    /// the driver's, or dlink's TX path), from its last open and re-read on
+    /// `kAsioLatenciesChanged`; `None` before the first open.
+    pub device_latency_ms: Option<f64>,
     /// The servo's last window: the offset the resampler's ratio drains,
     /// ms — the latency outside [target, target + cushion] (positive =
     /// later; 0 inside it and while waiting).
