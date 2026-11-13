@@ -34,8 +34,12 @@ impl EmitLateness {
         self.counts[bucket(late_us)] += 1;
     }
 
-    /// The histogram as the API serves it.
+    /// The histogram as the API serves it; empty (the default) before the
+    /// first emit, so a pacer that never emitted reports the default stats.
     pub fn report(&self) -> EmitLateHist {
+        if self.counts == [0; EDGES_US.len()] {
+            return EmitLateHist::default();
+        }
         EmitLateHist {
             edges_us: EDGES_US.to_vec(),
             counts: self.counts.to_vec(),
@@ -45,8 +49,8 @@ impl EmitLateness {
 
 /// `pacing.emit_late_hist` on `GET /api/v1/ndi/health`: `counts[i]` emits
 /// were `edges_us[i]` µs or more, and under `edges_us[i + 1]` µs, late
-/// (the last bucket has no upper edge). Both empty before the first
-/// heartbeat.
+/// (the last bucket has no upper edge). Both empty until the pipeline's
+/// first emit.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EmitLateHist {
     pub edges_us: Vec<u64>,
