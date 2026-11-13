@@ -182,18 +182,24 @@ export interface FirewallStatus {
   domain?: boolean | null;
   private?: boolean | null;
   public?: boolean | null;
-  /** #255: "off" | "dstack155" | "other" (null: a profile not read). */
+  /** #255: "off" | "dstack155" | "dante_leg" (#322) | "other" (null: a
+   * profile not read). */
   mode?: string | null;
   defaults?: (FirewallDefaults | null)[];
   dstack_group_rules?: number | null;
+  /** #322: the rules of the group "dstack Dante leg" (null: not read or an
+   * older server). */
+  dante_leg_group_rules?: number | null;
   block_rules_outside_group?: string[] | null;
 }
 
 /** #255 (dstack#155, the owner's ruling of 10.11.2026): the firewall is in
- * one of two states. "off": every profile off (a PC with no Dante leg).
- * "dstack155": dstack's two-network standard, every profile on, each default
- * action Allow (2), every enabled Block rule in the group dstack155, which
- * holds exactly 14. Each fact by name, whatever the mode says. */
+ * one of three states. "off": every profile off (a PC with no Dante leg).
+ * "dstack155": dstack's per-box two-network standard, every profile on, each
+ * default action Allow (2), every enabled Block rule in the group dstack155,
+ * which holds exactly 14. "dante_leg" (#322, dstack#264): the same with
+ * dstack's generic group "dstack Dante leg", exactly 10. The other group must
+ * hold none. Each fact by name, whatever the mode says. */
 function firewallFailures(fw: FirewallStatus | undefined, shown: (v: unknown) => string): string[] {
   const f: string[] = [];
   const mode = fw?.mode ?? null;
@@ -202,7 +208,7 @@ function firewallFailures(fw: FirewallStatus | undefined, shown: (v: unknown) =>
     for (const p of profiles) {
       if (fw?.[p] !== false) f.push(`firewall.${p} is ${shown(fw?.[p])}, not false`);
     }
-  } else if (mode === "dstack155") {
+  } else if (mode === "dstack155" || mode === "dante_leg") {
     profiles.forEach((p, i) => {
       if (fw?.[p] !== true) f.push(`firewall.${p} is ${shown(fw?.[p])}, not true`);
       const d = fw?.defaults?.[i];
@@ -210,15 +216,19 @@ function firewallFailures(fw: FirewallStatus | undefined, shown: (v: unknown) =>
         f.push(`firewall.defaults.${p} is ${shown(d)}, not {"inbound":2,"outbound":2}`);
       }
     });
-    if (fw?.dstack_group_rules !== 14) {
-      f.push(`firewall.dstack_group_rules is ${shown(fw?.dstack_group_rules)}, not 14`);
+    const [dstack155, danteLeg] = mode === "dstack155" ? [14, 0] : [0, 10];
+    if (fw?.dstack_group_rules !== dstack155) {
+      f.push(`firewall.dstack_group_rules is ${shown(fw?.dstack_group_rules)}, not ${dstack155}`);
+    }
+    if (fw?.dante_leg_group_rules !== danteLeg) {
+      f.push(`firewall.dante_leg_group_rules is ${shown(fw?.dante_leg_group_rules)}, not ${danteLeg}`);
     }
     const outside = fw?.block_rules_outside_group;
     if (!Array.isArray(outside) || outside.length > 0) {
       f.push(`firewall.block_rules_outside_group is ${shown(outside)}, not []`);
     }
   } else {
-    f.push(`firewall.mode is ${shown(mode)}, not "off" or "dstack155"`);
+    f.push(`firewall.mode is ${shown(mode)}, not "off", "dstack155" or "dante_leg"`);
   }
   return f;
 }

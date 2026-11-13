@@ -73,20 +73,35 @@ fn the_block_rules_are_counted_by_group_and_the_rest_named() {
                 Some("dstack155"),
                 Some("dstack155"),
             ),
+            // #322: dstack's generic group, as `dante-leg.ps1` creates it.
+            rule(
+                "{6}",
+                Some("dstack Dante leg: TCP in"),
+                Some("dstack Dante leg"),
+                Some("dstack Dante leg"),
+            ),
+            rule(
+                "{7}",
+                Some("dstack Dante leg: TCP out"),
+                None,
+                Some("DSTACK DANTE LEG"),
+            ),
         ]),
         ..wmi()
     });
     assert_eq!(
         block_rules(&read),
         Ok(BlockRules {
-            in_group: 3,
+            dstack155: 3,
+            dante_leg: 2,
             outside: vec!["Block X".to_string(), "{4}".to_string()],
         })
     );
     assert_eq!(
         facts_from(&direct(), &read).firewall_rules,
         Some(BlockRules {
-            in_group: 3,
+            dstack155: 3,
+            dante_leg: 2,
             outside: vec!["Block X".to_string(), "{4}".to_string()],
         })
     );

@@ -23,7 +23,7 @@ const DEFENDER = {
 };
 const FIREWALL_PUBLIC = {
   code: "firewall_on:public",
-  text_sk: "brána firewall je zapnutá (verejný profil) a nie je nastavená podľa štandardu dstack (skupina pravidiel dstack155)",
+  text_sk: "brána firewall je zapnutá (verejný profil) a nie je nastavená podľa štandardu dstack (skupina pravidiel „dstack Dante leg“ alebo dstack155)",
 };
 
 let consoleMessages: string[] = [];
@@ -97,7 +97,7 @@ test("the environment segment appears red while violated, names the problems, an
   );
   await expect(segment).toHaveAttribute(
     "title",
-    /Zistené: ochrana Windows Defender v reálnom čase je zapnutá; brána firewall je zapnutá \(verejný profil\) a nie je nastavená podľa štandardu dstack \(skupina pravidiel dstack155\)\.$/,
+    /Zistené: ochrana Windows Defender v reálnom čase je zapnutá; brána firewall je zapnutá \(verejný profil\) a nie je nastavená podľa štandardu dstack \(skupina pravidiel „dstack Dante leg“ alebo dstack155\)\.$/,
   );
 
   // Fixed on the box: the next poll says so and drops the segment.
@@ -119,7 +119,7 @@ test("the environment segment shows on every page's health bar", async ({
       timeout: 10000,
     });
     await expect(page.getByTestId("health-environment")).toHaveText(
-      "Prostredie: brána firewall je zapnutá (verejný profil) a nie je nastavená podľa štandardu dstack (skupina pravidiel dstack155)",
+      "Prostredie: brána firewall je zapnutá (verejný profil) a nie je nastavená podľa štandardu dstack (skupina pravidiel „dstack Dante leg“ alebo dstack155)",
       { timeout: 10000 },
     );
   }
