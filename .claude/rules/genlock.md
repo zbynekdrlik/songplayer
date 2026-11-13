@@ -1644,8 +1644,13 @@ Software decode did not stall, and is banned on SNV anyway
     a refused seek still reports (#217) and keeps the stream as it was; an
     accepted one drops the picture in the thread's hand (the rendezvous:
     nothing read before the seek can still be on its way). A seek that lands
-    while the thread is inside a blocked read waits for that read (a stall
-    then delays the seek, never the audio already queued).
+    while the thread is inside a blocked read waits for that read at most
+    `SEEK_WAIT` (2 s, above SNV's 0.5-0.75 s stalls); then it is REFUSED
+    (`DecoderError::Seek`, #217's path: the song plays on from where it
+    was) and the thread never applies it (`SeekClaim`: the thread's take
+    and the caller's give-up race on one compare-and-swap). So a read that
+    never returns never hangs the producer's seek, its Stop or the emit
+    thread's join (review round 2).
   - Drop never waits: the channels close, the thread ends once its read
     returns and drops the reader on its own thread. A thread that died is
     an error (`the video reader thread is gone`), never a hang.
@@ -1676,11 +1681,16 @@ Software decode did not stall, and is banned on SNV anyway
   tail's job), or once the audio ended. A run whose step would lie past
   `AUDIO_PAST_VIDEO_MAX_MS` (15 s) fails the song (`DecoderError::Decode`
   → the producer's decode-error path).
+- **The stall itself is bounded too** (review round 2): with nothing held
+  (a song's start, after a seek that moved) or no audio left to carry, no
+  late step runs into that bound, so `next_synced_within` starts a clock at
+  the first `NotReady` (reset by any picture, the end or a seek) and fails
+  the song once the picture stayed away more than 15 s.
 - **The picture catches up, the audio never pauses:** when pictures come
   back, every frame at or before the last late step is dropped (decoded,
   never shown, `late_counts().1`); the first one past it ends the run. A
-  video that ends during a run holds on from the last step (the #257 tail
-  continues from it). A seek ends the run.
+  video that ends during a run ends the run and holds on from the last
+  step (the #257 tail continues from it). A seek ends the run.
 - **Known bounds of a run that meets the video's end:** the #257 tail's
   15 s counts from the last late step, not the last real frame, so one
   frozen picture can last a 15 s late run plus a 15 s tail (~30 s), and

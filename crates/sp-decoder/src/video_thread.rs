@@ -22,7 +22,11 @@
 //! - **A seek** goes to the thread and waits for its answer, so a refused
 //!   seek is still reported (#217). While the thread waits to hand a picture
 //!   over it serves the seek at once; while it is inside a read (a stall) the
-//!   seek waits for that read. A picture read before an accepted seek is
+//!   seek waits for that read, at most [`SEEK_WAIT`]: then it gives up, the
+//!   thread never applies it (a three-state claim, [`SeekClaim`]) and the
+//!   seek is REFUSED (`DecoderError::Seek`, the #217 path: the song plays on
+//!   from where it was), so a read that never returns can never hang the
+//!   producer (review round 2). A picture read before an accepted seek is
 //!   dropped on the thread (the hand-off is a rendezvous: a read is either
 //!   taken before the seek is sent, or still in the thread's hand); a
 //!   refused seek keeps the stream as it was.
@@ -33,6 +37,8 @@
 //!   song can open its own reader (and its file) while the old one still
 //!   waits, holding its file handle and, GPU-resident, one ring slot.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, RecvTimeoutError, Select, Sender, TryRecvError};
@@ -44,9 +50,42 @@ use crate::types::DecodedVideoFrame;
 /// What a reader read.
 type Read = Result<Option<DecodedVideoFrame>, DecoderError>;
 
-/// A seek for the reader thread, answered on `reply`.
+/// How long a seek waits for the reader thread to take it (#318 review
+/// round 2): a read blocked longer than this refuses the seek. Above the
+/// 0.5-0.75 s D3D11 stalls measured on SNV, far under the song's 15 s bound.
+pub const SEEK_WAIT: Duration = Duration::from_secs(2);
+
+/// Who settled a seek first (#318 review round 2): the thread taking it, or
+/// the caller giving up. One compare-and-swap each, so exactly one wins.
+#[derive(Debug, Default)]
+struct SeekClaim(AtomicU8);
+
+impl SeekClaim {
+    const PENDING: u8 = 0;
+    const TAKEN: u8 = 1;
+    const ABANDONED: u8 = 2;
+
+    /// The thread takes the seek; `false` = the caller gave it up first.
+    fn take(&self) -> bool {
+        self.settle(Self::TAKEN)
+    }
+
+    /// The caller gives the seek up; `false` = the thread took it first.
+    fn abandon(&self) -> bool {
+        self.settle(Self::ABANDONED)
+    }
+
+    fn settle(&self, to: u8) -> bool {
+        self.0
+            .compare_exchange(Self::PENDING, to, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    }
+}
+
+/// A seek for the reader thread, answered on `reply` unless abandoned.
 struct Seek {
     position_ms: u64,
+    claim: Arc<SeekClaim>,
     reply: Sender<Result<(), DecoderError>>,
 }
 
@@ -204,6 +243,10 @@ fn hand_over(
 
 /// Seek the reader and answer; returns whether it moved.
 fn apply(reader: &mut dyn VideoStream, seek: Seek) -> bool {
+    if !seek.claim.take() {
+        // Given up by the caller (it reported the seek refused): nothing moves.
+        return false;
+    }
     let done = reader.seek(seek.position_ms);
     let moved = done.is_ok();
     let _ = seek.reply.send(done);
@@ -218,10 +261,23 @@ impl MediaStream for ThreadedVideo {
     /// Seek on the reader thread and wait for its answer (module doc).
     fn seek(&mut self, position_ms: u64) -> Result<(), DecoderError> {
         let (reply, answer) = crossbeam_channel::bounded(1);
-        self.seeks
-            .send(Seek { position_ms, reply })
-            .map_err(|_| gone())?;
-        answer.recv().map_err(|_| gone())?
+        let claim = Arc::new(SeekClaim::default());
+        let seek = Seek {
+            position_ms,
+            claim: Arc::clone(&claim),
+            reply,
+        };
+        self.seeks.send(seek).map_err(|_| gone())?;
+        match answer.recv_timeout(SEEK_WAIT) {
+            Ok(done) => done,
+            Err(RecvTimeoutError::Disconnected) => Err(gone()),
+            Err(RecvTimeoutError::Timeout) if claim.abandon() => Err(DecoderError::Seek(format!(
+                "the video reader is still inside a read after {} ms - the seek is refused (#318)",
+                SEEK_WAIT.as_millis()
+            ))),
+            // The thread took the seek just now: its answer follows.
+            Err(RecvTimeoutError::Timeout) => answer.recv().map_err(|_| gone())?,
+        }
     }
 }
 

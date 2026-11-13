@@ -2,7 +2,7 @@
 //! with audio-as-master-clock. Cross-platform.
 
 use std::collections::VecDeque;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tracing::debug;
 
@@ -200,6 +200,12 @@ pub struct SplitSyncedDecoder {
     late: LateRun,
     /// Late steps handed out and late frames dropped since the open (#318).
     late_counts: (u64, u64),
+    /// When the video's picture stopped coming (#318 review round 2: the
+    /// first `NotReady` since a picture, an end or a seek).
+    stall_since: Option<Instant>,
+    /// How long it may stay away before the song fails
+    /// ([`AUDIO_PAST_VIDEO_MAX_MS`]; tests shorten it).
+    stall_limit: Duration,
 }
 
 impl std::fmt::Debug for SplitSyncedDecoder {
@@ -279,7 +285,15 @@ impl SplitSyncedDecoder {
             seek_skipped: None,
             late: LateRun::default(),
             late_counts: (0, 0),
+            stall_since: None,
+            stall_limit: Duration::from_millis(AUDIO_PAST_VIDEO_MAX_MS),
         })
+    }
+
+    /// Shorten how long the picture may stay away (#318; tests only).
+    #[doc(hidden)]
+    pub fn set_stall_limit(&mut self, limit: Duration) {
+        self.stall_limit = limit;
     }
 
     /// One source frame period (ms) as the held steps count it (#318: what
@@ -376,6 +390,7 @@ impl SplitSyncedDecoder {
         self.seek_discarded = 0;
         self.seek_skipped = None;
         self.late = LateRun::default();
+        self.stall_since = None;
         Ok(())
     }
 
@@ -402,17 +417,27 @@ impl SplitSyncedDecoder {
     /// [`next_late`](Self::next_late)). A picture at or before the last late
     /// step is dropped (decoded, never shown): the picture catches up to the
     /// audio, the audio never waits for it.
+    ///
+    /// # Errors
+    ///
+    /// A picture that stays away more than [`AUDIO_PAST_VIDEO_MAX_MS`] from
+    /// the first `NotReady` fails the song (#318 review round 2): whatever
+    /// the late steps do, also with nothing held or no audio left to carry.
     pub fn next_synced_within(&mut self, wait: Option<Duration>) -> Result<Synced, DecoderError> {
         if self.held.video_ended {
             return Ok(Synced::Ended);
         }
-        let video = match self.next_target_video_frame(wait)? {
+        let polled = self.next_target_video_frame(wait)?;
+        if !matches!(polled, FramePoll::NotReady) {
+            self.stall_since = None;
+        }
+        let video = match polled {
             FramePoll::Ready(Some(video)) => video,
             FramePoll::Ready(None) => {
                 self.held.video_ended = true;
                 return Ok(Synced::Ended);
             }
-            FramePoll::NotReady => return Ok(Synced::NotReady),
+            FramePoll::NotReady => return self.not_ready(),
         };
         self.held.last_frame_ms = Some(video.timestamp_ms);
         let audio_frames = self.take_audio_until(video.timestamp_ms + self.audio_lead_ms)?;
@@ -424,6 +449,20 @@ impl SplitSyncedDecoder {
         );
 
         Ok(Synced::Frame(video, audio_frames))
+    }
+
+    /// The picture is not here (#318): start the stall clock at its first
+    /// `NotReady`, fail the song once it ran past the limit.
+    fn not_ready(&mut self) -> Result<Synced, DecoderError> {
+        let since = *self.stall_since.get_or_insert_with(Instant::now);
+        let away = since.elapsed();
+        if away > self.stall_limit {
+            return Err(DecoderError::Decode(format!(
+                "the video gave no picture for {} ms (#318)",
+                away.as_millis()
+            )));
+        }
+        Ok(Synced::NotReady)
     }
 
     /// One step while the next picture is late (#318): the time (ms) the
@@ -561,6 +600,9 @@ impl SplitSyncedDecoder {
                 if self.pending_video_target_ms.take().is_some() {
                     self.frame_before_end = self.seek_skipped.take();
                 }
+                // A late run ends with the video (review round 2): the tail
+                // holds on from its last step (`held.last_frame_ms`).
+                self.late = LateRun::default();
                 return Ok(FramePoll::Ready(None));
             };
             if let Some(target) = self.pending_video_target_ms {

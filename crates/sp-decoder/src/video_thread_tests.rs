@@ -8,7 +8,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-use super::ThreadedVideo;
+use super::{SEEK_WAIT, ThreadedVideo};
 use crate::error::DecoderError;
 use crate::stream::{FramePoll, MediaStream, VideoStream};
 use crate::types::{DecodedVideoFrame, PixelFormat};
@@ -341,4 +341,35 @@ fn a_gone_reader_thread_is_an_error_not_a_hang() {
         Err(DecoderError::Decode(_))
     ));
     assert!(matches!(video.seek(0), Err(DecoderError::Decode(_))));
+}
+
+#[test]
+fn a_seek_gives_up_on_a_read_that_never_returns_and_moves_nothing() {
+    // #318 review round 2: a hung D3D11 read must never hang the seek (and
+    // with it the producer, its Stop and the emit thread's join). The seek
+    // is refused after SEEK_WAIT, and the thread never applies it later.
+    let gate = Gate::closed();
+    let (mut video, did) = spawn(10, Some(1), &gate, false);
+    assert_eq!(index(video.next_frame().unwrap()), 0);
+    let (done_tx, done) = mpsc::channel();
+    let seeker = std::thread::spawn(move || {
+        let answer = video.seek(700);
+        let _ = done_tx.send(answer);
+        video
+    });
+    let answer = done
+        .recv_timeout(SEEK_WAIT + BOUND)
+        .expect("the seek returns while the read still blocks");
+    assert!(
+        matches!(answer, Err(DecoderError::Seek(ref text)) if text.contains("#318")),
+        "{answer:?}"
+    );
+    let mut video = seeker.join().unwrap();
+    // The read returns: the stream goes on where it was, the given-up seek
+    // was never applied.
+    gate.open();
+    assert_eq!(index(video.next_frame().unwrap()), 1);
+    assert_eq!(index(video.next_frame().unwrap()), 2);
+    let log: Vec<Did> = std::iter::from_fn(|| did.try_recv().ok()).collect();
+    assert!(!log.iter().any(|d| matches!(d, Did::Sought(..))), "{log:?}");
 }

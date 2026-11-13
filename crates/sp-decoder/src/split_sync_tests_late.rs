@@ -345,3 +345,65 @@ fn next_synced_with_no_wait_blocks_and_never_says_not_ready() {
     assert_eq!(v.timestamp_ms, 100);
     assert!(dec.next_synced().unwrap().is_none());
 }
+
+#[test]
+fn a_picture_away_for_good_fails_the_song_with_nothing_held() {
+    // #318 review round 2: at the song's start nothing is held, so no late
+    // step runs into its bound; the stall itself is bounded.
+    let mut video = Video::new(5);
+    video.polls = VecDeque::from(vec![false; 10_000]);
+    let mut dec = decoder(video, 1000);
+    dec.set_stall_limit(Duration::from_millis(30));
+    for _ in 0..2_000 {
+        match dec.next_synced_within(Some(Duration::ZERO)) {
+            Ok(Synced::NotReady) => std::thread::sleep(Duration::from_millis(5)),
+            Err(DecoderError::Decode(text)) => {
+                assert!(text.contains("gave no picture"), "{text}");
+                return;
+            }
+            other => panic!("not ready, then the failure: {other:?}"),
+        }
+    }
+    panic!("a picture away for good never failed the song");
+}
+
+#[test]
+fn a_picture_that_comes_restarts_the_stall_clock() {
+    let mut video = Video::new(5);
+    video.polls = VecDeque::from([false, true, false]);
+    let mut dec = decoder(video, 1000);
+    dec.set_stall_limit(Duration::from_millis(30));
+    assert!(matches!(
+        dec.next_synced_within(Some(Duration::ZERO)).unwrap(),
+        Synced::NotReady
+    ));
+    std::thread::sleep(Duration::from_millis(60));
+    assert_eq!(
+        frame_ms(&mut dec),
+        0,
+        "a picture, past the limit: no failure"
+    );
+    assert!(
+        matches!(
+            dec.next_synced_within(Some(Duration::ZERO)).unwrap(),
+            Synced::NotReady
+        ),
+        "a new stall starts its own clock"
+    );
+}
+
+#[test]
+fn a_video_that_ends_during_a_late_run_ends_the_run() {
+    let mut dec = decoder(Video::new(2), 5000);
+    assert_eq!(frame_ms(&mut dec), 0);
+    dec.next_late().unwrap().expect("a late step at 100");
+    assert!(dec.in_late_run());
+    // Frame 1 (100) lies on the line and is dropped, then the video ends.
+    assert!(matches!(
+        dec.next_synced_within(Some(Duration::ZERO)).unwrap(),
+        Synced::Ended
+    ));
+    assert!(!dec.in_late_run(), "the run ended with the video");
+    let (at, _) = dec.next_held().unwrap().expect("the tail goes on");
+    assert_eq!(at, 200, "from the last late step");
+}
