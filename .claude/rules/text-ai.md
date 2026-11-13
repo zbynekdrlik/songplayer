@@ -71,8 +71,9 @@ setting, the `claude_proxy` provider choice, CI's proxy gate,
   answers refused.
 - The policy is injected: production `RetryPolicy::SPANNING`; tests
   `RetryPolicy::NO_WAIT` (`AiClient::with_retry_policy`).
-- A failing call holds its worker up to ~85 s (3 × 120 s with the largest
-  `Retry-After`). The metadata probe bounds each provider at 180 s.
+- A failing call holds its worker 85 s on the fallback waits, up to 360 s
+  with the largest `Retry-After` (3 × 120 s). The metadata probe bounds
+  each provider at 180 s.
 
 ## Prompts and refusals
 
@@ -125,5 +126,9 @@ live. A change of provider, model or gate updates it in the same push.
 A SongPlayer from before #321 spawned `CLIProxyAPI.exe` as a child; the
 deploy steps (ci.yml "Deploy SongPlayer" + the E2E restart,
 deploy-pp.yml "Stop SongPlayer") still `taskkill` such a leftover, so it
-never runs on unowned. `C:\ProgramData\SongPlayer\cache\.cli-proxy-api\`
-(the old OAuth tokens) is no longer read by anything.
+never runs on unowned; those lines go once SNV and PP both run a build of
+0.93.0 or later. `C:\ProgramData\SongPlayer\cache\.cli-proxy-api\` (the old
+Claude OAuth tokens) and the old `ai_model` / `ai_api_url` /
+`ai_provider_<task>` settings rows are no longer read by anything; the
+session's revocation and the rows' removal are the owner's / a migration's
+follow-up, never a deploy step.

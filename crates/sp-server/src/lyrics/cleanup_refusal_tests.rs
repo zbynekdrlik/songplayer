@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::ai::client::AiClient;
-use crate::ai::retry::{RetryPolicy, content_filtered};
+use crate::ai::retry::content_filtered;
 use crate::lyrics::description_provider::{CleanupMode, clean_lyrics_via_claude};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -48,9 +48,7 @@ async fn a_refused_cleanup_is_never_sent_again_for_the_same_text() {
         .expect(2)
         .mount(&server)
         .await;
-    let client = crate::ai::test_support::ai_client_at(format!("{}/v1", server.uri()))
-        .await
-        .with_retry_policy(RetryPolicy::NO_WAIT);
+    let client = crate::ai::test_support::ai_client_at(format!("{}/v1", server.uri())).await;
     let dir = tempfile::tempdir().unwrap();
     let cache = dir.path().join("yt_lrclib_cleaned_v3.json");
 

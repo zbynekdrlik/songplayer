@@ -396,9 +396,7 @@ async fn node_with_a_broken_proxy() -> (MockServer, TestNode, LyricsWorker, i64)
         .await;
     let (node, mut worker, id) = node(&server, Some(&served())).await;
     worker.ai_client = Some(Arc::new(
-        crate::ai::test_support::ai_client_at(format!("{}/v1", server.uri()))
-            .await
-            .with_retry_policy(crate::ai::retry::RetryPolicy::NO_WAIT),
+        crate::ai::test_support::ai_client_at(format!("{}/v1", server.uri())).await,
     ));
     (server, node, worker, id)
 }

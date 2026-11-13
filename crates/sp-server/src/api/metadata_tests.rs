@@ -27,7 +27,7 @@ impl MetadataProvider for Refuses {
     }
 
     fn name(&self) -> &str {
-        "claude"
+        "openrouter"
     }
 }
 
@@ -130,7 +130,7 @@ async fn status_reports_the_repair_queue_and_every_provider_of_the_chain() {
     assert_eq!(
         claude,
         &ProviderHealth {
-            name: "claude".into(),
+            name: "openrouter".into(),
             last_ok_at_ms: None,
             last_error: Some("API request failed: chat completion failed (HTTP 502)".into()),
         }
@@ -169,7 +169,11 @@ async fn the_probe_asks_every_provider_on_its_own_and_writes_nothing() {
     let resp: ProbeResponse = serde_json::from_slice(&body).unwrap();
     assert_eq!(resp.youtube_id, VIDEO);
     let names: Vec<&str> = resp.providers.iter().map(|p| p.name.as_str()).collect();
-    assert_eq!(names, ["claude", "gemini"], "chain order, every provider");
+    assert_eq!(
+        names,
+        ["openrouter", "gemini"],
+        "chain order, every provider"
+    );
     let [claude, gemini] = resp.providers.as_slice() else {
         unreachable!()
     };
@@ -241,7 +245,7 @@ impl MetadataProvider for Hangs {
     }
 
     fn name(&self) -> &str {
-        "claude"
+        "openrouter"
     }
 }
 
@@ -263,7 +267,7 @@ impl MetadataProvider for Verbose {
 async fn a_provider_that_does_not_answer_in_time_is_reported_by_name() {
     let outcome = probe_one(&Hangs, VIDEO, TITLE, Duration::from_millis(20)).await;
 
-    assert_eq!(outcome.name, "claude");
+    assert_eq!(outcome.name, "openrouter");
     assert!(!outcome.ok);
     assert_eq!(outcome.error.as_deref(), Some("no answer within 0.02 s"));
     assert_eq!((outcome.song, outcome.artist), (None, None));

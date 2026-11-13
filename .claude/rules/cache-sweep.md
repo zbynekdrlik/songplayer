@@ -60,7 +60,8 @@ comment 6230045110.
   a real dir, never a symlink or junction; its name is the exchange's
   `peer::fetch::PARTS_DIR`). No other dir is walked
   (`tools/` with the lyrics venv, `peer/` itself, `.cli-proxy-api/` with
-  CLIProxyAPI's OAuth tokens). Each entry's time is its own record
+  the OAuth tokens of the CLIProxyAPI SongPlayer ran before #321). Each
+  entry's time is its own record
   (`std::fs::symlink_metadata`: never a symlink's target, and never the
   directory index, which NTFS updates lazily for an open file such as a
   part a fetch is writing). A symlink (a junction on Windows) is never

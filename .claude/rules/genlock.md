@@ -641,7 +641,7 @@ first capped job, and logs
   and the child's working-set cap was rejected with 1314 (issue #147 comment
   5815246953). The round-9 `SeIncreaseWorkingSetPrivilege` is in both
   tokens; only `SeIncreaseBasePriorityPrivilege` needs Highest.
-- **Side effects, accepted.** SongPlayer and its children (CLIProxyAPI,
+- **Side effects, accepted.** SongPlayer and its children (CLIProxyAPI before #321,
   yt-dlp, ffmpeg, the heavy python workers) now run at high integrity, and so
   does the port-8920 server. Windows (UIPI) blocks input from medium-integrity
   processes into the Tauri window, e.g. drag-and-drop from Explorer.

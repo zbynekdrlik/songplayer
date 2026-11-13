@@ -11,7 +11,6 @@ use wiremock::matchers::{body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::*;
-use crate::ai::retry::RetryPolicy;
 
 /// #321: OpenRouter's moderation refusal (final, typed `ContentFiltered`).
 const FILTER_BODY: &str = r#"{"error":{"code":403,"message":"Your input was flagged","metadata":{"reasons":["violence"],"flagged_input":"…"}}}"#;
@@ -86,9 +85,7 @@ async fn two_songs(server: &MockServer) -> (LyricsWorker, tempfile::TempDir, i64
     let (events, _) = broadcast::channel(16);
     let mut worker = LyricsWorker::new_for_test(pool, dir.path().to_path_buf(), events);
     worker.ai_client = Some(Arc::new(
-        crate::ai::test_support::ai_client_at(format!("{}/v1", server.uri()))
-            .await
-            .with_retry_policy(RetryPolicy::NO_WAIT),
+        crate::ai::test_support::ai_client_at(format!("{}/v1", server.uri())).await,
     ));
     (worker, dir, first)
 }

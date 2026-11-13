@@ -747,9 +747,7 @@ mod tests {
             .await;
 
         // #145: the refused call is retried; no test waits for real.
-        let ai = crate::ai::test_support::ai_client_at(format!("{}/v1", mock.uri()))
-            .await
-            .with_retry_policy(crate::ai::retry::RetryPolicy::NO_WAIT);
+        let ai = crate::ai::test_support::ai_client_at(format!("{}/v1", mock.uri())).await;
 
         let out = clean_lyrics_via_claude(
             &ai,

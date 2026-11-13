@@ -321,9 +321,7 @@ mod integration_tests {
 
     /// #145: a refused call is retried with no real wait in a test.
     async fn ai_client_pointed_at(uri: &str) -> AiClient {
-        crate::ai::test_support::ai_client_at(format!("{uri}/v1"))
-            .await
-            .with_retry_policy(crate::ai::retry::RetryPolicy::NO_WAIT)
+        crate::ai::test_support::ai_client_at(format!("{uri}/v1")).await
     }
 
     #[tokio::test]

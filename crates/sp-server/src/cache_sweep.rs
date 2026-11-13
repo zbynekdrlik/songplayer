@@ -11,7 +11,7 @@
 //!   (`{id}_isolation` / `_stemsep` / `_dub`; walked for their tree's bytes
 //!   and newest write only when the plan could take them, a video no row
 //!   has), and `<cache>/peer/`'s files (only when `peer` is a real dir).
-//!   Any other dir (`tools`, `.cli-proxy-api`) is never walked, and a
+//!   Any other dir (`tools`, the pre-#321 `.cli-proxy-api`) is never walked, and a
 //!   symlink (a junction on Windows) is never listed, followed or deleted.
 //!   Each entry's time is its own record (`symlink_metadata`), never the
 //!   directory index's, which NTFS updates lazily for an open file.

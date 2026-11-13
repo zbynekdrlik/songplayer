@@ -35,7 +35,7 @@ impl MetadataProvider for NamesTheSong {
     }
 
     fn name(&self) -> &str {
-        "claude"
+        "openrouter"
     }
 }
 

@@ -49,7 +49,7 @@ async fn row(pool: &SqlitePool, id: i64) -> (String, String, i64) {
 }
 
 #[tokio::test]
-async fn an_answering_claude_repairs_the_row_through_the_production_chain() {
+async fn an_answering_openrouter_repairs_the_row_through_the_production_chain() {
     let (pool, id) = pool_with_parser_row().await;
     let proxy = MockServer::start().await;
     openrouter_answers(&proxy, SONG, ARTIST).await;
@@ -73,7 +73,7 @@ async fn an_answering_claude_repairs_the_row_through_the_production_chain() {
 }
 
 #[tokio::test]
-async fn a_refusing_claude_repairs_the_row_through_gemini_on_the_next_key() {
+async fn a_refusing_openrouter_repairs_the_row_through_gemini_on_the_next_key() {
     let (pool, id) = pool_with_parser_row().await;
     let proxy = MockServer::start().await;
     openrouter_refuses(&proxy).await;
@@ -138,7 +138,7 @@ async fn a_failed_rows_reason_names_every_provider_in_chain_order() {
     let (pool, id) = pool_with_parser_row().await;
     let chain = chain_of(vec![
         Refusing {
-            name: "claude",
+            name: "openrouter",
             error: MetadataError::ApiError("proxy down".into()),
         },
         Refusing {
@@ -152,7 +152,7 @@ async fn a_failed_rows_reason_names_every_provider_in_chain_order() {
 
     assert_eq!(
         failure.reasons,
-        "claude: API request failed: proxy down; gemini: API request failed: all 5 keys failed"
+        "openrouter: API request failed: proxy down; gemini: API request failed: all 5 keys failed"
     );
     assert!(!failure.rate_limited);
     assert_eq!(row(&pool, id).await, (TITLE.into(), String::new(), 1));
@@ -163,7 +163,7 @@ async fn a_rate_limited_provider_marks_the_failure_and_keeps_every_reason() {
     let (pool, _) = pool_with_parser_row().await;
     let chain = chain_of(vec![
         Refusing {
-            name: "claude",
+            name: "openrouter",
             error: MetadataError::RateLimited("proxy quota".into()),
         },
         Refusing {
@@ -178,7 +178,7 @@ async fn a_rate_limited_provider_marks_the_failure_and_keeps_every_reason() {
     assert!(failure.rate_limited);
     assert_eq!(
         failure.reasons,
-        "claude: rate limited: proxy quota; gemini: Invalid response: no text"
+        "openrouter: rate limited: proxy quota; gemini: Invalid response: no text"
     );
 }
 
@@ -211,7 +211,7 @@ impl MetadataProvider for RefusesTheFirstVideo {
     }
 
     fn name(&self) -> &str {
-        "claude"
+        "openrouter"
     }
 }
 
@@ -277,7 +277,7 @@ impl MetadataProvider for EmojiOnlySong {
     }
 
     fn name(&self) -> &str {
-        "claude"
+        "openrouter"
     }
 }
 
@@ -295,6 +295,6 @@ async fn the_repair_never_stores_a_song_sanitized_to_empty() {
     let failure = worker.try_providers(VIDEO, TITLE).await.unwrap_err();
     assert_eq!(
         failure.reasons,
-        "claude: the song is empty after the emoji sanitizer"
+        "openrouter: the song is empty after the emoji sanitizer"
     );
 }

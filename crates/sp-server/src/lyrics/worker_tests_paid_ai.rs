@@ -72,7 +72,8 @@ async fn pp_with_claude(server: &MockServer) -> (TestNode, LyricsWorker, i64) {
         LyricsWorker::new_for_test(pp.pool().clone(), pp.cache().to_path_buf(), events)
             .with_peer(pp.ex.clone());
     worker.ai_client = Some(Arc::new(
-        crate::ai::test_support::ai_client_at(format!("{}/v1", server.uri())).await,
+        crate::ai::test_support::ai_client_on(pp.pool().clone(), format!("{}/v1", server.uri()))
+            .await,
     ));
     (pp, worker, todo)
 }
@@ -142,7 +143,8 @@ async fn a_translation_pass_holds_only_a_song_it_would_translate() {
     let mut idle =
         LyricsWorker::new_for_test(empty.pool().clone(), empty.cache().to_path_buf(), events);
     idle.ai_client = Some(Arc::new(
-        crate::ai::test_support::ai_client_at(format!("{}/v1", server.uri())).await,
+        crate::ai::test_support::ai_client_on(empty.pool().clone(), format!("{}/v1", server.uri()))
+            .await,
     ));
     idle.retry_missing_translations().await;
     idle.retranslate_next_stale().await;
@@ -184,7 +186,8 @@ async fn a_stale_translation_with_no_track_is_stamped_forward_not_held_while_off
     let mut worker =
         LyricsWorker::new_for_test(pp.pool().clone(), pp.cache().to_path_buf(), events);
     worker.ai_client = Some(Arc::new(
-        crate::ai::test_support::ai_client_at(format!("{}/v1", server.uri())).await,
+        crate::ai::test_support::ai_client_on(pp.pool().clone(), format!("{}/v1", server.uri()))
+            .await,
     ));
     worker.retranslate_next_stale().await;
     let version: i64 =
