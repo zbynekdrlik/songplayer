@@ -98,7 +98,7 @@ fn the_device_is_two_tx_no_rx_on_dlinks_defaults_at_the_network_rate() {
     let split = config.split().unwrap();
     assert_eq!(cfg.latency_ns, split.latency_ns);
     assert_eq!(cfg.work_margin, split.margin);
-    assert!(split.tx_path_ns <= dlink::BUDGET_NS);
+    assert!(split.tx_path_ns <= dlink::REFERENCE_PATH_NS);
     assert_eq!(
         (cfg.manufacturer.as_str(), cfg.model.as_str()),
         ("New Level", "SongPlayer")

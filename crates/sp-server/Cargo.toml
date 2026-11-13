@@ -78,9 +78,9 @@ rtrb = "=0.4.0"
 # and `asrc_servo.rs` are adapters over it). dstack by tag, no Dante code in
 # this repo. MIT OR Apache-2.0 since v0.6.12 (its MIT notice ships in
 # THIRD-PARTY-NOTICES.txt).
-dlink = { git = "https://github.com/zbynekdrlik/dstack", tag = "v0.6.99" }
-dstack = { git = "https://github.com/zbynekdrlik/dstack", tag = "v0.6.99" }
-dstack-resample = { git = "https://github.com/zbynekdrlik/dstack", tag = "v0.6.99" }
+dlink = { git = "https://github.com/zbynekdrlik/dstack", tag = "v0.6.109" }
+dstack = { git = "https://github.com/zbynekdrlik/dstack", tag = "v0.6.109" }
+dstack-resample = { git = "https://github.com/zbynekdrlik/dstack", tag = "v0.6.109" }
 # #228: the SP-program burn-id QR (911014, #151's payload). Pure-Rust
 # encoder; `default-features = false` drops the optional image / svg / pic
 # renderers (the module matrix needs none). MIT OR Apache-2.0 (its MIT notice

@@ -79,14 +79,14 @@ impl DanteParams {
     }
 
     /// dlink's TX path at the worker's rate: its work margin, the Dante
-    /// latency it derives from its 15 ms budget and the rate converter's TX
+    /// latency it derives from its 15 ms reference path (`REFERENCE_PATH_NS`, v0.6.106) and the rate converter's TX
     /// delay (`Config::split`, dstack v0.6.22: the budget is the app's whole
     /// path, the owner's ruling to dstack of 3.11.2026).
     fn latency_frames(&self) -> u64 {
         let path_ns = self
             .config()
             .split()
-            .map_or(dlink::BUDGET_NS, |s| s.tx_path_ns);
+            .map_or(dlink::REFERENCE_PATH_NS, |s| s.tx_path_ns);
         u64::from(self.rate) * path_ns / 1_000_000_000
     }
 
