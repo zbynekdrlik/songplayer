@@ -1662,7 +1662,20 @@ Software decode did not stall, and is banned on SNV anyway
     file stays open until that read returns (a `SONG_FILES` rename or swap
     of it waits for Windows' share rules, `song-files.md`). A read that
     NEVER returns leaks its thread, file handle and producer lease (before
-    #318 it hung the producer, visibly).
+    #318 it hung the producer, visibly). #319 makes that visible: the
+    reader thread holds a "done" sender for its life, and `ThreadedVideo`'s
+    `Drop` hands the receiver to a `video-reader-watch` thread
+    (`video_thread_watch.rs`: the pure `detached_verdict`, `watch`). A
+    thread still alive `DETACH_WARN_AFTER` (10 s) after the drop is ONE
+    WARN `video reader: a dropped reader's thread is still inside a read`
+    naming the file, and `status.video_decode.stuck_video_readers` (since
+    the start) / `stuck_video_readers_now` +1; if its read ever returns,
+    one INFO and `_now` −1. A watcher waits as long as its stuck thread
+    (one parked thread more per leak, nothing per normal song). Tests:
+    `video_thread_watch_tests.rs`, `video_thread_tests.rs`
+    `a_dropped_reader_whose_read_never_returns_is_counted_stuck`. Box
+    check: `stuck_video_readers` stays 0; a non-zero one names its file in
+    the WARN.
 - **The producer waits for the picture only until it is due**
   (`paced_producer::poll_item(.., Some(LATE_POLL), late)`, 5 ms looks,
   the queue's seek / stop read between them by `SharedQueue::producer_look`).
@@ -1691,11 +1704,16 @@ Software decode did not stall, and is banned on SNV anyway
   never shown, `late_counts().1`); the first one past it ends the run. A
   video that ends during a run ends the run and holds on from the last
   step (the #257 tail continues from it). A seek ends the run.
-- **Known bounds of a run that meets the video's end:** the #257 tail's
-  15 s counts from the last late step, not the last real frame, so one
-  frozen picture can last a 15 s late run plus a 15 s tail (~30 s), and
-  #277's early-end check is judged at the last late step, so an early end
-  shorter than the stall before it is not seen as one.
+- **A run that meets the video's end (#320):** the #257 tail's steps go
+  on after the last late step (`HeldTail::late_ms`, never back before it),
+  but its 15 s bound counts from the last REAL frame (`last_frame_ms`,
+  which late steps never move), so one frozen picture lasts at most 15 s.
+  #277's early-end check reads the last real picture too
+  (`DecodeProducer::real_ms`); `current_ms` still follows the late steps
+  (where a refused seek leaves the song, #217). Tests:
+  `split_sync_tests_late.rs` `a_late_run_into_the_video_s_end_bounds_the_tail_from_the_real_picture`,
+  `paced_producer_tests_early.rs`
+  `an_early_end_after_a_late_run_is_measured_from_the_last_real_picture`.
 - Log: one WARN `paced producer: the next picture is late - the audio
   goes on on the held picture (#318)` per run, one INFO `the late run
   ended` (the picture is back, or a seek moved on) with `late_steps` /

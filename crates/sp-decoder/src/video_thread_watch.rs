@@ -81,8 +81,8 @@ pub(crate) enum Detached {
 /// end is the disconnection).
 pub(crate) fn detached_verdict(waited: Result<(), RecvTimeoutError>) -> Detached {
     match waited {
-        Err(RecvTimeoutError::Disconnected) => Detached::Stuck,
-        Ok(()) | Err(RecvTimeoutError::Timeout) => Detached::Ended,
+        Err(RecvTimeoutError::Timeout) => Detached::Stuck,
+        Ok(()) | Err(RecvTimeoutError::Disconnected) => Detached::Ended,
     }
 }
 

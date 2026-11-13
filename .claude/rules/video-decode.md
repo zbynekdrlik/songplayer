@@ -501,9 +501,12 @@ rounds 1–2):
 - `GET /api/v1/status` → `video_decode {hw_decode, hw_requested,
   gpu_decodes, mf_software, open_fallbacks, mid_stream_fallbacks,
   path_changes, last_fallback, max_height, scaled_opens, scale_refusals,
-  video_decode, gpu_resident_opens, gpu_resident_blocked, pipelines}`
+  video_decode, gpu_resident_opens, gpu_resident_blocked, pipelines,
+  stuck_video_readers, stuck_video_readers_now}`
   (the setting + the decode cap (#282) + the counters + #279 P3a's
-  GPU-resident fields, "GPU-resident decode" below; counts of FILES since
+  GPU-resident fields, "GPU-resident decode" below + #319's readers
+  whose read never returned after their song, `genlock.md` #318; counts
+  of FILES since
   the process started, not live state; `#[serde(default)]`, so a missing
   key reads as zero).
 - `POST /api/v1/diag/decode-bench` takes `"hw": true` and reports
