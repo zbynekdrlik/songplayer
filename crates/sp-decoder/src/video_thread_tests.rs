@@ -378,12 +378,18 @@ fn a_seek_gives_up_on_a_read_that_never_returns_and_moves_nothing() {
     assert!(!log.iter().any(|d| matches!(d, Did::Sought(..))), "{log:?}");
 }
 
+/// How long a count may take to reach its value: far above a 20-30 ms
+/// watch plus a thread start, and under cargo-mutants' 20 s test timeout,
+/// so a mutant that never counts FAILS the test instead of hanging it
+/// (a TIMEOUT fails the mutation gate like a survivor).
+const COUNT_BOUND: Duration = Duration::from_secs(5);
+
 /// Wait (bounded) until `counts` reads `want`.
 fn counts_reach(counts: &DetachedReaders, want: DetachedCounts) {
     let start = std::time::Instant::now();
     while counts.snapshot() != want {
         assert!(
-            start.elapsed() < BOUND,
+            start.elapsed() < COUNT_BOUND,
             "counts {:?}, want {want:?}",
             counts.snapshot()
         );

@@ -13,12 +13,18 @@ use super::{Detached, DetachedCounts, DetachedReaders, detached_readers, detache
 /// A bound no correct step comes near.
 const BOUND: Duration = Duration::from_secs(20);
 
+/// How long a count may take to reach its value: far above a 20-30 ms
+/// watch plus a thread start, and under cargo-mutants' 20 s test timeout,
+/// so a mutant that never counts FAILS the test instead of hanging it
+/// (a TIMEOUT fails the mutation gate like a survivor).
+const COUNT_BOUND: Duration = Duration::from_secs(5);
+
 /// Wait (bounded) until `counts` reads `want`.
 fn wait_for(counts: &DetachedReaders, want: DetachedCounts) {
     let start = Instant::now();
     while counts.snapshot() != want {
         assert!(
-            start.elapsed() < BOUND,
+            start.elapsed() < COUNT_BOUND,
             "counts {:?}, want {want:?}",
             counts.snapshot()
         );
