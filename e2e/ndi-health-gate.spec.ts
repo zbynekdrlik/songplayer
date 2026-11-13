@@ -11,7 +11,9 @@
 
 import { test, expect } from "@playwright/test";
 import {
+  EMIT_LATE_EDGES_US,
   classifyConnections,
+  emitLateHistFailures,
   discoverableState,
   programReceiverVerdict,
 } from "./ndi-health-gate";
@@ -121,5 +123,41 @@ test.describe("SP-program dark gate logic (#127, #221)", () => {
     expect(discoverableState(program(null, 0, null, "stale"))).toBe("stale");
     expect(discoverableState(null), "no answer").toBe("missing");
     expect(discoverableState({ source: 1, health: { connections: 1 } })).toBe("missing");
+  });
+});
+
+test.describe("emit-lateness histogram (#289 step 0)", () => {
+  const counts = (n: number) => EMIT_LATE_EDGES_US.map((_, i) => (i === 0 ? n : 0));
+  const row = (ndi_name: string, enabled: boolean, hist?: { edges_us: number[]; counts: number[] }) => ({
+    ndi_name,
+    pacing: { enabled, emit_late_hist: hist },
+  });
+
+  test("a paced pipeline with counted emits passes; one not paced is not read", () => {
+    expect(EMIT_LATE_EDGES_US.length).toBe(14);
+    expect(EMIT_LATE_EDGES_US[13]).toBe(33_333);
+    expect(
+      emitLateHistFailures([
+        row("SP-slow", true, { edges_us: EMIT_LATE_EDGES_US, counts: counts(1800) }),
+        row("SP-off", false),
+        { ndi_name: "SP-none" },
+      ]),
+    ).toEqual([]);
+  });
+
+  test("each failure is named", () => {
+    expect(
+      emitLateHistFailures([
+        row("SP-a", true),
+        row("SP-b", true, { edges_us: [0, 120], counts: [0, 0] }),
+        row("SP-c", true, { edges_us: EMIT_LATE_EDGES_US, counts: counts(0) }),
+      ]),
+    ).toEqual([
+      "SP-a: no pacing.emit_late_hist",
+      "SP-b: edges_us [0,120]",
+      "SP-b: 2 counts, want 14",
+      "SP-b: no emit counted",
+      "SP-c: no emit counted",
+    ]);
   });
 });

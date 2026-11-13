@@ -304,7 +304,12 @@ async fn an_asio_entry_off_windows_waits_and_says_why() {
     ] {
         assert!(a.get(key).is_some(), "asio.{key}");
     }
-    // #289 step 0: never opened (off Windows): no device latency yet.
+    // #289 step 0: never opened (off Windows): no device latency yet, the
+    // key present as null.
+    assert!(
+        o.get("device_latency_ms").is_some(),
+        "outputs[i].device_latency_ms"
+    );
     assert_eq!(
         (&o["device_latency_ms"], &a["device_latency_ms"]),
         (&serde_json::Value::Null, &serde_json::Value::Null)

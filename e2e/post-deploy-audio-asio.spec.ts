@@ -54,6 +54,7 @@ import {
   asioCountReading,
   asioGateFailures,
   danteGateFailures,
+  deviceLatencyFailures,
   danteGateLog,
   type OutputStatus,
 } from "./audio-outputs-gate";
@@ -181,6 +182,9 @@ test.describe("ASIO output (#233)", () => {
       console.log(`[#233 asio] second: ${JSON.stringify(second)}`);
       if (second.note) console.log(`[#233 asio] note: ${second.note}`);
       expect(asioGateFailures(f, second), `ASIO output ${f.id}`).toEqual([]);
+      // #289 step 0: the device's own latency is measured and served.
+      console.log(`[#289 device] ${f.id}: device_latency_ms ${second.device_latency_ms}`);
+      expect(deviceLatencyFailures(second), `output ${f.id}`).toEqual([]);
       // #285: a native Dante output's stack figures over the same minute
       // (none for any other output).
       const danteLog = danteGateLog(f, second);

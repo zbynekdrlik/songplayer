@@ -35,6 +35,8 @@ import { test, expect, request as apiRequest } from "@playwright/test";
 import { ObsDriver } from "./obs-driver";
 import { pickBaselineScene } from "./obs-baseline-scene";
 import {
+  emitLateHistFailures,
+  type PacingHistRow,
   programReceiverVerdict,
   type ProgramReceiverVerdict,
   type ProgramReceiverView,
@@ -682,6 +684,12 @@ test.describe("SongPlayer post-deploy feature verification", () => {
       pacing?: { enabled?: boolean };
     }>;
     expect(Array.isArray(health)).toBe(true);
+    // #289 step 0: every paced pipeline serves its emit-lateness histogram.
+    const hist = health as PacingHistRow[];
+    console.log(
+      `[#289 emit lateness] ${JSON.stringify(hist.map((r) => [r.ndi_name, r.pacing?.emit_late_hist?.counts]))}`,
+    );
+    expect(emitLateHistFailures(hist)).toEqual([]);
 
     const enabled = health.filter((o) => o.pacing?.enabled === true);
 

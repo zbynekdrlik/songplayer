@@ -3,6 +3,7 @@ import {
   WINDOW_BLOCKS,
   asioGateFailures,
   danteGateFailures,
+  deviceLatencyFailures,
   danteGateLog,
   DANTE_LATE_TOP_BINS,
   lv1PathFailures,
@@ -454,6 +455,34 @@ test.describe("Dante gate (#285)", () => {
       "Dante output out-4: live_flows 1 -> 0, want at least 1",
       "Dante output out-4: packets sent (late_bins sum) 1024 -> 1024, want growth",
       "Dante output out-4: pump_missed 0 -> 7",
+    ]);
+  });
+});
+
+test.describe("device latency (#289 step 0)", () => {
+  test("a running ASIO or Dante output reports its device's latency, a VBAN output none", () => {
+    expect(deviceLatencyFailures(dvs(100, { device_latency_ms: 1.3333 }))).toEqual([]);
+    expect(deviceLatencyFailures(dvs(100, { device_latency_ms: 0 })), "a driver reporting none").toEqual([]);
+    expect(deviceLatencyFailures(lv1(100, { device_latency_ms: null }))).toEqual([]);
+    expect(deviceLatencyFailures(lv1(100)), "absent reads as none").toEqual([]);
+    expect(
+      deviceLatencyFailures(dvs(100, { state: "waiting", device_latency_ms: null })),
+      "not running: never opened yet",
+    ).toEqual([]);
+  });
+
+  test("each failure is named", () => {
+    expect(deviceLatencyFailures(dvs(100, { device_latency_ms: null }))).toEqual([
+      "asio output out-3: device_latency_ms null, want the device's latency in ms",
+    ]);
+    expect(deviceLatencyFailures(dvs(100, { device_latency_ms: undefined }))).toEqual([
+      "asio output out-3: device_latency_ms undefined, want the device's latency in ms",
+    ]);
+    expect(deviceLatencyFailures(dvs(100, { device_latency_ms: -1 }))).toEqual([
+      "asio output out-3: device_latency_ms -1, want the device's latency in ms",
+    ]);
+    expect(deviceLatencyFailures(lv1(100, { device_latency_ms: 2.7 }))).toEqual([
+      "VBAN output out-1: device_latency_ms 2.7, want null",
     ]);
   });
 });

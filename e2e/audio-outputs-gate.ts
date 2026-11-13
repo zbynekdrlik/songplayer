@@ -27,6 +27,9 @@ export interface OutputStatus {
   channels: number;
   delay_ms: number;
   latency_ms: number;
+  /** #289 step 0: the output device's own latency, ms; null for VBAN and
+   * before an ASIO / Dante device's first open. */
+  device_latency_ms?: number | null;
   blocks_sent: number;
   blocks_dropped: number;
   vban?: VbanTelemetry;
@@ -239,6 +242,21 @@ export function asioGateFailures(first: OutputStatus, second: OutputStatus): str
   const blocks = second.blocks_sent - first.blocks_sent;
   if (blocks < WINDOW_BLOCKS) f.push(`only ${blocks} blocks in the window, want ${WINDOW_BLOCKS}`);
   return f;
+}
+
+/**
+ * #289 step 0: a running ASIO / Dante output reports its device's own
+ * latency (a finite number of ms; 0 allowed, a driver may report none); a
+ * VBAN output none (its receiver's buffer is no device SongPlayer reads).
+ */
+export function deviceLatencyFailures(o: OutputStatus): string[] {
+  const v = o.device_latency_ms;
+  if (o.type === "vban") return v == null ? [] : [`VBAN output ${o.id}: device_latency_ms ${v}, want null`];
+  if (o.state !== "running") return [];
+  if (typeof v !== "number" || !Number.isFinite(v) || v < 0) {
+    return [`${o.type} output ${o.id}: device_latency_ms ${v}, want the device's latency in ms`];
+  }
+  return [];
 }
 
 /** SNV's lv1 destination. FOH has no VBAN since 5.11.2026 (the owner, #257): it
