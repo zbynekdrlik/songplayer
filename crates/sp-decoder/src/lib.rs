@@ -40,7 +40,9 @@ pub use peak_limiter::{LIMIT_CEILING, PeakLimiter};
 pub use split_sync::{SplitSyncedDecoder, Synced};
 pub use stream::{AudioStream, FramePoll, MediaStream, VideoStream};
 pub use types::{DecodedAudioFrame, DecodedVideoFrame, PixelFormat, VideoStreamInfo};
-pub use video_thread::ThreadedVideo;
+pub use video_thread::{
+    DETACH_WARN_AFTER, DetachedCounts, DetachedReaders, ThreadedVideo, detached_readers,
+};
 
 #[cfg(windows)]
 pub use video::MediaFoundationVideoReader;

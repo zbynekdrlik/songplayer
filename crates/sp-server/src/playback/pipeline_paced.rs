@@ -252,6 +252,7 @@ fn run_decode_producer(
     let open_path = video_path.clone();
     let opened = sp_decoder::ThreadedVideo::spawn(
         |body| spawn_decode_thread(format!("paced-video-{playlist_id}"), body).map(drop),
+        video_path.display().to_string(),
         move || {
             let reader = MediaFoundationVideoReader::open_with(&open_path, mode, cap)?;
             let codec = reader.codec();

@@ -36,12 +36,22 @@
 //!   so a reader stuck in a read OUTLIVES its producer: the pipeline's next
 //!   song can open its own reader (and its file) while the old one still
 //!   waits, holding its file handle and, GPU-resident, one ring slot.
+//! - **A stuck reader is reported** (#319): the drop hands the thread's
+//!   "done" signal to a watcher thread; a reader thread still alive
+//!   [`DETACH_WARN_AFTER`] after its owner dropped it is one WARN naming
+//!   the file and a count in [`detached_readers`] (`video_thread_watch.rs`).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, RecvTimeoutError, Select, Sender, TryRecvError};
+use tracing::warn;
+
+#[path = "video_thread_watch.rs"]
+mod watch;
+
+pub use watch::{DETACH_WARN_AFTER, DetachedCounts, DetachedReaders, detached_readers};
 
 use crate::error::DecoderError;
 use crate::stream::{FramePoll, MediaStream, VideoStream};
@@ -119,6 +129,14 @@ pub struct ThreadedVideo {
     reads: Receiver<Read>,
     seeks: Sender<Seek>,
     facts: Facts,
+    /// Disconnects when the reader thread ends (#319: its drop watches it).
+    done: Receiver<()>,
+    /// The file the reader reads, for the stuck reader's WARN.
+    file: String,
+    /// How long the drop's watcher waits for the thread's end.
+    watch_after: Duration,
+    /// Where a stuck reader is counted.
+    counts: &'static DetachedReaders,
 }
 
 impl std::fmt::Debug for ThreadedVideo {
@@ -132,10 +150,15 @@ impl std::fmt::Debug for ThreadedVideo {
 
 impl ThreadedVideo {
     /// Start the reader thread with `spawn` (handed the thread's body) and
-    /// open the reader on it with `open`, which also returns what the caller
-    /// wants of the reader at open (`T`: Media Foundation's codec name).
-    /// Returns once the reader opened, or its open error.
-    pub fn spawn<T, S, O>(spawn: S, open: O) -> Result<(Self, T), DecoderError>
+    /// open the reader of `file` (its name, for the log) on it with `open`,
+    /// which also returns what the caller wants of the reader at open (`T`:
+    /// Media Foundation's codec name). Returns once the reader opened, or its
+    /// open error.
+    pub fn spawn<T, S, O>(
+        spawn: S,
+        file: impl Into<String>,
+        open: O,
+    ) -> Result<(Self, T), DecoderError>
     where
         T: Send + 'static,
         S: FnOnce(Box<dyn FnOnce() + Send + 'static>) -> std::io::Result<()>,
@@ -144,7 +167,11 @@ impl ThreadedVideo {
         let (opened_tx, opened_rx) = crossbeam_channel::bounded(1);
         let (reads_tx, reads_rx) = crossbeam_channel::bounded(0);
         let (seeks_tx, seeks_rx) = crossbeam_channel::unbounded();
+        let (done_tx, done_rx) = crossbeam_channel::bounded::<()>(0);
         spawn(Box::new(move || {
+            // #319: held for the thread's whole life, so its end (a return
+            // or a panic) disconnects `done`.
+            let _alive = done_tx;
             let (reader, extra) = match open() {
                 Ok(opened) => opened,
                 Err(e) => {
@@ -163,8 +190,39 @@ impl ThreadedVideo {
             reads: reads_rx,
             seeks: seeks_tx,
             facts,
+            done: done_rx,
+            file: file.into(),
+            watch_after: DETACH_WARN_AFTER,
+            counts: detached_readers(),
         };
         Ok((video, extra))
+    }
+
+    /// Watch this reader's thread for `after` at its drop and count a stuck
+    /// one in `counts` (#319; tests only).
+    #[doc(hidden)]
+    pub fn set_detach_watch(&mut self, after: Duration, counts: &'static DetachedReaders) {
+        self.watch_after = after;
+        self.counts = counts;
+    }
+}
+
+impl Drop for ThreadedVideo {
+    /// Hand the reader thread's end to a watcher (#319): the drop itself
+    /// never waits (#318).
+    fn drop(&mut self) {
+        let done = std::mem::replace(&mut self.done, crossbeam_channel::never());
+        let file = std::mem::take(&mut self.file);
+        let (after, counts) = (self.watch_after, self.counts);
+        let watcher = std::thread::Builder::new()
+            .name("video-reader-watch".into())
+            .spawn(move || watch::watch(&done, after, &file, counts));
+        if let Err(e) = watcher {
+            warn!(
+                error = %e,
+                "video reader: the watcher of a dropped reader did not start (#319)"
+            );
+        }
     }
 }
 

@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use sp_core::config::{NdiSource, VideoDecode};
-use sp_decoder::{DecodeMode, HwDecodeStats};
+use sp_decoder::{DecodeMode, DetachedCounts, HwDecodeStats};
 use sp_gpu::RingStats;
 use tokio::sync::broadcast;
 
@@ -226,7 +226,15 @@ fn the_status_carries_the_setting_and_the_counters() {
         }),
     }];
     assert_eq!(
-        status_of(&setting, stats, rows.clone()),
+        status_of(
+            &setting,
+            stats,
+            rows.clone(),
+            DetachedCounts {
+                stuck: 3,
+                stuck_now: 1,
+            },
+        ),
         VideoDecodeStatus {
             hw_decode: true,
             hw_requested: 7,
@@ -243,17 +251,29 @@ fn the_status_carries_the_setting_and_the_counters() {
             gpu_resident_opens: 4,
             gpu_resident_blocked: None,
             pipelines: rows,
+            stuck_video_readers: 3,
+            stuck_video_readers_now: 1,
         }
     );
     setting.set_video_decode(VideoDecode::Gpu);
-    let blocked = status_of(&setting, HwDecodeStats::default(), Vec::new());
+    let blocked = status_of(
+        &setting,
+        HwDecodeStats::default(),
+        Vec::new(),
+        DetachedCounts::default(),
+    );
     assert_eq!(blocked.video_decode, "gpu");
     assert_eq!(
         blocked.gpu_resident_blocked.as_deref(),
         Some("ndi_source_cpu")
     );
     setting.set_ndi_source(NdiSource::Gpu);
-    let on = status_of(&setting, HwDecodeStats::default(), Vec::new());
+    let on = status_of(
+        &setting,
+        HwDecodeStats::default(),
+        Vec::new(),
+        DetachedCounts::default(),
+    );
     assert_eq!(on.gpu_resident_blocked, None, "it takes effect");
 }
 
@@ -293,6 +313,8 @@ fn the_status_serializes_to_the_documented_json() {
                 vram_mb: 249,
             }),
         }],
+        stuck_video_readers: 2,
+        stuck_video_readers_now: 1,
     })
     .unwrap();
     assert_eq!(json["hw_decode"], true);
@@ -324,6 +346,9 @@ fn the_status_serializes_to_the_documented_json() {
         assert_eq!(row["ring"][key], value, "{key}");
     }
     assert_eq!(row["ring"]["dead"], false);
+    // #319.
+    assert_eq!(json["stuck_video_readers"], 2);
+    assert_eq!(json["stuck_video_readers_now"], 1);
     // A block from an older build, missing keys: each reads as its zero.
     let old: VideoDecodeStatus = serde_json::from_str(r#"{"hw_decode": true}"#).unwrap();
     assert_eq!(

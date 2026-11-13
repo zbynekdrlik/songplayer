@@ -265,6 +265,7 @@ fn gpu_frames_cross_the_reader_thread_and_a_late_step_holds_the_ring_frame() {
             crate::playback::decode_thread::spawn_decode_thread("paced-video-t".into(), body)
                 .map(drop)
         },
+        "t.mp4",
         move || Ok((Box::new(reader) as Box<dyn VideoStream>, ())),
     )
     .expect("the reader opens");

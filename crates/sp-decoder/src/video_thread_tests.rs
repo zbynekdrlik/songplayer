@@ -8,7 +8,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-use super::{SEEK_WAIT, ThreadedVideo};
+use super::{DetachedCounts, DetachedReaders, SEEK_WAIT, ThreadedVideo};
 use crate::error::DecoderError;
 use crate::stream::{FramePoll, MediaStream, VideoStream};
 use crate::types::{DecodedVideoFrame, PixelFormat};
@@ -132,6 +132,7 @@ fn spawn(
                 .spawn(body)
                 .map(drop)
         },
+        "t.mp4",
         move || {
             let _ = log.send(Did::Opened(thread_name()));
             let reader = Reader {
@@ -187,6 +188,7 @@ fn frames_come_in_order_and_the_reader_lives_on_its_own_thread() {
 fn an_open_error_comes_back_and_a_spawn_failure_too() {
     let opened = ThreadedVideo::spawn(
         |body| std::thread::Builder::new().spawn(body).map(drop),
+        "t.mp4",
         || -> Result<(Box<dyn VideoStream>, ()), DecoderError> {
             Err(DecoderError::Io("no such file".into()))
         },
@@ -197,6 +199,7 @@ fn an_open_error_comes_back_and_a_spawn_failure_too() {
     }
     let refused = ThreadedVideo::spawn(
         |_body| Err(std::io::Error::other("no thread")),
+        "t.mp4",
         || -> Result<(Box<dyn VideoStream>, u8), DecoderError> { unreachable!("never opened") },
     );
     match refused {
@@ -332,6 +335,7 @@ fn a_gone_reader_thread_is_an_error_not_a_hang() {
     }
     let (mut video, ()) = ThreadedVideo::spawn(
         |body| std::thread::Builder::new().spawn(body).map(drop),
+        "t.mp4",
         || Ok((Box::new(Panics) as Box<dyn VideoStream>, ())),
     )
     .unwrap();
@@ -372,4 +376,53 @@ fn a_seek_gives_up_on_a_read_that_never_returns_and_moves_nothing() {
     assert_eq!(index(video.next_frame().unwrap()), 2);
     let log: Vec<Did> = std::iter::from_fn(|| did.try_recv().ok()).collect();
     assert!(!log.iter().any(|d| matches!(d, Did::Sought(..))), "{log:?}");
+}
+
+/// Wait (bounded) until `counts` reads `want`.
+fn counts_reach(counts: &DetachedReaders, want: DetachedCounts) {
+    let start = std::time::Instant::now();
+    while counts.snapshot() != want {
+        assert!(
+            start.elapsed() < BOUND,
+            "counts {:?}, want {want:?}",
+            counts.snapshot()
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+#[test]
+fn a_dropped_reader_whose_read_never_returns_is_counted_stuck() {
+    // #319: frame 1's read waits at a gate nobody opens (a hung driver
+    // call). The drop never waits for it (#318), and its watcher counts the
+    // reader stuck once the thread is still alive after the watch.
+    let counts: &'static DetachedReaders = Box::leak(Box::default());
+    let gate = Gate::closed();
+    let (mut video, did) = spawn(5, Some(1), &gate, false);
+    video.set_detach_watch(Duration::from_millis(30), counts);
+    assert_eq!(index(video.next_frame().unwrap()), 0);
+    drop(video);
+    counts_reach(
+        counts,
+        DetachedCounts {
+            stuck: 1,
+            stuck_now: 1,
+        },
+    );
+    // The read returns at last: the reader is dropped on its thread and the
+    // stuck reader is no longer counted as one now.
+    gate.open();
+    loop {
+        if let Did::Dropped(thread) = next(&did) {
+            assert_eq!(thread, "video-t");
+            break;
+        }
+    }
+    counts_reach(
+        counts,
+        DetachedCounts {
+            stuck: 1,
+            stuck_now: 0,
+        },
+    );
 }

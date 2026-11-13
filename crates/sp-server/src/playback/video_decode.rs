@@ -42,7 +42,7 @@ use sp_core::config::{
     SETTING_VIDEO_DECODE, SETTING_VIDEO_HW_DECODE, VideoDecode, program_ndi_source, video_decode,
     video_hw_decode,
 };
-use sp_decoder::{DecodeMode, HwDecodeStats};
+use sp_decoder::{DecodeMode, DetachedCounts, HwDecodeStats};
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
@@ -320,13 +320,22 @@ pub struct VideoDecodeStatus {
     /// #279 P3a: the pipelines that decode on the GPU or hold a producer,
     /// each with its ring.
     pub pipelines: Vec<PipelineDecode>,
+    /// #319: video readers whose thread was still inside a read
+    /// `sp_decoder::DETACH_WARN_AFTER` (10 s) after their song dropped them
+    /// (a hung read; one WARN each, naming the file).
+    pub stuck_video_readers: u64,
+    /// #319: of those, the ones whose read has not returned yet: each still
+    /// holds its file and, GPU-resident, one ring slot.
+    pub stuck_video_readers_now: u64,
 }
 
-/// The status of `setting`, `stats` and `pipelines`.
+/// The status of `setting`, `stats`, `pipelines` and the stuck video
+/// readers (#319).
 pub fn status_of(
     setting: &HwDecodeSetting,
     stats: HwDecodeStats,
     pipelines: Vec<PipelineDecode>,
+    readers: DetachedCounts,
 ) -> VideoDecodeStatus {
     VideoDecodeStatus {
         hw_decode: setting.hw(),
@@ -344,16 +353,19 @@ pub fn status_of(
         gpu_resident_opens: stats.resident_opens,
         gpu_resident_blocked: setting.resident().blocked().map(str::to_string),
         pipelines,
+        stuck_video_readers: readers.stuck,
+        stuck_video_readers_now: readers.stuck_now,
     }
 }
 
-/// The process's status (the global setting, `sp_decoder::hw_counters` and
-/// the GPU-resident pipelines' table).
+/// The process's status (the global setting, `sp_decoder::hw_counters`,
+/// the GPU-resident pipelines' table and `sp_decoder::detached_readers`).
 pub fn status() -> VideoDecodeStatus {
     status_of(
         &global(),
         sp_decoder::hw_counters().snapshot(),
         pipelines().status(),
+        sp_decoder::detached_readers().snapshot(),
     )
 }
 
