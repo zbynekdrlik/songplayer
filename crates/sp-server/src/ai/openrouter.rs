@@ -95,8 +95,22 @@ fn request_body<'a>(ask: &Ask<'a>) -> ChatRequest<'a> {
     }
 }
 
+/// #321: a 2xx answer whose first choice carries no text (the A/B's failed
+/// song). Typed, so `complete` retries it through the policy instead of
+/// returning it as a final error.
+#[derive(Debug)]
+pub struct NoText;
+
+impl std::fmt::Display for NoText {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("OpenRouter answered no text (choices[0].message.content)")
+    }
+}
+
+impl std::error::Error for NoText {}
+
 /// A 2xx body read as an answer: the first choice's text (none, or an
-/// empty one, is an error) and the model it names.
+/// empty one, is a [`NoText`] error) and the model it names.
 pub fn read_answer(body: &str) -> Result<Completion> {
     let answer: ChatAnswer = serde_json::from_str(body).map_err(|e| {
         anyhow::anyhow!(
@@ -112,7 +126,7 @@ pub fn read_answer(body: &str) -> Result<Completion> {
         .and_then(|c| c.message.content)
         .unwrap_or_default();
     if text.trim().is_empty() {
-        anyhow::bail!("OpenRouter answered no text (choices[0].message.content)");
+        return Err(anyhow::Error::new(NoText));
     }
     Ok(Completion {
         text,
@@ -169,7 +183,9 @@ impl OpenRouterClient {
         self
     }
 
-    /// One completion: retried on a 429 / 5xx, failed at once otherwise.
+    /// One completion: retried on a 429 / 5xx and on an answer with no text
+    /// ([`NoText`], #321), failed at once otherwise. An error names the
+    /// model, never the key.
     pub async fn complete(&self, ask: &Ask<'_>) -> Result<Completion> {
         let url = format!("{}/chat/completions", self.api_url);
         let body = request_body(ask);
@@ -197,7 +213,22 @@ impl OpenRouterClient {
                 .await
                 .context("openrouter: the answer was not read")?;
             if status.is_success() {
-                return read_answer(&text);
+                match read_answer(&text) {
+                    Err(e) if e.is::<NoText>() => {
+                        let Some(delay) = self.retry.fallback_delay(attempt + 1) else {
+                            anyhow::bail!("{NoText} from {}, every attempt", ask.model);
+                        };
+                        warn!(
+                            retry = attempt + 1,
+                            delay_ms = delay.as_millis() as u64,
+                            model = ask.model,
+                            "openrouter: answered no text - retrying after the wait"
+                        );
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    }
+                    answer => return answer,
+                }
             }
             let excerpt = redacted_excerpt(&text, ask.key);
             if is_moderation_refusal(status.as_u16(), &text) {

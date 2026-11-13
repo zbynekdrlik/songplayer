@@ -77,11 +77,18 @@ impl RetryPolicy {
         if !is_retried(status) {
             return None;
         }
-        let fallback = *self.fallback.get(attempt.checked_sub(1)? as usize)?;
+        let fallback = self.fallback_delay(attempt)?;
         let named = retry_after.and_then(|value| value.trim().parse::<u64>().ok());
         Some(named.map_or(fallback, |secs| {
             Duration::from_secs(secs).min(self.retry_after_cap)
         }))
+    }
+
+    /// The wait before retry `attempt` (1 = the first retry) when nothing
+    /// names one: the fallback's entry, `None` once the retries are spent.
+    /// #321: an OpenRouter answer with no text is retried on these waits.
+    pub fn fallback_delay(&self, attempt: u32) -> Option<Duration> {
+        self.fallback.get(attempt.checked_sub(1)? as usize).copied()
     }
 
     /// The most requests one call makes: the first plus one per fallback
