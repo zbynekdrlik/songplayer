@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use dlink::Clock as ClockSource;
-use dlink::{Block, Config, HostError, Link, Map, Media, Place, Process, Stopped};
+use dlink::{Block, Config, HostError, Link, Map, Media, Place, Ports, Process, Stopped};
 use dstack::ctl;
 use serde::Deserialize;
 use sp_core::audio_outputs::{DanteDest, OutputEntry, PROGRAM_RATE, effective_rate};
@@ -57,6 +57,11 @@ pub struct DanteParams {
     pub network_rate: u32,
     pub dir: PathBuf,
     pub clock: ClockSource,
+    /// The device's control ports and process id, `None` for Dante's
+    /// defaults (ARC 4440, CMC 8800, flows 4455, process 0): the output is
+    /// the one Dante device of its address. A test device takes a slot of
+    /// its own (#323), so the devices of parallel test processes never meet.
+    pub ports: Option<(Ports, u16)>,
 }
 
 impl DanteParams {
@@ -75,6 +80,7 @@ impl DanteParams {
             network_rate: effective_rate(entry.rate, network_rate),
             dir: base.join("dante"),
             clock: ClockSource::Dsync,
+            ports: None,
         })
     }
 

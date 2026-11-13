@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use dstack::flows::client::Client;
-use dstack::flows::control::{FlowRequest, PORT};
+use dstack::flows::control::FlowRequest;
 use dstack::media::packet;
 use sp_core::audio_outputs::RateChoice;
 
@@ -15,7 +15,9 @@ use crate::playback::asio_out::{AsioOut, run_asio_worker};
 use crate::playback::audio_out_block::ProgramBlock;
 use crate::playback::vban_out::VbanClock;
 
-/// One device at a time: each binds the Dante ports.
+/// One device at a time in this process: the device's hold (`HELD`) has one
+/// name. Ports never collide: each test that starts a device runs it on a
+/// slot of its own ([`claim_slot`]).
 static ONE_DEVICE: Mutex<()> = Mutex::new(());
 const BOUND: Duration = Duration::from_secs(20);
 
@@ -28,6 +30,78 @@ fn routed_ipv4() -> Ipv4Addr {
     }
 }
 
+/// Dante's default ARC port: the output's, and on dev1 another account's.
+const DANTE_ARC_PORT: u16 = 4440;
+/// The device slots a test may take (dstack's numbering: slot k = ARC
+/// 4440 + k, CMC 8800 + k, flows 4455 + k, process id k; ARC stays below
+/// flows 4455 up to slot 14). Slot 0, Dante's defaults, is never a test's.
+const TEST_SLOTS: std::ops::RangeInclusive<u16> = 1..=14;
+/// Slot k is claimed across processes by holding UDP 127.0.0.1:(base + k):
+/// nextest runs every test in its own process and the mutation gate two
+/// runs at once, so an in-process lock serializes nothing (#323).
+const CLAIM_PORT_BASE: u16 = 29_700;
+/// How long a test waits for a slot the other test processes hold.
+const CLAIM_WAIT: Duration = Duration::from_secs(60);
+
+/// A device slot this test holds until it is dropped.
+struct Slot {
+    ip: Ipv4Addr,
+    ports: dlink::Ports,
+    id: u16,
+    _claim: UdpSocket,
+}
+
+impl Slot {
+    /// The first port of the slot's TX flow block (dstack #264: RX
+    /// 29800 + 64k, TX 32 above it), where a granted flow sends from.
+    fn tx_base(id: u16) -> u16 {
+        29_800 + 64 * id + 32
+    }
+}
+
+/// Whether nothing holds UDP `port`, on `ip` (another device of this PC)
+/// or on the wildcard address (another program): dstack's own probe
+/// (`dstack_endpoint::slots::binds_with`). The probes close at once.
+fn port_free(ip: Ipv4Addr, port: u16) -> bool {
+    UdpSocket::bind((ip, port)).is_ok() && UdpSocket::bind((Ipv4Addr::UNSPECIFIED, port)).is_ok()
+}
+
+/// A slot of the test's own on `ip`: claimed, its ports free. Waits while
+/// the other test processes hold every slot; the panic names the ports.
+fn claim_slot(ip: Ipv4Addr) -> Slot {
+    let since = Instant::now();
+    loop {
+        for id in TEST_SLOTS {
+            let Ok(claim) = UdpSocket::bind((Ipv4Addr::LOCALHOST, CLAIM_PORT_BASE + id)) else {
+                continue;
+            };
+            let ports = dlink::Ports {
+                arc: DANTE_ARC_PORT + id,
+                cmc: 8800 + id,
+                flows: 4455 + id,
+            };
+            let all = [ports.arc, ports.cmc, ports.flows, Slot::tx_base(id)];
+            if all.iter().all(|&port| port_free(ip, port)) {
+                return Slot {
+                    ip,
+                    ports,
+                    id,
+                    _claim: claim,
+                };
+            }
+        }
+        assert!(
+            since.elapsed() < CLAIM_WAIT,
+            "no Dante test slot free on {ip} for {CLAIM_WAIT:?}: slots {TEST_SLOTS:?} \
+             (ARC 4441-4454, CMC 8801-8814, flows 4456-4469, claims on 127.0.0.1:{}-{}) \
+             are held by other test processes or taken by another program",
+            CLAIM_PORT_BASE + TEST_SLOTS.start(),
+            CLAIM_PORT_BASE + TEST_SLOTS.end()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 fn params(dir: &Path, ip: Ipv4Addr) -> DanteParams {
     DanteParams {
         device: "SongPlayer-test".into(),
@@ -36,6 +110,16 @@ fn params(dir: &Path, ip: Ipv4Addr) -> DanteParams {
         network_rate: 96_000,
         dir: dir.to_path_buf(),
         clock: ClockSource::System,
+        ports: None,
+    }
+}
+
+/// A test device on `slot`: its ports, its process id and a name of its own.
+fn on_slot(dir: &Path, slot: &Slot) -> DanteParams {
+    DanteParams {
+        device: format!("SongPlayer-test-{}", slot.id),
+        ports: Some((slot.ports, slot.id)),
+        ..params(dir, slot.ip)
     }
 }
 
@@ -113,6 +197,61 @@ fn the_state_file_stays_in_the_devices_directory() {
     assert_eq!(cfg.state_file, dir.join("state.toml"));
 }
 
+/// #323: a device given a slot binds that slot's ports with its process
+/// id; the output's own (`ports: None`) keeps Dante's defaults.
+#[test]
+fn a_device_on_a_slot_takes_its_ports_and_process_id() {
+    let on = DanteParams {
+        ports: Some((
+            dlink::Ports {
+                arc: 4443,
+                cmc: 8803,
+                flows: 4458,
+            },
+            3,
+        )),
+        ..params(Path::new("x"), Ipv4Addr::LOCALHOST)
+    };
+    let cfg = on.config().device().unwrap();
+    assert_eq!(
+        (cfg.arc_port, cfg.cmc_port, cfg.flows_port, cfg.process_id),
+        (4443, 8803, 4458, 3)
+    );
+    let plain = params(Path::new("x"), Ipv4Addr::LOCALHOST)
+        .config()
+        .device()
+        .unwrap();
+    assert_eq!(
+        (
+            plain.arc_port,
+            plain.cmc_port,
+            plain.flows_port,
+            plain.process_id
+        ),
+        (DANTE_ARC_PORT, 8800, 4455, 0)
+    );
+}
+
+/// #323: a test device never needs Dante's default ports. On dev1 another
+/// account's device holds UDP 4440, and parallel test processes would each
+/// bind it: here it is held (by this test, or already by another program),
+/// and the device starts on its own slot all the same.
+#[test]
+fn a_test_device_starts_while_dantes_default_arc_port_is_taken() {
+    let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let ip = routed_ipv4();
+    let _holder = UdpSocket::bind((ip, DANTE_ARC_PORT));
+    assert!(!port_free(ip, DANTE_ARC_PORT), "UDP 4440 is taken");
+    let slot = claim_slot(ip);
+    let mut device = DanteDevice::new(on_slot(dir.path(), &slot));
+    device.open("", [0, 1]).unwrap();
+    let (_tx, rx) = rtrb::RingBuffer::new(1024);
+    let started = device.start(rx).err();
+    assert_eq!(started, None, "the device on slot {}", slot.id);
+    device.close();
+}
+
 #[test]
 fn an_entry_builds_at_the_network_rate_or_its_own() {
     let dest = DanteDest {
@@ -179,9 +318,10 @@ fn the_stacks_status_line_reads_as_the_figures() {
 fn the_link_reads_the_running_stack_and_nothing_after_the_close() {
     let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
+    let slot = claim_slot(routed_ipv4());
     let link = DanteLink::default();
     assert_eq!(link.figures(), None);
-    let mut device = DanteDevice::linked(params(dir.path(), routed_ipv4()), link.clone());
+    let mut device = DanteDevice::linked(on_slot(dir.path(), &slot), link.clone());
     device.open("", [0, 1]).unwrap();
     assert_eq!(link.figures(), None, "not started yet");
     let (_tx, rx) = rtrb::RingBuffer::new(1024);
@@ -238,12 +378,13 @@ fn an_address_no_adapter_holds_fails_the_start_and_names_no_panic() {
 fn a_successor_waits_until_its_predecessor_closed() {
     let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
-    let mut old = DanteDevice::new(params(dir.path(), routed_ipv4()));
+    let slot = claim_slot(routed_ipv4());
+    let mut old = DanteDevice::new(on_slot(dir.path(), &slot));
     old.open("", [0, 1]).unwrap();
     let (_tx, rx) = rtrb::RingBuffer::new(1024);
     old.start(rx).unwrap();
 
-    let mut successor = DanteDevice::new(params(dir.path(), routed_ipv4()));
+    let mut successor = DanteDevice::new(on_slot(dir.path(), &slot));
     assert_eq!(successor.open("", [0, 1]).err(), Some(Reason::Held));
 
     old.close();
@@ -259,13 +400,14 @@ fn a_successor_waits_until_its_predecessor_closed() {
 fn dropping_a_running_device_stops_its_stack() {
     let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
-    let mut old = DanteDevice::new(params(dir.path(), routed_ipv4()));
+    let slot = claim_slot(routed_ipv4());
+    let mut old = DanteDevice::new(on_slot(dir.path(), &slot));
     old.open("", [0, 1]).unwrap();
     let (_tx, rx) = rtrb::RingBuffer::new(1024);
     old.start(rx).unwrap();
     drop(old);
 
-    let mut successor = DanteDevice::new(params(dir.path(), routed_ipv4()));
+    let mut successor = DanteDevice::new(on_slot(dir.path(), &slot));
     successor.open("", [0, 1]).unwrap();
     let (_tx, rx) = rtrb::RingBuffer::new(1024);
     successor.start(rx).unwrap();
@@ -300,8 +442,9 @@ fn a_name_the_stack_refuses_fails_the_open() {
 fn the_device_serves_a_receiver_the_rings_audio() {
     let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
-    let ip = routed_ipv4();
-    let p = params(dir.path(), ip);
+    let slot = claim_slot(routed_ipv4());
+    let ip = slot.ip;
+    let p = on_slot(dir.path(), &slot);
     let latency = u32::try_from(p.latency_frames()).unwrap();
     let link = DanteLink::default();
     let mut device = DanteDevice::linked(p, link.clone());
@@ -339,7 +482,8 @@ fn the_device_serves_a_receiver_the_rings_audio() {
         .build()
         .unwrap();
     let asked = Instant::now();
-    let granted = rt.block_on(Client::new(ip).request_flow(SocketAddrV4::new(ip, PORT), &req));
+    let at_flows = SocketAddrV4::new(ip, slot.ports.flows);
+    let granted = rt.block_on(Client::new(ip).request_flow(at_flows, &req));
     // #302: a refused or unanswered request names how long it waited and
     // what the device did meanwhile (dev CI 43121764441: Err(Timeout)).
     assert!(
@@ -412,7 +556,8 @@ impl VbanClock for TestClock {
 fn a_program_block_reaches_the_wire_through_the_asio_worker() {
     let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
-    let ip = routed_ipv4();
+    let own = claim_slot(routed_ipv4());
+    let ip = own.ip;
     let entry = OutputEntry::dante(
         "out-1",
         "Dante",
@@ -425,7 +570,7 @@ fn a_program_block_reaches_the_wire_through_the_asio_worker() {
     let start = Instant::now();
     let worker = {
         let out = Arc::clone(&out);
-        let params = params(dir.path(), ip);
+        let params = on_slot(dir.path(), &own);
         std::thread::spawn(move || {
             let mut device = DanteDevice::new(params);
             run_asio_worker(&out, &mut device, &mut TestClock(start));
@@ -470,7 +615,7 @@ fn a_program_block_reaches_the_wire_through_the_asio_worker() {
         }
         if !granted {
             let client = Client::new(ip);
-            let flow = client.request_flow(SocketAddrV4::new(ip, PORT), &req);
+            let flow = client.request_flow(SocketAddrV4::new(ip, own.ports.flows), &req);
             granted = rt.block_on(flow).is_ok();
         }
         if let Ok(n) = audio.recv(&mut buf) {
