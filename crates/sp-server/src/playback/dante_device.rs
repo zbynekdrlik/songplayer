@@ -168,9 +168,10 @@ pub fn figures_of(line: &str) -> Option<DanteFigures> {
         f.live_flows += u32::from(flow.live != 0);
         f.late_max_us = f.late_max_us.max(flow.late_max_us);
         f.send_max_us = f.send_max_us.max(flow.send_max_us);
-        if f.late_bins.len() < flow.late_bins.len() {
-            f.late_bins.resize(flow.late_bins.len(), 0);
-        }
+        // As long as the longest flow's (a `<` guard here had an
+        // equivalent `<=` mutant: resizing to the same length is a no-op).
+        let bins = f.late_bins.len().max(flow.late_bins.len());
+        f.late_bins.resize(bins, 0);
         for (sum, n) in f.late_bins.iter_mut().zip(&flow.late_bins) {
             *sum += n;
         }

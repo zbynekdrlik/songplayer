@@ -52,10 +52,15 @@ struct Slot {
 }
 
 impl Slot {
-    /// The first port of the slot's TX flow block (dstack #264: RX
-    /// 29800 + 64k, TX 32 above it), where a granted flow sends from.
-    fn tx_base(id: u16) -> u16 {
-        29_800 + 64 * id + 32
+    /// Every port the slot's device binds: its ARC, CMC and flow-control
+    /// ports and its whole TX flow block, which dstack places by the slot
+    /// (`slot_bases`, dstack #264), where a granted flow sends from.
+    fn bound_ports(ports: &dlink::Ports, id: u16) -> impl Iterator<Item = u16> {
+        let (_rx, tx) = dstack::device::ports::slot_bases(id);
+        let tx_block = (0..dstack::media::tx::MAX_FLOWS as u16).map(move |i| tx + i);
+        [ports.arc, ports.cmc, ports.flows]
+            .into_iter()
+            .chain(tx_block)
     }
 }
 
@@ -80,8 +85,7 @@ fn claim_slot(ip: Ipv4Addr) -> Slot {
                 cmc: 8800 + id,
                 flows: 4455 + id,
             };
-            let all = [ports.arc, ports.cmc, ports.flows, Slot::tx_base(id)];
-            if all.iter().all(|&port| port_free(ip, port)) {
+            if Slot::bound_ports(&ports, id).all(|port| port_free(ip, port)) {
                 return Slot {
                     ip,
                     ports,
@@ -312,6 +316,10 @@ fn the_stacks_status_line_reads_as_the_figures() {
         0
     );
     assert_eq!(figures_of("error: nothing"), None);
+    // Live flows are counted, ended ones not: two of three (one of two
+    // above reads the same with the test inverted).
+    let flows = r#"{"tx":[{"live":1},{"live":1},{"live":0}]}"#;
+    assert_eq!(figures_of(flows).unwrap().live_flows, 2);
 }
 
 #[test]
