@@ -100,7 +100,7 @@ process for this.
   dstack `docs/two-networks.md` §3; design comment on #255 "Design: the
   firewall rule follows dstack's two-network standard"). It REPLACES #233's
   "every profile off" (the firewall was part of #233's profile, never
-  separately proven: the pops were Defender's scan). Two states hold
+  separately proven: the pops were Defender's scan). Three states hold
   (`sp_core::prod_env::firewall`, `FirewallMode` on the status's
   `firewall.mode`):
   - `off`: every profile off (a PC with no Dante leg, PP today);
@@ -109,7 +109,28 @@ process for this.
     ENABLED Block rule in the group `dstack155`, which holds exactly
     `DSTACK_GROUP_RULES` = 14 (resolume-snv, 12:00Z: all three profiles 1 /
     2 / 2, 14 rows `MSFT_NetFirewallRule WHERE Action=4 AND Enabled=1`, all
-    `DisplayGroup dstack155`).
+    `DisplayGroup dstack155`);
+  - `dante_leg` (#322, dstack#264, the owner's decision of 13.11.2026: one
+    identical Dante-leg filter on every PC): the same profiles and
+    defaults, every ENABLED Block rule in the group `dstack Dante leg`
+    (`DANTE_LEG_GROUP`), which holds exactly `DANTE_LEG_GROUP_RULES` = 10.
+    dstack's `tools/windows/dante-leg.ps1` (read at tag v0.6.123, recorded on
+    #322 comment 6860319670) creates them, each `-Action Block -Enabled True
+    -Profile Any -InterfaceAlias <Dante adapter>`: `TCP in` / `TCP out`
+    (every port but 22 and 8092), `UDP in` (all but Dante's ports, the flow
+    range 29800-31847 and the ephemeral ports, off Dante's groups), `UDP
+    in, ephemeral ports` (49152-65535 from any remote port but 5353), and
+    UDP in + out of `svchost.exe`, `mDNSResponder.exe` and
+    `mDNSResponder.exe (x86)`; display names `dstack Dante leg: <what>`
+    (`DANTE_LEG_RULE_NAMES`). `dante-leg.ps1 -InterfaceAlias Dante70
+    -RemoveGroup dstack155` switches a PC; `-Mode check -InterfaceAlias
+    <adapter>` is dstack's own verdict (exit 0, else one `ERROR` line per
+    problem). The old `dstack155` state is deleted once every PC moved.
+  - A rule belongs to a group by its `RuleGroup` or `DisplayGroup`
+    (`FirewallGroup::of`); both groups holding rules (a switch half done) is
+    `firewall_groups_mixed`, never either standard; the rules are judged by
+    the group that holds them, the generic one when neither does
+    (`BlockRules::group`).
   - Read in the same WMI pass: the profile row's two default actions
     (`active_defaults`, both or none; the registry fallback has none) and
     `SELECT InstanceID, DisplayName, RuleGroup, DisplayGroup FROM
@@ -122,13 +143,14 @@ process for this.
   - The verdict (`prod_env_firewall.rs::problems`, pure): an unread profile
     = `unreadable:firewall:<p>` and nothing else judged; all off = no
     problem (rules and defaults ignored); a profile on: the standard is
-    ATTEMPTED once the group holds a rule, a profile that is ON allows both
+    ATTEMPTED once either group holds a rule, a profile that is ON allows both
     ways, or the rules are unread. Not attempted = `firewall_on:<p>` for each
     profile on, nothing else (a firewall simply on). Attempted = per profile
     in order `firewall_off:<p>` (off) or, on, `firewall_default_block:<p>`
     (`unreadable:firewall_defaults:<p>` with none read), then
-    `firewall_block_outside_group` (names), `firewall_group_incomplete`
-    (`rules` = the count) or `unreadable:firewall_rules`.
+    `firewall_block_outside_group` (names), `firewall_groups_mixed` or
+    `firewall_group_incomplete` (`group` + `rules` = the count) or
+    `unreadable:firewall_rules`.
   - Items 2's interface binding (`Dante70`) and 4 (no rule names
     SongPlayer.exe) are read by the setup script only (the filter classes
     are separate WMI associations; the cmdlets read them directly).
@@ -390,8 +412,9 @@ leg. It replaced the DVS note.
   `sp_core::prod_env::EnvironmentStatus` = `{checked, ok, note, edition_id,
   product_name, build_number, ltsc, edition_allowed, defender_realtime,
   defender_passive, defender_protections_on, defender_mode, defender_antivirus_enabled,
-  antivirus_on, firewall: {domain, private, public, mode: "off"|"dstack155"|"other"|null,
-  defaults: [{inbound, outbound}|null; 3], dstack_group_rules, block_rules_outside_group},
+  antivirus_on, firewall: {domain, private, public, mode: "off"|"dstack155"|"dante_leg"|"other"|null,
+  defaults: [{inbound, outbound}|null; 3], dstack_group_rules, dante_leg_group_rules,
+  block_rules_outside_group},
   audio: {soundgrid:
   "not_installed"|"unreadable"|"port_unset"|"port_missing"|"found",
   soundgrid_port_mac (12 hex digits), soundgrid_nic: NIC, windows_update: {no_auto_update,
@@ -416,7 +439,7 @@ leg. It replaced the DVS note.
   nothing else of the firewall), or `firewall_on:<domain|private|public>`,
   or per profile `firewall_off:<p>` / `firewall_default_block:<p>` /
   `unreadable:firewall_defaults:<p>`, then `firewall_block_outside_group`,
-  `firewall_group_incomplete` / `unreadable:firewall_rules`; then #255's: SoundGrid's one of
+  `firewall_groups_mixed` / `firewall_group_incomplete` / `unreadable:firewall_rules`; then #255's: SoundGrid's one of
   `unreadable:soundgrid` / `soundgrid_port_unset` / `soundgrid_port_missing`,
   or its adapter's `unreadable:soundgrid_nic`, `soundgrid_nic_netadaptercx`,
   `soundgrid_nic_setting:<name>` (in `NicSetting::ALL`'s order), then
@@ -458,9 +481,10 @@ judges THAT status (no second read), then FAILS (`environment-gate.ts`) on
 every problem (`code: text`), on every fact that is not the production one
 whatever `ok` says (`edition_allowed` true; `defender_realtime`,
 `defender_passive` false; the firewall by its `mode`: `off` with every profile
-false, or `dstack155` with every profile true, each `defaults` entry 2 / 2,
-`dstack_group_rules` 14 and `block_rules_outside_group` `[]` (any other
-mode, null included, fails: `firewallFailures`); `antivirus_on` and
+false, or `dstack155` / `dante_leg` (#322) with every profile true, each
+`defaults` entry 2 / 2, `dstack_group_rules` 14 / 0, `dante_leg_group_rules`
+0 / 10 and `block_rules_outside_group` `[]` (any other mode, null included,
+fails: `firewallFailures`); `antivirus_on` and
 `defender_protections_on` `[]`; #285: `audio.wired_nics` a non-empty list
 with every adapter `ok`; a fact
 missing from an older server reads null and fails; #255: `audio.soundgrid`
@@ -528,19 +552,25 @@ shell; ASCII only, it is read as cp1252) and pwsh 7 (the Linux tests).
   profiles off again"; it turned every profile off until 10.11.2026):
   `Read-ProdPcFirewallStandard` reads the ACTIVE store (each profile's
   default actions; `Get-NetFirewallRule -Enabled True -Action Block`; every
-  rule of `-Group dstack155` with `Get-NetFirewallInterfaceFilter`'s
-  `InterfaceAlias` and `Get-NetFirewallApplicationFilter`'s `Program`; a
-  cmdlet's ObjectNotFound = none, any other error throws) into the facts'
-  `firewall_standard`, and `Add-ProdPcFirewallReview` (pure) gives BLOCKERS
-  only, with lane 1's codes and the same "attempted" rule: `firewall_on:<p>`,
-  `firewall_off:<p>`, `firewall_default_block:<p>`,
-  `firewall_block_outside_group`, `firewall_group_incomplete` (exactly 14,
-  every one enabled Block), `unreadable:firewall:<p>`,
-  `unreadable:firewall_rules` (a profile on and no `firewall_standard`),
+  rule of `-Group dstack155` and (#322) `-Group 'dstack Dante leg'`, each
+  with its `group`, `Get-NetFirewallInterfaceFilter`'s `InterfaceAlias` and
+  `Get-NetFirewallApplicationFilter`'s `Program`; a cmdlet's ObjectNotFound
+  = none, any other error throws) into the facts' `firewall_standard`, and
+  `Add-ProdPcFirewallReview` (pure) gives BLOCKERS only, with lane 1's codes
+  and the same "attempted" rule: `firewall_on:<p>`, `firewall_off:<p>`,
+  `firewall_default_block:<p>`, `firewall_block_outside_group` (outside
+  both groups), `firewall_groups_mixed` (both hold rules),
+  `firewall_group_incomplete` (dstack155: exactly 14, every one enabled
+  Block; the generic group: exactly `Get-ProdPcDanteLegRuleNames`' 10 by
+  display name, every one enabled Block, the missing and foreign names
+  listed; a Rust test pins that list to `DANTE_LEG_RULE_NAMES`),
+  `unreadable:firewall:<p>`, `unreadable:firewall_rules` (a profile on and
+  no `firewall_standard`, or a group rule read with no group of dstack's),
   plus the script's own `firewall_group_interface` (a group rule not bound
   to `Dante70` alone) and `firewall_group_songplayer` (a group rule whose
-  program's file name is SongPlayer.exe, case ignored). Creating the group
-  stays dstack's job.
+  program's file name is SongPlayer.exe, case ignored), for either group.
+  Creating a group stays dstack's job; the script does not run dstack's
+  `dante-leg.ps1 -Mode check` (the tool is not on the box).
   Not here: the NIC driver swap (lane 3), the Dante adapter, CPU
   reservation, the edition.
 - **Shape:** READ every fact into one object (`Read-ProdPcFacts`, then a
@@ -614,6 +644,9 @@ shell; ASCII only, it is read as cp1252) and pwsh 7 (the Linux tests).
   read on 10.11.2026, the rules' names and paths written from dstack's
   design), a fresh PC (all 25 actions, in order; its firewall off), every
   firewall blocker and that no state ever plans a firewall action,
+  #322's generic filter (`snv-dante-leg.json`: SNV after the switch, the
+  rule set dante-leg.ps1 creates, rule Names placeholders for Windows'
+  GUIDs) holding and every departure from it, both groups at once,
   a second run after its own changes (empty, through a JSON round trip),
   each blocker, Defender's service states, and the script itself in
   `-Plan -FactsJson` mode (exit codes 0 / 2 / 3, `-SaveFacts`); fixtures
