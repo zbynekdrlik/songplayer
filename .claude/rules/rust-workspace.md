@@ -961,6 +961,11 @@ the test that kills each one BEFORE CI's mutation gate runs.
   ports checked free first; `DanteParams.ports` carries it (`None` = Dante's
   defaults, the output's). A new device test uses `claim_slot` + `on_slot`
   and asks a flow on `slot.ports.flows`, never `flows::control::PORT`.
+  The first honest gate run over `dante_device.rs` then showed two
+  survivors the collision had hidden: a count of flags pinned with ONE of
+  TWO set reads the same with the test inverted (`!=` → `==`; pin two of
+  three), and `if a.len() < n { a.resize(n, 0) }` has an equivalent `<=`
+  mutant (write `a.resize(a.len().max(n), 0)`).
 - **A NEW file is missing from `git diff <base>` until git tracks it**
   (#221 L2b): listing uncommitted work with `git diff 5ad0178f > range.diff`
   showed no mutant at all for the new `remote/codec.rs`. `git add -N
