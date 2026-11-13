@@ -946,6 +946,17 @@ the test that kills each one BEFORE CI's mutation gate runs.
   a test that waits 20 s for a counter a mutant never moves hits
   cargo-mutants' auto timeout (~20 s on these runners) and reads TIMEOUT,
   which fails the gate like a survivor. Bound such waits at ~5 s.
+- **The `dante_device` tests collide under nextest** (#322, measured on
+  dev1 with dstack v0.6.109 AND v0.6.123, 5–8 of 17 failing every run):
+  each starts a device on the routed address, which binds ARC UDP 4440;
+  their `ONE_DEVICE` mutex serializes threads of ONE process, but nextest
+  (the mutation gate's `test_tool`) runs every test in its own process, so
+  they fail `ARC on UDP 4440: Address already in use`. With
+  `fail-fast = { max-fail = 1, terminate = "immediate" }` that makes every
+  sp-server mutant read CAUGHT for the wrong reason (the gate runs
+  `--baseline=skip`). Until fixed, a local `cargo mutants` of sp-server says
+  nothing: name each mutant's killer by reading, and run the named tests
+  with `cargo test`.
 - **A NEW file is missing from `git diff <base>` until git tracks it**
   (#221 L2b): listing uncommitted work with `git diff 5ad0178f > range.diff`
   showed no mutant at all for the new `remote/codec.rs`. `git add -N

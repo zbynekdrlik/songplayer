@@ -668,6 +668,12 @@ shell; ASCII only, it is read as cp1252) and pwsh 7 (the Linux tests).
   PowerShell 5.1 cannot run, `PSUseCompatibleSyntax`), and Build (Windows)
   runs `-Plan` on the runner under 5.1 (the read glue, read only) and the
   adapter read + the other-user AppData branch directly.
+  **Locally (dev1 has no pwsh, #322):** fetch PowerShell's release tarball
+  (`powershell-7.4.6-linux-x64.tar.gz` from PowerShell's GitHub releases)
+  into the scratchpad, `Install-Module Pester -MinimumVersion 5.5.0
+  -SkipPublisherCheck` and `PSScriptAnalyzer` (CurrentUser), then run CI's
+  own configuration with `Import-Module Pester -RequiredVersion 5.6.1`
+  (the install also pulls 6.x) from a scratch `.ps1`.
 - **Known limits:** the Defender MAPS / sample-submission values and the
   Defender policy keys were not read back by lane 1 on the boxes; PP and
   SNV were set that way on 11.10.2026 (#233), so their first run is
