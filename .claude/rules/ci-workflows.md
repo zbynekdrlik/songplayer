@@ -185,6 +185,11 @@ message to worker` before blaming a person.
   port) and cargo-mutants then tests nothing. `git diff <base> -- crates > diff.patch`,
   `-j 3`: ~170 mutants in ~30 min. Wait on the real `cargo-mutants` pid, not a `setsid`
   wrapper's (it exits at once, so `tail --pid` returns immediately).
+  In a worktree WORKER lane a Bash call running past ~180 s is moved to the
+  background and its completion goes to the parent (#321 flip lane): start the
+  mutation run and the full `cargo test --workspace` detached (`setsid nohup
+  bash <scratch>/run.sh &`, the script writing a log ending in a DONE line) and
+  poll the log in calls well under 180 s.
   Prebuilt binaries via `taiki-e/install-action` (`cargo-mutants@27.1.0,cargo-nextest@0.9.140`),
   `cargo mutants --in-diff pr.diff --baseline=skip --test-tool=nextest --jobs 2`.
 - Profile + test tool + ALL exclusions live in `.cargo/mutants.toml` (`profile="mutants"`,
