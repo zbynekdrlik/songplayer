@@ -2277,6 +2277,8 @@ function programBody() {
       compose_phase_us_p50: 0,
       compose_phase_us_p99: 0,
       compose_late: 0,
+      // #317: the last late composes / sends {utc_ms, kind, late_us, after_offer_us}.
+      late_events: [],
       slot_repicks: 0,
       device_resets: 0,
       sender_backoffs: 0,

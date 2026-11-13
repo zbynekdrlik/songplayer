@@ -9,7 +9,7 @@ use sp_gpu::{ComposeStats, SpoutSendStats};
 use super::tests::{add_playlist, call};
 use crate::api::routes::tests::test_state;
 use crate::playback::program_bus::PROGRAM_NDI_NAME;
-use crate::playback::program_max::MAX_NOT_RUNNING;
+use crate::playback::program_max::{Lateness, MAX_NOT_RUNNING};
 
 #[tokio::test]
 async fn get_program_reports_the_max_block() {
@@ -55,6 +55,7 @@ async fn get_program_reports_the_max_block() {
             "compose_phase_us_p50": 0,
             "compose_phase_us_p99": 0,
             "compose_late": 0,
+            "late_events": [],
             "slot_repicks": 0,
             "device_resets": 0,
             "sender_backoffs": 0,
@@ -141,6 +142,18 @@ async fn get_program_reports_the_max_block() {
     max.record_uploads(t0 + std::time::Duration::from_millis(100), 3_110_400, 1);
     max.record_device_reset();
     max.record_adapter("NVIDIA GeForce RTX 3070 Ti".into());
+    // #317: a boundary composed 2.5 ms after its compose instant.
+    max.record_late(
+        17_632_000_123_456,
+        &Lateness {
+            offered: t0,
+            compose: Some((
+                t0 + std::time::Duration::from_millis(12),
+                t0 + std::time::Duration::from_micros(14_500),
+            )),
+            send: None,
+        },
+    );
     let pid = add_playlist(&state.pool, "slow").await;
     let (status, json) = call(
         state,
@@ -163,6 +176,16 @@ async fn get_program_reports_the_max_block() {
         )
     );
     assert_eq!(m["device_resets"], 1);
+    assert_eq!(
+        m["late_events"],
+        serde_json::json!([{
+            "utc_ms": 1_763_200_012_i64,
+            "kind": "compose",
+            "late_us": 2_500,
+            "after_offer_us": 14_500,
+        }]),
+        "#317: the late compose with its boundary and lateness"
+    );
     assert_eq!(m["adapter"], "NVIDIA GeForce RTX 3070 Ti");
     assert_eq!(
         (&m["upload_mb_s"], &m["uploads_per_s"]),
