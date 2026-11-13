@@ -117,8 +117,13 @@ struct HeldTail {
     /// The video reader returned end-of-stream since the last seek; it is
     /// not read again until the next seek.
     video_ended: bool,
-    /// The last frame delivered since the last seek: the steps follow it.
+    /// The last REAL frame delivered since the last seek: the 15 s bound
+    /// counts from it (#320), never from a late step.
     last_frame_ms: Option<u64>,
+    /// The last late step since that frame (#318, #320): the steps go on
+    /// after it (never back before it), so a late run that meets the
+    /// video's end holds on from where the run left off.
+    late_ms: Option<u64>,
     /// Where the song plays from since the last seek (0 at the open): the
     /// first step when no frame was delivered since (a seek past the last
     /// frame).
@@ -137,17 +142,19 @@ impl HeldTail {
     }
 
     /// The next step's time (ms), counted, or `None` once it would lie more
-    /// than [`AUDIO_PAST_VIDEO_MAX_MS`] past its base. The base is the last
-    /// frame delivered, the first step one frame after it; with no frame
-    /// delivered since the seek, the seek's own position, the first step on
-    /// it.
+    /// than [`AUDIO_PAST_VIDEO_MAX_MS`] past the last REAL frame (#320). The
+    /// steps follow the last late step, else the last frame delivered, the
+    /// first step one frame after it; with no frame delivered since the seek,
+    /// the seek's own position, the first step on it (the bound then counts
+    /// from there).
     fn next_ms(&mut self, frame_rate: (u32, u32)) -> Option<u64> {
-        let (base, first) = match self.last_frame_ms {
+        let (base, first) = match self.late_ms.or(self.last_frame_ms) {
             Some(ms) => (ms, 1),
             None => (self.origin_ms, 0),
         };
         let at = base + held_offset_ms(first + self.steps, frame_rate);
-        if at > base + AUDIO_PAST_VIDEO_MAX_MS {
+        let real = base;
+        if at > real + AUDIO_PAST_VIDEO_MAX_MS {
             return None;
         }
         self.steps += 1;
@@ -440,6 +447,7 @@ impl SplitSyncedDecoder {
             FramePoll::NotReady => return self.not_ready(),
         };
         self.held.last_frame_ms = Some(video.timestamp_ms);
+        self.held.late_ms = None;
         let audio_frames = self.take_audio_until(video.timestamp_ms + self.audio_lead_ms)?;
 
         debug!(
@@ -497,8 +505,9 @@ impl SplitSyncedDecoder {
         self.late.steps += 1;
         self.late.line_ms = Some(at_ms);
         self.late_counts.0 += 1;
-        // A video that ends during the run holds on from the last step.
-        self.held.last_frame_ms = Some(at_ms);
+        // A video that ends during the run holds on from the last step; the
+        // tail's bound still counts from the last real frame (#320).
+        self.held.late_ms = Some(at_ms);
         let audio = self.take_audio_until(at_ms + self.audio_lead_ms)?;
         Ok(Some((at_ms, audio)))
     }
@@ -601,7 +610,8 @@ impl SplitSyncedDecoder {
                     self.frame_before_end = self.seek_skipped.take();
                 }
                 // A late run ends with the video (review round 2): the tail
-                // holds on from its last step (`held.last_frame_ms`).
+                // holds on from its last step (`held.late_ms`), bounded from
+                // the last real frame (#320).
                 self.late = LateRun::default();
                 return Ok(FramePoll::Ready(None));
             };

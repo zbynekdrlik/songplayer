@@ -417,3 +417,62 @@ fn a_stall_exactly_at_the_bound_is_not_over_it() {
     assert!(super::stall_over(limit + Duration::from_nanos(1), limit));
     assert!(!super::stall_over(Duration::ZERO, limit));
 }
+
+/// #320: a 10 s late run on the picture at 0 ms meets the video's end. The
+/// tail goes on after the last late step (never back before it), but its
+/// 15 s bound counts from the last REAL picture (0 ms), so one frozen
+/// picture lasts 15 s, never the late run plus a whole tail (25 s here, up
+/// to ~30 s). The bound is inclusive: the step exactly 15 s after the
+/// picture still goes out.
+#[test]
+fn a_late_run_into_the_video_s_end_bounds_the_tail_from_the_real_picture() {
+    let mut dec = decoder(Video::new(2), 60_000);
+    assert_eq!(frame_ms(&mut dec), 0);
+    for k in 1..=100 {
+        let (at, _) = dec.next_late().unwrap().expect("a late step");
+        assert_eq!(at, k * 100);
+    }
+    // Frame 1 (100) lies behind the late line and is dropped; the video ends.
+    assert!(matches!(
+        dec.next_synced_within(Some(Duration::ZERO)).unwrap(),
+        Synced::Ended
+    ));
+    let mut tail = Vec::new();
+    while let Some((at, _)) = dec.next_held().unwrap() {
+        tail.push(at);
+    }
+    assert_eq!(tail.first(), Some(&10_100), "on after the last late step");
+    assert_eq!(
+        tail.last(),
+        Some(&AUDIO_PAST_VIDEO_MAX_MS),
+        "15 s after the real picture at 0 ms"
+    );
+    assert_eq!(tail.len(), 50);
+    assert!(!dec.audio_ended(), "the audio past the bound is never read");
+}
+
+/// #320: a picture that comes back after a late run ends what the run left
+/// on the tail: the tail after the video's end follows that picture, never
+/// the old run's last step.
+#[test]
+fn a_picture_after_a_late_run_is_where_the_tail_follows_from() {
+    let mut video = Video::new(5);
+    video.polls = VecDeque::from([true, false]);
+    let mut dec = decoder(video, 5000);
+    assert_eq!(frame_ms(&mut dec), 0);
+    assert!(matches!(
+        dec.next_synced_within(Some(Duration::ZERO)).unwrap(),
+        Synced::NotReady
+    ));
+    dec.next_late().unwrap().expect("a late step at 100");
+    dec.next_late().unwrap().expect("a late step at 200");
+    // 100 and 200 dropped, 300 and 400 shown, then the end.
+    assert_eq!(frame_ms(&mut dec), 300);
+    assert_eq!(frame_ms(&mut dec), 400);
+    assert!(matches!(
+        dec.next_synced_within(Some(Duration::ZERO)).unwrap(),
+        Synced::Ended
+    ));
+    let (at, _) = dec.next_held().unwrap().expect("a held step");
+    assert_eq!(at, 500, "after the real picture at 400");
+}

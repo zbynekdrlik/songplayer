@@ -135,8 +135,13 @@ pub struct DecodeProducer {
     /// (#217), so a frame's PTS is 0-based.
     pts_offset_ms: u64,
     /// The position of the last item handed out (the origin before one):
-    /// where a refused seek leaves the decoder (#217).
+    /// where a refused seek leaves the decoder (#217). It follows the late
+    /// steps too (#318).
     current_ms: u64,
+    /// The position of the last REAL picture handed out (the origin before
+    /// one), never a late step's (#320): where #277 measures an early end
+    /// from.
+    real_ms: u64,
     /// The seek generation the producer pushes under.
     epoch: u64,
     /// The last picture handed on: what the held steps show (#257).
@@ -172,6 +177,7 @@ impl DecodeProducer {
         Self {
             pts_offset_ms: start_ms,
             current_ms: start_ms,
+            real_ms: start_ms,
             epoch: 0,
             held: None,
             early: None,
@@ -284,6 +290,7 @@ impl DecodeProducer {
         self.note_kind(&video);
         let ms = video.timestamp_ms;
         self.current_ms = ms;
+        self.real_ms = ms;
         let frame = to_paced_frame(video, audio, self.pts_offset_ms);
         self.held = Some(Held::of(&frame));
         (frame, ms, audio_ended)
@@ -298,9 +305,11 @@ impl DecodeProducer {
         // A seek to or past the last frame: the last frame its fast-forward
         // decoded is the picture to hold.
         let before_end = decoder.take_frame_before_end();
+        // #320: from the last REAL picture, never a late step's time.
         let at_ms = before_end
             .as_ref()
-            .map_or(self.current_ms, |last| last.timestamp_ms);
+            .map_or(self.real_ms.max(self.current_ms), |last| last.timestamp_ms);
+        self.real_ms = at_ms;
         if let Some(early) = EarlyEnd::of(at_ms, decoder.video_duration_ms()) {
             self.early = Some(early);
             return Ok(Next::End);
@@ -382,6 +391,7 @@ impl DecodeProducer {
         self.early = None;
         self.pts_offset_ms = real;
         self.current_ms = real;
+        self.real_ms = real;
         self.epoch = epoch;
         real
     }
