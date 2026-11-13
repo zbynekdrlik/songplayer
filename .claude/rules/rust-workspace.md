@@ -946,6 +946,17 @@ the test that kills each one BEFORE CI's mutation gate runs.
   a test that waits 20 s for a counter a mutant never moves hits
   cargo-mutants' auto timeout (~20 s on these runners) and reads TIMEOUT,
   which fails the gate like a survivor. Bound such waits at ~5 s.
+- **Run the local diff gate in shards from a worktree lane** (#289 step 0):
+  `cargo mutants --in-diff <scratch>/range.diff --dir <wt> --baseline=skip
+  --jobs 2 --timeout 120 --shard k/4 --output <scratch>/mutK` — ~7 mutants
+  and ~4 min a shard on dev1, so each stays inside one Bash call (a call
+  over ~3 min is moved to the background; wait on its output file with
+  `inotifywait -t 170`, never end the turn on it). Sum the four summaries.
+- **A new `PacingStats` field must read its `Default` until the pacer's
+  first emit** (#289 step 0): `pacer_tests::disabled_pacer_reports_default_stats`
+  compares a disabled pacer's whole `stats()` with `PacingStats::default()`;
+  a histogram that served its edges from the start failed it, and only the
+  FULL suite showed it (run the whole `sp-server` lib before a GREEN).
 - **An in-process lock serializes nothing under nextest** (#322 / #323).
   nextest (the mutation gate's `test_tool`) runs every test in its own
   process, and the gate runs two mutants at once (`--jobs 2`), so a test
