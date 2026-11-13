@@ -13,7 +13,7 @@ triggers:
   - pipeline version
   - LYRICS_PIPELINE_VERSION
   - Gemini
-  - CLIProxyAPI
+  - OpenRouter
   - translation
   - reprocess
   - ensemble
@@ -311,44 +311,40 @@ owner's call on #144, asked separately.
   - The gate only changes WHEN work runs, never the output → NOT a
     `LYRICS_PIPELINE_VERSION` bump.
 
-## Translation — Claude only, never Gemini fallback
+## Translation — the `translate` text task on OpenRouter, no fallback model
 
-EN→SK translation MUST use Claude via CLIProxyAPI (paid Max plan — unlimited).
-Gemini is metered. Never add a "Claude falls back to Gemini" path.
+EN→SK translation is the `translate` text AI task on OpenRouter (#321,
+`.claude/rules/text-ai.md`): model `ai_model_translate`, blank =
+`google/gemini-4-hydrogen` (`DEFAULT_OPENROUTER_MODEL`). The blind A/B of
+13.11.2026 (#321 comment 6856550942, 18 songs, the production prompt,
+graded blind) found it no worse than the Claude Opus 5.5 it replaced
+(7.50 vs 7.61 of 10; Carbon 7.59 with one empty answer); the
+Claude-via-CLIProxyAPI path is DELETED, never kept as a fallback. A model
+change is a Nastavenia setting, made only after a new blind A/B
+(`POST /api/v1/ai/translate-ab`) shows it no worse — newest model only,
+re-verified on OpenRouter's list as of today. Never add a second
+"falls back to another model" path.
 
-When Claude refuses via CLIProxyAPI:
+When a model refuses:
 - Tune the prompt. A **neutral TECHNICAL** prompt works: numbered lines in,
   numbered Slovak lines out, exact line count, plus a masculine/feminine
   grammatical-gender directive — and NO story or persona. NEVER mention "song
-  lyrics", "worship", "church", "copyright", "karaoke" — these trip the
-  content-policy classifier.
-- **A "story" framing is a TRAP on the newest flagships (#145, measured on the
-  box 2026-09-14).** The #152 grandfather/grandmother "dictating for a memorial
-  plaque" story is REFUSED by `claude-fable-5-1` (on recognizable songs, e.g.
-  "Not Guilty") and `claude-opus-5` (on every song) — they answer "…even for a
-  family plaque…". `claude-opus-4-6` (the retired #144 stop-gap) did not, which
-  masked it. The fix was NOT a model change but DROPPING the story:
-  `translator::build_prompt` is now the bare neutral task above, which translated
-  9/9 across fable-5-1 / opus-5 / sonnet-5 and preserved gender (male "Keď som
-  **bol** vinný" / female "Keď som **bola** vinná"). If a model ever refuses
-  again, a refusal is now classified + logged `kind="refusal"` with the model id
-  (never a silent "parse returned 0", `translator::classify_zero_translation`) —
-  grep the worker log for `refusal`. Prompt-semantics change → bumped
-  `LYRICS_TRANSLATION_VERSION` 1→2 (catalog re-translation).
-- Model: `sp_core::config::DEFAULT_AI_MODEL` (`claude-opus-5-5` since
-  2026-09-29, #145 — the owner's flagship, routed by CLIProxyAPI **8.0.4**;
-  `claude-fable-5-1` on 7.3.1 before that). The proxy binary was upgraded 6.9.27 → 7.3.1
-  because the old build's model registry predated the Claude-5 ids and
-  `502 unknown provider`'d them; `claude-opus-4-6` was the #144 stop-gap it
-  forced (and `claude-opus-4-20250514` before that is fully retired — a
-  `404 not_found_error` upstream that also parks the OAuth auth in a
-  cooldown until the proxy restarts, so a retired id looks like a dead
-  login). Before switching the model or blaming the token, probe with
-  `python C:\ProgramData\SongPlayer\proxy_probe.py <model>` on win-resolume
-  and use only ids the proxy's `/v1/models` actually lists (an unlisted id
-  returns 502 "unknown provider"). Proxy upgrade + rollback procedure:
-  `scripts/cliproxy/README.md`. Always pass `max_tokens: 32000` for large
-  responses.
+  lyrics", "worship", "church", "copyright", "karaoke" — these tripped
+  Claude's content-policy classifier.
+- **A "story" framing is a TRAP (#145, measured on the box 2026-09-14 on the
+  Claude flagships).** The #152 grandfather/grandmother "dictating for a
+  memorial plaque" story was REFUSED by `claude-fable-5-1` and
+  `claude-opus-5` — they answered "…even for a family plaque…". The fix was
+  NOT a model change but DROPPING the story: `translator::build_prompt` is the
+  bare neutral task above, which translated 9/9 and preserved gender (male
+  "Keď som **bol** vinný" / female "Keď som **bola** vinná"). A refusal is
+  classified + logged `kind="refusal"` with the model id (never a silent
+  "parse returned 0", `translator::classify_zero_translation`) — grep the
+  worker log for `refusal`. Prompt-semantics change → bump
+  `LYRICS_TRANSLATION_VERSION` (catalog re-translation).
+- An OpenRouter answer with no text is retried (the policy's waits, #321),
+  never written as an empty translation; a moderation refusal (403) is
+  final: the song keeps its English lines.
 - If a specific song still refuses after prompt tuning: surface it to the user.
   Do NOT auto-fallback.
 
@@ -368,14 +364,9 @@ When Claude refuses via CLIProxyAPI:
   SEPARATE from `LYRICS_PIPELINE_VERSION` and gates RE-TRANSLATION only — never
   re-alignment, never a pipeline bump. Bump it when the translation prompt
   changes the Slovak wording. `videos.lyrics_translation_version < current` +
-  `has_lyrics=1` re-queues a song through `retranslate_next_stale` (one Claude
+  `has_lyrics=1` re-queues a song through `retranslate_next_stale` (one AI
   call, `sk` lines rewritten in place, lowest priority — runs only when the
   alignment queue is empty). Setting a gender resets the row's version to 0.
-- OAuth re-login: CLIProxyAPI's own `-claude-login` expires 5 min after
-  printing the URL — too short for the owner's authorise-and-paste round
-  trip. Use `C:\ProgramData\SongPlayer\claude_pkce_login.py start` (prints
-  the URL) and `… finish "<pasted callback URL>"` (exchanges the code and
-  writes the auth JSON into `cache\.cli-proxy-api\`). Never echo the code.
 
 ## Pipeline version discipline
 

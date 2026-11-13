@@ -73,11 +73,13 @@ dochadzat k ziadnemu platenemu ai spracovaniu dokial to nepovolim".
 
 ## The ONE switch: every paid call site asks `paid_ai`
 
-Paid AI here means Gemini (metered, `gemini_api_key`) and Claude (through
-CLIProxyAPI, a paid plan). There is no transport-level backstop (the
-transports, `AiClient::chat` and `gemini_api::send_on_key`, have no
-database; a process-wide flag would let one test's switch refuse another
-test's calls): each call site asks the switch, and each path has its test.
+Paid AI here means Gemini (metered, `gemini_api_key`) and the text AI on
+OpenRouter (metered, `openrouter_api_key`, #321). Each call site asks the
+switch, and each path has its test. The OpenRouter transport
+(`AiClient::openrouter_chat`) asks it again before anything is sent
+(`text-ai.md`); `gemini_api::send_on_key` has no database and no such
+backstop (a process-wide flag would let one test's switch refuse another
+test's calls).
 Every path:
 
 - **Lyrics job** (Gemini 3.5 Transcribe, Claude's clean-up, the Spotify
