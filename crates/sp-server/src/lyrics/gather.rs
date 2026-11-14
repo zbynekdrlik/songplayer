@@ -167,7 +167,7 @@ pub(crate) async fn gather_sources_impl(
         }
     }
     // Spotify priority sits between override and other Tier-1 sources;
-    // see `claude_merge::source_priority` for the exact ordering.
+    // see `candidate_pick::source_priority` for the exact ordering.
     if let Some(t) = spotify_track {
         candidate_texts.push(t.into());
     }
@@ -210,7 +210,7 @@ pub(crate) async fn gather_sources_impl(
     // lyrics.ovh returns clean plain-text lyrics — no section markers, no
     // contributor banners, no HTML. Push directly as a TextOnly candidate;
     // no Claude cleanup pass needed. Its label `lyrics_ovh` ranks at the
-    // community-lyrics-website slot of `claude_merge::priority_with_timing`.
+    // community-lyrics-website slot of `candidate_pick::priority_with_timing`.
     if let Some(lines) = lyrics_ovh_lines {
         candidate_texts.push(CandidateText {
             source: "lyrics_ovh".into(),

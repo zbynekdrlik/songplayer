@@ -12,7 +12,7 @@
 
 #![allow(unused_imports)]
 
-use crate::lyrics::claude_merge::best_authoritative_candidate;
+use crate::lyrics::candidate_pick::best_authoritative_candidate;
 use crate::lyrics::tier1::CandidateText;
 
 fn text_cand(source: &str, line_count: usize) -> CandidateText {

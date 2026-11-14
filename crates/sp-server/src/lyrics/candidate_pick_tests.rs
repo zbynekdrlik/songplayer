@@ -1,5 +1,5 @@
-//! Tests for `claude_merge`. Included as a sibling file via
-//! `#[path = "claude_merge_tests.rs"] #[cfg(test)] mod tests;` from claude_merge.rs
+//! Tests for `candidate_pick`. Included as a sibling file via
+//! `#[path = "candidate_pick_tests.rs"] #[cfg(test)] mod tests;` from candidate_pick.rs
 //! to keep that file under the airuleset 1000-line cap.
 
 use super::*;

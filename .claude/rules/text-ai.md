@@ -48,8 +48,8 @@ setting, the `claude_proxy` provider choice, CI's proxy gate,
   `description_provider::{clean_lyrics_via_ai, parse_ai_response}`,
   `register_check::check_via_ai`; a test's OpenRouter mock is `text_ai(…)`
   / `ai_mock`, and a log line says "the text AI", never "Claude" (the
-  model is a setting). `lyrics::claude_merge` is no AI call (a pure
-  candidate picker) and keeps its historical name.
+  model is a setting). `lyrics::candidate_pick` (renamed from
+  `claude_merge`, #321) is no AI call: the pure lyrics-text picker.
 - `ai/openrouter.rs` is the ONE transport: Bearer key, the request
   `{model, messages, temperature 0.1, max_tokens}`, the answer decoded into
   typed structs (never `serde_json::Value`'s own Deserialize), an error

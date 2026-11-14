@@ -232,7 +232,7 @@ impl LyricsWorker {
         // line timings ship; otherwise (skip / gate fail / mtl error) the base
         // tier below.
         let best_candidate = title_reference.or_else(|| {
-            crate::lyrics::claude_merge::best_authoritative_candidate(&candidates).cloned()
+            crate::lyrics::candidate_pick::best_authoritative_candidate(&candidates).cloned()
         });
 
         let mtl_track = match self

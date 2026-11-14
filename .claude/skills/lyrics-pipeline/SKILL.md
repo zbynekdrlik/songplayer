@@ -40,7 +40,7 @@ is now **text gathering + two tiers**, one forced aligner (mtl), one ASR vendor
    → **Spotify** (`spotify_track_id`, LINE_SYNCED) → operator
    **`lyrics_override_text`** → **YouTube description** (Claude-extracted,
    `description_provider.rs`). The best candidate is picked by
-   `claude_merge::best_authoritative_candidate` /
+   `candidate_pick::best_authoritative_candidate` /
    `priority_with_timing` (override=6; timed spotify/lrclib=5, timed
    yt_subs=4; text description=3, text lrclib=2, text lyrics_ovh=1; else=0).
    - **Captions keep their sung lines (#144):** `youtube_subs::parse_json3`

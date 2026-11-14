@@ -50,7 +50,7 @@ pub enum TitleProvider {
 
 impl TitleProvider {
     /// The candidate source label — the same slot as the provider's
-    /// artist+title lookup in `claude_merge::priority_with_timing`.
+    /// artist+title lookup in `candidate_pick::priority_with_timing`.
     pub fn source(self) -> &'static str {
         match self {
             TitleProvider::Lrclib => "lrclib",
@@ -294,7 +294,7 @@ impl TitleSearch<'_> {
         // The found lyric (as cleaned) against the text the video itself would
         // use without it: its priority pick, the same rule as when no lyric
         // is found.
-        let videos_pick = crate::lyrics::claude_merge::best_authoritative_candidate(gathered);
+        let videos_pick = crate::lyrics::candidate_pick::best_authoritative_candidate(gathered);
         let videos_score =
             videos_pick.map(|c| lines_overlap_score(c.lines.iter().map(String::as_str), words));
         let reference = found.as_ref().map(|(_, lyric)| {

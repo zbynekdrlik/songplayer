@@ -4,7 +4,7 @@
 //! `AlignedLines` / `FetchFn` machinery were deleted in #159 (one-regime
 //! cleanup). Only `CandidateText` + `TIER1_MIN_LINES` survive: `CandidateText`
 //! is the candidate the v21 reference stage force-aligns
-//! (`claude_merge::best_authoritative_candidate` picks it), and
+//! (`candidate_pick::best_authoritative_candidate` picks it), and
 //! `TIER1_MIN_LINES` is the "full lyric sheet" threshold `spotify_resolver`
 //! verifies against.
 
