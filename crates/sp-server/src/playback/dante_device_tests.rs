@@ -322,6 +322,62 @@ fn the_stacks_status_line_reads_as_the_figures() {
     assert_eq!(figures_of(flows).unwrap().live_flows, 2);
 }
 
+/// #325: dstack v0.6.127's engine part (`ctl/status.rs::engine_part`, the
+/// pump's wakes and the media threads' scheduling) reads field for field.
+#[test]
+fn the_engines_wake_and_thread_figures_read_from_the_stacks_line() {
+    let line = r#"{"engine":{"media":1,"offset":15,"playout":803,"blocks":9,
+        "late":1,"missed":5,"overruns":0,"rebootstraps":4,"max_process_us":78,
+        "rebootstraps_late":1,"rebootstraps_clock_back":2,
+        "rebootstraps_reanchor":3,"rebootstraps_retime":5,
+        "wake_behind_max_us":7400,"wake_behind_minute_max_us":910,
+        "wake_behind_buckets":[90,8,7,6,5,4,3,2],"late_wakes":6,
+        "late_wakes_recent":[{"unix_ms":1763075534391,"behind_us":7400,"rebootstrap":1},
+            {"unix_ms":1763075540000,"behind_us":1400,"rebootstrap":0}],
+        "threads":[{"thread":"pump","scheduling":"mmcss_high","mmcss_task":3},
+            {"thread":"tx","scheduling":"highest","mmcss_task":null}]}}"#;
+    let f = figures_of(line).unwrap();
+    assert_eq!((f.pump_late, f.pump_missed, f.pump_overruns), (1, 5, 0));
+    assert_eq!(
+        [
+            f.pump_rebootstraps,
+            f.pump_rebootstraps_late,
+            f.pump_rebootstraps_clock_back,
+            f.pump_rebootstraps_reanchor,
+            f.pump_rebootstraps_retime,
+        ],
+        [4, 1, 2, 3, 5]
+    );
+    assert_eq!(f.wake_behind_max_us, 7400);
+    assert_eq!(f.wake_behind_minute_max_us, Some(910));
+    assert_eq!(f.wake_behind_buckets, [90, 8, 7, 6, 5, 4, 3, 2]);
+    assert_eq!(f.late_wakes, 6);
+    let recent: Vec<(u64, u64, bool)> = f
+        .late_wakes_recent
+        .iter()
+        .map(|w| (w.unix_ms, w.behind_us, w.rebootstrap))
+        .collect();
+    assert_eq!(
+        recent,
+        [
+            (1_763_075_534_391, 7400, true),
+            (1_763_075_540_000, 1400, false)
+        ]
+    );
+    let threads: Vec<(&str, &str, Option<u32>)> = f
+        .threads
+        .iter()
+        .map(|t| (t.thread.as_str(), t.scheduling.as_str(), t.mmcss_task))
+        .collect();
+    assert_eq!(
+        threads,
+        [("pump", "mmcss_high", Some(3)), ("tx", "highest", None)]
+    );
+    // Before its first whole minute the stack writes no minute maximum.
+    let early = figures_of(r#"{"engine":{"wake_behind_max_us":5}}"#).unwrap();
+    assert_eq!(early.wake_behind_minute_max_us, None);
+}
+
 #[test]
 fn the_link_reads_the_running_stack_and_nothing_after_the_close() {
     let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
@@ -337,6 +393,21 @@ fn the_link_reads_the_running_stack_and_nothing_after_the_close() {
     let figures = link.figures().expect("the running stack answers");
     assert!(figures.clock_ready, "the system clock is ready at once");
     assert_eq!(figures.live_flows, 0);
+    // #325: the engine's wake buckets and the pump's scheduling come from
+    // the stack's own line under the names SongPlayer reads (a renamed
+    // field would read its default): the pump lists itself once it took its
+    // priority, bounded at 5 s (the mutation gate's timeout).
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let engine = loop {
+        let f = link.figures().expect("the running stack answers");
+        if f.threads.iter().any(|t| t.thread == "pump") || std::time::Instant::now() > until {
+            break f;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    assert_eq!(engine.wake_behind_buckets.len(), 8, "{engine:?}");
+    let pump = engine.threads.iter().find(|t| t.thread == "pump");
+    assert!(pump.is_some_and(|t| !t.scheduling.is_empty()), "{engine:?}");
     device.close();
     assert_eq!(link.figures(), None);
 }

@@ -169,7 +169,7 @@ the answer to `Asrc::set_correction_ppm` and (through `frames_from_100ns`:
 positive = insert, negative = skip) `Splice::insert` / `skip`, and pushes
 `Splice::process(Asrc::process(block))` into the card's ring.
 
-**Since #285 step 3 the LAWS live in dstack-resample** (dstack tag v0.6.123,
+**Since #285 step 3 the LAWS live in dstack-resample** (dstack tag v0.6.127,
 MIT OR Apache-2.0, `crates/dstack-resample/src/asrc.rs` + `lib.rs` in the
 dstack checkout): `Servo` is a thin ADAPTER over
 `dstack_resample::asrc::Controller` (`Controller::new(target, floor 38.3 ms,
@@ -1635,7 +1635,7 @@ difference with its UTC time.
 - `DanteDevice` (`dante_device.rs`) implements the `AsioDevice` seam **in this
   process**, on every platform, with no `sp-dante-host` (the owner's ruling):
   `asio_out`'s worker, ring, `asrc_servo` and status serve it, so a second servo
-  never appears. dstack by git tag (v0.6.123), no Dante protocol code here.
+  never appears. dstack by git tag (v0.6.127), no Dante protocol code here.
   #285 step 2 (the owner's ruling via dstack #90: one rate conversion, in
   dlink, for every app): `DanteParams.rate` is `PROGRAM_RATE` (48 kHz, what the
   worker writes) and `network_rate` the entry's effective rate; `config()` sets
@@ -1734,6 +1734,27 @@ difference with its UTC time.
   loss fails the post-deploy audio gate. dlink's media threads were
   THREAD_PRIORITY_HIGHEST (normal band) below SongPlayer's own MMCSS Pro
   Audio VBAN threads; since dstack v0.6.57 they join MMCSS Pro Audio at AVRT_PRIORITY_HIGH (#285 A/B under Arena load).
+- **The pump's wakes and the threads' scheduling** (#325, dstack #281,
+  v0.6.127): `outputs[i].dante` also carries `pump_rebootstraps` and its
+  causes (`_late` more than W behind, `_clock_back`, `_reanchor` a re-anchor
+  off the block grid, `_retime` a new device latency; they add up),
+  `wake_behind_max_us`, `wake_behind_minute_max_us` (null before the first
+  whole minute), `wake_behind_buckets` (8: < 0.5, 1, 2, 5, 10, 20, 50 ms,
+  more), `late_wakes` and `late_wakes_recent` (the last 32, oldest first,
+  `{unix_ms, behind_us, rebootstrap}`: match a ledger `pump_missed` to its
+  late wake to the ms) and `threads` (`{thread: pump|tx|tx_relay|rx,
+  scheduling: mmcss_high|mmcss_joined_priority_refused|highest|sched_fifo|
+  realtime|normal|refused, mmcss_task}`). Read typed in
+  `dante_device.rs::figures_of` (the stack's `rebootstrap` is 0/1, a
+  `WakeLine` maps it; `threads` deserialize straight into sp-core's
+  `MediaThread`). The real-stack test `the_link_reads_the_running_stack…`
+  waits (≤ 5 s) for the pump to list itself, so a field dstack renames
+  reads its default and fails there, not only in a JSON-literal pin.
+  `danteGateLog` logs them all (each late wake of the minute with its UTC),
+  and `danteGateFailures` FAILS when the pump's `scheduling` at the second
+  read is not `mmcss_high` (`DANTE_PUMP_SCHEDULING`; absent = "not
+  listed"): resolume-snv's pump logged MMCSS HIGH on 13.11.2026, so any
+  other word is a regression.
 - `cargo fmt --all` does not reach `sp-ui`, and `cargo fmt` inside it
   reformats unrelated files: run `rustfmt --edition 2024 <file>` on the ones
   you touched.

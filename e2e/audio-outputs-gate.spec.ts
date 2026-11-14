@@ -6,6 +6,7 @@ import {
   deviceLatencyFailures,
   danteGateLog,
   DANTE_LATE_TOP_BINS,
+  DANTE_PUMP_SCHEDULING,
   lv1PathFailures,
   gatedAsioOutputs,
   waitingForClock,
@@ -332,6 +333,20 @@ const danteFigures = (over: Partial<DanteTelemetry> = {}): DanteTelemetry => ({
   pump_late: 2,
   pump_missed: 0,
   pump_overruns: 1,
+  pump_rebootstraps: 1,
+  pump_rebootstraps_late: 1,
+  pump_rebootstraps_clock_back: 0,
+  pump_rebootstraps_reanchor: 0,
+  pump_rebootstraps_retime: 0,
+  wake_behind_max_us: 7400,
+  wake_behind_minute_max_us: 300,
+  wake_behind_buckets: [9000, 40, 3, 1, 1, 0, 0, 0],
+  late_wakes: 1,
+  late_wakes_recent: [{ unix_ms: 1_763_075_534_391, behind_us: 7400, rebootstrap: true }],
+  threads: [
+    { thread: "pump", scheduling: "mmcss_high", mmcss_task: 2 },
+    { thread: "tx", scheduling: "mmcss_high", mmcss_task: 3 },
+  ],
   ...over,
 });
 const out4 = (blocks: number, dante: DanteTelemetry | undefined): OutputStatus => ({
@@ -412,7 +427,8 @@ test.describe("Dante gate (#285)", () => {
     const later = danteFigures({ late_bins: [2000, 20, 3, 1, 2, 3] });
     expect(danteGateFailures(out4(100, base), out4(1900, later))).toEqual([]);
     expect(danteGateLog(out4(100, base), out4(1900, later))).toBe(
-      "Dante output out-4: packets 2 ms or more late 0 -> 5, pump_late 2 -> 2, pump_overruns 1 -> 1",
+      "Dante output out-4: packets 2 ms or more late 0 -> 5, pump_late 2 -> 2, pump_overruns 1 -> 1; " +
+        "rebootstraps 1 -> 1 (late 1, clock_back 0, reanchor 0, retime 0), wake_behind_max_us 7400, minute max 300, buckets [9000,40,3,1,1,0,0,0], late_wakes 1 -> 1 [], pump mmcss_high (mmcss_task 2)",
     );
   });
 
@@ -434,7 +450,73 @@ test.describe("Dante gate (#285)", () => {
       "Dante output out-4: pump_missed 0 -> 1",
     ]);
     expect(danteGateLog(out4(100, danteFigures()), out4(1900, after))).toBe(
-      "Dante output out-4: packets 2 ms or more late 0 -> 0, pump_late 2 -> 3, pump_overruns 1 -> 4",
+      "Dante output out-4: packets 2 ms or more late 0 -> 0, pump_late 2 -> 3, pump_overruns 1 -> 4; " +
+        "rebootstraps 1 -> 1 (late 1, clock_back 0, reanchor 0, retime 0), wake_behind_max_us 7400, minute max 300, buckets [9000,40,3,1,1,0,0,0], late_wakes 1 -> 1 [], pump mmcss_high (mmcss_task 2)",
+    );
+  });
+
+  test("the pump must run in MMCSS at HIGH (#325)", () => {
+    expect(DANTE_PUMP_SCHEDULING).toBe("mmcss_high");
+    const sent = { late_bins: [2000, 20, 3, 1, 0, 0] };
+    const tx = { thread: "tx", scheduling: "mmcss_high", mmcss_task: 3 };
+    for (const scheduling of ["highest", "mmcss_joined_priority_refused", "normal", "refused"]) {
+      const pump = { thread: "pump", scheduling, mmcss_task: null };
+      const after = danteFigures({ ...sent, threads: [pump, tx] });
+      expect(danteGateFailures(out4(100, danteFigures()), out4(1900, after))).toEqual([
+        `Dante output out-4: pump scheduling ${scheduling}, want mmcss_high`,
+      ]);
+    }
+    // Only the pump's line counts: a TX thread at mmcss_high is no pump.
+    for (const threads of [[tx], [], undefined]) {
+      const after = danteFigures({ ...sent, threads });
+      expect(danteGateFailures(out4(100, danteFigures()), out4(1900, after))).toEqual([
+        "Dante output out-4: pump scheduling not listed, want mmcss_high",
+      ]);
+    }
+    // The second read decides: a first read before the pump listed itself passes.
+    const early = danteFigures({ threads: [] });
+    expect(danteGateFailures(out4(100, early), out4(1900, danteFigures(sent)))).toEqual([]);
+  });
+
+  test("the pump's wakes in the minute are logged with their UTC (#325)", () => {
+    const sent = { late_bins: [2000, 20, 3, 1, 0, 0] };
+    const old = { unix_ms: 1_763_075_534_391, behind_us: 7400, rebootstrap: true };
+    const after = danteFigures({
+      ...sent,
+      pump_rebootstraps: 3,
+      pump_rebootstraps_late: 2,
+      pump_rebootstraps_clock_back: 1,
+      wake_behind_minute_max_us: null,
+      late_wakes: 3,
+      late_wakes_recent: [
+        old,
+        { unix_ms: 1_763_075_600_000, behind_us: 2100, rebootstrap: false },
+        { unix_ms: 1_763_075_601_500, behind_us: 8000, rebootstrap: true },
+      ],
+      threads: [{ thread: "pump", scheduling: "highest", mmcss_task: null }],
+    });
+    expect(danteGateLog(out4(100, danteFigures()), out4(1900, after))).toBe(
+      "Dante output out-4: packets 2 ms or more late 0 -> 0, pump_late 2 -> 2, pump_overruns 1 -> 1; " +
+        "rebootstraps 1 -> 3 (late 2, clock_back 1, reanchor 0, retime 0), wake_behind_max_us 7400, " +
+        "minute max null, buckets [9000,40,3,1,1,0,0,0], late_wakes 1 -> 3 " +
+        "[2025-11-13T23:13:20.000Z 2100 us, 2025-11-13T23:13:21.500Z 8000 us rebootstrap], " +
+        "pump highest (mmcss_task null)",
+    );
+    // A server before #325 serves none of it: the log says so, never a crash.
+    const bare: DanteTelemetry = {
+      clock_ready: true,
+      live_flows: 1,
+      late_bins: [1, 0, 0, 0, 0, 0],
+      late_max_us: 1,
+      send_max_us: 1,
+      pump_late: 0,
+      pump_missed: 0,
+      pump_overruns: 0,
+    };
+    expect(danteGateLog(out4(100, bare), out4(1900, bare))).toBe(
+      "Dante output out-4: packets 2 ms or more late 0 -> 0, pump_late 0 -> 0, pump_overruns 0 -> 0; " +
+        "rebootstraps ? -> ? (late ?, clock_back ?, reanchor ?, retime ?), wake_behind_max_us ?, " +
+        "minute max ?, buckets [], late_wakes ? -> ? [], pump not listed",
     );
   });
 
@@ -449,12 +531,14 @@ test.describe("Dante gate (#285)", () => {
       live_flows: 0,
       late_bins: [1000, 20, 3, 1, 0, 0],
       pump_missed: 7,
+      threads: [],
     });
     expect(danteGateFailures(out4(100, danteFigures()), out4(1900, bad))).toEqual([
       "Dante output out-4: clock_ready true -> false, want true at both reads",
       "Dante output out-4: live_flows 1 -> 0, want at least 1",
       "Dante output out-4: packets sent (late_bins sum) 1024 -> 1024, want growth",
       "Dante output out-4: pump_missed 0 -> 7",
+      "Dante output out-4: pump scheduling not listed, want mmcss_high",
     ]);
   });
 });

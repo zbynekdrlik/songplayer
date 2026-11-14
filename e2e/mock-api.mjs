@@ -2505,6 +2505,21 @@ function mockDanteOutput(e) {
     pump_late: 0,
     pump_missed: 0,
     pump_overruns: 0,
+    // #325: dstack v0.6.127's pump wakes and thread scheduling.
+    pump_rebootstraps: 0,
+    pump_rebootstraps_late: 0,
+    pump_rebootstraps_clock_back: 0,
+    pump_rebootstraps_reanchor: 0,
+    pump_rebootstraps_retime: 0,
+    wake_behind_max_us: 640,
+    wake_behind_minute_max_us: 410,
+    wake_behind_buckets: [5400, 12, 0, 0, 0, 0, 0, 0],
+    late_wakes: 0,
+    late_wakes_recent: [],
+    threads: [
+      { thread: "pump", scheduling: "mmcss_high", mmcss_task: 2 },
+      { thread: "tx", scheduling: "mmcss_high", mmcss_task: 3 },
+    ],
   };
   return { ...line, type: "dante", ...(line.state === "running" ? { dante } : {}) };
 }

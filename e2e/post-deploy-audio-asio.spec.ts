@@ -19,8 +19,11 @@
  *    (up to 4, `MAX_ASIO_OUTPUTS`). A native Dante output (#285) is also
  *    judged on its stack's figures over that minute (`danteGateFailures`):
  *    its clock ready at both reads, a receiver's flow, packets sent, no
- *    missed pump block (the ledger's loss); packets 2 ms or more late and
- *    late / overrun pump blocks are logged (`danteGateLog`), not failed.
+ *    missed pump block (the ledger's loss), and (#325) its pump thread at
+ *    `mmcss_high` (a regression guard); packets 2 ms or more late, late /
+ *    overrun pump blocks and the pump's wakes (re-bootstraps by cause, the
+ *    wake maxima and buckets, each late wake of the minute with its UTC,
+ *    the pump's scheduling) are logged (`danteGateLog`), not failed.
  *
  * 3. #233 (the spawn finding): a child process SongPlayer spawns (one yt-dlp,
  *    `POST /api/v1/youtube/probe`; skipped when no output runs, every

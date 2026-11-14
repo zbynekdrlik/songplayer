@@ -26,7 +26,7 @@ use dlink::{Block, Config, HostError, Link, Map, Media, Place, Ports, Process, S
 use dstack::ctl;
 use serde::Deserialize;
 use sp_core::audio_outputs::{DanteDest, OutputEntry, PROGRAM_RATE, effective_rate};
-use sp_core::dante_status::DanteFigures;
+use sp_core::dante_status::{DanteFigures, LateWake, MediaThread};
 use tracing::{info, warn};
 
 use crate::playback::asio_format::AsioSample;
@@ -150,6 +150,26 @@ struct EngineLine {
     late: u64,
     missed: u64,
     overruns: u64,
+    rebootstraps: u64,
+    rebootstraps_late: u64,
+    rebootstraps_clock_back: u64,
+    rebootstraps_reanchor: u64,
+    rebootstraps_retime: u64,
+    wake_behind_max_us: u64,
+    wake_behind_minute_max_us: Option<u64>,
+    wake_behind_buckets: Vec<u64>,
+    late_wakes: u64,
+    late_wakes_recent: Vec<WakeLine>,
+    threads: Vec<MediaThread>,
+}
+
+/// One of the pump's late wakes (its `rebootstrap` flag 0 or 1).
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct WakeLine {
+    unix_ms: u64,
+    behind_us: u64,
+    rebootstrap: u8,
 }
 
 /// The stack's status line (`ctl::status`, what `Link::status` returns) as
@@ -157,11 +177,31 @@ struct EngineLine {
 /// flow that ended included. `None` for a line that does not read.
 pub fn figures_of(line: &str) -> Option<DanteFigures> {
     let line: StatusLine = serde_json::from_str(line).ok()?;
+    let e = line.engine;
     let mut f = DanteFigures {
         clock_ready: line.clock.ready != 0,
-        pump_late: line.engine.late,
-        pump_missed: line.engine.missed,
-        pump_overruns: line.engine.overruns,
+        pump_late: e.late,
+        pump_missed: e.missed,
+        pump_overruns: e.overruns,
+        pump_rebootstraps: e.rebootstraps,
+        pump_rebootstraps_late: e.rebootstraps_late,
+        pump_rebootstraps_clock_back: e.rebootstraps_clock_back,
+        pump_rebootstraps_reanchor: e.rebootstraps_reanchor,
+        pump_rebootstraps_retime: e.rebootstraps_retime,
+        wake_behind_max_us: e.wake_behind_max_us,
+        wake_behind_minute_max_us: e.wake_behind_minute_max_us,
+        wake_behind_buckets: e.wake_behind_buckets,
+        late_wakes: e.late_wakes,
+        late_wakes_recent: e
+            .late_wakes_recent
+            .into_iter()
+            .map(|w| LateWake {
+                unix_ms: w.unix_ms,
+                behind_us: w.behind_us,
+                rebootstrap: w.rebootstrap != 0,
+            })
+            .collect(),
+        threads: e.threads,
         ..DanteFigures::default()
     };
     for flow in &line.tx {

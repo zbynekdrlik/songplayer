@@ -212,3 +212,40 @@ fn the_figures_read_with_any_field_missing() {
     assert!(read.clock_ready);
     assert_eq!(read.late_max_us, 0);
 }
+
+/// #325: the pump's wake figures and the threads' scheduling, as
+/// `GET /api/v1/program` serves them and the dashboard reads them back.
+#[test]
+fn the_pump_wake_and_thread_figures_round_trip_and_default_when_absent() {
+    let f = DanteFigures {
+        pump_rebootstraps: 3,
+        pump_rebootstraps_late: 1,
+        pump_rebootstraps_clock_back: 1,
+        pump_rebootstraps_reanchor: 1,
+        wake_behind_max_us: 7_400,
+        wake_behind_minute_max_us: Some(900),
+        wake_behind_buckets: vec![9_000, 40, 3, 1, 1, 0, 0, 0],
+        late_wakes: 2,
+        late_wakes_recent: vec![LateWake {
+            unix_ms: 1_763_075_534_391,
+            behind_us: 7_400,
+            rebootstrap: true,
+        }],
+        threads: vec![MediaThread {
+            thread: "pump".into(),
+            scheduling: "mmcss_high".into(),
+            mmcss_task: Some(2),
+        }],
+        ..dante()
+    };
+    let text = serde_json::to_string(&f).unwrap();
+    assert!(text.contains(r#""mmcss_task":2"#), "{text}");
+    assert!(text.contains(r#""rebootstrap":true"#), "{text}");
+    assert_eq!(serde_json::from_str::<DanteFigures>(&text).unwrap(), f);
+    let old: DanteFigures = serde_json::from_str(r#"{"clock_ready":true}"#).unwrap();
+    assert_eq!(old.wake_behind_minute_max_us, None);
+    assert!(old.threads.is_empty() && old.late_wakes_recent.is_empty());
+    let line = r#"{"threads":[{"thread":"rx","scheduling":"highest","mmcss_task":null}]}"#;
+    let none: DanteFigures = serde_json::from_str(line).unwrap();
+    assert_eq!(none.threads[0].mmcss_task, None);
+}
