@@ -342,7 +342,7 @@ const danteFigures = (over: Partial<DanteTelemetry> = {}): DanteTelemetry => ({
   wake_behind_minute_max_us: 300,
   wake_behind_buckets: [9000, 40, 3, 1, 1, 0, 0, 0],
   late_wakes: 1,
-  late_wakes_recent: [{ unix_ms: 1_763_075_534_391, behind_us: 7400, rebootstrap: true }],
+  late_wakes_recent: [{ unix_ms: 1_794_611_534_391, behind_us: 7400, rebootstrap: true }],
   threads: [
     { thread: "pump", scheduling: "mmcss_high", mmcss_task: 2 },
     { thread: "tx", scheduling: "mmcss_high", mmcss_task: 3 },
@@ -480,7 +480,7 @@ test.describe("Dante gate (#285)", () => {
 
   test("the pump's wakes in the minute are logged with their UTC (#325)", () => {
     const sent = { late_bins: [2000, 20, 3, 1, 0, 0] };
-    const old = { unix_ms: 1_763_075_534_391, behind_us: 7400, rebootstrap: true };
+    const old = { unix_ms: 1_794_611_534_391, behind_us: 7400, rebootstrap: true };
     const after = danteFigures({
       ...sent,
       pump_rebootstraps: 3,
@@ -490,8 +490,8 @@ test.describe("Dante gate (#285)", () => {
       late_wakes: 3,
       late_wakes_recent: [
         old,
-        { unix_ms: 1_763_075_600_000, behind_us: 2100, rebootstrap: false },
-        { unix_ms: 1_763_075_601_500, behind_us: 8000, rebootstrap: true },
+        { unix_ms: 1_794_611_600_000, behind_us: 2100, rebootstrap: false },
+        { unix_ms: 1_794_611_601_500, behind_us: 8000, rebootstrap: true },
       ],
       threads: [{ thread: "pump", scheduling: "highest", mmcss_task: null }],
     });
@@ -499,7 +499,7 @@ test.describe("Dante gate (#285)", () => {
       "Dante output out-4: packets 2 ms or more late 0 -> 0, pump_late 2 -> 2, pump_overruns 1 -> 1; " +
         "rebootstraps 1 -> 3 (late 2, clock_back 1, reanchor 0, retime 0), wake_behind_max_us 7400, " +
         "minute max null, buckets [9000,40,3,1,1,0,0,0], late_wakes 1 -> 3 " +
-        "[2025-11-13T23:13:20.000Z 2100 us, 2025-11-13T23:13:21.500Z 8000 us rebootstrap], " +
+        "[2026-11-13T23:13:20.000Z 2100 us, 2026-11-13T23:13:21.500Z 8000 us rebootstrap], " +
         "pump highest (mmcss_task null)",
     );
     // A server before #325 serves none of it: the log says so, never a crash.
@@ -517,6 +517,35 @@ test.describe("Dante gate (#285)", () => {
       "Dante output out-4: packets 2 ms or more late 0 -> 0, pump_late 0 -> 0, pump_overruns 0 -> 0; " +
         "rebootstraps ? -> ? (late ?, clock_back ?, reanchor ?, retime ?), wake_behind_max_us ?, " +
         "minute max ?, buckets [], late_wakes ? -> ? [], pump not listed",
+    );
+  });
+
+  test("the minute's late wakes are taken by count, never by their time (#325 review)", () => {
+    const wake = (unix_ms: number, behind_us: number) => ({ unix_ms, behind_us, rebootstrap: false });
+    const tail = (b: Partial<DanteTelemetry>, a: Partial<DanteTelemetry> = {}) =>
+      danteGateLog(out4(100, danteFigures(a)), out4(1900, danteFigures(b))).split("late_wakes ")[1];
+    // A first read with an empty ring: only the one wake that came is the minute's.
+    const ring = [wake(1_794_611_534_391, 7400), wake(1_794_611_600_000, 2100)];
+    expect(tail({ late_wakes: 2, late_wakes_recent: ring }, { late_wakes: 1, late_wakes_recent: [] })).toBe(
+      "1 -> 2 [2026-11-13T23:13:20.000Z 2100 us], pump mmcss_high (mmcss_task 2)",
+    );
+    // The wall stepped back: a newer wake with an older time is still the minute's.
+    const back = [wake(1_794_611_600_000, 2100), wake(1_794_611_590_000, 3000)];
+    expect(tail({ late_wakes: 3, late_wakes_recent: back }, { late_wakes: 2, late_wakes_recent: back.slice(0, 1) })).toBe(
+      "2 -> 3 [2026-11-13T23:13:10.000Z 3000 us], pump mmcss_high (mmcss_task 2)",
+    );
+    // A device rebuilt in the minute counts from 0: its own wakes, at most the ring.
+    expect(tail({ late_wakes: 1, late_wakes_recent: [wake(1_794_611_600_000, 2100)] }, { late_wakes: 5 })).toBe(
+      "5 -> 1 [2026-11-13T23:13:20.000Z 2100 us], pump mmcss_high (mmcss_task 2)",
+    );
+    // More wakes than the ring holds: the whole ring, never more.
+    expect(tail({ late_wakes: 40, late_wakes_recent: ring }, { late_wakes: 0 })).toBe(
+      "0 -> 40 [2026-11-13T23:12:14.391Z 7400 us, 2026-11-13T23:13:20.000Z 2100 us], " +
+        "pump mmcss_high (mmcss_task 2)",
+    );
+    // No growth: none, whatever the ring holds.
+    expect(tail({ late_wakes: 2, late_wakes_recent: ring }, { late_wakes: 2 })).toBe(
+      "2 -> 2 [], pump mmcss_high (mmcss_task 2)",
     );
   });
 

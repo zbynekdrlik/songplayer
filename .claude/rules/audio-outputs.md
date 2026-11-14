@@ -1750,7 +1750,9 @@ difference with its UTC time.
   `MediaThread`). The real-stack test `the_link_reads_the_running_stack…`
   waits (≤ 5 s) for the pump to list itself, so a field dstack renames
   reads its default and fails there, not only in a JSON-literal pin.
-  `danteGateLog` logs them all (each late wake of the minute with its UTC),
+  `danteGateLog` logs them all (each late wake of the minute with its UTC,
+  taken by COUNT — the ring's last `late_wakes` growth entries, a rebuilt
+  device counting from 0 — never by time: dsync can step the wall back),
   and `danteGateFailures` FAILS when the pump's `scheduling` at the second
   read is not `mmcss_high` (`DANTE_PUMP_SCHEDULING`; absent = "not
   listed"): resolume-snv's pump logged MMCSS HIGH on 13.11.2026, so any

@@ -104,9 +104,15 @@ function pumpThread(d: DanteTelemetry): DanteThread | undefined {
  * scheduling. */
 function danteWakeLog(a: DanteTelemetry, b: DanteTelemetry): string {
   const n = (v: number | null | undefined) => (v === undefined ? "?" : String(v));
-  const since = Math.max(0, ...(a.late_wakes_recent ?? []).map((w) => w.unix_ms));
-  const fresh = (b.late_wakes_recent ?? [])
-    .filter((w) => w.unix_ms > since)
+  // The minute's wakes by COUNT, never by time (a dsync step moves the
+  // wall): the ring is oldest first, so they are its last `late_wakes`
+  // growth entries; a device rebuilt in the minute counts from 0 again.
+  const was = a.late_wakes ?? 0;
+  const now = b.late_wakes ?? 0;
+  const ring = b.late_wakes_recent ?? [];
+  const grew = Math.min(now >= was ? now - was : now, ring.length);
+  const fresh = ring
+    .slice(ring.length - grew)
     .map((w) => `${new Date(w.unix_ms).toISOString()} ${w.behind_us} us${w.rebootstrap ? " rebootstrap" : ""}`);
   const pump = pumpThread(b);
   return (
