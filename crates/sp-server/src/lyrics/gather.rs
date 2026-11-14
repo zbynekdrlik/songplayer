@@ -167,7 +167,7 @@ pub(crate) async fn gather_sources_impl(
         }
     }
     // Spotify priority sits between override and other Tier-1 sources;
-    // see `candidate_pick::source_priority` for the exact ordering.
+    // see `candidate_pick::priority_with_timing` for the exact ordering.
     if let Some(t) = spotify_track {
         candidate_texts.push(t.into());
     }
