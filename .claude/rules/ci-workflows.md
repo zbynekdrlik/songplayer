@@ -770,3 +770,12 @@ Confirm the restart with `/api/v1/status` `uptime_s` before sampling anything
 that depends on a startup-read setting (e.g. `sp_min_working_set_mb`;
 the `genlock_pacing` setting this was written for is deleted, #221 lane 3).
 
+
+## Pausing SP-program for another repo's rig run (14.11.2026)
+
+camera-box's release E2E needs SP-program silent (its stream guard). Before
+pausing it (`POST /api/v1/playback/{source}/pause`), read the rig lease
+(`http://10.77.9.195:8890/rig-lease.json`): if SongPlayer's own deploy/E2E
+holds it, wait for that run to end — a pause mid-run makes SongPlayer's own
+A/V gate record digital silence and fail (CI 43529621238). Resume with
+`.../play` when the other run releases the lease.
