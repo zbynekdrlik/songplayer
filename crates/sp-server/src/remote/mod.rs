@@ -441,11 +441,12 @@ impl Upstream {
 
     /// #327: hand one request to cg OBS NOW (queue order: it goes out before
     /// any call queued after this one) without waiting for its answer here;
-    /// a task waits for it and WARNs a refusal or no answer. `false` when it
-    /// could not be queued (no OBS client, a full queue).
-    pub fn send(&self, request_type: &str, request_data: Option<Value>) -> bool {
+    /// a task waits for it and WARNs a refusal or no answer; one WARN when
+    /// it could not be queued (no OBS client, a full queue).
+    pub fn send(&self, request_type: &str, request_data: Option<Value>) {
         let Some(rx) = self.enqueue(request_type, request_data) else {
-            return false;
+            warn!("remote: {request_type} not sent to cg OBS (no OBS client)");
+            return;
         };
         let timeout = self.timeout;
         let what = request_type.to_string();
@@ -459,7 +460,6 @@ impl Upstream {
                 Err(why) => warn!("remote: cg OBS did not do {what}: {why}"),
             }
         });
-        true
     }
 
     /// Hand one request to the OBS client without ever blocking on its queue

@@ -311,9 +311,7 @@ pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switche
 /// reaches cg OBS after it), never awaited: the cut never waits for cg OBS.
 fn cg_obs_to_blank(ctx: &SwitchCtx<'_>) {
     let data = serde_json::json!({ "sceneName": CG_OBS_BLANK_SCENE });
-    if !ctx.upstream.send("SetCurrentProgramScene", Some(data)) {
-        tracing::warn!("program switch: cg OBS not told to show {CG_OBS_BLANK_SCENE}");
-    }
+    ctx.upstream.send("SetCurrentProgramScene", Some(data));
 }
 
 /// #327: cg OBS's own black scene.
