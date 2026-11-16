@@ -373,7 +373,10 @@ jobs:
   frontend-e2e:
     name: Frontend E2E Tests
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    # ubuntu-latest moved to 26.04 on 16.11.2026 and the locked Playwright
+    # (1.59.1) refuses it: "Playwright does not support chromium on
+    # ubuntu26.04-x64" (run 43900608027). Pinned to the image it passed on.
+    runs-on: ubuntu-24.04
     needs: [build-wasm]
     # The job takes ~9 min. On 7.10.2026 an Ubuntu mirror stalled its old
     # apt-based browser install for 70 min (main run 37670589944); with no
