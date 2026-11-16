@@ -278,7 +278,11 @@ pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switche
             // The catalog's name: the lowercased NDI output name.
             let name = catalog.scene_of(pid).unwrap_or(scene).to_string();
             let cut = cut_and_record(ctx.pool, ctx.bus, scene, via, pid, Some(&name), None);
-            match cut.await {
+            let cut = cut.await;
+            if cut.is_ok() {
+                cg_obs_to_blank(ctx);
+            }
+            match cut {
                 Ok(_) => Switched::Cut,
                 Err(e) => Switched::StoreFailed(e),
             }
@@ -286,7 +290,11 @@ pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switche
         SceneKind::Blank => {
             let blank = Some(PROGRAM_BLANK_LABEL);
             let cut = cut_and_record(ctx.pool, ctx.bus, scene, via, PROGRAM_BLANK_ID, blank, None);
-            match cut.await {
+            let cut = cut.await;
+            if cut.is_ok() {
+                cg_obs_to_blank(ctx);
+            }
+            match cut {
                 Ok(_) => Switched::Cut,
                 Err(e) => Switched::StoreFailed(e),
             }
@@ -295,6 +303,21 @@ pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switche
         SceneKind::Manual => switch_manual(ctx, scene, via).await,
     }
 }
+
+/// #327 (owner 16.11.2026): a press of a SongPlayer scene (a playlist, or
+/// SongPlayer's own Blank) parks cg OBS on its scene "Blank", so the next
+/// press of a manual scene is a real scene change in cg OBS and its media
+/// starts again. Queued here, under the `switch_order` (a later manual press
+/// reaches cg OBS after it), never awaited: the cut never waits for cg OBS.
+fn cg_obs_to_blank(ctx: &SwitchCtx<'_>) {
+    let data = serde_json::json!({ "sceneName": CG_OBS_BLANK_SCENE });
+    if !ctx.upstream.send("SetCurrentProgramScene", Some(data)) {
+        tracing::warn!("program switch: cg OBS not told to show {CG_OBS_BLANK_SCENE}");
+    }
+}
+
+/// #327: cg OBS's own black scene.
+pub const CG_OBS_BLANK_SCENE: &str = "Blank";
 
 /// #221 L4a: switch `SP-program` to a SOURCE (the dashboard's
 /// `POST /api/v1/program/cut`, which validated it: a known playlist, or the

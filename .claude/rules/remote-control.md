@@ -277,7 +277,7 @@ come from `SP-program`, never from cg OBS.
 | `TriggerStudioModeTransition` | ALWAYS a switch to that preview (below), never short-circuited when it equals the program scene: a same-source cut is a bus no-op whose publication still counts (the re-kick). No preview and nothing on program → 604. The preview is NOT swapped afterwards. |
 | `SetCurrentProgramScene {sceneName}` | a switch to that scene |
 | `GetCurrentProgramScene` | (L3) `{sceneName, currentProgramSceneName}`: SP-program's scene (`program_scene_name`), never forwarded; nothing on program → 604 |
-| `GetSceneList` | (lane 2) forwarded; a successful answer's `currentProgramSceneName` = SP-program's scene (null while nothing is on it), `currentPreviewSceneName` = this session's preview, each `…Uuid` = cg OBS's uuid of that name in the answer's `scenes` (null when it lists none, e.g. "OBS manuál"); the rest verbatim (`protocol::with_songplayer_scenes`) |
+| `GetSceneList` | (#326) every catalog playlist scene cg OBS does not list is appended as `{sceneName, sceneUuid: "songplayer-<scene>"}` (`protocol::with_playlist_scenes`), so cg OBS's own sp-* scenes can be deleted; with cg OBS unreachable (207) the answer is built on `own_scene_list_base()` = SongPlayer's scenes + Blank alone. (lane 2) forwarded; a successful answer's `currentProgramSceneName` = SP-program's scene (null while nothing is on it), `currentPreviewSceneName` = this session's preview, each `…Uuid` = cg OBS's uuid of that name in the answer's `scenes` (null when it lists none, e.g. "OBS manuál"); the rest verbatim (`protocol::with_songplayer_scenes`) |
 | `SetCurrentSceneTransitionDuration {transitionDuration}` | validated like obs-websocket (missing / null → 300, not a number → 401, outside 50..=20000 → 402), 100, NOT applied: `remote.last_transition_duration {ms, applied: false}` (a fraction truncates) |
 
 - **The preview is per session**, not OBS-global: Companion's preview →
@@ -301,11 +301,18 @@ whole switch:
 1. `kind` = the scene catalog (one `get_active_playlists` read). Unreadable
    → keep, `catalog_failed`, 205.
 2. **Playlist(pid)**: `persist_and_cut(pid, catalog name)` — never gated
-   on cg OBS (an unreachable cg OBS still cuts and plays), and cg OBS is
-   told NOTHING (#221 B4 step 6 deleted the legacy mirror: every consumer
-   takes `SP-program`, and cg OBS keeps whatever manual scene it shows).
-   The reply is 100, `cg_forward` null. A failed persist cuts nothing, 205
-   `persist_failed`.
+   on cg OBS (an unreachable cg OBS still cuts and plays). #327 (owner
+   16.11.2026, reverses B4 step 6's "cg OBS told nothing" for a press):
+   after a successful cut of a playlist OR of SongPlayer's Blank, cg OBS
+   gets `SetCurrentProgramScene "Blank"` (`cg_obs_to_blank`,
+   `Upstream::send`: queued under the `switch_order`, so a later manual
+   press reaches cg OBS after it, its answer awaited in a task, one WARN
+   on a refusal / no answer, `remote::sent_outcome`). Why: cg OBS kept the
+   last manual scene (INTRO) on program, so pressing it again changed
+   nothing and its media did not restart. The reply is 100, `cg_forward`
+   null. A failed persist cuts nothing and tells cg OBS nothing, 205
+   `persist_failed`. The dashboard cut is unchanged (tells cg OBS
+   nothing).
 3. **Manual**: `SetCurrentProgramScene(X)` to cg OBS FIRST, awaited under
    the lock ("OBS manuál" carries cg OBS's program; a later press must not
    overtake it). Refused → cg OBS's own answer (600) passed through, keep

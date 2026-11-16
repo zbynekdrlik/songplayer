@@ -92,7 +92,11 @@ async fn a_playlist_scene_is_cut_from_the_catalog_and_sends_nothing_to_cg_obs() 
     // Published under the catalog's name.
     assert_eq!(rig.bus.on_air_now().scene.as_deref(), Some("sp-fast"));
     witness(&mut ws).await;
-    assert_eq!(rig.calls(), ["GetInputList "], "cg OBS is told nothing");
+    assert_eq!(
+        rig.calls(),
+        ["SetCurrentProgramScene Blank", "GetInputList "],
+        "cg OBS is parked on Blank (#327)"
+    );
     let cut = last_cut_json(&rig);
     assert_eq!(cut["scene"], "SP-Fast");
     assert_eq!(cut["action"], "playlist");
@@ -169,11 +173,15 @@ async fn a_companion_button_previews_then_transitions_and_cuts_the_program() {
         (Some("sp-fast"), Some("transition"))
     );
     assert!(rig.remote().unsupported_requests.is_empty());
-    // #221 B4 step 6: cg OBS is told nothing. The transition's events come
-    // first (this client subscribed to every intent), then the witness.
+    // #327: cg OBS is parked on Blank. The transition's events come first
+    // (this client subscribed to every intent), then the witness.
     let (d, _events) = request_collecting(&mut ws, "GetInputList", None).await;
     assert_eq!(d["requestStatus"]["code"], 100);
-    assert_eq!(rig.calls(), ["GetInputList "], "cg OBS is told nothing");
+    assert_eq!(
+        rig.calls(),
+        ["SetCurrentProgramScene Blank", "GetInputList "],
+        "cg OBS is parked on Blank"
+    );
 }
 
 #[tokio::test]
@@ -273,9 +281,17 @@ async fn a_transition_to_the_scene_on_air_always_switches() {
     request(&mut ws, "TriggerStudioModeTransition", None).await;
     assert_eq!(rig.bus.on_air_now().seq, seq + 2);
     assert_eq!(rig.bus.status().source, Some(7));
-    // #221 B4 step 6: neither the press nor the re-kicks told cg OBS anything.
+    // #327: the press and each re-kick park cg OBS on Blank.
     witness(&mut ws).await;
-    assert_eq!(rig.calls(), ["GetInputList "]);
+    assert_eq!(
+        rig.calls(),
+        [
+            "SetCurrentProgramScene Blank",
+            "SetCurrentProgramScene Blank",
+            "SetCurrentProgramScene Blank",
+            "GetInputList "
+        ]
+    );
 }
 
 #[tokio::test]
@@ -381,8 +397,16 @@ async fn a_playlist_press_never_waits_for_cg_obs() {
     assert_eq!(d["requestStatus"]["code"], 100);
     assert_eq!(rig.bus.status().source, Some(3));
     witness(&mut ws).await; // a getter: this cg OBS answers it at once
-    assert_eq!(rig.calls(), ["GetInputList "]);
-    assert!(held.lock().unwrap().is_empty(), "cg OBS holds no switch");
+    // #327: each press queued cg OBS's Blank, and neither waited for it.
+    assert_eq!(
+        rig.calls(),
+        [
+            "SetCurrentProgramScene Blank",
+            "SetCurrentProgramScene Blank",
+            "GetInputList "
+        ]
+    );
+    assert_eq!(held.lock().unwrap().len(), 2, "cg OBS holds both Blanks");
     let cut = last_cut_json(&rig);
     assert_eq!(
         (cut["scene"].as_str(), cut["cg_forward"].as_str()),
@@ -473,12 +497,17 @@ async fn a_manual_press_holds_the_switch_order_until_cg_obs_answers() {
     assert_eq!(answer["d"]["requestId"], "playlist");
     assert_eq!(answer["d"]["requestStatus"]["code"], 100);
     assert_eq!(rig.bus.status().source, Some(7));
-    // #221 B4 step 6: only the manual press reached cg OBS.
+    // #327: the playlist press, queued after the manual one, parks cg OBS
+    // on Blank after it.
     witness(&mut playlist).await;
     assert_eq!(
         rig.calls(),
-        ["SetCurrentProgramScene Slido", "GetInputList "],
-        "the playlist press tells cg OBS nothing"
+        [
+            "SetCurrentProgramScene Slido",
+            "SetCurrentProgramScene Blank",
+            "GetInputList "
+        ],
+        "the playlist press reaches cg OBS after the manual one"
     );
 }
 

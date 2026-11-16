@@ -115,6 +115,11 @@ impl SceneCatalog {
             .map(|(scene, _)| scene.as_str())
     }
 
+    /// #326: every playlist scene name, in name order.
+    pub fn scene_names(&self) -> Vec<&str> {
+        self.scenes.keys().map(String::as_str).collect()
+    }
+
     /// The playlists that name no scene, one log line each.
     pub fn conflicts(&self) -> &[String] {
         &self.conflicts

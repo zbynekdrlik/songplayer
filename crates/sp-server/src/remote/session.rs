@@ -47,6 +47,7 @@ use super::{Facade, MAX_MESSAGE_BYTES, MAX_SESSIONS, clip};
 use crate::obs::ObsEvent;
 use crate::playback::program_on_air::program_scene_name;
 use crate::playback::program_switch::{SwitchCtx, Switched, Via, switch_scene};
+use crate::playback::scene_catalog::load_catalog;
 
 type WsWrite = SplitSink<WebSocketStream<TcpStream>, Message>;
 
@@ -376,13 +377,22 @@ impl Session<'_> {
             Route::Forward => forward(facade, request_type, item.request_data.clone()).await,
             // #221 lane 2: cg OBS's list, SongPlayer's program and preview;
             // #245: with Blank in it.
+            // #326: with every playlist scene of SongPlayer's catalog, also
+            // when cg OBS is not reachable (then SongPlayer's scenes alone).
             Route::SceneList => {
                 let mut reply = forward(facade, request_type, item.request_data.clone()).await;
+                if reply.status["code"] == STATUS_NOT_READY {
+                    reply = Reply::ok(Some(protocol::own_scene_list_base()));
+                }
                 if reply.succeeded()
                     && let Some(data) = reply.data.as_mut()
                 {
                     let program = program_scene_name(&facade.bus.on_air_now());
                     let preview = self.preview_given(program.clone());
+                    match load_catalog(&facade.pool).await {
+                        Ok(catalog) => protocol::with_playlist_scenes(data, &catalog.scene_names()),
+                        Err(e) => tracing::warn!("GetSceneList: scene catalog unreadable: {e}"),
+                    }
                     protocol::with_blank_scene(data);
                     protocol::with_songplayer_scenes(data, program.as_deref(), preview.as_deref());
                 }

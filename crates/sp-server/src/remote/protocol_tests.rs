@@ -758,3 +758,59 @@ fn a_scene_list_without_scenes_or_not_an_object_is_handled() {
     with_songplayer_scenes(&mut data, Some("sp-fast"), None);
     assert_eq!(data, json!(["sp-fast"]));
 }
+
+/// #326: SongPlayer's own playlist scenes are in the list whether cg OBS
+/// lists them or not (cg OBS's sp-* scenes are deleted), each one cg OBS
+/// lacks appended with the facade's uuid `songplayer-<scene>`; a scene cg
+/// OBS still lists (any ASCII case) is kept as it is, and the program's
+/// uuid is then found for a scene only SongPlayer lists.
+#[test]
+fn the_scene_list_holds_every_playlist_scene() {
+    let mut data = cg_scene_list();
+    with_playlist_scenes(&mut data, &["sp-fast", "sp-worship", "sp-90s"]);
+    let scenes = data["scenes"].as_array().unwrap();
+    let names: Vec<&str> = scenes
+        .iter()
+        .map(|s| s["sceneName"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["sp-fast", "sp-slow", "Slido", "sp-worship", "sp-90s"]
+    );
+    assert_eq!(
+        scenes[0]["sceneUuid"], "u-sp-fast",
+        "cg OBS's own entry kept"
+    );
+    assert_eq!(
+        scenes[3],
+        json!({ "sceneIndex": 3, "sceneName": "sp-worship", "sceneUuid": "songplayer-sp-worship" })
+    );
+    assert_eq!(scenes[4]["sceneIndex"], 4);
+    with_songplayer_scenes(&mut data, Some("sp-worship"), None);
+    assert_eq!(data["currentProgramSceneUuid"], "songplayer-sp-worship");
+
+    let mut upper =
+        json!({ "scenes": [ { "sceneIndex": 0, "sceneName": "SP-Fast", "sceneUuid": "u" } ] });
+    with_playlist_scenes(&mut upper, &["sp-fast"]);
+    assert_eq!(upper["scenes"].as_array().unwrap().len(), 1);
+
+    let mut odd = json!({ "scenes": "nope" });
+    with_playlist_scenes(&mut odd, &["sp-fast"]);
+    assert_eq!(odd, json!({ "scenes": "nope" }));
+}
+
+/// #326: with cg OBS unreachable the facade still answers the list from
+/// SongPlayer's own scenes: an empty cg OBS answer to build on.
+#[test]
+fn an_unreachable_cg_obs_lists_songplayers_own_scenes() {
+    let mut data = own_scene_list_base();
+    with_playlist_scenes(&mut data, &["sp-slow"]);
+    with_blank_scene(&mut data);
+    let names: Vec<&str> = data["scenes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["sceneName"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["sp-slow", "Blank"]);
+}

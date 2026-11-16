@@ -690,8 +690,16 @@ async fn without_cg_obs_forwarded_requests_are_not_ready_and_nothing_is_cut() {
         "code": 207,
         "comment": "cg OBS is not reachable from SongPlayer right now",
     });
+    // #326: the scene list is answered from SongPlayer's own catalog.
     let d = request(&mut ws, "GetSceneList", None).await;
-    assert_eq!(d["requestStatus"], not_ready);
+    assert_eq!(d["requestStatus"]["code"], 100);
+    let names: Vec<&str> = d["responseData"]["scenes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["sceneName"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["sp-fast", "sp-slow", "Blank"]);
     let d = press(&mut ws, "Slido").await;
     assert_eq!(d["requestStatus"], not_ready);
     assert_eq!(rig.bus.status().source, None);
@@ -730,9 +738,10 @@ async fn a_manual_scene_keeps_the_program_when_the_input_is_not_a_source() {
 
 /// #245: a press of Blank (any ASCII case) cuts SP-program to SongPlayer's
 /// own black (-2): persisted, published as `Blank`, recorded as `blank`,
-/// and NOTHING goes to cg OBS — no NDI input needed.
+/// and (#327) cg OBS is parked on its own Blank, once per press — no NDI
+/// input needed.
 #[tokio::test]
-async fn a_blank_press_cuts_to_songplayer_s_own_black_and_tells_cg_obs_nothing() {
+async fn a_blank_press_cuts_to_songplayer_s_own_black_and_parks_cg_obs_on_blank() {
     let rig = rig().await;
     enable_input(&rig.pool, false).await;
     let mut ws = connect(rig.addr).await;
@@ -753,8 +762,8 @@ async fn a_blank_press_cuts_to_songplayer_s_own_black_and_tells_cg_obs_nothing()
     let d = request(&mut ws, "GetCurrentProgramScene", None).await;
     assert_eq!(d["responseData"]["sceneName"], "Blank");
     assert!(
-        rig.calls().is_empty(),
-        "cg OBS was told nothing: {:?}",
+        rig.calls() == ["SetCurrentProgramScene Blank"; 2],
+        "cg OBS was told Blank at each press: {:?}",
         rig.calls()
     );
 }

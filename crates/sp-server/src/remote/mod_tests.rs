@@ -586,3 +586,16 @@ async fn the_settings_task_binds_rebinds_retries_and_stops_the_listener() {
         .unwrap();
     assert!(!listening());
 }
+
+/// #327: cg OBS's answer to a sent request: done only on `result: true`.
+#[test]
+fn a_sent_request_is_done_only_when_cg_obs_says_so() {
+    let ok = json!({ "requestStatus": { "result": true, "code": 100 } });
+    assert_eq!(sent_outcome(Some(&ok)), Ok(()));
+    let refused = json!({ "requestStatus": { "result": false, "code": 600 } });
+    assert_eq!(
+        sent_outcome(Some(&refused)),
+        Err(r#"refused {"code":600,"result":false}"#.to_string())
+    );
+    assert_eq!(sent_outcome(None), Err("no answer".to_string()));
+}

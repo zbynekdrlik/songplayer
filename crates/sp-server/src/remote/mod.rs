@@ -365,6 +365,16 @@ impl RemoteShared {
 }
 
 /// An error worth logging: there is one, and it differs from the previous one.
+/// #327: what cg OBS made of a request sent with [`Upstream::send`]: done,
+/// or why not (its own `requestStatus`, or no answer).
+pub(crate) fn sent_outcome(answer: Option<&Value>) -> Result<(), String> {
+    match answer {
+        Some(d) if d["requestStatus"]["result"] == true => Ok(()),
+        Some(d) => Err(format!("refused {}", d["requestStatus"])),
+        None => Err("no answer".to_string()),
+    }
+}
+
 pub(crate) fn is_new_error(previous: Option<&str>, current: Option<&str>) -> bool {
     current.is_some() && previous != current
 }
@@ -427,6 +437,29 @@ impl Upstream {
     pub async fn request(&self, request_type: &str, request_data: Option<Value>) -> Option<Value> {
         let rx = self.enqueue(request_type, request_data)?;
         self.wait(rx).await
+    }
+
+    /// #327: hand one request to cg OBS NOW (queue order: it goes out before
+    /// any call queued after this one) without waiting for its answer here;
+    /// a task waits for it and WARNs a refusal or no answer. `false` when it
+    /// could not be queued (no OBS client, a full queue).
+    pub fn send(&self, request_type: &str, request_data: Option<Value>) -> bool {
+        let Some(rx) = self.enqueue(request_type, request_data) else {
+            return false;
+        };
+        let timeout = self.timeout;
+        let what = request_type.to_string();
+        tokio::spawn(async move {
+            let answer = tokio::time::timeout(timeout, rx)
+                .await
+                .ok()
+                .and_then(Result::ok);
+            match sent_outcome(answer.flatten().as_ref()) {
+                Ok(()) => tracing::debug!("remote: cg OBS did {what}"),
+                Err(why) => warn!("remote: cg OBS did not do {what}: {why}"),
+            }
+        });
+        true
     }
 
     /// Hand one request to the OBS client without ever blocking on its queue

@@ -277,12 +277,19 @@ async fn companion_over_msgpack_presses_a_page_13_button_and_gets_every_event_as
             "eventData": scenes,
         }})
     );
-    // #221 B4 step 6: the playlist press told cg OBS nothing. A forwarded
-    // getter is the witness: the OBS client's queue is FIFO, so a switch the
-    // press had queued would have reached the fake first.
+    // #327: the playlist press parked cg OBS on Blank, and nothing else. A
+    // forwarded getter is the witness: the OBS client's queue is FIFO, so a
+    // switch the press had queued reaches the fake first.
     let d = request_msgpack(&mut ws, "GetInputList", Value::Null).await;
     assert_eq!(d["requestStatus"]["code"], 100);
-    assert_eq!(rig.calls(), ["GetSceneList ", "GetInputList "]);
+    assert_eq!(
+        rig.calls(),
+        [
+            "GetSceneList ",
+            "SetCurrentProgramScene Blank",
+            "GetInputList "
+        ]
+    );
 
     // v4's batch (op 8 → op 9), as msgpack both ways.
     let batch = json!({ "op": 8, "d": {
