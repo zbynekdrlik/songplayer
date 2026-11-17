@@ -170,14 +170,18 @@ fn a_half_written_frame_waits_for_its_other_half() {
     let (mut tx, rx) = rtrb::RingBuffer::new(32);
     let counts = Arc::new(Counts::default());
     let mut process = RingProcess::new(rx, Arc::clone(&counts));
+    counts.primed.store(true, Ordering::Relaxed);
     for x in [0.5, -0.25, 0.5] {
         tx.push(x).unwrap();
     }
     assert_eq!(block_of(&mut process, 2), [0.5, 0.0, -0.25, 0.0]);
+    assert_eq!(counts.underruns.load(Ordering::Relaxed), 1, "a short block");
     tx.push(-0.25).unwrap();
     tx.push(0.5).unwrap();
     tx.push(-0.25).unwrap();
     assert_eq!(block_of(&mut process, 2), [0.5, 0.5, -0.25, -0.25]);
+    assert_eq!(counts.underruns.load(Ordering::Relaxed), 1, "a whole block");
+    assert_eq!(counts.consumed.load(Ordering::Relaxed), 4);
 }
 
 /// dstack's numbers for program audio: a 15 ms budget for the whole TX
