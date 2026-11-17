@@ -162,6 +162,24 @@ fn a_short_ring_is_silence_and_an_underrun_only_once_primed() {
     assert_eq!(counts.consumed.load(Ordering::Relaxed), 4);
 }
 
+/// dstack#371: a block takes only whole frames. A ring that holds half a
+/// frame (the writer between its left and its right sample) leaves that
+/// sample for the next block, so left stays left for the rest of the run.
+#[test]
+fn a_half_written_frame_waits_for_its_other_half() {
+    let (mut tx, rx) = rtrb::RingBuffer::new(32);
+    let counts = Arc::new(Counts::default());
+    let mut process = RingProcess::new(rx, Arc::clone(&counts));
+    for x in [0.5, -0.25, 0.5] {
+        tx.push(x).unwrap();
+    }
+    assert_eq!(block_of(&mut process, 2), [0.5, 0.0, -0.25, 0.0]);
+    tx.push(-0.25).unwrap();
+    tx.push(0.5).unwrap();
+    tx.push(-0.25).unwrap();
+    assert_eq!(block_of(&mut process, 2), [0.5, 0.5, -0.25, -0.25]);
+}
+
 /// dstack's numbers for program audio: a 15 ms budget for the whole TX
 /// path (dlink v0.6.28+), block 128, the device's latency and margin as
 /// dlink's own `Config::split` sizes them.
@@ -578,8 +596,8 @@ fn the_device_serves_a_receiver_the_rings_audio() {
     let (mut left, mut right) = (false, false);
     while !(left && right) && start.elapsed() < BOUND {
         while tx.slots() >= 2 && tx.slots() > (1 << 16) - 4096 {
-            tx.push(0.5).unwrap();
-            tx.push(-0.25).unwrap();
+            // One frame at a time: never half a frame in the ring.
+            tx.push_entire_slice(&[0.5, -0.25]).unwrap();
         }
         // #302: a read that times out names what the stack did meanwhile
         // (its clock, the flows a receiver holds, the packets it sent by
