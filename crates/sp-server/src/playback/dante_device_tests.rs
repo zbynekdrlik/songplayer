@@ -21,13 +21,12 @@ use crate::playback::vban_out::VbanClock;
 static ONE_DEVICE: Mutex<()> = Mutex::new(());
 const BOUND: Duration = Duration::from_secs(20);
 
-fn routed_ipv4() -> Ipv4Addr {
-    let probe = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).unwrap();
-    probe.connect((Ipv4Addr::new(192, 0, 2, 1), 9)).unwrap();
-    match probe.local_addr().unwrap() {
-        SocketAddr::V4(a) => *a.ip(),
-        other => panic!("no routed IPv4: {other}"),
-    }
+/// #328: every test device serves on loopback (dstack >= v0.6.164 with
+/// `DSTACK_TEST_LOOPBACK=1` from `.cargo/config.toml`), never the routed
+/// address: a device there announces and answers mDNS onto the site's
+/// networks (dasio#127, dev1 among the top senders on FOH's Dante leg).
+fn test_ipv4() -> Ipv4Addr {
+    Ipv4Addr::LOCALHOST
 }
 
 /// Dante's default ARC port: the output's, and on dev1 another account's.
@@ -244,7 +243,7 @@ fn a_device_on_a_slot_takes_its_ports_and_process_id() {
 fn a_test_device_starts_while_dantes_default_arc_port_is_taken() {
     let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
-    let ip = routed_ipv4();
+    let ip = test_ipv4();
     let _holder = UdpSocket::bind((ip, DANTE_ARC_PORT));
     assert!(!port_free(ip, DANTE_ARC_PORT), "UDP 4440 is taken");
     let slot = claim_slot(ip);
@@ -382,7 +381,7 @@ fn the_engines_wake_and_thread_figures_read_from_the_stacks_line() {
 fn the_link_reads_the_running_stack_and_nothing_after_the_close() {
     let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
-    let slot = claim_slot(routed_ipv4());
+    let slot = claim_slot(test_ipv4());
     let link = DanteLink::default();
     assert_eq!(link.figures(), None);
     let mut device = DanteDevice::linked(on_slot(dir.path(), &slot), link.clone());
@@ -457,7 +456,7 @@ fn an_address_no_adapter_holds_fails_the_start_and_names_no_panic() {
 fn a_successor_waits_until_its_predecessor_closed() {
     let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
-    let slot = claim_slot(routed_ipv4());
+    let slot = claim_slot(test_ipv4());
     let mut old = DanteDevice::new(on_slot(dir.path(), &slot));
     old.open("", [0, 1]).unwrap();
     let (_tx, rx) = rtrb::RingBuffer::new(1024);
@@ -479,7 +478,7 @@ fn a_successor_waits_until_its_predecessor_closed() {
 fn dropping_a_running_device_stops_its_stack() {
     let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
-    let slot = claim_slot(routed_ipv4());
+    let slot = claim_slot(test_ipv4());
     let mut old = DanteDevice::new(on_slot(dir.path(), &slot));
     old.open("", [0, 1]).unwrap();
     let (_tx, rx) = rtrb::RingBuffer::new(1024);
@@ -521,7 +520,7 @@ fn a_name_the_stack_refuses_fails_the_open() {
 fn the_device_serves_a_receiver_the_rings_audio() {
     let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
-    let slot = claim_slot(routed_ipv4());
+    let slot = claim_slot(test_ipv4());
     let ip = slot.ip;
     let p = on_slot(dir.path(), &slot);
     let latency = u32::try_from(p.latency_frames()).unwrap();
@@ -635,7 +634,7 @@ impl VbanClock for TestClock {
 fn a_program_block_reaches_the_wire_through_the_asio_worker() {
     let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
-    let own = claim_slot(routed_ipv4());
+    let own = claim_slot(test_ipv4());
     let ip = own.ip;
     let entry = OutputEntry::dante(
         "out-1",
