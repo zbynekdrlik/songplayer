@@ -268,9 +268,13 @@ impl Process for RingProcess {
     fn process(&mut self, block: &mut Block<'_>) {
         let frames = block.frames();
         let want = (frames * DANTE_CHANNELS).min(self.scratch.len());
+        // Whole frames only (dstack#371): half a frame in the ring (its
+        // writer between left and right) waits for the next block, so the
+        // channels never swap.
+        let whole = self.ring.slots() / DANTE_CHANNELS * DANTE_CHANNELS;
         let got = self
             .ring
-            .pop_partial_slice(&mut self.scratch[..want])
+            .pop_partial_slice(&mut self.scratch[..want.min(whole)])
             .0
             .len();
         self.scratch[got..want].fill(0.0);
