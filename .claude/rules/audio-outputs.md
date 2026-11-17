@@ -1643,6 +1643,9 @@ difference with its UTC time.
   the routed address for a test device again: it announced mDNS onto dev1's
   LAN / Dante legs (dasio#127). A live test on a real network sets
   `DSTACK_LIVE_TEST=1` itself; a test binary run directly has no variable.
+  The `[env]` reaches `cargo run` / `cargo tauri dev` too: never run SongPlayer
+  through cargo on a PC with a Dante output (its device would be refused);
+  the installed exe never sees the variable (dstack reads it at runtime).
   #285 step 2 (the owner's ruling via dstack #90: one rate conversion, in
   dlink, for every app): `DanteParams.rate` is `PROGRAM_RATE` (48 kHz, what the
   worker writes) and `network_rate` the entry's effective rate; `config()` sets

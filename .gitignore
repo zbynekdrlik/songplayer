@@ -22,3 +22,6 @@ e2e/test-results/
 # Lyrics eval local cache (vocal stems, downloaded audio)
 eval/lyrics/.eval-cache/
 e2e/post-deploy-report/
+
+# src-tauri resolves its own lockfile at build time; never tracked (#328 review)
+src-tauri/Cargo.lock

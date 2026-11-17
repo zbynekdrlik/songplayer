@@ -442,7 +442,8 @@ fn an_output_with_no_device_running_shows_no_dante_figures() {
 fn an_address_no_adapter_holds_fails_the_start_and_names_no_panic() {
     let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
-    // No such address on this machine.
+    // No such address on this machine (TEST-NET-1, never loopback by design:
+    // the stack judges an address it does not find as in production).
     let mut device = DanteDevice::new(params(dir.path(), Ipv4Addr::new(192, 0, 2, 77)));
     device.open("", [0, 1]).unwrap();
     let (_tx, rx) = rtrb::RingBuffer::new(1024);
@@ -497,6 +498,7 @@ fn dropping_a_running_device_stops_its_stack() {
 fn a_failed_start_gives_the_hold_back_at_its_close() {
     let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
+    // TEST-NET-1 on purpose: a start that fails (no adapter holds it).
     let mut device = DanteDevice::new(params(dir.path(), Ipv4Addr::new(192, 0, 2, 77)));
     device.open("", [0, 1]).unwrap();
     let (_tx, rx) = rtrb::RingBuffer::new(1024);
