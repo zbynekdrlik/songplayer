@@ -315,7 +315,9 @@ whole switch:
    then takes the
    `switch_order` and goes only while nothing was switched since (a cut —
    a press or a dashboard cut — or a manual scene cg OBS accepted counts,
-   `RemoteShared::note_switch`; a press that changed nothing does not) and
+   `RemoteShared::note_switch`; a kept press — refused, input off,
+   failed persist — does not, a cut to the source already on air still
+   does) and
    the cut's source is still on air (`blank_decision`; a window that never
    ended is a WARN, no Blank). The outgoing side can be cg OBS's program ("OBS
    manuál", also while an EARLIER cut's window still fades it out, which

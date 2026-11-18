@@ -290,6 +290,45 @@ async fn a_press_that_changed_nothing_keeps_the_waiting_blank() {
     wait_blanks(&rig, 1).await;
 }
 
+/// #327 re-review 4: away and back inside the window (a playlist, "OBS
+/// manuál", the playlist again) is one switch after another: only the last
+/// press's Blank goes, the first one sees the count moved.
+#[tokio::test]
+async fn away_and_back_inside_the_window_parks_cg_obs_once() {
+    let rig = rig().await;
+    enable_input(&rig.pool, true).await;
+    let mut ws = connect(rig.addr).await;
+    hello_identify(&mut ws, 0).await;
+    press(&mut ws, "Slido").await;
+    rig.bus.release_due(utc_now_100ns() + 600_000_000);
+    assert!(
+        rig.bus
+            .set_transition(TransitionSpec::fade(300, SpecSource::Setting))
+    );
+    press(&mut ws, "sp-fast").await;
+    press(&mut ws, "OBS manuál").await;
+    press(&mut ws, "sp-fast").await;
+    assert_eq!(rig.bus.status().source, Some(7));
+    wait_for("the windows served", || {
+        rig.bus.release_due(utc_now_100ns() + 600_000_000);
+        rig.bus.status().transition.active.is_none()
+    })
+    .await;
+    wait_blanks(&rig, 1).await;
+    // Only the safe direction: a second Blank due now would come within it.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    witness(&mut ws).await;
+    assert_eq!(
+        rig.calls(),
+        [
+            "SetCurrentProgramScene Slido",
+            "SetCurrentProgramScene Blank",
+            "GetInputList "
+        ],
+        "one Blank, the last press's"
+    );
+}
+
 // ---- the page-13 buttons: preview + transition -----------------------------
 
 #[tokio::test]
