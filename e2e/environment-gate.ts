@@ -61,7 +61,12 @@ export interface AudioProfile {
   soundgrid?: "not_installed" | "unreadable" | "port_unset" | "port_missing" | "found" | null;
   soundgrid_port_mac?: string | null;
   soundgrid_nic?: NicView | null;
-  windows_update?: { no_auto_update?: boolean | null; drivers_excluded?: boolean | null };
+  windows_update?: {
+    no_auto_update?: boolean | null;
+    drivers_excluded?: boolean | null;
+    /** #333: the Microsoft Store's AutoDownload is 2 (no app updates itself). */
+    store_auto_updates_off?: boolean | null;
+  };
   /** #285: every wired adapter (`sp_core::prod_env::audio::WiredNicView`). */
   wired_nics?: { name?: string | null; guid?: string; ok?: boolean | null }[] | null;
   mmcss?: {
@@ -286,6 +291,13 @@ function factFailures(env: EnvironmentStatus): string[] {
   // #255 lane 2: a gate since scripts/setup-prod-pc.ps1 applies it at every
   // deploy, before SongPlayer starts (a driver push would undo PP's NDIS swap).
   want("audio.windows_update.drivers_excluded", audio?.windows_update?.drivers_excluded, true);
+  // #333: a Store app update disturbed PP's clock (dsync, 18.11.2026);
+  // scripts/setup-prod-pc.ps1 sets AutoDownload = 2 at every deploy.
+  want(
+    "audio.windows_update.store_auto_updates_off",
+    audio?.windows_update?.store_auto_updates_off,
+    true,
+  );
   for (const [key, expected] of Object.entries(MMCSS_PRODUCTION)) {
     const mmcss = (audio?.mmcss ?? {}) as Record<string, unknown>;
     want(`audio.mmcss.${key}`, mmcss[key], expected);

@@ -223,6 +223,7 @@ Describe 'Get-ProdPcPlan' {
         Get-PlanLines $facts | Should -Be @(
             'windows_update NoAutoUpdate',
             'windows_update ExcludeWUDriversInQualityUpdate',
+            'windows_store AutoDownload',
             'mmcss SystemResponsiveness',
             'mmcss NetworkThrottlingIndex',
             'mmcss Priority',
@@ -271,6 +272,34 @@ Describe 'Get-ProdPcPlan' {
         $byName['defender MAPSReporting'].Wanted | Should -Be 0
         $byName['defender SubmitSamplesConsent'].Wanted | Should -Be 2
         $byName['defender_policy DisableOnAccessProtection'].Path | Should -BeExactly 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection'
+        $byName['windows_store AutoDownload'].Current | Should -BeExactly '(none)'
+        $byName['windows_store AutoDownload'].Wanted | Should -Be 2
+        $byName['windows_store AutoDownload'].Path | Should -BeExactly 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore'
+        $byName['windows_store AutoDownload'].Type | Should -BeExactly 'DWord'
+        $byName['windows_store AutoDownload'].Kind | Should -BeExactly 'registry'
+    }
+
+    It "plans the Store's AutoDownload 2 wherever it is not the DWORD 2 (issue 333)" {
+        foreach ($case in @(
+                @{ Kind = $null; Value = $null; Current = '(none)' },
+                @{ Kind = 'DWord'; Value = 4; Current = '4' },
+                @{ Kind = 'DWord'; Value = 1; Current = '1' },
+                @{ Kind = 'String'; Value = '2'; Current = '2 (String)' })) {
+            $facts = Read-Fixture 'pp'
+            $entry = Find-ProdPcRegistryFact -Facts $facts -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore' -Name 'AutoDownload'
+            $entry.kind = $case.Kind
+            $entry.value = $case.Value
+            $plan = @(Get-ProdPcPlan -Facts $facts)
+            $plan | Should -HaveCount 1
+            $plan[0].Area | Should -BeExactly 'windows_store'
+            $plan[0].Name | Should -BeExactly 'AutoDownload'
+            $plan[0].Current | Should -BeExactly $case.Current
+            $plan[0].Wanted | Should -Be 2
+        }
+        # The plan's order: after Windows Update's two policies, before MMCSS.
+        $facts = Read-Fixture 'fresh'
+        $lines = @(Get-PlanLines $facts)
+        [array]::IndexOf($lines, 'windows_store AutoDownload') | Should -Be 2
     }
 
     It 'plans nothing once its own changes are applied (a second run plans nothing)' {
@@ -1025,7 +1054,7 @@ Describe 'setup-prod-pc.ps1 itself' {
     It 'prints every fresh action and still exits 0 in -Plan' {
         $output = & $script:Pwsh -NoProfile -NonInteractive -File $script:ScriptPath -Plan -FactsJson (Join-Path $script:FixtureDir 'fresh.json') 2>&1
         $LASTEXITCODE | Should -Be 0
-        @($output | Where-Object { "$_" -like 'PLAN  *' }) | Should -HaveCount 25
+        @($output | Where-Object { "$_" -like 'PLAN  *' }) | Should -HaveCount 26
         (($output | ForEach-Object { "$_" }) -join "`n") | Should -Match "PLAN  soundgrid_nic adapter 'Ethernet' \*FlowControl: 3 -> 0"
     }
 

@@ -107,6 +107,10 @@ pub const SERVICES: &str = r"SYSTEM\CurrentControlSet\Services";
 pub const WINDOWS_UPDATE: &str = r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate";
 /// Windows Update's automatic-update policies (`NoAutoUpdate`).
 pub const WINDOWS_UPDATE_AU: &str = r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU";
+/// #333: the Microsoft Store's policies (`AutoDownload`).
+pub const WINDOWS_STORE: &str = r"SOFTWARE\Policies\Microsoft\WindowsStore";
+/// #333: `AutoDownload` 2 = the Store updates no app by itself.
+pub const STORE_AUTO_DOWNLOAD_OFF: u32 = 2;
 /// MMCSS's system profile.
 pub const MMCSS_PROFILE: &str =
     r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile";
@@ -436,8 +440,20 @@ pub fn adapter_for_mac<'a>(rows: &'a [IfRow], mac: &str) -> Result<&'a IfRow, Ma
 /// A policy DWORD that is 1 (`None`: could not be read). A missing value,
 /// any other number or a value of another type is not the policy.
 pub fn policy_on(value: RegValue, what: &str, errors: &mut Vec<String>) -> Option<bool> {
+    policy_is(value, 1, what, errors)
+}
+
+/// A policy DWORD is `wanted` (#333: the Store's `AutoDownload` 2); missing,
+/// another number or another type = not, a failed read = `None` (the
+/// reason pushed).
+pub fn policy_is(
+    value: RegValue,
+    wanted: u32,
+    what: &str,
+    errors: &mut Vec<String>,
+) -> Option<bool> {
     match value {
-        RegValue::Dword(n) => Some(n == 1),
+        RegValue::Dword(n) => Some(n == wanted),
         RegValue::Failed(code) => {
             errors.push(format!("{what} could not be read (error {code})"));
             None
@@ -572,6 +588,13 @@ pub fn read_audio(
         "Windows Update's ExcludeWUDriversInQualityUpdate",
         &mut errors,
     );
+    // #333: the Store's automatic app updates, applied by the same setup.
+    let store_auto_updates_off = policy_is(
+        reg.value(WINDOWS_STORE, "AutoDownload"),
+        STORE_AUTO_DOWNLOAD_OFF,
+        "the Microsoft Store's AutoDownload",
+        &mut errors,
+    );
     let mmcss = mmcss(reg, &mut errors);
     let power = power_facts(power, &mut errors);
     let wired_nics = wired::wired_nics(reg, adapters, &mut errors);
@@ -579,6 +602,7 @@ pub fn read_audio(
         soundgrid,
         no_auto_update,
         drivers_excluded,
+        store_auto_updates_off,
         mmcss,
         power,
         wired_nics,

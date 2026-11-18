@@ -517,7 +517,7 @@ jobs:
           $pa = "$mm\Tasks\Pro Audio"
           $mmcss = "SystemResponsiveness=$(Get-RegText $mm 'SystemResponsiveness');NetworkThrottlingIndex=$(Get-RegText $mm 'NetworkThrottlingIndex');Priority=$(Get-RegText $pa 'Priority');SchedulingCategory=$(Get-RegText $pa 'Scheduling Category')"
           $wu = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate'
-          $wuLine = "NoAutoUpdate=$(Get-RegText "$wu\AU" 'NoAutoUpdate');ExcludeWUDriversInQualityUpdate=$(Get-RegText $wu 'ExcludeWUDriversInQualityUpdate')"
+          $wuLine = "NoAutoUpdate=$(Get-RegText "$wu\AU" 'NoAutoUpdate');ExcludeWUDriversInQualityUpdate=$(Get-RegText $wu 'ExcludeWUDriversInQualityUpdate');AutoDownload=$(Get-RegText 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore' 'AutoDownload')"
           $active = (powercfg /getactivescheme) -join ' '
           if ($active -notmatch '([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})') {
             throw "powercfg /getactivescheme names no scheme: $active"

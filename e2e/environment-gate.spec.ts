@@ -32,7 +32,7 @@ const audioHolds = (over: Partial<AudioProfile> = {}): AudioProfile => ({
     settings_ok: true,
     settings: [],
   },
-  windows_update: { no_auto_update: true, drivers_excluded: true },
+  windows_update: { no_auto_update: true, drivers_excluded: true, store_auto_updates_off: true },
   wired_nics: [
     { name: "soundgrid-pcie", guid: "{A}", ok: true },
     { name: "Dante", guid: "{B}", ok: true },
@@ -361,7 +361,7 @@ test.describe("production environment gate (#233)", () => {
     const env = holds({
       audio: audioHolds({
         soundgrid_nic: { ...sg, driver_model: "netadaptercx", settings_ok: false },
-        windows_update: { no_auto_update: false, drivers_excluded: false },
+        windows_update: { no_auto_update: false, drivers_excluded: false, store_auto_updates_off: false },
         mmcss: {
           system_responsiveness: 20,
           network_throttling_index: 10,
@@ -375,6 +375,7 @@ test.describe("production environment gate (#233)", () => {
       "audio.soundgrid_nic.settings_ok is false, not true",
       "audio.windows_update.no_auto_update is false, not true",
       "audio.windows_update.drivers_excluded is false, not true",
+      "audio.windows_update.store_auto_updates_off is false, not true",
       "audio.mmcss.system_responsiveness is 20, not 0",
       "audio.mmcss.network_throttling_index is 10, not 4294967295",
       "audio.mmcss.pro_audio_priority is 1, not 6",
@@ -429,6 +430,7 @@ test.describe("production environment gate (#233)", () => {
       'audio.soundgrid is null, not "found" or "not_installed"',
       "audio.windows_update.no_auto_update is null, not true",
       "audio.windows_update.drivers_excluded is null, not true",
+      "audio.windows_update.store_auto_updates_off is null, not true",
       "audio.mmcss.system_responsiveness is null, not 0",
       "audio.mmcss.network_throttling_index is null, not 4294967295",
       "audio.mmcss.pro_audio_priority is null, not 6",
@@ -447,10 +449,31 @@ test.describe("production environment gate (#233)", () => {
     for (const drivers_excluded of [false, null] as const) {
       expect(
         environmentFailures(
-          holds({ audio: audioHolds({ windows_update: { no_auto_update: true, drivers_excluded } }) }),
+          holds({
+            audio: audioHolds({
+              windows_update: { no_auto_update: true, drivers_excluded, store_auto_updates_off: true },
+            }),
+          }),
         ),
         String(drivers_excluded),
       ).toEqual([`audio.windows_update.drivers_excluded is ${String(drivers_excluded)}, not true`]);
+    }
+  });
+
+  test("#333: the Store's automatic app updates gate, on or unread", () => {
+    for (const store_auto_updates_off of [false, null] as const) {
+      expect(
+        environmentFailures(
+          holds({
+            audio: audioHolds({
+              windows_update: { no_auto_update: true, drivers_excluded: true, store_auto_updates_off },
+            }),
+          }),
+        ),
+        String(store_auto_updates_off),
+      ).toEqual([
+        `audio.windows_update.store_auto_updates_off is ${String(store_auto_updates_off)}, not true`,
+      ]);
     }
   });
 

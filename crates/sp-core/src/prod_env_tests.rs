@@ -62,6 +62,7 @@ fn every_audio_problem() -> Vec<EnvProblem> {
     all.push(EnvProblem::SoundGridNicUnreadable { nic: nic() });
     all.push(EnvProblem::AutoUpdateOn);
     all.push(EnvProblem::DriversNotExcluded);
+    all.push(EnvProblem::StoreAutoUpdatesOn);
     for setting in MmcssSetting::ALL {
         all.push(EnvProblem::Mmcss {
             setting,
@@ -110,6 +111,7 @@ fn every_audio_problem_has_its_stable_code() {
             "unreadable:soundgrid_nic",
             "windows_auto_update_on",
             "windows_update_drivers_on",
+            "store_auto_updates_on",
             "mmcss:system_responsiveness",
             "mmcss:network_throttling_index",
             "mmcss:pro_audio_priority",
@@ -161,13 +163,15 @@ fn every_audio_problem_reads_in_slovak() {
             "automatické aktualizácie Windows nie sú vypnuté (NoAutoUpdate)",
             "Windows Update nemá vylúčené ovládače (ExcludeWUDriversInQualityUpdate) — \
              aktualizácia môže vymeniť ovládač sieťovej karty",
+            "automatické aktualizácie aplikácií z Microsoft Store nie sú vypnuté (AutoDownload) \
+             — aktualizácia rozruší hodiny počítača",
             "MMCSS: SystemResponsiveness je 20 (má byť 0)",
             "MMCSS: NetworkThrottlingIndex je 20 (má byť 0xFFFFFFFF)",
             "MMCSS: Priority úlohy Pro Audio je 20 (má byť 6)",
             "MMCSS: Scheduling Category úlohy Pro Audio je 20 (má byť High)",
             "MMCSS: Priority úlohy Pro Audio chýba (má byť 6)",
             "väzby protokolu SoundGrid na sieťové karty sa nepodarilo zistiť",
-            "nastavenia Windows Update sa nepodarilo zistiť",
+            "nastavenia aktualizácií (Windows Update, Microsoft Store) sa nepodarilo zistiť",
             "nastavenia MMCSS sa nepodarilo zistiť",
             "zoznam sieťových kariet sa nepodarilo zistiť",
             "sieťová karta „soundgrid-pcie“: nastavenie „*EEE“ nie je produkčné (je 1)",
@@ -343,7 +347,11 @@ fn the_status_serializes_every_field_by_name() {
                 "soundgrid": "not_installed",
                 "soundgrid_port_mac": null,
                 "soundgrid_nic": null,
-                "windows_update": {"no_auto_update": null, "drivers_excluded": null},
+                "windows_update": {
+                    "no_auto_update": null,
+                    "drivers_excluded": null,
+                    "store_auto_updates_off": null,
+                },
                 "wired_nics": null,
                 "mmcss": {
                     "system_responsiveness": null,

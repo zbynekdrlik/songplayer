@@ -5,9 +5,9 @@
 #[cfg(windows)]
 use std::collections::HashMap;
 
-use sp_core::prod_env::EnvProblem;
 #[cfg(windows)]
 use sp_core::prod_env::audio::NicSetting;
+use sp_core::prod_env::{EnvProblem, Unreadable};
 
 use super::fake::*;
 use super::*;
@@ -282,6 +282,7 @@ fn pp_s_profile_reads_as_its_facts_and_holds() {
             },
             no_auto_update: Some(true),
             drivers_excluded: Some(true),
+            store_auto_updates_off: Some(true),
             mmcss: MmcssFacts {
                 system_responsiveness: Reading::Value(0),
                 network_throttling_index: Reading::Value(u32::MAX),
@@ -341,6 +342,53 @@ fn snv_s_profile_fails_only_on_the_driver_exclusion_until_the_setup_sets_it() {
     assert_eq!(view(&after, &[]).notes.len(), 0);
 }
 
+/// #333: the Store's `AutoDownload`, as PP read it on 18.11.2026 before it
+/// was set (no value) and every other shape: only DWORD 2 holds.
+#[test]
+fn the_store_s_auto_download_holds_only_at_two() {
+    let read = |value: RegValue| {
+        let mut reg = Fake::default();
+        add_cx_nic(&mut reg);
+        add_policies(&mut reg);
+        reg.set(WINDOWS_STORE, "AutoDownload", value);
+        read_audio(
+            &reg,
+            &Ok(vec![row(CX_GUID, "00e04c02d461", true, false)]),
+            &FileRead::Failed("%APPDATA% is not set".to_string()),
+            &power_read(),
+        )
+    };
+    let set = read(RegValue::Dword(2));
+    assert!(set.errors.is_empty(), "{:?}", set.errors);
+    assert_eq!(set.store_auto_updates_off, Some(true));
+    assert!(problems(&set, &[]).is_empty());
+    for value in [
+        RegValue::Absent,
+        RegValue::Dword(1),
+        RegValue::Dword(4),
+        RegValue::Text("2".to_string()),
+    ] {
+        let facts = read(value.clone());
+        assert!(facts.errors.is_empty(), "{value:?}: {:?}", facts.errors);
+        assert_eq!(facts.store_auto_updates_off, Some(false), "{value:?}");
+        assert_eq!(
+            problems(&facts, &[]),
+            [EnvProblem::StoreAutoUpdatesOn],
+            "{value:?}"
+        );
+    }
+    let failed = read(RegValue::Failed(5));
+    assert_eq!(failed.store_auto_updates_off, None);
+    assert_eq!(
+        failed.errors,
+        ["the Microsoft Store's AutoDownload could not be read (error 5)"]
+    );
+    assert_eq!(
+        problems(&failed, &[]),
+        [EnvProblem::Unreadable(Unreadable::WindowsUpdate)]
+    );
+}
+
 #[test]
 fn a_profile_that_cannot_be_read_says_why_once_per_reason() {
     let mut reg = Fake::default();
@@ -351,6 +399,7 @@ fn a_profile_that_cannot_be_read_says_why_once_per_reason() {
         "ExcludeWUDriversInQualityUpdate",
         RegValue::Failed(5),
     );
+    reg.set(WINDOWS_STORE, "AutoDownload", RegValue::Failed(5));
     let facts = read_audio(
         &reg,
         &Err(87),
@@ -364,12 +413,14 @@ fn a_profile_that_cannot_be_read_says_why_once_per_reason() {
     assert_eq!(facts.soundgrid, SoundGridFacts::Unreadable);
     assert_eq!(facts.no_auto_update, None);
     assert_eq!(facts.drivers_excluded, None);
+    assert_eq!(facts.store_auto_updates_off, None);
     assert_eq!(
         facts.errors,
         [
             "the SoundGrid Protocol's service could not be read (error 5)",
             "Windows Update's NoAutoUpdate could not be read (error 5)",
             "Windows Update's ExcludeWUDriversInQualityUpdate could not be read (error 5)",
+            "the Microsoft Store's AutoDownload could not be read (error 5)",
             "the active power scheme could not be read (error 2)",
             "the core-parking minimum could not be read (error 2)",
             "the wired adapters could not be listed (error 87)",
@@ -460,6 +511,12 @@ fn the_audio_glue_reads_what_windows_itself_reports() {
     assert_eq!(
         audio.drivers_excluded,
         on("ExcludeWUDriversInQualityUpdate")
+    );
+    // #333: the Store's policy, read by the same CI step.
+    assert_eq!(
+        audio.store_auto_updates_off,
+        Some(wu.get("AutoDownload").map(String::as_str) == Some("2")),
+        "AutoDownload"
     );
 
     let power = expected("SP_ENV_EXPECT_POWER");

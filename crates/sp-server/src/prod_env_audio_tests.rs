@@ -425,6 +425,40 @@ fn windows_update_s_two_policies_gate() {
     assert_eq!(wu(Some(false), None), [unread, EnvProblem::AutoUpdateOn]);
 }
 
+/// #333: the Store's automatic app updates gate after Windows Update's two
+/// policies; not read is the same ONE "cannot be read".
+#[test]
+fn the_store_s_automatic_updates_gate() {
+    let store = |off: Option<bool>, drivers_excluded: Option<bool>| {
+        problems(
+            &AudioFacts {
+                store_auto_updates_off: off,
+                drivers_excluded,
+                ..production_example()
+            },
+            &[],
+        )
+    };
+    let unread = EnvProblem::Unreadable(Unreadable::WindowsUpdate);
+    assert_eq!(store(Some(true), Some(true)), Vec::<EnvProblem>::new());
+    assert_eq!(
+        store(Some(false), Some(true)),
+        [EnvProblem::StoreAutoUpdatesOn]
+    );
+    assert_eq!(
+        store(Some(false), Some(false)),
+        [
+            EnvProblem::DriversNotExcluded,
+            EnvProblem::StoreAutoUpdatesOn
+        ]
+    );
+    assert_eq!(store(None, Some(true)), std::slice::from_ref(&unread));
+    assert_eq!(
+        store(None, Some(false)),
+        [unread, EnvProblem::DriversNotExcluded]
+    );
+}
+
 #[test]
 fn the_profile_names_every_problem_in_order() {
     let nothing = AudioFacts::default();
@@ -447,6 +481,7 @@ fn the_profile_names_every_problem_in_order() {
     };
     bad.no_auto_update = Some(false);
     bad.drivers_excluded = Some(false);
+    bad.store_auto_updates_off = Some(false);
     bad.mmcss.pro_audio_priority = Reading::Value(1);
     assert_eq!(
         problems(&bad, &[]),
@@ -457,6 +492,7 @@ fn the_profile_names_every_problem_in_order() {
             sg_setting(NicSetting::Eee, Some("1")),
             EnvProblem::AutoUpdateOn,
             EnvProblem::DriversNotExcluded,
+            EnvProblem::StoreAutoUpdatesOn,
             mmcss(MmcssSetting::ProAudioPriority, Some("1")),
         ]
     );
@@ -584,6 +620,7 @@ fn the_profile_is_shown_with_its_notes() {
     assert_eq!(p.soundgrid_nic, Some(nic_view(&sg_nic())));
     assert_eq!(p.windows_update.no_auto_update, Some(true));
     assert_eq!(p.windows_update.drivers_excluded, Some(true));
+    assert_eq!(p.windows_update.store_auto_updates_off, Some(true));
     assert_eq!(p.mmcss.system_responsiveness, Some(0));
     assert_eq!(p.mmcss.network_throttling_index, Some(u32::MAX));
     assert_eq!(p.mmcss.pro_audio_priority, Some(6));
@@ -612,6 +649,17 @@ fn the_profile_is_shown_with_its_notes() {
         snv_before_setup.windows_update.drivers_excluded,
         Some(false)
     );
+    // #333: the Store's value is shown as read.
+    let store_on = view(
+        &AudioFacts {
+            store_auto_updates_off: Some(false),
+            ..production_example()
+        },
+        &[],
+    );
+    assert_eq!(store_on.notes, p.notes);
+    assert_eq!(store_on.windows_update.store_auto_updates_off, Some(false));
+    assert_eq!(store_on.windows_update.drivers_excluded, Some(true));
     // Nothing read: every report-only fact is a note (the scheme, core
     // parking), SoundGrid unreadable.
     let nothing = view(&AudioFacts::default(), &[]);

@@ -13,6 +13,11 @@
 #   1. Windows Update: policies NoAutoUpdate = 1 (...\WindowsUpdate\AU) and
 #      ExcludeWUDriversInQualityUpdate = 1 (...\WindowsUpdate). A Windows
 #      Update driver push would undo PP's NDIS driver swap (issue 233).
+#      Issue 333: the Microsoft Store's automatic app updates off,
+#      AutoDownload = 2 (HKLM\SOFTWARE\Policies\Microsoft\WindowsStore, the
+#      key created when absent). NoAutoUpdate does not cover the Store: dsync
+#      measured a Store update on PP (Microsoft.WindowsAppRuntime.2,
+#      18.11.2026) as a 72-84 us clock disturbance.
 #   2. MMCSS: SystemResponsiveness 0, NetworkThrottlingIndex 0xFFFFFFFF, the
 #      Pro Audio task Priority 6 and Scheduling Category High (issue 210
 #      part 2, .claude/rules/vban-out.md).
@@ -246,13 +251,15 @@ function Get-PowercfgAcIndex {
 }
 
 # The registry values the profile sets, in the plan's order (Windows Update,
-# MMCSS, Defender's policy keys). The read reads exactly these.
+# the Store, MMCSS, Defender's policy keys). The read reads exactly these.
 function Get-ProdPcRegistryWants {
     $wu = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate'
+    $store = 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore'
     $mm = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile'
     $pa = "$mm\Tasks\Pro Audio"
     $rtp = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection'
     $whyWu = 'a Windows Update driver push would undo the NDIS driver swap (issues 233, 255)'
+    $whyStore = 'a Store app update disturbed the clock, NoAutoUpdate does not cover the Store (issue 333)'
     $whyMm = 'MMCSS Pro Audio for the audio threads (issue 210 part 2)'
     $whyDef = 'Defender scanned every process SongPlayer launched: SoundGrid resyncs (issue 233)'
     $want = {
@@ -261,6 +268,7 @@ function Get-ProdPcRegistryWants {
     }
     & $want 'windows_update' "$wu\AU" 'NoAutoUpdate' 'DWord' ([uint32]1) $whyWu
     & $want 'windows_update' $wu 'ExcludeWUDriversInQualityUpdate' 'DWord' ([uint32]1) $whyWu
+    & $want 'windows_store' $store 'AutoDownload' 'DWord' ([uint32]2) $whyStore
     & $want 'mmcss' $mm 'SystemResponsiveness' 'DWord' ([uint32]0) $whyMm
     & $want 'mmcss' $mm 'NetworkThrottlingIndex' 'DWord' ([uint32]4294967295) $whyMm
     & $want 'mmcss' $pa 'Priority' 'DWord' ([uint32]6) $whyMm
@@ -735,6 +743,7 @@ function Get-ProdPcReview {
         }
     }
     & $addRegistry 'windows_update'
+    & $addRegistry 'windows_store'
     & $addRegistry 'mmcss'
     Add-ProdPcSoundGridReview -Facts $Facts -Actions $actions -Blockers $blockers
 
