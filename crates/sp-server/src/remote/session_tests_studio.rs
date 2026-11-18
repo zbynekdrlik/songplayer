@@ -19,6 +19,8 @@ use super::tests::{
 use super::tests_feedback::request_collecting;
 use crate::obs::ObsCommand;
 use crate::obs::remote_call::RemoteCall;
+use crate::playback::program_transition::{SpecSource, TransitionSpec};
+use crate::playback::wallclock::utc_now_100ns;
 use crate::remote::IDENTIFY_TIMEOUT;
 
 /// cg OBS's replies it holds back (open, unanswered) until the test answers.
@@ -140,6 +142,44 @@ async fn a_manual_scene_cuts_to_obs_manual_after_cg_obs_switched_while_the_input
     );
     assert_eq!(rig.bus.on_air_now().scene.as_deref(), Some("Slido"));
     assert_eq!(last_cut_json(&rig)["scene"], "Slido");
+}
+
+/// #327 review: "OBS manuál" on program IS cg OBS's program, so a fade from
+/// it to a playlist must not park cg OBS on Blank before the window is
+/// served — the outgoing half would fade out of black and silence. Blank
+/// goes once the fade has ended.
+#[tokio::test]
+async fn a_fade_from_obs_manual_parks_cg_obs_on_blank_only_after_its_window() {
+    let rig = rig().await;
+    enable_input(&rig.pool, true).await;
+    let mut ws = connect(rig.addr).await;
+    hello_identify(&mut ws, 0).await;
+    press(&mut ws, "Slido").await;
+    assert_eq!(rig.bus.status().source, Some(-1));
+    rig.bus.release_due(utc_now_100ns() + 600_000_000);
+    assert!(
+        rig.bus
+            .set_transition(TransitionSpec::fade(300, SpecSource::Setting))
+    );
+    let d = press(&mut ws, "sp-fast").await;
+    assert_eq!(d["requestStatus"]["code"], 100);
+    assert!(
+        rig.bus.status().transition.active.is_some(),
+        "the fade runs"
+    );
+    witness(&mut ws).await;
+    assert_eq!(
+        rig.calls(),
+        ["SetCurrentProgramScene Slido", "GetInputList "],
+        "no Blank while cg OBS's program still fades out"
+    );
+    rig.bus.release_due(utc_now_100ns() + 600_000_000);
+    wait_for("cg OBS parked on Blank after the fade", || {
+        rig.calls()
+            .iter()
+            .any(|c| c == "SetCurrentProgramScene Blank")
+    })
+    .await;
 }
 
 // ---- the page-13 buttons: preview + transition -----------------------------
