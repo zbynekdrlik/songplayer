@@ -107,3 +107,16 @@ fn the_records_of_a_cut_and_of_a_kept_program() {
     );
     assert!(held.at_ms > 1_700_000_000_000, "{}", held.at_ms);
 }
+
+/// #327 review: the Blank after a fade from "OBS manuál" goes only once the
+/// window was served and while the source it cut to is still on air.
+#[test]
+fn a_blank_after_a_fade_goes_only_while_its_cut_is_on_air() {
+    assert!(blank_still_due(true, 7, Some(7)));
+    assert!(
+        !blank_still_due(false, 7, Some(7)),
+        "the window never ended"
+    );
+    assert!(!blank_still_due(true, 7, Some(-1)), "a manual press came");
+    assert!(!blank_still_due(true, 7, None));
+}

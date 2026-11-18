@@ -274,7 +274,11 @@ async fn companion_over_msgpack_presses_a_page_13_button_and_gets_every_event_as
         json!({ "op": 5, "d": {
             "eventType": "SceneListChanged",
             "eventIntent": 4,
-            "eventData": scenes,
+            "eventData": { "scenes": [
+                { "sceneName": "sp-fast" },
+                { "sceneIndex": 1, "sceneName": "sp-slow", "sceneUuid": "songplayer-sp-slow" },
+                { "sceneIndex": 2, "sceneName": "Blank", "sceneUuid": "songplayer-blank" },
+            ] },
         }})
     );
     // #327: the playlist press parked cg OBS on Blank, and nothing else. A

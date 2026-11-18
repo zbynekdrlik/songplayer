@@ -76,11 +76,11 @@ async fn witness(ws: &mut Client) {
     assert_eq!(d["requestStatus"]["code"], 100);
 }
 
-/// #221 B4 step 6: a playlist press cuts `SP-program` from SongPlayer's own
-/// catalog and sends NOTHING to cg OBS (no mirror any more: cg OBS keeps
-/// whatever manual scene it shows, only "OBS manuál" takes its program).
+/// A playlist press cuts `SP-program` from SongPlayer's own catalog (no
+/// mirror of the playlist scene, #221 B4 step 6) and parks cg OBS on its
+/// "Blank" scene (#327), nothing else.
 #[tokio::test]
-async fn a_playlist_scene_is_cut_from_the_catalog_and_sends_nothing_to_cg_obs() {
+async fn a_playlist_scene_is_cut_from_the_catalog_and_parks_cg_obs_on_blank() {
     let rig = rig().await;
     let mut ws = connect(rig.addr).await;
     hello_identify(&mut ws, 0).await;
@@ -665,4 +665,22 @@ async fn the_transition_duration_is_acknowledged_and_never_applied() {
         json!({ "ms": 20_000, "applied": false })
     );
     assert_eq!(rig.bus.status().transition, before);
+}
+
+/// #327 review: a Blank press whose cut cannot be persisted cuts nothing and
+/// parks cg OBS on nothing (the `cut.is_ok()` guard of the Blank branch).
+#[tokio::test]
+async fn a_blank_press_that_cannot_be_persisted_tells_cg_obs_nothing() {
+    let rig = rig().await;
+    let mut ws = connect(rig.addr).await;
+    hello_identify(&mut ws, 0).await;
+    sqlx::query("DROP TABLE settings")
+        .execute(&rig.pool)
+        .await
+        .unwrap();
+    let d = press(&mut ws, "Blank").await;
+    assert_eq!(d["requestStatus"]["code"], 205);
+    assert_eq!(rig.bus.status().source, None);
+    witness(&mut ws).await;
+    assert_eq!(rig.calls(), ["GetInputList "], "cg OBS is told nothing");
 }

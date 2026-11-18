@@ -38,8 +38,8 @@
 //!   value): `remote.last_transition_duration {ms, applied: false}`.
 //! - **A scene press** (`SetCurrentProgramScene`, or the transition) goes
 //!   through the ONE switch path, `playback::program_switch`: a playlist
-//!   scene (from SongPlayer's own catalog) is cut and cg OBS is told nothing
-//!   (#221 B4 step 6), a manual scene goes to cg OBS first, then "OBS
+//!   scene (from SongPlayer's own catalog) is cut and cg OBS is parked on
+//!   its "Blank" scene (#327), a manual scene goes to cg OBS first, then "OBS
 //!   manuál" (#212). Presses are applied one at a time, in arrival order,
 //!   across every client.
 //! - **Telemetry** lives on the program bus ([`RemoteShared`],
@@ -364,7 +364,6 @@ impl RemoteShared {
     }
 }
 
-/// An error worth logging: there is one, and it differs from the previous one.
 /// #327: what cg OBS made of a request sent with [`Upstream::send`]: done,
 /// or why not (its own `requestStatus`, or no answer).
 pub(crate) fn sent_outcome(answer: Option<&Value>) -> Result<(), String> {
@@ -375,6 +374,7 @@ pub(crate) fn sent_outcome(answer: Option<&Value>) -> Result<(), String> {
     }
 }
 
+/// An error worth logging: there is one, and it differs from the previous one.
 pub(crate) fn is_new_error(previous: Option<&str>, current: Option<&str>) -> bool {
     current.is_some() && previous != current
 }
@@ -409,6 +409,10 @@ pub struct Upstream {
     /// tests, so a "never awaited" test cannot be passed by a timeout and a
     /// stalled test runner never runs a switch out of its time).
     timeout: Duration,
+    /// #327 review: the last outcome of a [`Upstream::send`] that failed
+    /// (`None` after a success), so a cg OBS with no "Blank" scene logs ONE
+    /// WARN, not one per press.
+    last_sent_error: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl Upstream {
@@ -420,6 +424,7 @@ impl Upstream {
             cmd_tx,
             events,
             timeout: UPSTREAM_TIMEOUT,
+            last_sent_error: Arc::default(),
         }
     }
 
@@ -441,25 +446,44 @@ impl Upstream {
 
     /// #327: hand one request to cg OBS NOW (queue order: it goes out before
     /// any call queued after this one) without waiting for its answer here;
-    /// a task waits for it and WARNs a refusal or no answer; one WARN when
-    /// it could not be queued (no OBS client, a full queue).
+    /// a task waits for it and WARNs a refusal or no answer (once per
+    /// distinct outcome, [`Upstream::note_sent`]); one WARN when it could not
+    /// be queued (no OBS client, or its queue is full).
     pub fn send(&self, request_type: &str, request_data: Option<Value>) {
         let Some(rx) = self.enqueue(request_type, request_data) else {
-            warn!("remote: {request_type} not sent to cg OBS (no OBS client)");
+            warn!(
+                "remote: {request_type} not sent to cg OBS (no OBS client, or its queue is full)"
+            );
             return;
         };
         let timeout = self.timeout;
         let what = request_type.to_string();
+        let link = self.clone();
         tokio::spawn(async move {
             let answer = tokio::time::timeout(timeout, rx)
                 .await
                 .ok()
                 .and_then(Result::ok);
-            match sent_outcome(answer.flatten().as_ref()) {
-                Ok(()) => tracing::debug!("remote: cg OBS did {what}"),
-                Err(why) => warn!("remote: cg OBS did not do {what}: {why}"),
+            let outcome = sent_outcome(answer.flatten().as_ref());
+            if link.note_sent(&outcome) {
+                warn!("remote: cg OBS did not do {what}: {}", outcome.unwrap_err());
+            } else if outcome.is_ok() {
+                tracing::debug!("remote: cg OBS did {what}");
             }
         });
+    }
+
+    /// Record a sent request's outcome; `true` when it is a failure worth a
+    /// WARN (a new one, [`is_new_error`]). A success clears the record.
+    pub(crate) fn note_sent(&self, outcome: &Result<(), String>) -> bool {
+        let mut last = self
+            .last_sent_error
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let current = outcome.as_ref().err().cloned();
+        let new = is_new_error(last.as_deref(), current.as_deref());
+        *last = current;
+        new
     }
 
     /// Hand one request to the OBS client without ever blocking on its queue

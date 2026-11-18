@@ -10,10 +10,10 @@
 //! 1. The scene catalog (`scene_catalog`, one `get_active_playlists` read)
 //!    says what the scene is.
 //! 2. A PLAYLIST scene is cut (`persist_and_cut`, published as on air with
-//!    the catalog name), and cg OBS is told NOTHING. #221 B4 step 6 deleted
-//!    the legacy mirror (the same `SetCurrentProgramScene` to cg OBS, for the
-//!    consumers that took cg OBS's program): every consumer takes
-//!    `SP-program` now, and cg OBS keeps whatever manual scene it shows.
+//!    the catalog name). #327: then cg OBS is parked on its "Blank" scene
+//!    (`cg_obs_to_blank`; after the fade's window when the cut left "OBS
+//!    manuál"), so the next manual press is a real change in cg OBS. #221
+//!    B4 step 6 deleted the legacy mirror (the playlist scene itself).
 //! 3. A MANUAL scene goes to cg OBS FIRST, awaited under the lock: "OBS
 //!    manuál" carries cg OBS's program, and a later press must not overtake
 //!    it. cg OBS accepted → cut to "OBS manuál" (-1) while the NDI input is a
@@ -27,7 +27,7 @@
 //! 5. #245: `Blank` (any ASCII case) is SongPlayer's own black, the source
 //!    `PROGRAM_BLANK_ID` (-2) that nobody offers, so the bus fills every
 //!    boundary with its standby pair (black, silence). It is cut with the
-//!    scene `Blank`; cg OBS is told nothing.
+//!    scene `Blank`; cg OBS is parked on its "Blank" scene as in 2.
 //! 6. The cut uses the bus's current transition spec unchanged. A manual →
 //!    manual press keeps -1 (no mix) and publishes the new scene name.
 //!
@@ -45,6 +45,9 @@
 //! playlists by the same rule for the dashboard, which disables their
 //! buttons.
 
+use std::sync::Arc;
+use std::time::Duration;
+
 use serde::Serialize;
 use serde_json::{Value, json};
 use sp_core::config::{
@@ -57,6 +60,7 @@ use crate::playback::ndi_input::load_input_settings;
 use crate::playback::program_bus::{ProgramBus, ProgramStatus, persist_and_cut};
 use crate::playback::scene_catalog::{SceneCatalog, SceneKind, load_catalog};
 use crate::remote::protocol::Reply;
+use crate::remote::studio_events::wait_transition_end;
 use crate::remote::{RemoteCut, Upstream, clip, now_ms};
 
 /// `cg_forward` when cg OBS accepted.
@@ -207,7 +211,9 @@ pub enum Switched {
 /// a manual scene's forward).
 pub struct SwitchCtx<'a> {
     pub pool: &'a SqlitePool,
-    pub bus: &'a ProgramBus,
+    /// An `Arc`: a Blank after a fade from "OBS manuál" waits for the
+    /// window in a task of its own (`cg_obs_to_blank`).
+    pub bus: &'a Arc<ProgramBus>,
     pub upstream: &'a Upstream,
 }
 
@@ -277,10 +283,11 @@ pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switche
         SceneKind::Playlist(pid) => {
             // The catalog's name: the lowercased NDI output name.
             let name = catalog.scene_of(pid).unwrap_or(scene).to_string();
+            let from_input = input_on_air(ctx.bus);
             let cut = cut_and_record(ctx.pool, ctx.bus, scene, via, pid, Some(&name), None);
             let cut = cut.await;
             if cut.is_ok() {
-                cg_obs_to_blank(ctx);
+                cg_obs_to_blank(ctx, from_input, pid);
             }
             match cut {
                 Ok(_) => Switched::Cut,
@@ -289,10 +296,11 @@ pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switche
         }
         SceneKind::Blank => {
             let blank = Some(PROGRAM_BLANK_LABEL);
+            let from_input = input_on_air(ctx.bus);
             let cut = cut_and_record(ctx.pool, ctx.bus, scene, via, PROGRAM_BLANK_ID, blank, None);
             let cut = cut.await;
             if cut.is_ok() {
-                cg_obs_to_blank(ctx);
+                cg_obs_to_blank(ctx, from_input, PROGRAM_BLANK_ID);
             }
             match cut {
                 Ok(_) => Switched::Cut,
@@ -309,10 +317,52 @@ pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switche
 /// press of a manual scene is a real scene change in cg OBS and its media
 /// starts again. Queued here, under the `switch_order` (a later manual press
 /// reaches cg OBS after it), never awaited: the cut never waits for cg OBS.
-fn cg_obs_to_blank(ctx: &SwitchCtx<'_>) {
-    let data = serde_json::json!({ "sceneName": CG_OBS_BLANK_SCENE });
-    ctx.upstream.send("SetCurrentProgramScene", Some(data));
+///
+/// From "OBS manuál" (`from_input`) the outgoing side of the cut IS cg OBS's
+/// program, so Blank waits until the cut's window is served (at once for a
+/// Cut), then takes the `switch_order` and goes only while `cut_to` is still
+/// on air: a newer press in the window that moved the program (a manual
+/// scene) sends its own scene and no Blank follows it.
+fn cg_obs_to_blank(ctx: &SwitchCtx<'_>, from_input: bool, cut_to: i64) {
+    if !from_input {
+        send_blank(ctx.upstream);
+        return;
+    }
+    let (bus, upstream) = (Arc::clone(ctx.bus), ctx.upstream.clone());
+    tokio::spawn(async move {
+        let ended = wait_transition_end(&bus, BLANK_POLL, BLANK_AFTER_FADE_MAX).await;
+        let _order = bus.switch_order().lock().await;
+        if blank_still_due(ended, cut_to, bus.on_air_now().source) {
+            send_blank(&upstream);
+        } else {
+            info!(
+                ended,
+                "program switch: cg OBS not parked on Blank — the fade did not end, or a newer press came"
+            );
+        }
+    });
 }
+
+/// Whether the Blank after a fade from "OBS manuál" still goes: the window
+/// was served and the source it cut to is still on air.
+fn blank_still_due(ended: bool, cut_to: i64, on_air: Option<i64>) -> bool {
+    ended && on_air == Some(cut_to)
+}
+
+fn send_blank(upstream: &Upstream) {
+    let data = serde_json::json!({ "sceneName": CG_OBS_BLANK_SCENE });
+    upstream.send("SetCurrentProgramScene", Some(data));
+}
+
+/// Whether "OBS manuál" (-1) is on air before a cut.
+fn input_on_air(bus: &ProgramBus) -> bool {
+    bus.on_air_now().source == Some(PROGRAM_INPUT_ID)
+}
+
+/// How often the Blank waiter looks at the window, and how long at most
+/// (the longest window is ~10.6 s; `studio_events::TRANSITION_END_MAX_WAIT`).
+const BLANK_POLL: Duration = Duration::from_millis(20);
+const BLANK_AFTER_FADE_MAX: Duration = Duration::from_secs(15);
 
 /// #327: cg OBS's own black scene.
 pub const CG_OBS_BLANK_SCENE: &str = "Blank";

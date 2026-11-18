@@ -761,8 +761,16 @@ async fn a_blank_press_cuts_to_songplayer_s_own_black_and_parks_cg_obs_on_blank(
     assert_eq!(last_cut_json(&rig)["cg_forward"], Value::Null);
     let d = request(&mut ws, "GetCurrentProgramScene", None).await;
     assert_eq!(d["responseData"]["sceneName"], "Blank");
+    // The witness: a forwarded getter after both presses (FIFO).
+    let d = request(&mut ws, "GetInputList", None).await;
+    assert_eq!(d["requestStatus"]["code"], 100);
     assert!(
-        rig.calls() == ["SetCurrentProgramScene Blank"; 2],
+        rig.calls()
+            == [
+                "SetCurrentProgramScene Blank",
+                "SetCurrentProgramScene Blank",
+                "GetInputList "
+            ],
         "cg OBS was told Blank at each press: {:?}",
         rig.calls()
     );
@@ -835,8 +843,11 @@ async fn a_cut_that_cannot_be_persisted_is_205_cuts_nothing_and_tells_cg_obs_not
     assert_eq!(cut.action, "keep");
     assert_eq!(cut.source, None);
     assert_eq!(cut.reason, Some("persist_failed"));
+    // The witness: a forwarded getter after the press (FIFO).
+    let d = request(&mut ws, "GetInputList", None).await;
+    assert_eq!(d["requestStatus"]["code"], 100);
     assert!(
-        rig.calls().is_empty(),
+        rig.calls() == ["GetInputList "],
         "cg OBS is told nothing: {:?}",
         rig.calls()
     );
@@ -873,7 +884,9 @@ async fn cg_obs_scene_list_fans_out_but_its_program_scene_event_never_does() {
             json!({ "sceneName": "Slido", "sceneUuid": "u-Slido" }),
         ))
         .unwrap();
-    // The scene list passes through: it is the first event either client gets.
+    // The scene list passes through: it is the first event either client
+    // gets. #327 review: with SongPlayer's scenes cg OBS does not list (the
+    // catalog's sp-slow) and Blank, like `GetSceneList`'s answer.
     let scenes = json!({ "scenes": [{ "sceneName": "sp-fast" }] });
     rig.events
         .send(raw("SceneListChanged", scenes.clone()))
@@ -881,7 +894,11 @@ async fn cg_obs_scene_list_fans_out_but_its_program_scene_event_never_does() {
     let expected = json!({ "op": 5, "d": {
         "eventType": "SceneListChanged",
         "eventIntent": 4,
-        "eventData": scenes,
+        "eventData": { "scenes": [
+            { "sceneName": "sp-fast" },
+            { "sceneIndex": 1, "sceneName": "sp-slow", "sceneUuid": "songplayer-sp-slow" },
+            { "sceneIndex": 2, "sceneName": "Blank", "sceneUuid": "songplayer-blank" },
+        ] },
     }});
     assert_eq!(next_json(&mut a).await, expected);
     assert_eq!(next_json(&mut b).await, expected);
@@ -924,7 +941,7 @@ async fn reidentify_changes_the_subscriptions() {
         .unwrap();
     let ev = next_json(&mut ws).await;
     assert_eq!(ev["op"], 5);
-    assert_eq!(ev["d"]["eventData"]["scenes"], json!(["b"]));
+    assert_eq!(ev["d"]["eventData"]["scenes"][0], "b");
 
     // Kept at 4 too (a reset to 0 would drop this event).
     send_json(&mut ws, json!({ "op": 3, "d": {} })).await;
@@ -934,5 +951,5 @@ async fn reidentify_changes_the_subscriptions() {
         .unwrap();
     let ev = next_json(&mut ws).await;
     assert_eq!(ev["op"], 5);
-    assert_eq!(ev["d"]["eventData"]["scenes"], json!(["c"]));
+    assert_eq!(ev["d"]["eventData"]["scenes"][0], "c");
 }

@@ -137,7 +137,10 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
             // stream of pings cannot keep an unidentified session alive.
             biased;
             event = events.recv() => match event {
-                Ok(ObsEvent::Raw { event_type, event_data }) => {
+                Ok(ObsEvent::Raw { event_type, mut event_data }) => {
+                    if event_type == SCENE_LIST_CHANGED {
+                        with_songplayer_list(&facade, &mut event_data).await;
+                    }
                     if let Some(msg) = session.event(&event_type, &event_data)
                         && send(&mut write, codec, &msg).await.is_err()
                     {
@@ -389,11 +392,7 @@ impl Session<'_> {
                 {
                     let program = program_scene_name(&facade.bus.on_air_now());
                     let preview = self.preview_given(program.clone());
-                    match load_catalog(&facade.pool).await {
-                        Ok(catalog) => protocol::with_playlist_scenes(data, &catalog.scene_names()),
-                        Err(e) => tracing::warn!("GetSceneList: scene catalog unreadable: {e}"),
-                    }
-                    protocol::with_blank_scene(data);
+                    with_songplayer_list(facade, data).await;
                     protocol::with_songplayer_scenes(data, program.as_deref(), preview.as_deref());
                 }
                 reply
@@ -490,6 +489,20 @@ impl Session<'_> {
         protocol::subscribed(self.subscriptions, event.intent)
             .then(|| protocol::event(event.event_type, event.intent, &event.data))
     }
+}
+
+/// cg OBS's `SceneListChanged` (#327 review): the scene list Companion builds
+/// from it carries SongPlayer's scenes too, like `GetSceneList`'s.
+const SCENE_LIST_CHANGED: &str = "SceneListChanged";
+
+/// #326: a scene list (`GetSceneList`'s answer, a `SceneListChanged`'s data)
+/// with every playlist scene cg OBS does not list and SongPlayer's Blank.
+async fn with_songplayer_list(facade: &Facade, data: &mut Value) {
+    match load_catalog(&facade.pool).await {
+        Ok(catalog) => protocol::with_playlist_scenes(data, &catalog.scene_names()),
+        Err(e) => tracing::warn!("scene list: scene catalog unreadable: {e}"),
+    }
+    protocol::with_blank_scene(data);
 }
 
 /// Forward one request to cg OBS and pass its answer through.

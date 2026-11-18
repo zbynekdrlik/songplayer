@@ -141,7 +141,8 @@ come from `SP-program`, never from cg OBS.
   GetGroupSceneItemList (L3: `GetCurrentProgramScene` is native now). A test
   pins it in sync with `route` (GetSceneList routes to `SceneList`, the
   rest to `Forward`). The studio requests are never forwarded.
-  `passthrough_intent` passes only cg OBS's `SceneListChanged`.
+  `passthrough_intent` passes only cg OBS's `SceneListChanged` (with
+  SongPlayer's scenes added, #327 review).
   `parse_client_message` takes the DECODED `Value` (#221 L2b), so both
   encodings share one parser.
 - `remote/codec.rs` (#221 L2b, pure) is the session's encoding (above):
@@ -205,8 +206,8 @@ come from `SP-program`, never from cg OBS.
     the facade never asks cg OBS which playlists a scene shows.
   - **The newest press reaches cg OBS last (#221 review rounds 1–5)** — for
     switches cg OBS answers within the OBS client's 2 s (see Residuals).
-    Since B4 step 6 only a MANUAL press switches cg OBS; a playlist press
-    sends it nothing. The connection loop hands every `Remote` call to ONE
+    A MANUAL press switches cg OBS to its scene; since #327 a playlist /
+    Blank press parks it on "Blank" (`Upstream::send`, not awaited). The connection loop hands every `Remote` call to ONE
     forwarder per connection (`remote_call::forwarder` → `run_calls`, in
     the connection's task set). Each of these traps would let an older
     switch land after a newer one and leave cg OBS on the older scene:
@@ -236,8 +237,9 @@ come from `SP-program`, never from cg OBS.
     `Upstream::enqueue(…, true)`), the mirror's longer waiter
     (`Upstream::wait_mirror`, `MIRROR_EXTRA_WAIT`) and the last-cut id it
     answered by (`last_cut_id`, `set_cg_forward`). With no unawaited switch
-    left, every switch in the queue is a requester's awaited one, and
-    `Upstream::request` (enqueue + wait) is the facade's only call.
+    left, a manual press's switch is the only awaited one; #327's Blank goes
+    through `Upstream::send` (enqueue, its answer awaited in a task, one WARN
+    per distinct failure, `Upstream::note_sent`).
   - The forwarder's answer timeout is a parameter (`run_calls(…,
     answer_timeout)`; `forwarder()` passes the production 2 s): the tests
     pass 10 minutes, so a wait the forwarder must not do fails them, and
@@ -292,8 +294,8 @@ come from `SP-program`, never from cg OBS.
 ## A scene press: the ONE switch path (`playback/program_switch.rs`)
 
 #245: a press of `Blank` (any ASCII case) is SongPlayer's own black (-2),
-never forwarded to cg OBS (`program-bus.md` "Blank"); cg OBS's own "Blank"
-scene is no longer used through the facade.
+never forwarded to cg OBS as a scene (`program-bus.md` "Blank"); since
+#327 cg OBS is parked on its own "Blank" after it, like after a playlist.
 
 `switch_scene(ctx, X, via)` runs under the bus's `switch_order` for the
 whole switch:
@@ -307,7 +309,12 @@ whole switch:
    gets `SetCurrentProgramScene "Blank"` (`cg_obs_to_blank`,
    `Upstream::send`: queued under the `switch_order`, so a later manual
    press reaches cg OBS after it, its answer awaited in a task, one WARN
-   on a refusal / no answer, `remote::sent_outcome`). Why: cg OBS kept the
+   on a refusal / no answer, `remote::sent_outcome`). When "OBS manuál" (-1)
+   was on air before the cut, its outgoing half IS cg OBS's program, so the
+   Blank waits for the cut's window (`wait_transition_end`, 15 s bound),
+   then takes the `switch_order` and goes only while the cut's source is
+   still on air (`blank_still_due`; release review: a fade from -1 dipped
+   to black otherwise). Why: cg OBS kept the
    last manual scene (INTRO) on program, so pressing it again changed
    nothing and its media did not restart. The reply is 100, `cg_forward`
    null. A failed persist cuts nothing and tells cg OBS nothing, 205
@@ -578,7 +585,8 @@ playlists on air) went with it.
   - Telemetry fields are read through the API's own JSON
     (`last_cut_json`), so a test never depends on a struct field it only
     wants to see serialized.
-  - "A playlist press tells cg OBS nothing" (#221 B4 step 6) is proven by a
+  - What a press sends cg OBS (#327: a playlist press exactly one
+    `SetCurrentProgramScene Blank`; a failed persist nothing) is proven by a
     WITNESS: a forwarded getter (`GetInputList`) sent after the press. The
     OBS client's command queue is FIFO, so a switch the press had queued
     would reach the fake first (`session_tests_studio.rs::witness`; the
@@ -726,10 +734,13 @@ playlists on air) went with it.
   unidentified session holds its slot until `IDENTIFY_TIMEOUT` (10 s), so a
   hostile LAN client can keep the 16 slots busy and Companion's reconnect
   answered 503 — the listener is meant for a trusted LAN (as before).
-- When Companion connects while cg OBS is down, its scene list stays empty
-  until cg OBS emits a `SceneListChanged` or Companion reconnects. The
-  page-13 buttons send their stored names verbatim, so they keep working:
-  playlist presses cut, manual presses answer not-ready.
+- When Companion connects while cg OBS is down, its scene list is
+  SongPlayer's own (`own_scene_list_base`: the playlist scenes + Blank)
+  until cg OBS emits a `SceneListChanged` or Companion reconnects. #327
+  review: cg OBS's `SceneListChanged` gets the same additions
+  (`session::with_songplayer_list`), so a scene edit in cg OBS never drops
+  the playlist scenes from Companion's list. Manual presses answer
+  not-ready while cg OBS is down.
 - The E2E driver (`e2e/obs-driver.ts`) raises its transition flag BEFORE
   `TriggerStudioModeTransition`: the facade ends a Cut at once, and Node's
   `ws` may hand the response and the Ended frame over in one tick, so a flag
@@ -755,6 +766,15 @@ playlists on air) went with it.
   out). (The L3 cases where SP-program's name differed from what the wall
   showed needed the deleted follow and mirror.)
 
+- **#327's Blank is an ORDERED request.** A manual press right after a
+  playlist press waits behind Blank's answer (≤ 2 s) in the forwarder, so
+  with a slow cg OBS it can be answered 207 (`too_late`). Accepted: the
+  next press corrects it; the deleted supersede rule was the cost of the
+  mirror.
+- **The dashboard cut does not park cg OBS on Blank** (#327 is a facade
+  press rule, the owner's Companion case). A dashboard cut to a playlist
+  leaves cg OBS on its last manual scene.
+
 ## Box acceptance (the supervisor's job)
 
 Use a real obs-websocket 5 client against `resolume:4456`, with
@@ -770,7 +790,7 @@ only, so it proves the JSON path, never Companion's. It must:
 - on `SetCurrentPreviewScene(baseline sp-*)` + `TriggerStudioModeTransition`
   (the page-13 pair), cut `SP-program` to that playlist (program `filled`
   +0, `last_remote_cut.via = transition`) and leave cg OBS's program where
-  it was (`cg_forward` null; B4 step 6), with no `GetSceneItemList` from
+  it parked on its "Blank" scene (`cg_forward` null; #327), with no `GetSceneItemList` from
   the facade;
 - on a manual scene, switch cg OBS first, then cut to "OBS manuál" while the
   input is enabled;
