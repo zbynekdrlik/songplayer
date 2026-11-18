@@ -188,6 +188,46 @@ async fn a_fade_from_obs_manual_parks_cg_obs_on_blank_only_after_its_window() {
     .await;
 }
 
+/// #327 re-review: a second press inside the fade's window (the same
+/// playlist again, or Blank) still fades out of cg OBS's program, so it must
+/// not park cg OBS on Blank before the window is served either.
+#[tokio::test]
+async fn a_second_press_inside_a_fade_from_obs_manual_does_not_park_cg_obs_early() {
+    for second in ["sp-fast", "Blank"] {
+        let rig = rig().await;
+        enable_input(&rig.pool, true).await;
+        let mut ws = connect(rig.addr).await;
+        hello_identify(&mut ws, 0).await;
+        press(&mut ws, "Slido").await;
+        rig.bus.release_due(utc_now_100ns() + 600_000_000);
+        assert!(
+            rig.bus
+                .set_transition(TransitionSpec::fade(300, SpecSource::Setting))
+        );
+        press(&mut ws, "sp-fast").await;
+        let d = press(&mut ws, second).await;
+        assert_eq!(d["requestStatus"]["code"], 100, "{second}");
+        assert!(rig.bus.status().transition.active.is_some(), "{second}");
+        witness(&mut ws).await;
+        assert_eq!(
+            rig.calls(),
+            ["SetCurrentProgramScene Slido", "GetInputList "],
+            "no Blank inside the window after {second}"
+        );
+        wait_for("the fade's window served", || {
+            rig.bus.release_due(utc_now_100ns() + 600_000_000);
+            rig.bus.status().transition.active.is_none()
+        })
+        .await;
+        wait_for("cg OBS parked on Blank after the fade", || {
+            rig.calls()
+                .iter()
+                .any(|c| c == "SetCurrentProgramScene Blank")
+        })
+        .await;
+    }
+}
+
 // ---- the page-13 buttons: preview + transition -----------------------------
 
 #[tokio::test]
