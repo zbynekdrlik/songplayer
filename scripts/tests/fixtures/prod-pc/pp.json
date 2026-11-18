@@ -1,5 +1,5 @@
 {
-  "_comment": "PP (RESOLUME-PP) as #255 lane 1 read it live on 13.10.2026 (dev 3b0b22d4): every value already the production one. The adapter GUIDs are placeholders (the status shows them truncated). AutoDownload (issue 333) as set by hand and read back on 18.11.2026.",
+  "_comment": "PP (RESOLUME-PP) as #255 lane 1 read it live on 13.10.2026 (dev 3b0b22d4): every value already the production one. The adapter GUIDs are placeholders (the status shows them truncated). AutoDownload (issue 333) 2 as set by hand on 18.11.2026 (its read-back reported by the main session on issue 333, not read from the box by the lane that added it).",
   "registry": [
     { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU", "name": "NoAutoUpdate", "kind": "DWord", "value": 1 },
     { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate", "name": "ExcludeWUDriversInQualityUpdate", "kind": "DWord", "value": 1 },
