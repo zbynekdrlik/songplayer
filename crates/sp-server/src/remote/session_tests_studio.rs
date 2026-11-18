@@ -14,7 +14,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use super::tests::{
     Calls, Client, connect, enable_input, hello_identify, last_cut_json, next_json,
-    persisted_source, press, request, rig, rig_on, rig_with, send_json, wait_for,
+    persisted_source, press, request, rig, rig_on, rig_with, send_json, wait_blanks, wait_for,
 };
 use super::tests_feedback::request_collecting;
 use crate::obs::ObsCommand;
@@ -93,6 +93,7 @@ async fn a_playlist_scene_is_cut_from_the_catalog_and_parks_cg_obs_on_blank() {
     assert_eq!(persisted_source(&rig.pool).await.as_deref(), Some("7"));
     // Published under the catalog's name.
     assert_eq!(rig.bus.on_air_now().scene.as_deref(), Some("sp-fast"));
+    wait_blanks(&rig, 1).await;
     witness(&mut ws).await;
     assert_eq!(
         rig.calls(),
@@ -261,6 +262,7 @@ async fn a_companion_button_previews_then_transitions_and_cuts_the_program() {
     assert!(rig.remote().unsupported_requests.is_empty());
     // #327: cg OBS is parked on Blank. The transition's events come first
     // (this client subscribed to every intent), then the witness.
+    wait_blanks(&rig, 1).await;
     let (d, _events) = request_collecting(&mut ws, "GetInputList", None).await;
     assert_eq!(d["requestStatus"]["code"], 100);
     assert_eq!(
@@ -368,6 +370,7 @@ async fn a_transition_to_the_scene_on_air_always_switches() {
     assert_eq!(rig.bus.on_air_now().seq, seq + 2);
     assert_eq!(rig.bus.status().source, Some(7));
     // #327: the press and each re-kick park cg OBS on Blank.
+    wait_blanks(&rig, 3).await;
     witness(&mut ws).await;
     assert_eq!(
         rig.calls(),
@@ -482,6 +485,7 @@ async fn a_playlist_press_never_waits_for_cg_obs() {
     let d = press(&mut ws, "sp-slow").await;
     assert_eq!(d["requestStatus"]["code"], 100);
     assert_eq!(rig.bus.status().source, Some(3));
+    wait_blanks(&rig, 2).await;
     witness(&mut ws).await; // a getter: this cg OBS answers it at once
     // #327: each press queued cg OBS's Blank, and neither waited for it.
     assert_eq!(
@@ -585,6 +589,7 @@ async fn a_manual_press_holds_the_switch_order_until_cg_obs_answers() {
     assert_eq!(rig.bus.status().source, Some(7));
     // #327: the playlist press, queued after the manual one, parks cg OBS
     // on Blank after it.
+    wait_blanks(&rig, 1).await;
     witness(&mut playlist).await;
     assert_eq!(
         rig.calls(),

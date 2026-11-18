@@ -21,7 +21,7 @@ use tokio_tungstenite::tungstenite::http::HeaderValue;
 
 use super::tests::{
     Client, SPEC_PASSWORD, TIMEOUT, close_code_at_end, connect, hello_identify, last_cut_json,
-    next_close, rig, rig_with, wait_for,
+    next_close, rig, rig_with, wait_blanks, wait_for,
 };
 use crate::obs::ObsEvent;
 
@@ -284,6 +284,7 @@ async fn companion_over_msgpack_presses_a_page_13_button_and_gets_every_event_as
     // #327: the playlist press parked cg OBS on Blank, and nothing else. A
     // forwarded getter is the witness: the OBS client's queue is FIFO, so a
     // switch the press had queued reaches the fake first.
+    wait_blanks(&rig, 1).await;
     let d = request_msgpack(&mut ws, "GetInputList", Value::Null).await;
     assert_eq!(d["requestStatus"]["code"], 100);
     assert_eq!(

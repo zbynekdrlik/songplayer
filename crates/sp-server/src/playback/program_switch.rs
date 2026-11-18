@@ -283,11 +283,10 @@ pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switche
         SceneKind::Playlist(pid) => {
             // The catalog's name: the lowercased NDI output name.
             let name = catalog.scene_of(pid).unwrap_or(scene).to_string();
-            let from_input = input_on_air(ctx.bus);
             let cut = cut_and_record(ctx.pool, ctx.bus, scene, via, pid, Some(&name), None);
             let cut = cut.await;
             if cut.is_ok() {
-                cg_obs_to_blank(ctx, from_input, pid);
+                cg_obs_to_blank(ctx, pid);
             }
             match cut {
                 Ok(_) => Switched::Cut,
@@ -296,11 +295,10 @@ pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switche
         }
         SceneKind::Blank => {
             let blank = Some(PROGRAM_BLANK_LABEL);
-            let from_input = input_on_air(ctx.bus);
             let cut = cut_and_record(ctx.pool, ctx.bus, scene, via, PROGRAM_BLANK_ID, blank, None);
             let cut = cut.await;
             if cut.is_ok() {
-                cg_obs_to_blank(ctx, from_input, PROGRAM_BLANK_ID);
+                cg_obs_to_blank(ctx, PROGRAM_BLANK_ID);
             }
             match cut {
                 Ok(_) => Switched::Cut,
@@ -315,19 +313,16 @@ pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switche
 /// #327 (owner 16.11.2026): a press of a SongPlayer scene (a playlist, or
 /// SongPlayer's own Blank) parks cg OBS on its scene "Blank", so the next
 /// press of a manual scene is a real scene change in cg OBS and its media
-/// starts again. Queued here, under the `switch_order` (a later manual press
-/// reaches cg OBS after it), never awaited: the cut never waits for cg OBS.
+/// starts again. Sent from a task of its own, never awaited: the cut never
+/// waits for cg OBS.
 ///
-/// From "OBS manuál" (`from_input`) the outgoing side of the cut IS cg OBS's
-/// program, so Blank waits until the cut's window is served (at once for a
-/// Cut), then takes the `switch_order` and goes only while `cut_to` is still
-/// on air: a newer press in the window that moved the program (a manual
-/// scene) sends its own scene and no Blank follows it.
-fn cg_obs_to_blank(ctx: &SwitchCtx<'_>, from_input: bool, cut_to: i64) {
-    if !from_input {
-        send_blank(ctx.upstream);
-        return;
-    }
+/// The outgoing side of a cut may be cg OBS's program ("OBS manuál", also
+/// while an earlier cut's window still fades it out, which the on-air source
+/// does not show), so Blank always waits until the window is served (at once
+/// when nothing is mixed), then takes the `switch_order` and goes only while
+/// `cut_to` is still on air: a newer press in the window that moved the
+/// program (a manual scene) sends its own scene and no Blank follows it.
+fn cg_obs_to_blank(ctx: &SwitchCtx<'_>, cut_to: i64) {
     let (bus, upstream) = (Arc::clone(ctx.bus), ctx.upstream.clone());
     tokio::spawn(async move {
         let ended = wait_transition_end(&bus, BLANK_POLL, BLANK_AFTER_FADE_MAX).await;
@@ -352,11 +347,6 @@ fn blank_still_due(ended: bool, cut_to: i64, on_air: Option<i64>) -> bool {
 fn send_blank(upstream: &Upstream) {
     let data = serde_json::json!({ "sceneName": CG_OBS_BLANK_SCENE });
     upstream.send("SetCurrentProgramScene", Some(data));
-}
-
-/// Whether "OBS manuál" (-1) is on air before a cut.
-fn input_on_air(bus: &ProgramBus) -> bool {
-    bus.on_air_now().source == Some(PROGRAM_INPUT_ID)
 }
 
 /// How often the Blank waiter looks at the window, and how long at most

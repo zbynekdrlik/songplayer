@@ -307,14 +307,17 @@ whole switch:
    16.11.2026, reverses B4 step 6's "cg OBS told nothing" for a press):
    after a successful cut of a playlist OR of SongPlayer's Blank, cg OBS
    gets `SetCurrentProgramScene "Blank"` (`cg_obs_to_blank`,
-   `Upstream::send`: queued under the `switch_order`, so a later manual
-   press reaches cg OBS after it, its answer awaited in a task, one WARN
-   on a refusal / no answer, `remote::sent_outcome`). When "OBS manuál" (-1)
-   was on air before the cut, its outgoing half IS cg OBS's program, so the
-   Blank waits for the cut's window (`wait_transition_end`, 15 s bound),
-   then takes the `switch_order` and goes only while the cut's source is
-   still on air (`blank_still_due`; release review: a fade from -1 dipped
-   to black otherwise). Why: cg OBS kept the
+   `Upstream::send`, its answer awaited in a task, one WARN per distinct
+   refusal / no answer, `remote::sent_outcome`). The Blank ALWAYS goes from
+   a task of its own: it waits for the cut's window (`wait_transition_end`,
+   at once when nothing is mixed, 15 s bound), then takes the
+   `switch_order` and goes only while the cut's source is still on air
+   (`blank_still_due`). The outgoing side can be cg OBS's program ("OBS
+   manuál", also while an EARLIER cut's window still fades it out, which
+   `on_air_now` does not show — release reviews 1 and 2: a fade from -1, and
+   a second press inside it, dipped to black). A manual press that moved
+   the program meanwhile sent its own scene, and no Blank follows it. Tests
+   wait for the Blank (`session_tests::wait_blanks`) before their witness. Why: cg OBS kept the
    last manual scene (INTRO) on program, so pressing it again changed
    nothing and its media did not restart. The reply is 100, `cg_forward`
    null. A failed persist cuts nothing and tells cg OBS nothing, 205

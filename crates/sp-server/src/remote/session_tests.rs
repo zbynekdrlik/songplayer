@@ -370,6 +370,20 @@ pub(super) async fn wait_for(what: &str, mut cond: impl FnMut() -> bool) {
     }
 }
 
+/// #327: cg OBS's Blank goes from a task of its own after the cut (it waits
+/// out the cut's window first), so a test waits until `n` reached the fake
+/// before its witness.
+pub(super) async fn wait_blanks(rig: &Rig, n: usize) {
+    wait_for("cg OBS parked on Blank", || {
+        rig.calls()
+            .iter()
+            .filter(|c| *c == "SetCurrentProgramScene Blank")
+            .count()
+            >= n
+    })
+    .await;
+}
+
 pub(super) async fn enable_input(pool: &SqlitePool, enabled: bool) {
     use crate::db::models::set_setting;
     let value = if enabled { "true" } else { "false" };
@@ -761,7 +775,8 @@ async fn a_blank_press_cuts_to_songplayer_s_own_black_and_parks_cg_obs_on_blank(
     assert_eq!(last_cut_json(&rig)["cg_forward"], Value::Null);
     let d = request(&mut ws, "GetCurrentProgramScene", None).await;
     assert_eq!(d["responseData"]["sceneName"], "Blank");
-    // The witness: a forwarded getter after both presses (FIFO).
+    // The witness: a forwarded getter after both presses' Blank (FIFO).
+    wait_blanks(&rig, 2).await;
     let d = request(&mut ws, "GetInputList", None).await;
     assert_eq!(d["requestStatus"]["code"], 100);
     assert!(

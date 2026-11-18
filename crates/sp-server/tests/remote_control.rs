@@ -263,6 +263,16 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
     // #327: the playlist press parked cg OBS on its Blank. The witness: a
     // getter forwarded after it (the OBS client writes the facade's calls in
     // queue order, so the switch the press queued reached cg OBS first).
+    // The Blank goes from a task of its own once the cut's window is served:
+    // wait until cg OBS shows it, then the witness.
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    while fake.state().await.program_scene.as_deref() != Some("Blank") {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "cg OBS never parked on Blank"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     let inputs = request(&mut ws, "GetInputList", None).await;
     assert_eq!(inputs["requestStatus"]["code"], 100);
     let cg_now = fake.state().await;
