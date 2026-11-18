@@ -525,6 +525,14 @@ pub fn ring_capacity_frames(rate: f64, target_100ns: i64, max_block_frames: usiz
     frames_from_100ns(span_100ns, rate).max(0) as usize + max_block_frames
 }
 
+/// #289 step 0: a device's own output latency, ms — what it adds after the
+/// worker hands it a frame (`AsioDevice::output_latency_frames`: an ASIO
+/// driver's `getLatencies` output, dlink's whole TX path for Dante), at the
+/// rate the worker writes.
+pub fn device_latency_ms(latency_frames: u32, rate: f64) -> f64 {
+    f64::from(latency_frames) * 1_000.0 / rate
+}
+
 /// An ASIO output's latency, ms: the servo's (ring + splice + hand-off), the
 /// resampler's delay, the driver's output latency. 0 (unknown) until the
 /// servo measured its first window: its latency reads 0 until then.

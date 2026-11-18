@@ -107,3 +107,27 @@ fn the_records_of_a_cut_and_of_a_kept_program() {
     );
     assert!(held.at_ms > 1_700_000_000_000, "{}", held.at_ms);
 }
+
+/// #327 reviews: the Blank after a cut goes only once the window was served,
+/// nothing was switched since and the source it cut to is still on air.
+#[test]
+fn a_blank_after_a_cut_goes_only_while_nothing_was_switched_since() {
+    use BlankDecision::*;
+    assert_eq!(blank_decision(true, (4, 7), (4, Some(7))), Send);
+    assert_eq!(
+        blank_decision(false, (4, 7), (4, Some(7))),
+        WindowNotServed,
+        "the window never ended"
+    );
+    assert_eq!(
+        blank_decision(true, (4, 7), (5, Some(7))),
+        Superseded,
+        "a manual press cg OBS accepted that kept the program"
+    );
+    assert_eq!(
+        blank_decision(true, (4, 7), (4, Some(-1))),
+        Superseded,
+        "the source left the air"
+    );
+    assert_eq!(blank_decision(true, (4, 7), (4, None)), Superseded);
+}

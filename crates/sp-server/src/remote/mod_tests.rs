@@ -586,3 +586,33 @@ async fn the_settings_task_binds_rebinds_retries_and_stops_the_listener() {
         .unwrap();
     assert!(!listening());
 }
+
+/// #327: cg OBS's answer to a sent request: done only on `result: true`.
+#[test]
+fn a_sent_request_is_done_only_when_cg_obs_says_so() {
+    let ok = json!({ "requestStatus": { "result": true, "code": 100 } });
+    assert_eq!(sent_outcome(Some(&ok)), Ok(()));
+    let refused = json!({ "requestStatus": { "result": false, "code": 600 } });
+    assert_eq!(
+        sent_outcome(Some(&refused)),
+        Err(r#"refused {"code":600,"result":false}"#.to_string())
+    );
+    assert_eq!(sent_outcome(None), Err("no answer".to_string()));
+}
+
+/// #327 review: a cg OBS with no "Blank" scene refuses every park; the WARN
+/// comes once per distinct failure, again after a success in between.
+#[test]
+fn a_repeated_send_failure_is_logged_once() {
+    let (events, _) = broadcast::channel(4);
+    let link = Upstream::new(None, events);
+    let refused: Result<(), String> = Err("refused 600".into());
+    assert!(link.note_sent(&refused), "the first failure");
+    assert!(!link.note_sent(&refused), "the same failure again");
+    assert!(
+        link.clone().note_sent(&Err("no answer".into())),
+        "a new failure"
+    );
+    assert!(!link.note_sent(&Ok(())), "a success is no WARN");
+    assert!(link.note_sent(&refused), "after a success it is new again");
+}

@@ -13,7 +13,7 @@ use sp_gpu::{VblankGrid, VblankState};
 
 use super::tests::{FakeGpu, picture, spawn_loop, wait_until};
 use super::{MaxWorker, run_max_loop};
-use crate::playback::program_max::{MaxJob, MaxOut};
+use crate::playback::program_max::{LateKind, MaxJob, MaxLateEvent, MaxOut};
 use crate::playback::program_max_send::tests::{FakeClock, waits};
 use crate::playback::program_max_vblank::VblankSource;
 
@@ -492,5 +492,60 @@ fn the_paced_output_is_named_as_it_moves() {
         max.status().vblank_output.as_deref(),
         Some(r"\\.\DISPLAY1 7680x1080"),
         "named at the boundary after the move"
+    );
+}
+
+/// #317: a compose taken after its instant is placed in time, not only
+/// counted: `max.late_events` names its boundary, how late it started and
+/// when after the offer; its send kept its slot, so no send event.
+#[test]
+fn a_late_compose_is_kept_with_its_boundary_and_its_lateness() {
+    let max = MaxOut::new();
+    max.set_enabled(true);
+    let gpu = FakeGpu::default();
+    let offered = Instant::now();
+    let now = offered + 14 * MS;
+    let (mut worker, _list, _at_wait) = grid_test_worker(&max, &gpu, offered, now);
+    worker.serve_offered(&job(17_632_000_123_456), offered, now);
+
+    let status = max.status();
+    assert_eq!((status.compose_late, status.send_late), (1, 0));
+    assert_eq!(
+        status.late_events,
+        [MaxLateEvent {
+            utc_ms: 1_763_200_012,
+            kind: LateKind::Compose,
+            late_us: 2_000,
+            after_offer_us: 14_000,
+        }]
+    );
+}
+
+/// #317: a send that went after its due instant (off the grid: the
+/// constant 12 ms lead) is kept too; an on-time boundary adds nothing.
+#[test]
+fn a_late_send_is_kept_and_an_on_time_boundary_adds_nothing() {
+    let max = MaxOut::new();
+    max.set_enabled(true);
+    let gpu = FakeGpu::default();
+    let offered = Instant::now();
+    let (clock, _list) = FakeClock::at(offered + 4 * MS);
+    let mut worker = MaxWorker::new(&max, gpu.clone()).with_clock(Box::new(clock));
+    worker.serve_offered(&job(1), offered, offered + 4 * MS);
+    assert!(max.status().late_events.is_empty(), "on time");
+
+    let max = MaxOut::new();
+    max.set_enabled(true);
+    let (clock, _list) = FakeClock::at(offered + 20 * MS);
+    let mut worker = MaxWorker::new(&max, gpu.clone()).with_clock(Box::new(clock));
+    worker.serve_offered(&job(123_450_000), offered, offered + 20 * MS);
+    assert_eq!(
+        max.status().late_events,
+        [MaxLateEvent {
+            utc_ms: 12_345,
+            kind: LateKind::Send,
+            late_us: 8_000,
+            after_offer_us: 20_000,
+        }]
     );
 }

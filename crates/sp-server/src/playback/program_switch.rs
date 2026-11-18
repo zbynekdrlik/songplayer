@@ -10,10 +10,10 @@
 //! 1. The scene catalog (`scene_catalog`, one `get_active_playlists` read)
 //!    says what the scene is.
 //! 2. A PLAYLIST scene is cut (`persist_and_cut`, published as on air with
-//!    the catalog name), and cg OBS is told NOTHING. #221 B4 step 6 deleted
-//!    the legacy mirror (the same `SetCurrentProgramScene` to cg OBS, for the
-//!    consumers that took cg OBS's program): every consumer takes
-//!    `SP-program` now, and cg OBS keeps whatever manual scene it shows.
+//!    the catalog name). #327: then cg OBS is parked on its "Blank" scene
+//!    (`cg_obs_to_blank`; after the fade's window when the cut left "OBS
+//!    manuál"), so the next manual press is a real change in cg OBS. #221
+//!    B4 step 6 deleted the legacy mirror (the playlist scene itself).
 //! 3. A MANUAL scene goes to cg OBS FIRST, awaited under the lock: "OBS
 //!    manuál" carries cg OBS's program, and a later press must not overtake
 //!    it. cg OBS accepted → cut to "OBS manuál" (-1) while the NDI input is a
@@ -27,7 +27,7 @@
 //! 5. #245: `Blank` (any ASCII case) is SongPlayer's own black, the source
 //!    `PROGRAM_BLANK_ID` (-2) that nobody offers, so the bus fills every
 //!    boundary with its standby pair (black, silence). It is cut with the
-//!    scene `Blank`; cg OBS is told nothing.
+//!    scene `Blank`; cg OBS is parked on its "Blank" scene as in 2.
 //! 6. The cut uses the bus's current transition spec unchanged. A manual →
 //!    manual press keeps -1 (no mix) and publishes the new scene name.
 //!
@@ -45,6 +45,9 @@
 //! playlists by the same rule for the dashboard, which disables their
 //! buttons.
 
+use std::sync::Arc;
+use std::time::Duration;
+
 use serde::Serialize;
 use serde_json::{Value, json};
 use sp_core::config::{
@@ -57,6 +60,7 @@ use crate::playback::ndi_input::load_input_settings;
 use crate::playback::program_bus::{ProgramBus, ProgramStatus, persist_and_cut};
 use crate::playback::scene_catalog::{SceneCatalog, SceneKind, load_catalog};
 use crate::remote::protocol::Reply;
+use crate::remote::studio_events::wait_transition_end;
 use crate::remote::{RemoteCut, Upstream, clip, now_ms};
 
 /// `cg_forward` when cg OBS accepted.
@@ -207,8 +211,13 @@ pub enum Switched {
 /// a manual scene's forward).
 pub struct SwitchCtx<'a> {
     pub pool: &'a SqlitePool,
-    pub bus: &'a ProgramBus,
+    /// An `Arc`: a Blank after a fade from "OBS manuál" waits for the
+    /// window in a task of its own (`cg_obs_to_blank`).
+    pub bus: &'a Arc<ProgramBus>,
     pub upstream: &'a Upstream,
+    /// How long a Blank waits at most for its cut's window: the facade's
+    /// `transition_end_max` (a test passes a bound it never reaches).
+    pub window_max: Duration,
 }
 
 /// cg OBS's answer as `cg_forward`: `ok`, `error <code>` (its own
@@ -278,7 +287,11 @@ pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switche
             // The catalog's name: the lowercased NDI output name.
             let name = catalog.scene_of(pid).unwrap_or(scene).to_string();
             let cut = cut_and_record(ctx.pool, ctx.bus, scene, via, pid, Some(&name), None);
-            match cut.await {
+            let cut = cut.await;
+            if cut.is_ok() {
+                cg_obs_to_blank(ctx, pid);
+            }
+            match cut {
                 Ok(_) => Switched::Cut,
                 Err(e) => Switched::StoreFailed(e),
             }
@@ -286,7 +299,11 @@ pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switche
         SceneKind::Blank => {
             let blank = Some(PROGRAM_BLANK_LABEL);
             let cut = cut_and_record(ctx.pool, ctx.bus, scene, via, PROGRAM_BLANK_ID, blank, None);
-            match cut.await {
+            let cut = cut.await;
+            if cut.is_ok() {
+                cg_obs_to_blank(ctx, PROGRAM_BLANK_ID);
+            }
+            match cut {
                 Ok(_) => Switched::Cut,
                 Err(e) => Switched::StoreFailed(e),
             }
@@ -295,6 +312,75 @@ pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switche
         SceneKind::Manual => switch_manual(ctx, scene, via).await,
     }
 }
+
+/// #327 (owner 16.11.2026): a press of a SongPlayer scene (a playlist, or
+/// SongPlayer's own Blank) parks cg OBS on its scene "Blank", so the next
+/// press of a manual scene is a real scene change in cg OBS and its media
+/// starts again. Sent from a task of its own, never awaited: the cut never
+/// waits for cg OBS.
+///
+/// The outgoing side of a cut may be cg OBS's program ("OBS manuál", also
+/// while an earlier cut's window still fades it out, which the on-air source
+/// does not show), so Blank always waits until the window is served (at once
+/// when nothing is mixed), then takes the `switch_order` and goes only while
+/// nothing was switched since this press (`RemoteShared::switches`: a cut,
+/// or a manual scene cg OBS accepted; a press that changed nothing does not
+/// count) and the source it cut to is still on air: a later switch (a
+/// manual scene, "OBS manuál" itself, another playlist with its own Blank)
+/// decides what cg OBS shows, never this Blank.
+fn cg_obs_to_blank(ctx: &SwitchCtx<'_>, cut_to: i64) {
+    let (bus, upstream) = (Arc::clone(ctx.bus), ctx.upstream.clone());
+    let (switch, max) = (bus.remote().switches(), ctx.window_max);
+    tokio::spawn(async move {
+        let ended = wait_transition_end(&bus, BLANK_POLL, max).await;
+        let _order = bus.switch_order().lock().await;
+        let now = (bus.remote().switches(), bus.on_air_now().source);
+        match blank_decision(ended, (switch, cut_to), now) {
+            BlankDecision::Send => send_blank(&upstream),
+            BlankDecision::WindowNotServed => warn!(
+                max_s = max.as_secs(),
+                "program switch: the cut's window did not end in time — cg OBS not parked on Blank"
+            ),
+            BlankDecision::Superseded => {
+                info!("program switch: a newer switch came — cg OBS not parked on Blank")
+            }
+        }
+    });
+}
+
+/// What the Blank after a cut does once its wait is over.
+#[derive(Debug, PartialEq, Eq)]
+enum BlankDecision {
+    Send,
+    /// The window was not served within its bound (a stalled sender): cg
+    /// OBS may still be the outgoing side, so no Blank.
+    WindowNotServed,
+    /// Something was switched since (or the cut's source left the air).
+    Superseded,
+}
+
+/// `at_press` = (the switch count after this press, the source it cut to);
+/// `now` = (the switch count, the source on air) once the wait is over.
+fn blank_decision(ended: bool, at_press: (u64, i64), now: (u64, Option<i64>)) -> BlankDecision {
+    if !ended {
+        BlankDecision::WindowNotServed
+    } else if now.0 == at_press.0 && now.1 == Some(at_press.1) {
+        BlankDecision::Send
+    } else {
+        BlankDecision::Superseded
+    }
+}
+
+fn send_blank(upstream: &Upstream) {
+    let data = serde_json::json!({ "sceneName": CG_OBS_BLANK_SCENE });
+    upstream.send("SetCurrentProgramScene", Some(data));
+}
+
+/// How often the Blank waiter looks at the window.
+const BLANK_POLL: Duration = Duration::from_millis(20);
+
+/// #327: cg OBS's own black scene.
+pub const CG_OBS_BLANK_SCENE: &str = "Blank";
 
 /// #221 L4a: switch `SP-program` to a SOURCE (the dashboard's
 /// `POST /api/v1/program/cut`, which validated it: a known playlist, or the
@@ -395,6 +481,9 @@ async fn switch_manual(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switched {
         ctx.bus.remote().record_cut(record);
         return Switched::NotSwitched(answer);
     }
+    // cg OBS shows this scene now, whatever SP-program does next (#327:
+    // a waiting Blank must not override it).
+    ctx.bus.remote().note_switch();
     let input_active = load_input_settings(ctx.pool)
         .await
         .is_ok_and(|s| s.active());
@@ -434,6 +523,7 @@ async fn cut_and_record(
     let shared = bus.remote();
     match persist_and_cut(pool, bus, source, name).await {
         Ok(status) => {
+            shared.note_switch();
             info!(
                 scene = %clip(pressed),
                 source,

@@ -7,12 +7,12 @@
 //! call ([`enabled`]); there is no transport-level backstop, so a new call
 //! site asks it too (a test per path pins each one):
 //!
-//! - the lyrics job (Gemini 3.5 Transcribe, Claude's clean-up, the Spotify
+//! - the lyrics job (Gemini 3.5 Transcribe, the text AI's clean-up, the Spotify
 //!   resolution, the translation): `peer::Exchange::may_run_here`, asked at
 //!   every "run here" of the exchange before the run's own records — while
 //!   off the job still takes a peer's copy, else it is held;
-//! - the two translation passes (Claude): held;
-//! - the metadata chain (Claude, Gemini): `metadata::ProviderChain::providers`
+//! - the two translation passes (the text AI): held;
+//! - the metadata chain (the OpenRouter text AI, Gemini): `metadata::ProviderChain::providers`
 //!   answers none — a download names the song by the title parser (free),
 //!   marked for the repair; the repair takes a peer's title only; the probe
 //!   asks no provider;
@@ -20,7 +20,7 @@
 //! - every Gemini key read: [`gemini_keys`] (none while off) — the lyrics
 //!   tiers, the dub worker, the g35t probe;
 //! - the lyrics source probe (`POST /api/v1/lyrics/probe-sources`): its
-//!   description probe asks Claude only while on.
+//!   description probe asks the text AI only while on.
 //!
 //! A new paid provider is gated here too. Held work counts no attempt and
 //! logs ONE INFO per kind and song ([`hold`]), then DEBUG — never a WARN.

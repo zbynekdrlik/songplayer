@@ -2,18 +2,25 @@
 //! song as a FAILURE: no held tail, `early_end` says where and of how long.
 //! The mock video reports the duration its container would, apart from its
 //! frames (Media Foundation reported 250 965 ms for "Remembrance" and handed
-//! out no picture).
+//! out no picture). #320: an early end is measured from the last REAL
+//! picture, never from a late step (#318) that held it.
 
-use sp_decoder::{DecodedVideoFrame, DecoderError, MediaStream, SplitSyncedDecoder, VideoStream};
+use std::time::Duration;
+
+use sp_decoder::{
+    DecodedVideoFrame, DecoderError, FramePoll, MediaStream, SplitSyncedDecoder, VideoStream,
+};
 
 use super::{Audio, SeekAnswer, Video, every, items, shape, taps};
 use crate::playback::early_end::EarlyEnd;
-use crate::playback::paced_producer::DecodeProducer;
+use crate::playback::paced_producer::{DecodeProducer, Next};
 
-/// [`Video`] whose container says it is `duration_ms` long.
+/// [`Video`] whose container says it is `duration_ms` long; its polls answer
+/// from `polls` first (`false` = not ready, #318).
 struct Long {
     frames: Video,
     duration_ms: u64,
+    polls: Vec<bool>,
 }
 
 impl MediaStream for Long {
@@ -29,6 +36,12 @@ impl VideoStream for Long {
     fn next_frame(&mut self) -> Result<Option<DecodedVideoFrame>, DecoderError> {
         self.frames.next_frame()
     }
+    fn poll_frame(&mut self, _wait: Duration) -> Result<FramePoll, DecoderError> {
+        if !self.polls.is_empty() && !self.polls.remove(0) {
+            return Ok(FramePoll::NotReady);
+        }
+        Ok(FramePoll::Ready(self.frames.next_frame()?))
+    }
     fn width(&self) -> u32 {
         self.frames.width()
     }
@@ -43,14 +56,27 @@ impl VideoStream for Long {
 /// A decoder over frames at `video` ms in a video `duration_ms` long, and
 /// chunks at `audio` ms.
 fn long(video: &[u64], duration_ms: u64, audio: &[u64]) -> SplitSyncedDecoder {
+    long_polled(video, duration_ms, audio, &[], SeekAnswer::Lands)
+}
+
+/// [`long`] whose video polls answer `polls` first and whose video
+/// answers a seek as `seeks`.
+fn long_polled(
+    video: &[u64],
+    duration_ms: u64,
+    audio: &[u64],
+    polls: &[bool],
+    seeks: SeekAnswer,
+) -> SplitSyncedDecoder {
     SplitSyncedDecoder::new(
         Box::new(Long {
             frames: Video {
                 ms: video.to_vec(),
                 next: 0,
-                seeks: SeekAnswer::Lands,
+                seeks,
             },
             duration_ms,
+            polls: polls.to_vec(),
         }),
         Box::new(Audio {
             ms: audio.to_vec(),
@@ -162,4 +188,88 @@ fn a_seek_clears_an_early_end_and_the_video_plays_again() {
     assert_eq!(p.early_end(), None, "the video plays again from the seek");
     let (_, ms, _) = p.next_item(&mut dec, &taps()).unwrap().expect("frame 0");
     assert_eq!(ms, 0);
+}
+
+/// #320: a 5 s late run on the picture at 0 ms, then the picture comes back
+/// only to end (its frame at 100 ms lies behind the late line, dropped) in a
+/// video 15 s long. The last REAL picture was at 0 ms, 15 s before the
+/// duration: an early end. Measured from the last late step (5 000 ms, 10 s
+/// before the end) it read as the natural end, and the held tail played on.
+#[test]
+fn an_early_end_after_a_late_run_is_measured_from_the_last_real_picture() {
+    let mut polls = vec![true];
+    polls.extend([false; 50]);
+    let mut dec = long_polled(
+        &[0, 100],
+        15_000,
+        &every(0, 6_000, 100),
+        &polls,
+        SeekAnswer::Lands,
+    );
+    let mut p = DecodeProducer::new(0);
+    let taps = taps();
+    let zero = Some(Duration::ZERO);
+    let first = p.poll_item(&mut dec, &taps, zero, true).unwrap();
+    assert!(matches!(first, Next::Item((_, 0, _))), "{first:?}");
+    for k in 1..=50 {
+        match p.poll_item(&mut dec, &taps, zero, true).unwrap() {
+            Next::Item((_, ms, _)) => assert_eq!(ms, k * 100, "late step {k}"),
+            other => panic!("late step {k}: {other:?}"),
+        }
+    }
+    let end = p.poll_item(&mut dec, &taps, zero, true).unwrap();
+    assert!(matches!(end, Next::End), "no held tail: {end:?}");
+    assert_eq!(
+        p.early_end(),
+        Some(EarlyEnd {
+            at_ms: 0,
+            duration_ms: 15_000
+        })
+    );
+    assert_eq!(
+        dec.late_counts(),
+        (50, 1),
+        "frame 100 dropped behind the line"
+    );
+}
+
+/// #320 review: a seek REFUSED during a late run moves nothing, so it
+/// leaves the last real picture where it was (0 ms). The song plays on from
+/// the last late step (#217: `current_ms`, 5 000 ms), but the early end is
+/// still measured from the real picture: an early end, never the natural
+/// end a measure from 5 000 ms would read.
+#[test]
+fn a_refused_seek_during_a_late_run_keeps_the_real_picture_for_the_early_end() {
+    let mut polls = vec![true];
+    polls.extend([false; 50]);
+    let mut dec = long_polled(
+        &[0, 100],
+        15_000,
+        &every(0, 6_000, 100),
+        &polls,
+        SeekAnswer::Refuses,
+    );
+    let mut p = DecodeProducer::new(0);
+    let taps = taps();
+    let zero = Some(Duration::ZERO);
+    for _ in 0..=50 {
+        assert!(matches!(
+            p.poll_item(&mut dec, &taps, zero, true).unwrap(),
+            Next::Item(_)
+        ));
+    }
+    assert_eq!(
+        p.seek(&mut dec, 2_000, 1, 1),
+        5_000,
+        "refused: on from there"
+    );
+    let end = p.poll_item(&mut dec, &taps, zero, true).unwrap();
+    assert!(matches!(end, Next::End), "no held tail: {end:?}");
+    assert_eq!(
+        p.early_end(),
+        Some(EarlyEnd {
+            at_ms: 0,
+            duration_ms: 15_000
+        })
+    );
 }

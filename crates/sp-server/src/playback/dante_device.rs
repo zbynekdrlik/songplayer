@@ -22,11 +22,11 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use dlink::Clock as ClockSource;
-use dlink::{Block, Config, HostError, Link, Map, Media, Place, Process, Stopped};
+use dlink::{Block, Config, HostError, Link, Map, Media, Place, Ports, Process, Stopped};
 use dstack::ctl;
 use serde::Deserialize;
 use sp_core::audio_outputs::{DanteDest, OutputEntry, PROGRAM_RATE, effective_rate};
-use sp_core::dante_status::DanteFigures;
+use sp_core::dante_status::{DanteFigures, LateWake, MediaThread};
 use tracing::{info, warn};
 
 use crate::playback::asio_format::AsioSample;
@@ -57,6 +57,11 @@ pub struct DanteParams {
     pub network_rate: u32,
     pub dir: PathBuf,
     pub clock: ClockSource,
+    /// The device's control ports and process id, `None` for Dante's
+    /// defaults (ARC 4440, CMC 8800, flows 4455, process 0): the output is
+    /// the one Dante device of its address. A test device takes a slot of
+    /// its own (#323), so the devices of parallel test processes never meet.
+    pub ports: Option<(Ports, u16)>,
 }
 
 impl DanteParams {
@@ -75,18 +80,19 @@ impl DanteParams {
             network_rate: effective_rate(entry.rate, network_rate),
             dir: base.join("dante"),
             clock: ClockSource::Dsync,
+            ports: None,
         })
     }
 
     /// dlink's TX path at the worker's rate: its work margin, the Dante
-    /// latency it derives from its 15 ms budget and the rate converter's TX
+    /// latency it derives from its 15 ms reference path (`REFERENCE_PATH_NS`, v0.6.106) and the rate converter's TX
     /// delay (`Config::split`, dstack v0.6.22: the budget is the app's whole
     /// path, the owner's ruling to dstack of 3.11.2026).
     fn latency_frames(&self) -> u64 {
         let path_ns = self
             .config()
             .split()
-            .map_or(dlink::BUDGET_NS, |s| s.tx_path_ns);
+            .map_or(dlink::REFERENCE_PATH_NS, |s| s.tx_path_ns);
         u64::from(self.rate) * path_ns / 1_000_000_000
     }
 
@@ -101,11 +107,15 @@ impl DanteParams {
     /// state file, and the channels carry DVS's names: a receiver subscribed
     /// to `01@resolume-snv` needs no change.
     pub fn config(&self) -> Config {
-        Config::new(self.device.clone(), self.dir.join("state.toml"))
+        let config = Config::new(self.device.clone(), self.dir.join("state.toml"))
             .tx(["01", "02"])
             .sample_rate(self.rate)
             .network_rate(self.network_rate)
-            .product("New Level", "SongPlayer")
+            .product("New Level", "SongPlayer");
+        match self.ports {
+            Some((ports, id)) => config.ports(ports).process_id(id),
+            None => config,
+        }
     }
 }
 
@@ -140,6 +150,26 @@ struct EngineLine {
     late: u64,
     missed: u64,
     overruns: u64,
+    rebootstraps: u64,
+    rebootstraps_late: u64,
+    rebootstraps_clock_back: u64,
+    rebootstraps_reanchor: u64,
+    rebootstraps_retime: u64,
+    wake_behind_max_us: u64,
+    wake_behind_minute_max_us: Option<u64>,
+    wake_behind_buckets: Vec<u64>,
+    late_wakes: u64,
+    late_wakes_recent: Vec<WakeLine>,
+    threads: Vec<MediaThread>,
+}
+
+/// One of the pump's late wakes (its `rebootstrap` flag 0 or 1).
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct WakeLine {
+    unix_ms: u64,
+    behind_us: u64,
+    rebootstrap: u8,
 }
 
 /// The stack's status line (`ctl::status`, what `Link::status` returns) as
@@ -147,20 +177,41 @@ struct EngineLine {
 /// flow that ended included. `None` for a line that does not read.
 pub fn figures_of(line: &str) -> Option<DanteFigures> {
     let line: StatusLine = serde_json::from_str(line).ok()?;
+    let e = line.engine;
     let mut f = DanteFigures {
         clock_ready: line.clock.ready != 0,
-        pump_late: line.engine.late,
-        pump_missed: line.engine.missed,
-        pump_overruns: line.engine.overruns,
+        pump_late: e.late,
+        pump_missed: e.missed,
+        pump_overruns: e.overruns,
+        pump_rebootstraps: e.rebootstraps,
+        pump_rebootstraps_late: e.rebootstraps_late,
+        pump_rebootstraps_clock_back: e.rebootstraps_clock_back,
+        pump_rebootstraps_reanchor: e.rebootstraps_reanchor,
+        pump_rebootstraps_retime: e.rebootstraps_retime,
+        wake_behind_max_us: e.wake_behind_max_us,
+        wake_behind_minute_max_us: e.wake_behind_minute_max_us,
+        wake_behind_buckets: e.wake_behind_buckets,
+        late_wakes: e.late_wakes,
+        late_wakes_recent: e
+            .late_wakes_recent
+            .into_iter()
+            .map(|w| LateWake {
+                unix_ms: w.unix_ms,
+                behind_us: w.behind_us,
+                rebootstrap: w.rebootstrap != 0,
+            })
+            .collect(),
+        threads: e.threads,
         ..DanteFigures::default()
     };
     for flow in &line.tx {
         f.live_flows += u32::from(flow.live != 0);
         f.late_max_us = f.late_max_us.max(flow.late_max_us);
         f.send_max_us = f.send_max_us.max(flow.send_max_us);
-        if f.late_bins.len() < flow.late_bins.len() {
-            f.late_bins.resize(flow.late_bins.len(), 0);
-        }
+        // As long as the longest flow's (a `<` guard here had an
+        // equivalent `<=` mutant: resizing to the same length is a no-op).
+        let bins = f.late_bins.len().max(flow.late_bins.len());
+        f.late_bins.resize(bins, 0);
         for (sum, n) in f.late_bins.iter_mut().zip(&flow.late_bins) {
             *sum += n;
         }
@@ -217,9 +268,13 @@ impl Process for RingProcess {
     fn process(&mut self, block: &mut Block<'_>) {
         let frames = block.frames();
         let want = (frames * DANTE_CHANNELS).min(self.scratch.len());
+        // Whole frames only (dstack#371): half a frame in the ring (its
+        // writer between left and right) waits for the next block, so the
+        // channels never swap.
+        let whole = self.ring.slots() / DANTE_CHANNELS * DANTE_CHANNELS;
         let got = self
             .ring
-            .pop_partial_slice(&mut self.scratch[..want])
+            .pop_partial_slice(&mut self.scratch[..want.min(whole)])
             .0
             .len();
         self.scratch[got..want].fill(0.0);

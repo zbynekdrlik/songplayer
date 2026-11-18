@@ -501,9 +501,12 @@ rounds 1–2):
 - `GET /api/v1/status` → `video_decode {hw_decode, hw_requested,
   gpu_decodes, mf_software, open_fallbacks, mid_stream_fallbacks,
   path_changes, last_fallback, max_height, scaled_opens, scale_refusals,
-  video_decode, gpu_resident_opens, gpu_resident_blocked, pipelines}`
+  video_decode, gpu_resident_opens, gpu_resident_blocked, pipelines,
+  stuck_video_readers, stuck_video_readers_now}`
   (the setting + the decode cap (#282) + the counters + #279 P3a's
-  GPU-resident fields, "GPU-resident decode" below; counts of FILES since
+  GPU-resident fields, "GPU-resident decode" below + #319's readers
+  whose read never returned after their song, `genlock.md` #318; counts
+  of FILES since
   the process started, not live state; `#[serde(default)]`, so a missing
   key reads as zero).
 - `POST /api/v1/diag/decode-bench` takes `"hw": true` and reports
@@ -708,12 +711,16 @@ shows "Náhľad nedostupný pri GPU dekódovaní." and has no
     preview slot (`preview.md`).
 - **The ring's 20 slots** (`RING_CAPACITY`, P2's sizing kept by P3a's
   design) hold, from ONE pipeline: the 12 queued frames, the producer's
-  frame waiting to be pushed, the decoder's `frame_before_end`, the held
+  frame waiting to be pushed, #318: the video reader thread's one picture
+  read ahead (waiting in its rendezvous hand-off, `sp_decoder::
+  video_thread`), the decoder's `frame_before_end`, the held
   step, the pacer's shown / next frame, the handoff's 2, and the bus's
   pending reorder entries and submit queue (`PROGRAM_PENDING_BOUND` 16,
   `PROGRAM_QUEUE_BOUND` 10, normally 1-3), MAX's queue and the
-  compositor's open slots. The steady state is ~16-18; a catch-up or a
-  bus stall can reach 20, and a copy then waits `RING_WAIT` (100 ms,
+  compositor's open slots. The steady state is ~17-19 (#318 added the
+  reader's one); a catch-up or a bus stall can reach 21 (and a reader
+  stuck in a read past its song's end keeps its slot while the next
+  song's reader runs, `genlock.md` #318), and a copy then waits `RING_WAIT` (100 ms,
   counted in `waits`) and, past it, is a decode error: the song goes on in
   software (`full` +1). The box gate reads `ring.full` (+0 required) and
   reports `waits`.
@@ -1813,3 +1820,13 @@ transform". Before blaming the reader, check `Get-AppxPackage -AllUsers` for
 1.2.20.0 and AV1 2.0.35.0. `win-resolume-ops` "PP site" has the winget
 install.
 
+
+## Never toggle `video_hw_decode` for an A/B on resolume-snv (#317, 13.11.2026)
+
+Software decode (`video_hw_decode` = false) tripled SP-program's NDI submit
+time for as long as it ran (20–29 ms max per 15 s bucket vs 6.8–7.6 ms on the
+D3D11 path), and the one Dante pump loss of 12–13.11 (`out-4`, `missed=5`)
+came 22 s after a software-decoded open. The cause is not separated (a
+Dante-network change elsewhere ran the same night), but the audio risk is
+real, so this setting is no A/B lever on SNV. Separate the steps of a song
+change another way (timestamps, or moving the title text-set in time).

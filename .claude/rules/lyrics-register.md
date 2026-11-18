@@ -77,8 +77,8 @@ ROZHODNUTÉ 6106231933: no tokens per showing.
 
 ## Before a prompt change ships
 
-Probe it live on SNV through the real proxy (`proxy_probe.py`, the
-`ai-proxy.md` rules), on:
+Probe it live on SNV through the register task's OpenRouter model (the
+`text-ai.md` rules: the probe route, a blind A/B), on:
 
 - "We Raise"'s original base-tier transcript
   (`~/.claude/work-products/pp_8_r1kXQWtbA_lyrics.orig.json` on dev1);

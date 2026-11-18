@@ -1,4 +1,4 @@
-//! Claude prompts used by `description_provider::clean_lyrics_via_claude`.
+//! Text-AI prompts used by `description_provider::clean_lyrics_via_ai`.
 //!
 //! Split into a sibling module to keep `description_provider.rs` under the
 //! 1000-line cap. Two distinct prompts:
@@ -7,7 +7,7 @@
 //! - [`build_scraped_lyrics_cleanup_prompt`] for already-scraped lyrics
 //!   from lrclib-plain (keeps every repeat, drops ad-libs).
 
-/// Selects which Claude prompt `clean_lyrics_via_claude` uses.
+/// Selects which text-AI prompt `clean_lyrics_via_ai` uses.
 ///
 /// Description blobs contain mixed content (lyrics + tour dates + credits +
 /// links); the prompt filters non-lyric noise out. Scraped lyrics blobs
@@ -22,7 +22,17 @@ pub enum CleanupMode {
     ScrapedLyrics,
 }
 
-/// Build the Claude extraction prompt for a single video description.
+impl CleanupMode {
+    /// #321: the text AI task this cleanup is (its own provider and model).
+    pub fn task(self) -> sp_core::ai_tasks::AiTask {
+        match self {
+            Self::Description => sp_core::ai_tasks::AiTask::Description,
+            Self::ScrapedLyrics => sp_core::ai_tasks::AiTask::Cleanup,
+        }
+    }
+}
+
+/// Build the text-AI extraction prompt for a single video description.
 ///
 /// Empty system prompt — soft-framing in user message instead. Mirrors the
 /// `text_merge.rs` pattern: CLIProxyAPI OAuth Claude reverts to conversational
@@ -65,10 +75,10 @@ pub fn build_description_extraction_prompt(
     (system, user)
 }
 
-/// Build the Claude cleanup prompt for already-scraped lyrics (lrclib plain).
+/// Build the text-AI cleanup prompt for already-scraped lyrics (lrclib plain).
 ///
 /// The input is already pure lyrics — no tour dates, no credits, no links to
-/// filter. The problems we need Claude to fix are different:
+/// filter. The problems we need the text AI to fix are different:
 ///
 /// 1. **Repeats are kept (#144).** A scraped lyric writes a chorus as many
 ///    times as it is sung (e.g., 9 consecutive `"It's the power of Jesus"`). The prompt used

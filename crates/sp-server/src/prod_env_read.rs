@@ -8,9 +8,9 @@
 //! the policy as it applies), the registry only when that cannot be read.
 
 use sp_core::prod_env::FirewallProfile;
-use sp_core::prod_env::firewall::FirewallDefaults;
+use sp_core::prod_env::firewall::{FirewallDefaults, FirewallGroup};
 
-use super::firewall::{BlockRules, in_dstack_group};
+use super::firewall::BlockRules;
 
 use super::audio::AudioFacts;
 use super::network::{AdapterRow, BindingRow, NetworkFacts, with_adapters, with_bindings};
@@ -230,12 +230,9 @@ pub fn block_rules(wmi: &Result<WmiRead, String>) -> Result<BlockRules, String> 
     };
     let mut rules = BlockRules::default();
     for row in rows {
-        if in_dstack_group(row.rule_group.as_deref(), row.display_group.as_deref()) {
-            rules.in_group += 1;
-        } else {
-            let name = row.display_name.clone().unwrap_or_else(|| row.id.clone());
-            rules.outside.push(name);
-        }
+        let group = FirewallGroup::of(row.rule_group.as_deref(), row.display_group.as_deref());
+        let name = row.display_name.clone().unwrap_or_else(|| row.id.clone());
+        rules.add(group, name);
     }
     Ok(rules)
 }

@@ -10,7 +10,8 @@
 //! playlists lookup (the switch decides from SongPlayer's own playlists,
 //! `playback::scene_catalog`), and B4 step 6 the mirror of a playlist press
 //! to cg OBS (and with it the rule that a later mirror supersedes a queued
-//! switch): a playlist press sends cg OBS nothing.
+//! switch). #327: a playlist (or Blank) press then parks cg OBS on its
+//! "Blank" scene (`program_switch::cg_obs_to_blank`).
 //!
 //! #221: the newest press reaches cg OBS last (for switches cg OBS answers
 //! within `DEFAULT_RESPONSE_TIMEOUT`):

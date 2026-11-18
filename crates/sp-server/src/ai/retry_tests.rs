@@ -1,6 +1,5 @@
-//! #145: the AI client's retry policy against CLIProxyAPI's credential
-//! cooldown (60 s by default; a refusal inside it is a 503 with
-//! `Retry-After`). Pure: no request, no sleep.
+//! #145: the AI client's retry policy (a refusal's `Retry-After`, else the
+//! fallback waits). Pure: no request, no sleep.
 //! Wired via `#[cfg(test)] #[path = "retry_tests.rs"] mod tests;`.
 
 use std::time::Duration;
@@ -22,7 +21,7 @@ fn without_a_retry_after_the_retries_wait_5_20_60_s_then_stop() {
     let total: Duration = p.fallback.iter().sum();
     assert!(
         total > secs(60),
-        "the waits outlast CLIProxyAPI's default 60 s cooldown: {total:?}"
+        "the waits outlast a provider's 60 s cooldown: {total:?}"
     );
     assert_eq!(p.retry_delay(503, None, 0), None, "attempt 0 is no retry");
 }
@@ -106,18 +105,6 @@ fn a_refused_body_is_logged_by_its_first_300_characters() {
     assert_eq!(body_excerpt(""), "");
 }
 
-/// #144: Claude's upstream content filter, as CLIProxyAPI relays it (SNV log
-/// 10.10.2026), and nothing else.
-#[test]
-fn a_content_filter_refusal_is_told_apart() {
-    let body = r#"{"error":{"message":"claude executor: upstream returned error event: Output blocked by content filtering policy","type":"server_error"}}"#;
-    assert!(is_content_filtered(body));
-    assert!(!is_content_filtered(
-        r#"{"error":{"code":"auth_unavailable","message":"no auth available"}}"#
-    ));
-    assert!(!is_content_filtered(""));
-}
-
 /// #144: a refusal is found by TYPE in an error's causes (the cleanup adds
 /// its context on top of the client's error), never by an error's text: a
 /// malformed answer quoting the phrase is no refusal.
@@ -126,7 +113,7 @@ fn a_content_filter_refusal_is_found_by_type_in_an_errors_causes() {
     let refused = anyhow::Error::new(ContentFiltered {
         detail: "HTTP 502: Output blocked by content filtering policy".into(),
     })
-    .context("Claude clean_lyrics chat failed");
+    .context("clean_lyrics AI chat failed");
     assert!(content_filtered(&refused));
     assert!(
         refused
@@ -134,9 +121,9 @@ fn a_content_filter_refusal_is_found_by_type_in_an_errors_causes() {
             .any(|c| c.to_string().contains("upstream content filter"))
     );
     let outage = anyhow::anyhow!("chat completion failed (HTTP 503): auth_unavailable")
-        .context("Claude clean_lyrics chat failed");
+        .context("clean_lyrics AI chat failed");
     assert!(!content_filtered(&outage));
     let quoting = anyhow::anyhow!("malformed answer: Output blocked by content filtering policy")
-        .context("Claude response malformed");
+        .context("AI response malformed");
     assert!(!content_filtered(&quoting));
 }

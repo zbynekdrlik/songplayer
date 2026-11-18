@@ -3,7 +3,7 @@
 //! Moved out of `gemini.rs` (#135) so the emoji sanitizer is a single
 //! choke point every metadata path can share: `metadata::get_metadata`
 //! applies it to whatever a provider returns AND to the regex-parser
-//! fallback, so Gemini, Claude, and the fallback all ship clean text —
+//! fallback, so Gemini, the OpenRouter text AI and the fallback all ship clean text —
 //! not just Gemini, which was the only path that called this internally
 //! before.
 

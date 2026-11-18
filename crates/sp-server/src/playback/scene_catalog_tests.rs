@@ -196,3 +196,22 @@ async fn the_stored_catalog_holds_only_the_active_playlists() {
         Some("Blank")
     );
 }
+
+/// #326: the hidden test playlist (`kind` test) is no scene Companion lists,
+/// yet stays a playlist scene a press resolves.
+#[test]
+fn the_test_playlist_is_not_listed_but_still_resolves() {
+    let row = |id: i64, ndi: &str, kind: &str| Playlist {
+        id,
+        ndi_output_name: ndi.to_string(),
+        kind: kind.to_string(),
+        ..Default::default()
+    };
+    let catalog = SceneCatalog::from_playlists(&[
+        row(4, "SP-slow", "youtube"),
+        row(9, "SP-test", crate::test_item::TEST_KIND),
+        row(7, "SP-fast", ""),
+    ]);
+    assert_eq!(catalog.scene_names(), vec!["sp-fast", "sp-slow"]);
+    assert_eq!(catalog.kind("sp-test"), SceneKind::Playlist(9));
+}

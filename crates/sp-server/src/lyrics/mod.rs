@@ -4,8 +4,8 @@ pub mod backend;
 pub mod bootstrap;
 pub mod bootstrap_probe; // #221: the venv probe's reason + the fast-path retry decision
 pub mod bootstrap_venv_exe;
+pub mod candidate_pick;
 pub mod child_output;
-pub mod claude_merge;
 pub mod cleanup_refusal; // #144: a content-filter refusal of a cleanup, remembered per text
 pub mod description_provider;
 pub mod display_plan;

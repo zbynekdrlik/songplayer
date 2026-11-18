@@ -360,3 +360,30 @@ async fn max_resolution_takes_480_to_2160_and_refuses_the_rest() {
     assert_eq!(status, StatusCode::NO_CONTENT, "{text}");
     assert_eq!(stored(&state.pool, key).await.as_deref(), Some("2160"));
 }
+
+/// #321: a retired text-AI setting (`ai_model`, `ai_api_url`,
+/// `ai_provider_<task>`, deleted by V45) refuses the whole PATCH — 400 naming
+/// the key, nothing written, a task's model sent beside it included — so no
+/// client re-creates a setting nothing reads.
+#[tokio::test]
+async fn a_retired_text_ai_setting_is_refused_and_nothing_is_written() {
+    let state = test_state().await;
+    for key in ["ai_model", "ai_api_url", "ai_provider_translate"] {
+        let sent = body(&[(key, "openrouter"), ("ai_model_translate", "google/x")]);
+        let (status, text) = patch(&state, &sent).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{key}: {text}");
+        assert!(text.contains(key), "the reason names {key}: {text}");
+        assert_eq!(stored(&state.pool, key).await, None, "{key}");
+        assert_eq!(
+            stored(&state.pool, "ai_model_translate").await,
+            None,
+            "{key}"
+        );
+    }
+    let (status, text) = patch(&state, &body(&[("ai_model_translate", " google/x ")])).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{text}");
+    assert_eq!(
+        stored(&state.pool, "ai_model_translate").await.as_deref(),
+        Some("google/x")
+    );
+}

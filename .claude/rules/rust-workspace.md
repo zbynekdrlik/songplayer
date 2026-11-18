@@ -942,6 +942,41 @@ the test that kills each one BEFORE CI's mutation gate runs.
   script with the Write tool (`grep -rnIF --exclude-dir=…` inside it) and run
   `bash <scratch>/refs.sh`; likewise `gh … -q '"\(.x)"'` jq interpolation:
   dump with a Python script that calls `gh … --json` and parses it.
+- **A test's own wait must end well under the mutant's timeout** (#319):
+  a test that waits 20 s for a counter a mutant never moves hits
+  cargo-mutants' auto timeout (~20 s on these runners) and reads TIMEOUT,
+  which fails the gate like a survivor. Bound such waits at ~5 s.
+- **Run the local diff gate in shards from a worktree lane** (#289 step 0):
+  `cargo mutants --in-diff <scratch>/range.diff --dir <wt> --baseline=skip
+  --jobs 2 --timeout 120 --shard k/4 --output <scratch>/mutK` — ~7 mutants
+  and ~4 min a shard on dev1, so each stays inside one Bash call (a call
+  over ~3 min is moved to the background; wait on its output file with
+  `inotifywait -t 170`, never end the turn on it). Sum the four summaries.
+- **A new `PacingStats` field must read its `Default` until the pacer's
+  first emit** (#289 step 0): `pacer_tests::disabled_pacer_reports_default_stats`
+  compares a disabled pacer's whole `stats()` with `PacingStats::default()`;
+  a histogram that served its edges from the start failed it, and only the
+  FULL suite showed it (run the whole `sp-server` lib before a GREEN).
+- **An in-process lock serializes nothing under nextest** (#322 / #323).
+  nextest (the mutation gate's `test_tool`) runs every test in its own
+  process, and the gate runs two mutants at once (`--jobs 2`), so a test
+  resource shared across processes (a fixed port, a file) needs a
+  cross-process claim. With `fail-fast = { max-fail = 1, terminate =
+  "immediate" }` one such collision reads every mutant of the crate CAUGHT
+  for the wrong reason (the gate runs `--baseline=skip`). The
+  `dante_device` tests had it: every device bound Dante's ARC UDP 4440
+  (5–8 of 17 failing each run, and on dev1 another account may hold 4440).
+  Now each test that starts a device takes a dstack slot 1-14 of its own
+  (`claim_slot`: ARC 4440+k, CMC 8800+k, flows 4455+k, process id k),
+  claimed by holding UDP 127.0.0.1:(29700 + k) for the test's life, its
+  ports checked free first; `DanteParams.ports` carries it (`None` = Dante's
+  defaults, the output's). A new device test uses `claim_slot` + `on_slot`
+  and asks a flow on `slot.ports.flows`, never `flows::control::PORT`.
+  The first honest gate run over `dante_device.rs` then showed two
+  survivors the collision had hidden: a count of flags pinned with ONE of
+  TWO set reads the same with the test inverted (`!=` → `==`; pin two of
+  three), and `if a.len() < n { a.resize(n, 0) }` has an equivalent `<=`
+  mutant (write `a.resize(a.len().max(n), 0)`).
 - **A NEW file is missing from `git diff <base>` until git tracks it**
   (#221 L2b): listing uncommitted work with `git diff 5ad0178f > range.diff`
   showed no mutant at all for the new `remote/codec.rs`. `git add -N
@@ -1379,6 +1414,14 @@ PRE-fmt text silently does nothing — #212 shipped a test asserting the old 2×
 standby while the rig built 2×4, caught only by a review pass (it would have
 reddened 6 CI tests). Fail loudly when an anchor is missing
 (`if old not in s: sys.exit(...)`), or use the Edit tool, and re-read the result.
+
+A multi-file edit script that exits halfway has already WRITTEN the files
+before the failing one (#321): re-running it then trips its own anchors. Do not
+make it "idempotent" by skipping an edit whose NEW text is already there when
+that new text CONTAINS the old one (an append): the old anchor still matches
+and every re-run appends again (#321 wrote one doc paragraph four times).
+Check every anchor of every file first, then write, or re-read the diff after
+any re-run.
 
 In a worktree lane the Bash guard may refuse a long `python3 - <<'EOF' … EOF`
 edit chained with `git` or `cargo` ("too complex to verify that it stays inside

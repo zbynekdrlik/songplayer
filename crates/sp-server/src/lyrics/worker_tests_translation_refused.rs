@@ -1,6 +1,6 @@
-//! #144: Claude's content filter refusing a song's translation is final —
+//! #144: the text AI's content filter refusing a song's translation is final —
 //! the song keeps its English lines and the next song goes on; an outage
-//! still backs off. Claude is a wiremock that refuses every request naming
+//! still backs off. The text AI is a wiremock that refuses every request naming
 //! the refused song's line.
 
 use std::sync::Arc;
@@ -11,11 +11,9 @@ use wiremock::matchers::{body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::*;
-use crate::ai::AiSettings;
-use crate::ai::client::AiClient;
-use crate::ai::retry::RetryPolicy;
 
-const FILTER_BODY: &str = r#"{"error":{"message":"claude executor: upstream returned error event: Output blocked by content filtering policy","type":"server_error"}}"#;
+/// #321: OpenRouter's moderation refusal (final, typed `ContentFiltered`).
+const FILTER_BODY: &str = r#"{"error":{"code":403,"message":"Your input was flagged","metadata":{"reasons":["violence"],"flagged_input":"…"}}}"#;
 
 fn untranslated(en: &str) -> LyricsTrack {
     LyricsTrack {
@@ -34,10 +32,10 @@ fn untranslated(en: &str) -> LyricsTrack {
     }
 }
 
-/// A Claude that refuses (content filter, or `refusal_status` with no
+/// A text AI that refuses (content filter, or `refusal_status` with no
 /// filter body) every request naming "refused line", and translates the
 /// rest.
-async fn claude(refusal_status: u16, refusal_body: &'static str) -> MockServer {
+async fn text_ai(refusal_status: u16, refusal_body: &'static str) -> MockServer {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
@@ -87,13 +85,7 @@ async fn two_songs(server: &MockServer) -> (LyricsWorker, tempfile::TempDir, i64
     let (events, _) = broadcast::channel(16);
     let mut worker = LyricsWorker::new_for_test(pool, dir.path().to_path_buf(), events);
     worker.ai_client = Some(Arc::new(
-        AiClient::new(AiSettings {
-            api_url: format!("{}/v1", server.uri()),
-            api_key: None,
-            model: "claude-test".into(),
-            system_prompt_extra: None,
-        })
-        .with_retry_policy(RetryPolicy::NO_WAIT),
+        crate::ai::test_support::ai_client_at(format!("{}/v1", server.uri())).await,
     ));
     (worker, dir, first)
 }
@@ -106,7 +98,7 @@ fn sk(dir: &tempfile::TempDir, yt: &str) -> Option<String> {
 
 #[tokio::test]
 async fn a_refused_translation_is_final_and_the_next_song_goes_on() {
-    let server = claude(502, FILTER_BODY).await;
+    let server = text_ai(403, FILTER_BODY).await;
     let (worker, dir, _) = two_songs(&server).await;
     worker.retry_missing_translations().await;
     worker.retry_missing_translations().await;
@@ -125,7 +117,7 @@ async fn a_refused_translation_is_final_and_the_next_song_goes_on() {
 
 #[tokio::test]
 async fn an_outage_still_backs_off_and_is_asked_again_later() {
-    let server = claude(500, "upstream down").await;
+    let server = text_ai(500, "upstream down").await;
     let (worker, dir, _) = two_songs(&server).await;
     worker.retry_missing_translations().await;
     worker.retry_missing_translations().await;
@@ -137,7 +129,7 @@ async fn an_outage_still_backs_off_and_is_asked_again_later() {
 
 #[tokio::test]
 async fn a_refused_stale_translation_is_stamped_forward() {
-    let server = claude(502, FILTER_BODY).await;
+    let server = text_ai(403, FILTER_BODY).await;
     let (worker, _dir, refused) = two_songs(&server).await;
     worker.retranslate_next_stale().await;
     let version: i64 =

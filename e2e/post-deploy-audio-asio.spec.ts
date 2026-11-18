@@ -19,8 +19,11 @@
  *    (up to 4, `MAX_ASIO_OUTPUTS`). A native Dante output (#285) is also
  *    judged on its stack's figures over that minute (`danteGateFailures`):
  *    its clock ready at both reads, a receiver's flow, packets sent, no
- *    missed pump block (the ledger's loss); packets 2 ms or more late and
- *    late / overrun pump blocks are logged (`danteGateLog`), not failed.
+ *    missed pump block (the ledger's loss), and (#325) its pump thread at
+ *    `mmcss_high` (a regression guard); packets 2 ms or more late, late /
+ *    overrun pump blocks and the pump's wakes (re-bootstraps by cause, the
+ *    wake maxima and buckets, each late wake of the minute with its UTC,
+ *    the pump's scheduling) are logged (`danteGateLog`), not failed.
  *
  * 3. #233 (the spawn finding): a child process SongPlayer spawns (one yt-dlp,
  *    `POST /api/v1/youtube/probe`; skipped when no output runs, every
@@ -50,10 +53,12 @@ import { test, expect, type APIRequestContext } from "@playwright/test";
 import {
   DVS_DRIVER,
   WINDOW_BLOCKS,
+  dvsExpected,
   asioCount,
   asioCountReading,
   asioGateFailures,
   danteGateFailures,
+  deviceLatencyFailures,
   danteGateLog,
   type OutputStatus,
 } from "./audio-outputs-gate";
@@ -105,15 +110,18 @@ test.describe("ASIO output (#233)", () => {
     fileStart = await fileStartOrNull(request);
   });
 
-  test("the driver list reads, with Dante Virtual Soundcard on a box expected to run ASIO", async ({
+  test("the driver list reads, with Dante Virtual Soundcard where an ASIO output plays on it", async ({
     request,
   }) => {
     const resp = await request.get("/api/v1/audio/asio-drivers");
     expect(resp.status(), "GET /api/v1/audio/asio-drivers").toBe(200);
     const drivers = (await resp.json()).drivers as string[];
-    console.log(`[#233 asio] drivers: ${JSON.stringify(drivers)} (expected outputs: ${EXPECTED})`);
-    if (EXPECTED > 0) {
-      expect(drivers, "an ASIO output is expected: DVS must be registered").toContain(DVS_DRIVER);
+    const list = await readOutputs(request);
+    expect(list, "GET /api/v1/program").not.toBeNull();
+    const wanted = dvsExpected(list as OutputStatus[]);
+    console.log(`[#233 asio] drivers: ${JSON.stringify(drivers)} (DVS expected: ${wanted})`);
+    if (wanted) {
+      expect(drivers, "an ASIO output plays on DVS: DVS must be registered").toContain(DVS_DRIVER);
     }
   });
 
@@ -181,6 +189,9 @@ test.describe("ASIO output (#233)", () => {
       console.log(`[#233 asio] second: ${JSON.stringify(second)}`);
       if (second.note) console.log(`[#233 asio] note: ${second.note}`);
       expect(asioGateFailures(f, second), `ASIO output ${f.id}`).toEqual([]);
+      // #289 step 0: the device's own latency is measured and served.
+      console.log(`[#289 device] ${f.id}: device_latency_ms ${second.device_latency_ms}`);
+      expect(deviceLatencyFailures(second), `output ${f.id}`).toEqual([]);
       // #285: a native Dante output's stack figures over the same minute
       // (none for any other output).
       const danteLog = danteGateLog(f, second);

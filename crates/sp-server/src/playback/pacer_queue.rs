@@ -169,6 +169,20 @@ struct QueueState<T> {
     /// Set by the consumer on a Seek; consumed by the producer. Carries the seek
     /// target; the epoch is already bumped in `queue` by `begin_seek`.
     pending_seek: Option<u64>,
+    /// #318: when the consumer last took an item (`None` before its first).
+    last_pop: Option<std::time::Instant>,
+}
+
+/// What the producer sees in one look while its next picture is not ready
+/// (#318, [`SharedQueue::producer_look`]).
+#[derive(Debug, PartialEq, Eq)]
+pub struct ProducerLook {
+    /// `Seek` / `Stop` when one is pending, else `Continue`.
+    pub action: ProducerAction,
+    /// Items queued.
+    pub queued: usize,
+    /// µs since the consumer last took an item (`None` before its first).
+    pub since_last_pop_us: Option<u64>,
 }
 
 /// Thread-safe wrapper around [`PacedQueue`] driving the #147 decode producer and
@@ -190,6 +204,7 @@ impl<T> SharedQueue<T> {
                 queue: PacedQueue::new(bound),
                 stop: false,
                 pending_seek: None,
+                last_pop: None,
             }),
             not_full: Condvar::new(),
         }
@@ -247,9 +262,43 @@ impl<T> SharedQueue<T> {
         let mut st = self.inner.lock().ok()?;
         let f = st.queue.pop();
         if f.is_some() {
+            st.last_pop = Some(std::time::Instant::now());
             self.not_full.notify_one();
         }
         f
+    }
+
+    /// Producer (#318): one look, never blocking, while the next picture is
+    /// not ready: a pending stop or seek (the seek taken, as `producer_push`
+    /// takes it), the items queued and how long ago the consumer took one.
+    /// Poison → `Stop`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn producer_look(&self) -> ProducerLook {
+        let Ok(mut st) = self.inner.lock() else {
+            return ProducerLook {
+                action: ProducerAction::Stop,
+                queued: 0,
+                since_last_pop_us: None,
+            };
+        };
+        let action = if st.stop {
+            ProducerAction::Stop
+        } else if let Some(position_ms) = st.pending_seek.take() {
+            ProducerAction::Seek {
+                position_ms,
+                epoch: st.queue.epoch(),
+            }
+        } else {
+            ProducerAction::Continue
+        };
+        let since_last_pop_us = st
+            .last_pop
+            .map(|at| u64::try_from(at.elapsed().as_micros()).unwrap_or(u64::MAX));
+        ProducerLook {
+            action,
+            queued: st.queue.depth(),
+            since_last_pop_us,
+        }
     }
 
     /// Producer: mark end-of-stream (no more frames until a seek). Poison → no-op.

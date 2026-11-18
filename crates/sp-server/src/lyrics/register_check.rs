@@ -1,4 +1,4 @@
-//! #250: the register check — ONE Claude call per track, made while the track
+//! #250: the register check — ONE text-AI call per track, made while the track
 //! is processed (right after its translation, before it is persisted), never
 //! at display. Owner, 11.10.2026: the songs are Christian worship songs, and a
 //! transcript that misheard "I will dwell in the house of the Lord" as "I
@@ -19,7 +19,7 @@
 //!
 //! The prompt is the translator's sibling: numbered lines in, numbered lines
 //! out, nothing else (`translator.rs` "Prompt design" — the content-policy
-//! classifier of Claude via CLIProxyAPI is why).
+//! classifier Claude via CLIProxyAPI ran before #321 is why).
 
 use anyhow::Result;
 use sp_core::lyrics::{LyricsTrack, RegisterCheck, RegisterLine, RegisterVerdict};
@@ -253,11 +253,11 @@ pub fn unreadable(error: &anyhow::Error) -> bool {
     error.chain().any(|cause| cause.is::<UnreadableAnswer>())
 }
 
-/// Ask Claude and apply its answer to `track`. A refusal (in its answer, or
-/// Claude's upstream content filter) is a [`RegisterVerdict::Refused`] check;
+/// Ask the text AI and apply its answer to `track`. A refusal (in its answer, or
+/// the text AI's upstream content filter) is a [`RegisterVerdict::Refused`] check;
 /// any other failure is an error and the track is left as it was.
 #[cfg_attr(test, mutants::skip)] // HTTP glue; its parts are tested
-pub async fn check_via_claude(
+pub async fn check_via_ai(
     ai_client: &crate::ai::client::AiClient,
     track: &mut LyricsTrack,
 ) -> Result<RegisterCheck> {
@@ -265,10 +265,11 @@ pub async fn check_via_claude(
         return Ok(apply(track, Vec::new()));
     }
     let prompt = build_prompt(&numbered_lines(track));
-    let answer = match ai_client.chat("", &prompt).await {
+    let task = sp_core::ai_tasks::AiTask::Register;
+    let answer = match ai_client.chat_for(task, "", &prompt, 300).await {
         Ok(answer) => answer,
         Err(e) if crate::ai::retry::content_filtered(&e) => return Ok(refused()),
-        Err(e) => return Err(e.context("register check: the Claude call failed")),
+        Err(e) => return Err(e.context("register check: the AI call failed")),
     };
     match read_answer(&answer, track.lines.len())? {
         Some(findings) => Ok(apply(track, findings)),

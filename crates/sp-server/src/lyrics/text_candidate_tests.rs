@@ -1,7 +1,6 @@
 //! Tests for `text_candidate.rs` (#144).
 
 use super::*;
-use crate::ai::AiSettings;
 use crate::ai::client::AiClient;
 use sp_core::lyrics::{LyricsLine, LyricsTrack};
 
@@ -25,13 +24,8 @@ fn track(lines: &[(u64, u64, &str)]) -> LyricsTrack {
     }
 }
 
-fn ai_at(url: String) -> AiClient {
-    AiClient::new(AiSettings {
-        api_url: url,
-        api_key: Some("test".into()),
-        model: "claude-test".into(),
-        system_prompt_extra: None,
-    })
+async fn ai_at(url: String) -> AiClient {
+    crate::ai::test_support::ai_client_at(url).await
 }
 
 #[test]
@@ -65,7 +59,7 @@ async fn a_scraped_text_is_cleaned_into_a_text_candidate() {
         .expect(1)
         .mount(&mock)
         .await;
-    let ai = ai_at(format!("{}/v1", mock.uri()));
+    let ai = ai_at(format!("{}/v1", mock.uri())).await;
     let t = track(&[
         (0, 0, "[Chorus]"),
         (0, 0, "You never fail"),
@@ -76,7 +70,7 @@ async fn a_scraped_text_is_cleaned_into_a_text_candidate() {
     let c = cleaned_text_candidate(&ai, "Jesus Be the Name", "", "lrclib", &t, &cache)
         .await
         .unwrap()
-        .expect("Claude returned lyric lines");
+        .expect("the text AI returned lyric lines");
     assert_eq!(c.source, "lrclib");
     assert_eq!(c.lines, vec!["You never fail", "You never will"]);
     assert!(!c.has_timing);
@@ -96,7 +90,7 @@ async fn a_text_the_cleanup_rejects_gives_no_candidate() {
     tokio::fs::write(&cache, r#"{"lines": null}"#)
         .await
         .unwrap();
-    let ai = ai_at("http://127.0.0.1:9/v1".to_string());
+    let ai = ai_at("http://127.0.0.1:9/v1".to_string()).await;
     let t = track(&[(0, 0, "Buy my album")]);
     let got = cleaned_text_candidate(&ai, "Song", "Artist", "lrclib", &t, &cache)
         .await
@@ -111,7 +105,7 @@ async fn an_empty_cleanup_gives_no_candidate() {
     let dir = tempfile::tempdir().unwrap();
     let cache = dir.path().join("yt1_title_lrclib_8_cleaned_v3.json");
     tokio::fs::write(&cache, r#"{"lines": []}"#).await.unwrap();
-    let ai = ai_at("http://127.0.0.1:9/v1".to_string());
+    let ai = ai_at("http://127.0.0.1:9/v1".to_string()).await;
     let t = track(&[(0, 0, "Something")]);
     let got = cleaned_text_candidate(&ai, "Song", "Artist", "lrclib", &t, &cache)
         .await
@@ -129,14 +123,14 @@ fn cleaned() -> CandidateText {
 }
 
 /// The error a cleanup refused by Claude's upstream content filter carries
-/// up to `gather`, as `AiClient::chat` and `clean_lyrics_via_claude` build it
+/// up to `gather`, as `AiClient::chat` and `clean_lyrics_via_ai` build it
 /// (SNV log 10.10.2026): the client's typed refusal, under the cleanup's
 /// context.
 fn content_filtered() -> anyhow::Error {
     anyhow::Error::new(crate::ai::retry::ContentFiltered {
         detail: "HTTP 502 Bad Gateway: Output blocked by content filtering policy".into(),
     })
-    .context("Claude clean_lyrics chat failed")
+    .context("clean_lyrics AI chat failed")
 }
 
 /// #144: a cleanup Claude's upstream content filter refuses leaves out THAT

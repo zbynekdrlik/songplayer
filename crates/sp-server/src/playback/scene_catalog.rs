@@ -50,6 +50,9 @@ pub struct SceneCatalog {
     conflicts: Vec<String>,
     /// Every playlist the catalog was built from: the active ones.
     active: BTreeSet<i64>,
+    /// #326: playlists whose scene Companion's list leaves out (the hidden
+    /// test playlist); a press still resolves them.
+    unlisted: BTreeSet<i64>,
 }
 
 impl SceneCatalog {
@@ -87,12 +90,19 @@ impl SceneCatalog {
             scenes,
             conflicts,
             active,
+            unlisted: BTreeSet::new(),
         }
     }
 
     /// The catalog of these (active) playlists.
     pub fn from_playlists(playlists: &[Playlist]) -> Self {
-        Self::new(playlists.iter().map(|p| (p.id, p.ndi_output_name.as_str())))
+        let mut catalog = Self::new(playlists.iter().map(|p| (p.id, p.ndi_output_name.as_str())));
+        catalog.unlisted = playlists
+            .iter()
+            .filter(|p| p.kind == crate::test_item::TEST_KIND)
+            .map(|p| p.id)
+            .collect();
+        catalog
     }
 
     /// What `scene` is, ignoring ASCII case.
@@ -113,6 +123,16 @@ impl SceneCatalog {
             .iter()
             .find(|&(_, &p)| p == pid)
             .map(|(scene, _)| scene.as_str())
+    }
+
+    /// #326: every playlist scene name Companion lists, in name order (the
+    /// hidden test playlist's left out).
+    pub fn scene_names(&self) -> Vec<&str> {
+        self.scenes
+            .iter()
+            .filter(|&(_, pid)| !self.unlisted.contains(pid))
+            .map(|(scene, _)| scene.as_str())
+            .collect()
     }
 
     /// The playlists that name no scene, one log line each.

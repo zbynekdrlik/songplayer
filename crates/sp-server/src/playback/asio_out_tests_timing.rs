@@ -110,3 +110,39 @@ fn the_callback_timing_adds_up_across_polls_and_runs() {
     w.step(&o, &mut d, t1 + 5 * S + SLOT, None);
     assert_eq!(shown(&o), (12.3456, 3, 4, late(5.0, 0.0)));
 }
+
+/// #289 step 0: the device's own output latency (its driver's frames at its
+/// rate): none before the first open, read at the open, re-read on
+/// `kAsioLatenciesChanged`, kept while the output waits to reopen.
+#[test]
+fn the_device_latency_is_the_drivers_own_and_follows_its_change() {
+    let o = out();
+    assert_eq!(o.snapshot().status.device_latency_ms, None);
+    let mut d = FakeDevice::answering(vec![Ok(dvs(96_000.0)), Ok(dvs(96_000.0))]);
+    let mut w = AsioWorker::new(T0);
+    w.step(&o, &mut d, T0, None);
+    // The fake driver reports 128 frames at 96 kHz.
+    assert_eq!(o.snapshot().status.device_latency_ms, Some(128.0 / 96.0));
+    for k in 1..4 {
+        w.step(&o, &mut d, T0 + k * SLOT + 50_000, Some(block(k)));
+        d.drain(25);
+    }
+    assert_eq!(o.snapshot().status.device_latency_ms, Some(128.0 / 96.0));
+    d.latency = 480;
+    d.events.push_back(DeviceEvents {
+        latencies_changed: true,
+        ..Default::default()
+    });
+    w.step(&o, &mut d, T0 + 4 * SLOT, None);
+    assert_eq!(o.snapshot().status.device_latency_ms, Some(5.0));
+    d.events.push_back(DeviceEvents {
+        reset: true,
+        ..Default::default()
+    });
+    w.step(&o, &mut d, T0 + 5 * SLOT, None);
+    let s = o.snapshot();
+    assert_eq!(
+        (s.state, s.status.device_latency_ms),
+        ("waiting", Some(5.0))
+    );
+}

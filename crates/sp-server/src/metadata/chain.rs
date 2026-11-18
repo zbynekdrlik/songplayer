@@ -20,9 +20,9 @@ use std::time::Instant;
 use async_trait::async_trait;
 use sp_core::metadata::VideoMetadata;
 
-use super::claude::ClaudeMetadataProvider;
 use super::gemini::GeminiProvider;
 use super::health::{MetadataHealth, ProviderHealth};
+use super::openrouter_text::OpenRouterMetadataProvider;
 use super::{MetadataError, MetadataProvider};
 use crate::ai::client::AiClient;
 
@@ -83,7 +83,8 @@ impl ProviderChain {
     }
 }
 
-/// The production chain: Claude through CLIProxyAPI first, then Gemini on the
+/// The production chain: the OpenRouter text provider first (#321, the
+/// metadata task's model), then Gemini on the
 /// `gemini_api_key` key LIST (split here with the shared
 /// `gemini_keys_from_setting`, one key per attempt). Gemini is in the chain
 /// even with no key: it then fails at once with "no API key configured", so
@@ -116,7 +117,7 @@ pub fn provider_chain_at(
     ))
 }
 
-/// Claude, then Gemini on `gemini_api_root`.
+/// OpenRouter's text provider, then Gemini on `gemini_api_root`.
 fn chain_at(
     ai_client: Arc<AiClient>,
     gemini_csv: &str,
@@ -128,10 +129,10 @@ fn chain_at(
     tracing::info!(
         gemini_keys = keys.len(),
         gemini_model,
-        "metadata provider chain: claude, then gemini"
+        "metadata provider chain: openrouter, then gemini"
     );
     ProviderChain::new(vec![
-        Box::new(ClaudeMetadataProvider::new(ai_client)),
+        Box::new(OpenRouterMetadataProvider::new(ai_client)),
         Box::new(GeminiProvider::with_api_root(
             keys,
             gemini_model.to_string(),

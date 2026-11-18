@@ -108,7 +108,12 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
 
     // cg OBS: a playlist scene, a baseline scene and a manual browser scene.
     let cg = FakeObsState {
-        scene_list: vec!["sp-fast".into(), "sp-slow".into(), "Slido".into()],
+        scene_list: vec![
+            "sp-fast".into(),
+            "sp-slow".into(),
+            "Slido".into(),
+            "Blank".into(),
+        ],
         program_scene: Some("sp-slow".into()),
         ..Default::default()
     };
@@ -255,22 +260,30 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
             .all(|m| m["d"]["eventType"] != "CurrentProgramSceneChanged"),
         "cg OBS's program scene reached Companion: {before:?}"
     );
-    // #221 B4 step 6: the playlist press told cg OBS nothing. The witness: a
+    // #327: the playlist press parked cg OBS on its Blank. The witness: a
     // getter forwarded after it (the OBS client writes the facade's calls in
-    // queue order, so a switch the press had queued would have reached cg
-    // OBS first). cg OBS keeps its own program.
+    // queue order, so the switch the press queued reached cg OBS first).
+    // The Blank goes from a task of its own once the cut's window is served:
+    // wait until cg OBS shows it, then the witness.
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    while fake.state().await.program_scene.as_deref() != Some("Blank") {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "cg OBS never parked on Blank"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     let inputs = request(&mut ws, "GetInputList", None).await;
     assert_eq!(inputs["requestStatus"]["code"], 100);
     let cg_now = fake.state().await;
-    assert!(
-        cg_now
-            .requests
-            .iter()
-            .all(|r| r["requestType"] != "SetCurrentProgramScene"),
-        "a playlist press switched cg OBS: {:?}",
-        cg_now.requests
-    );
-    assert_eq!(cg_now.program_scene.as_deref(), Some("sp-slow"));
+    let switches: Vec<&Value> = cg_now
+        .requests
+        .iter()
+        .filter(|r| r["requestType"] == "SetCurrentProgramScene")
+        .collect();
+    assert_eq!(switches.len(), 1, "one switch: {:?}", cg_now.requests);
+    assert_eq!(switches[0]["requestData"]["sceneName"], "Blank");
+    assert_eq!(cg_now.program_scene.as_deref(), Some("Blank"));
     // SongPlayer's program scene, never cg OBS's.
     let program = request(&mut ws, "GetCurrentProgramScene", None).await;
     assert_eq!(
@@ -278,7 +291,7 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
         "sp-fast"
     );
     // #221 lane 2: Companion's connect-time feedback (`GetSceneList`) names
-    // it too, with cg OBS's uuid of that scene; cg OBS still shows sp-slow.
+    // it too, with cg OBS's uuid of that scene; cg OBS shows Blank (#327).
     let list = request(&mut ws, "GetSceneList", None).await;
     assert_eq!(list["responseData"]["currentProgramSceneName"], "sp-fast");
     assert_eq!(

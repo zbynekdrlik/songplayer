@@ -97,6 +97,9 @@ pub use phase::{
 #[path = "program_max_upload.rs"]
 mod upload;
 pub use upload::{GpuStatus, UPLOAD_RATE_SPAN};
+#[path = "program_max_late.rs"]
+mod late;
+pub use late::{LateKind, Lateness, MAX_LATE_EVENTS, MaxLateEvent};
 
 /// How many MAX jobs wait for the `program-max` thread: two, then the oldest
 /// is dropped (coalesced) — revision 2's D4 hand-off.
@@ -312,6 +315,8 @@ pub struct MaxStatus {
     /// #251: boundaries on the grid whose job came after their compose
     /// instant (composed at once).
     pub compose_late: u64,
+    /// #317: the last late composes / sends, oldest first (`program_max_late.rs`).
+    pub late_events: Vec<MaxLateEvent>,
     /// Times a boundary's slot was picked anew (its lead left the window: one
     /// picture shown one refresh more or less); about one per drift cycle
     /// between the display's clock and SongPlayer's, hours apart.
@@ -452,6 +457,7 @@ struct Stats {
     send_phase: Window,
     compose_phase: Window,
     compose_late: u64,
+    late_events: late::LateRing,
     repicks: u64,
     list_holder: Option<ListHolderStatus>,
 }
@@ -551,6 +557,7 @@ impl MaxOut {
                 send_phase: Window::default(),
                 compose_phase: Window::default(),
                 compose_late: 0,
+                late_events: late::LateRing::default(),
                 repicks: 0,
                 list_holder: None,
             }),
@@ -875,6 +882,7 @@ impl MaxOut {
             compose_phase_us_p50: compose_phase.p50(),
             compose_phase_us_p99: compose_phase.p99(),
             compose_late,
+            late_events: self.late_events(),
             slot_repicks,
             device_resets,
             sender_backoffs,

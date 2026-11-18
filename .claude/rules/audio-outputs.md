@@ -132,6 +132,35 @@ start):
   `settings_tests_audio.rs` (the PATCH); `program_tests_outputs.rs` (the
   top-level field).
 
+## The timestamped-audio rebuild, step 0: measure (#289, design 6814927800)
+
+Six steps, one deploy each (ROZHODNUTÉ 6860359169); step 0 changes
+nothing audible, it only measures what the later steps are sized from:
+
+- `outputs[i].device_latency_ms` (and `asio.device_latency_ms`): the
+  device's own output latency after the worker hands it a frame —
+  `AsioDevice::output_latency_frames` at the worker's rate
+  (`asio_state::device_latency_ms`): an ASIO driver's `getLatencies`
+  output at its rate, dlink's whole TX path for Dante at 48 kHz (the
+  worker's rate there). Set at each open and every publish (so
+  `kAsioLatenciesChanged` shows), kept while the output waits, `null`
+  before the first open and for VBAN (its receiver's buffer is unknown to
+  SongPlayer: it goes into `delay_ms` from the wall-vs-FOH measurement).
+  Crosses the host pipe (`WireStatus`, `#[serde(default)]`). Step 4
+  subtracts it from the servo's target; until then it is read only. Step
+  4 must take it from the RUNNING worker (`Run::driver_latency_frames`),
+  never from the status: the status keeps the last open's value while the
+  output waits, and a reopen can be at another rate.
+- Live gate: `post-deploy-audio-asio.spec.ts` logs each measured output's
+  `[#289 device]` figure and runs `audio-outputs-gate.ts::deviceLatencyFailures`
+  (a running ASIO / Dante output: a finite number ≥ 0 — a driver may
+  report 0; a VBAN output: null).
+- The pacer's emit-lateness histogram: `genlock.md`, "Emit lateness,
+  bucketed".
+- Tests: `asio_out_tests_timing.rs`
+  (`the_device_latency_is_the_drivers_own_and_follows_its_change`),
+  `wire_status_tests.rs`, `audio_out_tests.rs`, `program_tests_outputs.rs`.
+
 ## The drift servo and the ASRC (`asrc_servo.rs`, `asrc.rs`) — lane 2
 
 Pure modules, no thread, no I/O: the ASIO worker (and the Dante output
@@ -140,7 +169,7 @@ the answer to `Asrc::set_correction_ppm` and (through `frames_from_100ns`:
 positive = insert, negative = skip) `Splice::insert` / `skip`, and pushes
 `Splice::process(Asrc::process(block))` into the card's ring.
 
-**Since #285 step 3 the LAWS live in dstack-resample** (dstack tag v0.6.99,
+**Since #285 step 3 the LAWS live in dstack-resample** (dstack tag v0.6.178,
 MIT OR Apache-2.0, `crates/dstack-resample/src/asrc.rs` + `lib.rs` in the
 dstack checkout): `Servo` is a thin ADAPTER over
 `dstack_resample::asrc::Controller` (`Controller::new(target, floor 38.3 ms,
@@ -1194,11 +1223,12 @@ past 1 s parking the device, its successor told the driver is parked,
 pins the holds on Linux.
 
 **Live gate** (`e2e/post-deploy-audio-asio.spec.ts`, SNV's suite and PP's
-subset): DVS is registered — checked only when `SP_ASIO_OUTPUTS_EXPECTED`
-is over 0 (release review: a box expected to run none need not have DVS);
-exactly `SP_ASIO_OUTPUTS_EXPECTED` enabled ASIO
-outputs (`asioCount`, #229 ROZHODNUTÉ 11.11.2026; PP "2" since 11.10.2026:
-out-2 Waves SoundGrid + out-3 Dante, SNV "1"; ci.yml / deploy-pp.yml). An
+subset): DVS is registered — checked only while an enabled ASIO output
+plays on it (`dvsExpected`; #332, 18.11.2026: DVS is uninstalled on SNV
+and PP, Dante runs through the native `dante` output); exactly
+`SP_ASIO_OUTPUTS_EXPECTED` enabled ASIO-worker outputs (`asioCount`, #229
+ROZHODNUTÉ 11.11.2026; SNV "1" and, since #332, PP "1": the native Dante
+output; ci.yml / deploy-pp.yml). An
 output in a calm wait for its driver's clock (`waitingForClock`: `no_clock`
 or `clock_off_rate` — its device or network is off, PP's SoundGrid outside
 services, run 43001397048) is an enabled output behaving correctly: on a
@@ -1606,7 +1636,17 @@ difference with its UTC time.
 - `DanteDevice` (`dante_device.rs`) implements the `AsioDevice` seam **in this
   process**, on every platform, with no `sp-dante-host` (the owner's ruling):
   `asio_out`'s worker, ring, `asrc_servo` and status serve it, so a second servo
-  never appears. dstack by git tag (v0.6.99), no Dante protocol code here.
+  never appears. dstack by git tag (v0.6.178), no Dante protocol code here.
+  #328 (dstack#366): every test Dante device serves on 127.0.0.1 —
+  `.cargo/config.toml` `[env] DSTACK_TEST_LOOPBACK = "1"` reaches cargo test,
+  nextest and cargo-mutants, and the stack then refuses any other address the
+  lookup finds; `dante_device_tests.rs::test_ipv4()` is `LOCALHOST`. Never probe
+  the routed address for a test device again: it announced mDNS onto dev1's
+  LAN / Dante legs (dasio#127). A live test on a real network sets
+  `DSTACK_LIVE_TEST=1` itself; a test binary run directly has no variable.
+  The `[env]` reaches `cargo run` / `cargo tauri dev` too: never run SongPlayer
+  through cargo on a PC with a Dante output (its device would be refused);
+  the installed exe never sees the variable (dstack reads it at runtime).
   #285 step 2 (the owner's ruling via dstack #90: one rate conversion, in
   dlink, for every app): `DanteParams.rate` is `PROGRAM_RATE` (48 kHz, what the
   worker writes) and `network_rate` the entry's effective rate; `config()` sets
@@ -1705,6 +1745,29 @@ difference with its UTC time.
   loss fails the post-deploy audio gate. dlink's media threads were
   THREAD_PRIORITY_HIGHEST (normal band) below SongPlayer's own MMCSS Pro
   Audio VBAN threads; since dstack v0.6.57 they join MMCSS Pro Audio at AVRT_PRIORITY_HIGH (#285 A/B under Arena load).
+- **The pump's wakes and the threads' scheduling** (#325, dstack #281,
+  v0.6.127): `outputs[i].dante` also carries `pump_rebootstraps` and its
+  causes (`_late` more than W behind, `_clock_back`, `_reanchor` a re-anchor
+  off the block grid, `_retime` a new device latency; they add up),
+  `wake_behind_max_us`, `wake_behind_minute_max_us` (null before the first
+  whole minute), `wake_behind_buckets` (8: < 0.5, 1, 2, 5, 10, 20, 50 ms,
+  more), `late_wakes` and `late_wakes_recent` (the last 32, oldest first,
+  `{unix_ms, behind_us, rebootstrap}`: match a ledger `pump_missed` to its
+  late wake to the ms) and `threads` (`{thread: pump|tx|tx_relay|rx,
+  scheduling: mmcss_high|mmcss_joined_priority_refused|highest|sched_fifo|
+  realtime|normal|refused, mmcss_task}`). Read typed in
+  `dante_device.rs::figures_of` (the stack's `rebootstrap` is 0/1, a
+  `WakeLine` maps it; `threads` deserialize straight into sp-core's
+  `MediaThread`). The real-stack test `the_link_reads_the_running_stack…`
+  waits (≤ 5 s) for the pump to list itself, so a field dstack renames
+  reads its default and fails there, not only in a JSON-literal pin.
+  `danteGateLog` logs them all (each late wake of the minute with its UTC,
+  taken by COUNT — the ring's last `late_wakes` growth entries, a rebuilt
+  device counting from 0 — never by time: dsync can step the wall back),
+  and `danteGateFailures` FAILS when the pump's `scheduling` at the second
+  read is not `mmcss_high` (`DANTE_PUMP_SCHEDULING`; absent = "not
+  listed"): resolume-snv's pump logged MMCSS HIGH on 13.11.2026, so any
+  other word is a regression.
 - `cargo fmt --all` does not reach `sp-ui`, and `cargo fmt` inside it
   reformats unrelated files: run `rustfmt --edition 2024 <file>` on the ones
   you touched.

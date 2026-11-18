@@ -27,6 +27,9 @@ export interface OutputStatus {
   channels: number;
   delay_ms: number;
   latency_ms: number;
+  /** #289 step 0: the output device's own latency, ms; null for VBAN and
+   * before an ASIO / Dante device's first open. */
+  device_latency_ms?: number | null;
   blocks_sent: number;
   blocks_dropped: number;
   vban?: VbanTelemetry;
@@ -54,6 +57,72 @@ export interface DanteTelemetry {
   pump_late: number;
   pump_missed: number;
   pump_overruns: number;
+  /** #325 (dstack v0.6.127): the pump's re-bootstraps, all and by cause. */
+  pump_rebootstraps?: number;
+  pump_rebootstraps_late?: number;
+  pump_rebootstraps_clock_back?: number;
+  pump_rebootstraps_reanchor?: number;
+  pump_rebootstraps_retime?: number;
+  /** How late the pump woke: since the start, over the last whole minute
+   * (null before the first), by bucket (< 0.5, 1, 2, 5, 10, 20, 50 ms, more). */
+  wake_behind_max_us?: number;
+  wake_behind_minute_max_us?: number | null;
+  wake_behind_buckets?: number[];
+  /** Wakes one block or more behind, and the last 32 of them. */
+  late_wakes?: number;
+  late_wakes_recent?: DanteLateWake[];
+  /** The stack's media threads and the scheduling each took. */
+  threads?: DanteThread[];
+}
+
+/** One late wake of the Dante pump (`late_wakes_recent`). */
+export interface DanteLateWake {
+  unix_ms: number;
+  behind_us: number;
+  rebootstrap: boolean;
+}
+
+/** One media thread of the Dante stack (`threads`). */
+export interface DanteThread {
+  thread: string;
+  scheduling: string;
+  mmcss_task: number | null;
+}
+
+/** #325: the scheduling the Dante pump must run at (MMCSS "Pro Audio" at
+ * AVRT_PRIORITY_HIGH, what resolume-snv's log read on 13.11.2026). */
+export const DANTE_PUMP_SCHEDULING = "mmcss_high";
+
+/** The pump thread's line, if the stack lists one. */
+function pumpThread(d: DanteTelemetry): DanteThread | undefined {
+  return (d.threads ?? []).find((t) => t.thread === "pump");
+}
+
+/** #325: the pump's wakes and scheduling over the minute, for the log: the
+ * re-bootstraps by cause, the wake maxima and buckets, the late wakes that
+ * came in the minute (with their UTC, to match a ledger loss), the pump's
+ * scheduling. */
+function danteWakeLog(a: DanteTelemetry, b: DanteTelemetry): string {
+  const n = (v: number | null | undefined) => (v === undefined ? "?" : String(v));
+  // The minute's wakes by COUNT, never by time (a dsync step moves the
+  // wall): the ring is oldest first, so they are its last `late_wakes`
+  // growth entries; a device rebuilt in the minute counts from 0 again.
+  const was = a.late_wakes ?? 0;
+  const now = b.late_wakes ?? 0;
+  const ring = b.late_wakes_recent ?? [];
+  const grew = Math.min(now >= was ? now - was : now, ring.length);
+  const fresh = ring
+    .slice(ring.length - grew)
+    .map((w) => `${new Date(w.unix_ms).toISOString()} ${w.behind_us} us${w.rebootstrap ? " rebootstrap" : ""}`);
+  const pump = pumpThread(b);
+  return (
+    `rebootstraps ${n(a.pump_rebootstraps)} -> ${n(b.pump_rebootstraps)} ` +
+    `(late ${n(b.pump_rebootstraps_late)}, clock_back ${n(b.pump_rebootstraps_clock_back)}, ` +
+    `reanchor ${n(b.pump_rebootstraps_reanchor)}, retime ${n(b.pump_rebootstraps_retime)}), ` +
+    `wake_behind_max_us ${n(b.wake_behind_max_us)}, minute max ${n(b.wake_behind_minute_max_us)}, ` +
+    `buckets ${JSON.stringify(b.wake_behind_buckets ?? [])}, late_wakes ${n(a.late_wakes)} -> ${n(b.late_wakes)}` +
+    ` [${fresh.join(", ")}], pump ${pump ? `${pump.scheduling} (mmcss_task ${pump.mmcss_task})` : "not listed"}`
+  );
 }
 
 /** How many of `late_bins`' last bins are "late" (2 ms or more). */
@@ -65,7 +134,8 @@ export const DANTE_LATE_TOP_BINS = 2;
  * output is judged (anything else: no failure). At both reads the media clock
  * runs; at the second a receiver holds a flow (FOH); the packets sent grew
  * (the `late_bins` sum); no packet 2 ms or more late (the last two bins) and
- * no pump late / missed / overrun in the minute. `late_max_us` is NOT gated:
+ * no pump late / missed / overrun in the minute, and (#325) the pump thread
+ * at `mmcss_high` at the second read. `late_max_us` is NOT gated:
  * it is a since-start maximum, so a start-up spike would fail every deploy.
  * Each failure names the figure and both reads.
  */
@@ -77,7 +147,8 @@ export function danteGateLog(first: OutputStatus, second: OutputStatus): string 
   const top = (bins: number[]) => bins.slice(-DANTE_LATE_TOP_BINS).reduce((s, n) => s + n, 0);
   return (
     `Dante output ${second.id}: packets 2 ms or more late ${top(a.late_bins)} -> ${top(b.late_bins)}, ` +
-    `pump_late ${a.pump_late} -> ${b.pump_late}, pump_overruns ${a.pump_overruns} -> ${b.pump_overruns}`
+    `pump_late ${a.pump_late} -> ${b.pump_late}, pump_overruns ${a.pump_overruns} -> ${b.pump_overruns}; ` +
+    danteWakeLog(a, b)
   );
 }
 
@@ -107,6 +178,13 @@ export function danteGateFailures(first: OutputStatus, second: OutputStatus): st
   // while out-4 sends packets 2-5 ms late, dev CI 43124069179):
   // `danteGateLog` names those.
   if (b.pump_missed > a.pump_missed) f.push(`${at}: pump_missed ${a.pump_missed} -> ${b.pump_missed}`);
+  // #325: a regression guard — the pump must run in MMCSS at HIGH (an
+  // MMCSS-HIGH pump still woke 7 ms late once under load; one that lost
+  // MMCSS would starve under SongPlayer's own HIGH_PRIORITY_CLASS threads).
+  const pump = pumpThread(b);
+  if (pump?.scheduling !== DANTE_PUMP_SCHEDULING) {
+    f.push(`${at}: pump scheduling ${pump ? pump.scheduling : "not listed"}, want ${DANTE_PUMP_SCHEDULING}`);
+  }
   return f;
 }
 
@@ -129,8 +207,17 @@ export interface AsioTelemetry {
   reason_code?: string | null;
 }
 
-/** The driver SNV's and PP's ASIO outputs play on. */
+/** The driver an ASIO output to Dante played on before the native output. */
 export const DVS_DRIVER = "Dante Virtual Soundcard (x64)";
+
+/**
+ * Whether DVS must be registered on the box: an enabled ASIO output plays on
+ * it. Since 18.11.2026 (owner, #332) neither SNV nor PP has DVS installed:
+ * Dante runs through the native `dante` output, which needs no driver.
+ */
+export function dvsExpected(list: OutputStatus[]): boolean {
+  return list.some((o) => o.enabled && o.type === "asio" && o.asio?.driver === DVS_DRIVER);
+}
 /** One minute of program blocks (30 a second). */
 export const WINDOW_BLOCKS = 1800;
 /** The drift servo's bound, ppm (`asrc_servo::MAX_PPM`). */
@@ -239,6 +326,21 @@ export function asioGateFailures(first: OutputStatus, second: OutputStatus): str
   const blocks = second.blocks_sent - first.blocks_sent;
   if (blocks < WINDOW_BLOCKS) f.push(`only ${blocks} blocks in the window, want ${WINDOW_BLOCKS}`);
   return f;
+}
+
+/**
+ * #289 step 0: a running ASIO / Dante output reports its device's own
+ * latency (a finite number of ms; 0 allowed, a driver may report none); a
+ * VBAN output none (its receiver's buffer is no device SongPlayer reads).
+ */
+export function deviceLatencyFailures(o: OutputStatus): string[] {
+  const v = o.device_latency_ms;
+  if (o.type === "vban") return v == null ? [] : [`VBAN output ${o.id}: device_latency_ms ${v}, want null`];
+  if (o.state !== "running") return [];
+  if (typeof v !== "number" || !Number.isFinite(v) || v < 0) {
+    return [`${o.type} output ${o.id}: device_latency_ms ${v}, want the device's latency in ms`];
+  }
+  return [];
 }
 
 /** SNV's lv1 destination. FOH has no VBAN since 5.11.2026 (the owner, #257): it

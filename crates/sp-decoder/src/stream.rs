@@ -17,10 +17,29 @@ pub trait MediaStream {
     fn seek(&mut self, position_ms: u64) -> Result<(), DecoderError>;
 }
 
+/// What [`VideoStream::poll_frame`] found (#318).
+#[derive(Debug)]
+pub enum FramePoll {
+    /// The next frame, or `None` at end-of-stream ([`VideoStream::next_frame`]'s answer).
+    Ready(Option<DecodedVideoFrame>),
+    /// No frame within the wait: the read is still running (a reader on its
+    /// own thread, [`crate::video_thread::ThreadedVideo`]).
+    NotReady,
+}
+
 /// A reader that produces decoded video frames.
 pub trait VideoStream: MediaStream + Send {
     /// Pull the next decoded frame. Returns `Ok(None)` at end-of-stream.
     fn next_frame(&mut self) -> Result<Option<DecodedVideoFrame>, DecoderError>;
+
+    /// The next frame if it is ready within `wait` (#318). A reader that
+    /// decodes on the caller's thread is always ready: it reads the frame
+    /// ([`next_frame`](Self::next_frame)), however long that takes. Only a
+    /// reader on its own thread answers [`FramePoll::NotReady`].
+    fn poll_frame(&mut self, wait: std::time::Duration) -> Result<FramePoll, DecoderError> {
+        let _ = wait;
+        Ok(FramePoll::Ready(self.next_frame()?))
+    }
 
     /// Frame width in pixels.
     fn width(&self) -> u32;

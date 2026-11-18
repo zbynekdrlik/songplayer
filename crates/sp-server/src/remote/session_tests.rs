@@ -370,6 +370,20 @@ pub(super) async fn wait_for(what: &str, mut cond: impl FnMut() -> bool) {
     }
 }
 
+/// #327: cg OBS's Blank goes from a task of its own after the cut (it waits
+/// out the cut's window first), so a test waits until `n` reached the fake
+/// before its witness.
+pub(super) async fn wait_blanks(rig: &Rig, n: usize) {
+    wait_for("cg OBS parked on Blank", || {
+        rig.calls()
+            .iter()
+            .filter(|c| *c == "SetCurrentProgramScene Blank")
+            .count()
+            >= n
+    })
+    .await;
+}
+
 pub(super) async fn enable_input(pool: &SqlitePool, enabled: bool) {
     use crate::db::models::set_setting;
     let value = if enabled { "true" } else { "false" };
@@ -690,8 +704,16 @@ async fn without_cg_obs_forwarded_requests_are_not_ready_and_nothing_is_cut() {
         "code": 207,
         "comment": "cg OBS is not reachable from SongPlayer right now",
     });
+    // #326: the scene list is answered from SongPlayer's own catalog.
     let d = request(&mut ws, "GetSceneList", None).await;
-    assert_eq!(d["requestStatus"], not_ready);
+    assert_eq!(d["requestStatus"]["code"], 100);
+    let names: Vec<&str> = d["responseData"]["scenes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["sceneName"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["sp-fast", "sp-slow", "Blank"]);
     let d = press(&mut ws, "Slido").await;
     assert_eq!(d["requestStatus"], not_ready);
     assert_eq!(rig.bus.status().source, None);
@@ -730,9 +752,10 @@ async fn a_manual_scene_keeps_the_program_when_the_input_is_not_a_source() {
 
 /// #245: a press of Blank (any ASCII case) cuts SP-program to SongPlayer's
 /// own black (-2): persisted, published as `Blank`, recorded as `blank`,
-/// and NOTHING goes to cg OBS — no NDI input needed.
+/// and (#327) cg OBS is parked on its own Blank, once per press — no NDI
+/// input needed.
 #[tokio::test]
-async fn a_blank_press_cuts_to_songplayer_s_own_black_and_tells_cg_obs_nothing() {
+async fn a_blank_press_cuts_to_songplayer_s_own_black_and_parks_cg_obs_on_blank() {
     let rig = rig().await;
     enable_input(&rig.pool, false).await;
     let mut ws = connect(rig.addr).await;
@@ -752,9 +775,18 @@ async fn a_blank_press_cuts_to_songplayer_s_own_black_and_tells_cg_obs_nothing()
     assert_eq!(last_cut_json(&rig)["cg_forward"], Value::Null);
     let d = request(&mut ws, "GetCurrentProgramScene", None).await;
     assert_eq!(d["responseData"]["sceneName"], "Blank");
+    // The witness: a forwarded getter after both presses' Blank (FIFO).
+    wait_blanks(&rig, 2).await;
+    let d = request(&mut ws, "GetInputList", None).await;
+    assert_eq!(d["requestStatus"]["code"], 100);
     assert!(
-        rig.calls().is_empty(),
-        "cg OBS was told nothing: {:?}",
+        rig.calls()
+            == [
+                "SetCurrentProgramScene Blank",
+                "SetCurrentProgramScene Blank",
+                "GetInputList "
+            ],
+        "cg OBS was told Blank at each press: {:?}",
         rig.calls()
     );
 }
@@ -826,8 +858,11 @@ async fn a_cut_that_cannot_be_persisted_is_205_cuts_nothing_and_tells_cg_obs_not
     assert_eq!(cut.action, "keep");
     assert_eq!(cut.source, None);
     assert_eq!(cut.reason, Some("persist_failed"));
+    // The witness: a forwarded getter after the press (FIFO).
+    let d = request(&mut ws, "GetInputList", None).await;
+    assert_eq!(d["requestStatus"]["code"], 100);
     assert!(
-        rig.calls().is_empty(),
+        rig.calls() == ["GetInputList "],
         "cg OBS is told nothing: {:?}",
         rig.calls()
     );
@@ -864,7 +899,9 @@ async fn cg_obs_scene_list_fans_out_but_its_program_scene_event_never_does() {
             json!({ "sceneName": "Slido", "sceneUuid": "u-Slido" }),
         ))
         .unwrap();
-    // The scene list passes through: it is the first event either client gets.
+    // The scene list passes through: it is the first event either client
+    // gets. #327 review: with SongPlayer's scenes cg OBS does not list (the
+    // catalog's sp-slow) and Blank, like `GetSceneList`'s answer.
     let scenes = json!({ "scenes": [{ "sceneName": "sp-fast" }] });
     rig.events
         .send(raw("SceneListChanged", scenes.clone()))
@@ -872,7 +909,11 @@ async fn cg_obs_scene_list_fans_out_but_its_program_scene_event_never_does() {
     let expected = json!({ "op": 5, "d": {
         "eventType": "SceneListChanged",
         "eventIntent": 4,
-        "eventData": scenes,
+        "eventData": { "scenes": [
+            { "sceneName": "sp-fast" },
+            { "sceneIndex": 1, "sceneName": "sp-slow", "sceneUuid": "songplayer-sp-slow" },
+            { "sceneIndex": 2, "sceneName": "Blank", "sceneUuid": "songplayer-blank" },
+        ] },
     }});
     assert_eq!(next_json(&mut a).await, expected);
     assert_eq!(next_json(&mut b).await, expected);
@@ -915,7 +956,7 @@ async fn reidentify_changes_the_subscriptions() {
         .unwrap();
     let ev = next_json(&mut ws).await;
     assert_eq!(ev["op"], 5);
-    assert_eq!(ev["d"]["eventData"]["scenes"], json!(["b"]));
+    assert_eq!(ev["d"]["eventData"]["scenes"][0], "b");
 
     // Kept at 4 too (a reset to 0 would drop this event).
     send_json(&mut ws, json!({ "op": 3, "d": {} })).await;
@@ -925,5 +966,5 @@ async fn reidentify_changes_the_subscriptions() {
         .unwrap();
     let ev = next_json(&mut ws).await;
     assert_eq!(ev["op"], 5);
-    assert_eq!(ev["d"]["eventData"]["scenes"], json!(["c"]));
+    assert_eq!(ev["d"]["eventData"]["scenes"][0], "c");
 }

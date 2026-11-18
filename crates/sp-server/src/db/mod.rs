@@ -109,6 +109,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (42, MIGRATION_V42),
     (43, MIGRATION_V43),
     (44, MIGRATION_V44),
+    (45, MIGRATION_V45),
 ];
 
 const MIGRATION_V1: &str = "
@@ -744,6 +745,15 @@ CREATE TABLE IF NOT EXISTS blocked_songs (
 )
 ";
 
+/// V45 (#321): the text AI's settings no code reads since every text task
+/// went to OpenRouter — the Claude proxy's `ai_model` / `ai_api_url` and the
+/// per-task transport choice `ai_provider_<task>`. A settings PATCH refuses
+/// them (`sp_core::ai_tasks::checked_setting`), so nothing re-creates them.
+const MIGRATION_V45: &str = "
+DELETE FROM settings
+WHERE key IN ('ai_model', 'ai_api_url') OR key GLOB 'ai_provider_*'
+";
+
 /// Connection-pool tuning for the FILE-backed pool (#184 round A).
 ///
 /// WAL + NORMAL synchronous remove reader/writer blocking for this
@@ -949,6 +959,9 @@ mod tests_v43;
 #[path = "mod_tests_v44.rs"]
 #[cfg(test)]
 mod tests_v44;
+#[path = "mod_tests_v45.rs"]
+#[cfg(test)]
+mod tests_v45;
 
 #[path = "mod_tests_pool.rs"]
 #[cfg(test)]

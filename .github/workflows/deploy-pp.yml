@@ -189,7 +189,8 @@ jobs:
       # The phase-0 task `SongPlayer` (MultipleInstances=IgnoreNew): end the
       # task INSTANCE first, else Task Scheduler can still report it Running
       # after a taskkill and the later `schtasks /run` does nothing
-      # (ci-workflows.md). Then CLIProxyAPI, an orphan of the old process.
+      # (ci-workflows.md). Then a CLIProxyAPI a build from before #321 left
+      # (SongPlayer no longer runs it).
       # Each of the next two steps has its own bound: a hung stop or
       # installer fails its step in minutes (a plain step failure), and the
       # always() Start step brings SongPlayer back, instead of PP waiting
@@ -388,10 +389,11 @@ jobs:
           FACADE_WS_URL: ws://localhost:4456
           OBS_WS_URL: ws://localhost:4455
           PP_MANUAL_SCENE: ${{ vars.PP_MANUAL_SCENE }}
-          # #233 lane 3: how many enabled ASIO outputs PP must run
-          # (e2e/post-deploy-audio-asio.spec.ts): since 11.10.2026 two,
-          # out-2 Waves SoundGrid and out-3 Dante, both enabled.
-          SP_ASIO_OUTPUTS_EXPECTED: "2"
+          # #233 lane 3: how many enabled ASIO-worker outputs PP must run
+          # (e2e/post-deploy-audio-asio.spec.ts): since 18.11.2026 (#332,
+          # the owner: PP like SNV) one, the native Dante output out-4;
+          # DVS and Waves SoundGrid are uninstalled.
+          SP_ASIO_OUTPUTS_EXPECTED: "1"
           # #229: PP's SoundGrid network is off outside services, so out-2
           # waits calmly for a clock (clock_off_rate): counted, named, not
           # measured. Never set on resolume-snv (a Dante/DVS clock loss there

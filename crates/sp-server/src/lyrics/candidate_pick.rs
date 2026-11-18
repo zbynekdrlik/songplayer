@@ -62,5 +62,5 @@ pub(crate) fn best_authoritative_candidate(candidates: &[CandidateText]) -> Opti
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[path = "claude_merge_tests.rs"]
+#[path = "candidate_pick_tests.rs"]
 mod tests;

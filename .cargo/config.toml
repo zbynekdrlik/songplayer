@@ -1,0 +1,8 @@
+# #328 (dstack#366, dstack >= v0.6.164): every process cargo runs here —
+# cargo test, nextest, cargo-mutants — serves a test Dante device on
+# 127.0.0.1 and the stack refuses any other address, so no test announces
+# mDNS onto a box's real networks. A live test on a real network sets
+# DSTACK_LIVE_TEST=1 itself. dstack reads it at runtime (std::env), never
+# baked into a build, so the installed exe never has it.
+[env]
+DSTACK_TEST_LOOPBACK = "1"

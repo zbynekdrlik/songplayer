@@ -54,6 +54,10 @@ async fn ndi_health_endpoint_includes_pacing() {
             wall_anchor_max_step_us: 1_500,
             wall_anchor_wide_brackets: 3,
             wall_anchor_slewed_us: 500,
+            emit_late_hist: crate::playback::emit_lateness::EmitLateHist {
+                edges_us: vec![0, 100],
+                counts: vec![7, 2],
+            },
             ..Default::default()
         },
         audio: AudioStats {
@@ -111,6 +115,9 @@ async fn ndi_health_endpoint_includes_pacing() {
     assert_eq!(p["av_frame_offset_ms"].as_f64(), Some(-26.25));
     assert_eq!(p["av_frame_offset_min_ms"].as_f64(), Some(-31.5));
     assert_eq!(p["av_frame_offset_max_ms"].as_f64(), Some(-20.75));
+    // #289 step 0: the emit-lateness histogram.
+    assert_eq!(p["emit_late_hist"]["edges_us"], serde_json::json!([0, 100]));
+    assert_eq!(p["emit_late_hist"]["counts"], serde_json::json!([7, 2]));
     // #147: the pacer wall's anchor telemetry (additive keys).
     assert_eq!(
         arr[0]["pacing"]["wall_anchor_max_step_us"].as_u64(),

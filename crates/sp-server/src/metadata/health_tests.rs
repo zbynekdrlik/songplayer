@@ -4,7 +4,7 @@ use super::*;
 use crate::db;
 
 fn names() -> Vec<String> {
-    vec!["claude".to_string(), "gemini".to_string()]
+    vec!["openrouter".to_string(), "gemini".to_string()]
 }
 
 #[test]
@@ -15,7 +15,7 @@ fn a_new_record_names_every_provider_in_chain_order_with_nothing_seen() {
         health.snapshot(),
         [
             ProviderHealth {
-                name: "claude".into(),
+                name: "openrouter".into(),
                 last_ok_at_ms: None,
                 last_error: None
             },

@@ -2,8 +2,6 @@
 //! model of the multiset Dice score.
 
 use super::*;
-use crate::ai::AiSettings;
-use crate::ai::client::AiClient;
 use crate::db::models::VideoLyricsRow;
 use crate::lyrics::g35t_client::AsrWord;
 use crate::lyrics::tier1::CandidateText as TierCandidate;
@@ -402,12 +400,7 @@ async fn a_plain_lyric_is_cleaned_into_a_text_candidate() {
         .expect(1)
         .mount(&server)
         .await;
-    let ai = AiClient::new(AiSettings {
-        api_url: format!("{base}/v1"),
-        api_key: Some("test".into()),
-        model: "claude-test".into(),
-        system_prompt_extra: None,
-    });
+    let ai = crate::ai::test_support::ai_client_at(format!("{base}/v1")).await;
     let dir = tempfile::tempdir().unwrap();
     let client = reqwest::Client::new();
     let search = TitleSearch {
@@ -478,7 +471,7 @@ async fn a_different_song_of_the_same_title_is_never_chosen() {
 /// A plain lyric needs the Claude cleanup; without a Claude client the
 /// chosen plain lyric is not used.
 #[tokio::test]
-async fn a_plain_lyric_without_a_claude_client_is_not_used() {
+async fn a_plain_lyric_without_an_ai_client_is_not_used() {
     let server = MockServer::start().await;
     mount_lrclib(
         &server,

@@ -25,6 +25,51 @@ pub struct DanteFigures {
     pub pump_late: u64,
     pub pump_missed: u64,
     pub pump_overruns: u64,
+    /// #325 (dstack #281, v0.6.127): the pump's re-bootstraps, all of them
+    /// and by cause (more than its margin W behind, the clock went back, a
+    /// re-anchor off the block grid, a new device latency); the causes add
+    /// up to the whole.
+    pub pump_rebootstraps: u64,
+    pub pump_rebootstraps_late: u64,
+    pub pump_rebootstraps_clock_back: u64,
+    pub pump_rebootstraps_reanchor: u64,
+    pub pump_rebootstraps_retime: u64,
+    /// How late the pump woke, the most since the start.
+    pub wake_behind_max_us: u64,
+    /// The same over the last whole minute; `None` before the first.
+    pub wake_behind_minute_max_us: Option<u64>,
+    /// Wakes by how late: under 0.5, 1, 2, 5, 10, 20, 50 ms, and more.
+    pub wake_behind_buckets: Vec<u64>,
+    /// Wakes one block or more behind.
+    pub late_wakes: u64,
+    /// The last 32 of them, oldest first.
+    pub late_wakes_recent: Vec<LateWake>,
+    /// The stack's media threads and the scheduling each took.
+    pub threads: Vec<MediaThread>,
+}
+
+/// One late wake of the Dante pump (`late_wakes_recent`).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct LateWake {
+    /// When, UTC ms.
+    pub unix_ms: u64,
+    pub behind_us: u64,
+    /// The pump re-bootstrapped at it (skipped blocks: silence).
+    pub rebootstrap: bool,
+}
+
+/// One media thread of the Dante stack (`threads`).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct MediaThread {
+    /// `pump`, `tx`, `tx_relay` or `rx`.
+    pub thread: String,
+    /// `mmcss_high`, `mmcss_joined_priority_refused`, `highest`,
+    /// `sched_fifo`, `realtime`, `normal` or `refused`.
+    pub scheduling: String,
+    /// MMCSS's task index; `None` outside MMCSS.
+    pub mmcss_task: Option<u32>,
 }
 
 const CLOCK_TIP: &str = "Hodiny siete Dante: SongPlayer ich číta z dsync. Bez nich zariadenie ostáva ohlásené v sieti, ale neposiela zvuk.";

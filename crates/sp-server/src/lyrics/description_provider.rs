@@ -1,6 +1,6 @@
 //! YouTube description lyrics provider.
 //!
-//! Fetches the raw description via yt-dlp, pipes it through a narrow Claude
+//! Fetches the raw description via yt-dlp, pipes it through a narrow text-AI
 //! prompt, and emits a `CandidateText { source: "description" }` for the
 //! ensemble text-merge step. Caches both the raw description and the
 //! extracted lyrics JSON on disk so reprocesses reuse the work.
@@ -21,20 +21,20 @@ pub use prompts::{
     CleanupMode, build_description_extraction_prompt, build_scraped_lyrics_cleanup_prompt,
 };
 
-/// Parse Claude's response to the description extraction prompt.
+/// Parse the text AI's response to the description extraction prompt.
 ///
 /// Handles three cases:
 /// - `{"lines": [...]}` → `Ok(Some(vec))`
 /// - `{"lines": null}` → `Ok(None)`
 /// - Markdown fences or preamble → strips via `crate::ai::client::strip_markdown_fences` before parsing
 /// - Malformed JSON / missing "lines" key / wrong type → `Err`
-pub(crate) fn parse_claude_response(raw: &str) -> Result<Option<Vec<String>>> {
+pub(crate) fn parse_ai_response(raw: &str) -> Result<Option<Vec<String>>> {
     let cleaned = crate::ai::client::strip_markdown_fences(raw);
     let v: serde_json::Value = serde_json::from_str(&cleaned)
-        .with_context(|| format!("failed to parse Claude response as JSON: {cleaned}"))?;
+        .with_context(|| format!("failed to parse the AI response as JSON: {cleaned}"))?;
     let lines = v
         .get("lines")
-        .ok_or_else(|| anyhow::anyhow!("missing 'lines' key in Claude response: {cleaned}"))?;
+        .ok_or_else(|| anyhow::anyhow!("missing 'lines' key in the AI response: {cleaned}"))?;
     if lines.is_null() {
         return Ok(None);
     }
@@ -164,13 +164,13 @@ pub(crate) async fn fetch_raw_description(
     Ok(Some(text))
 }
 
-/// Claude-clean a raw lyrics blob. Reuses the description-extraction prompt
+/// Have the text AI clean a raw lyrics blob. Reuses the description-extraction prompt
 /// (`build_description_extraction_prompt`). Reads / writes the cleaned-lines
 /// cache at `cache_path`.
 ///
 /// Returns:
-/// - `Ok(Some(lines))` — Claude produced lines (may be empty; callers must guard `!lines.is_empty()`).
-/// - `Ok(None)`        — Claude returned `{"lines": null}` (refusal / no lyrics).
+/// - `Ok(Some(lines))` — the text AI produced lines (may be empty; callers must guard `!lines.is_empty()`).
+/// - `Ok(None)`        — the text AI returned `{"lines": null}` (refusal / no lyrics).
 /// - `Err(_)`          — transport error, malformed JSON, or IO error.
 ///
 /// Caller policy decides whether `Ok(None)` is fatal:
@@ -178,12 +178,12 @@ pub(crate) async fn fetch_raw_description(
 /// - lrclib-plain: `Ok(None)` is fatal (caller must bail).
 ///
 /// Cache contract matches `write_lyrics_cache`: on success the result is
-/// persisted so subsequent reprocesses skip Claude. On `Err`, no cache is
-/// written so the next attempt retries — except a refusal by Claude's
+/// persisted so subsequent reprocesses skip the text AI. On `Err`, no cache is
+/// written so the next attempt retries — except a refusal by the text AI's
 /// content filter (#144, `ai::retry::ContentFiltered`): remembered for this
 /// raw text (`cleanup_refusal`), and answered from the cache, with no call,
 /// until the text changes.
-pub async fn clean_lyrics_via_claude(
+pub async fn clean_lyrics_via_ai(
     ai: &AiClient,
     title: &str,
     artist: &str,
@@ -206,7 +206,7 @@ pub async fn clean_lyrics_via_claude(
     {
         debug!(
             cache_path = %cache_path.display(),
-            "clean_lyrics_via_claude: cache hit"
+            "clean_lyrics_via_ai: cache hit"
         );
         return Ok(cached);
     }
@@ -215,16 +215,16 @@ pub async fn clean_lyrics_via_claude(
         CleanupMode::Description => build_description_extraction_prompt(title, artist, raw_blob),
         CleanupMode::ScrapedLyrics => build_scraped_lyrics_cleanup_prompt(title, artist, raw_blob),
     };
-    let raw = match ai.chat_with_timeout(&system, &user, 180).await {
+    let raw = match ai.chat_for(mode.task(), &system, &user, 180).await {
         Ok(raw) => raw,
         Err(e) => {
             if crate::ai::retry::content_filtered(&e) {
                 crate::lyrics::cleanup_refusal::remember(cache_path, raw_blob).await;
             }
-            return Err(e.context("Claude clean_lyrics chat failed"));
+            return Err(e.context("clean_lyrics AI chat failed"));
         }
     };
-    let parsed = parse_claude_response(&raw).context("Claude response malformed")?;
+    let parsed = parse_ai_response(&raw).context("AI response malformed")?;
 
     write_lyrics_cache(cache_path, parsed.as_deref()).await?;
     Ok(parsed)
@@ -233,10 +233,10 @@ pub async fn clean_lyrics_via_claude(
 /// Fetch and extract lyrics from a YouTube video description.
 ///
 /// Caches both the raw description and the extracted lyrics JSON per
-/// `youtube_id`, so subsequent calls short-circuit any yt-dlp or Claude
+/// `youtube_id`, so subsequent calls short-circuit any yt-dlp or text-AI
 /// work. `Ok(None)` means no lyrics available; `Ok(Some(lines))` means
 /// the caller should push a `CandidateText { source: "description" }`.
-// mutants::skip: orchestration across yt-dlp + Claude I/O; behaviour covered by
+// mutants::skip: orchestration across yt-dlp + text-AI I/O; behaviour covered by
 // cached-hit, no-lyrics, success, malformed-response, and ytdlp-failure tests.
 #[cfg_attr(test, mutants::skip)]
 pub async fn fetch_description_lyrics(
@@ -260,12 +260,12 @@ pub async fn fetch_description_lyrics(
         return Ok(None);
     }
 
-    // Delegate Claude call + cache write to the shared helper.
-    // description-specific policy: swallow Claude errors to Ok(None) so other
+    // Delegate text-AI call + cache write to the shared helper.
+    // description-specific policy: swallow text-AI errors to Ok(None) so other
     // gather sources (yt_subs / lrclib / lyrics.ovh) still get a chance. The
     // shared helper does NOT write the cache on Err, so the next reprocess
     // retries cleanly.
-    match clean_lyrics_via_claude(
+    match clean_lyrics_via_ai(
         ai,
         title,
         artist,
@@ -277,7 +277,7 @@ pub async fn fetch_description_lyrics(
     {
         Ok(parsed) => Ok(parsed),
         Err(e) => {
-            warn!(youtube_id, %e, "description_provider: Claude cleanup failed");
+            warn!(youtube_id, %e, "description_provider: AI cleanup failed");
             Ok(None)
         }
     }
@@ -353,7 +353,7 @@ mod tests {
     #[test]
     fn parse_lines_array_returns_some() {
         let raw = r#"{"lines": ["How great thou art", "O Lord my God"]}"#;
-        let out = parse_claude_response(raw).unwrap();
+        let out = parse_ai_response(raw).unwrap();
         assert_eq!(
             out,
             Some(vec![
@@ -366,39 +366,39 @@ mod tests {
     #[test]
     fn parse_lines_null_returns_none() {
         let raw = r#"{"lines": null}"#;
-        let out = parse_claude_response(raw).unwrap();
+        let out = parse_ai_response(raw).unwrap();
         assert_eq!(out, None);
     }
 
     #[test]
     fn parse_handles_markdown_fences() {
         let raw = "```json\n{\"lines\": [\"line one\"]}\n```";
-        let out = parse_claude_response(raw).unwrap();
+        let out = parse_ai_response(raw).unwrap();
         assert_eq!(out, Some(vec!["line one".to_string()]));
     }
 
     #[test]
     fn parse_handles_preamble_before_fences() {
         let raw = "I'll analyze the description.\n```json\n{\"lines\":null}\n```";
-        let out = parse_claude_response(raw).unwrap();
+        let out = parse_ai_response(raw).unwrap();
         assert_eq!(out, None);
     }
 
     #[test]
     fn parse_rejects_invalid_json() {
-        assert!(parse_claude_response("not json at all").is_err());
-        assert!(parse_claude_response("{ not json").is_err());
+        assert!(parse_ai_response("not json at all").is_err());
+        assert!(parse_ai_response("{ not json").is_err());
     }
 
     #[test]
     fn parse_rejects_missing_lines_key() {
-        assert!(parse_claude_response(r#"{"foo": []}"#).is_err());
+        assert!(parse_ai_response(r#"{"foo": []}"#).is_err());
     }
 
     #[test]
     fn parse_rejects_wrong_lines_type() {
-        assert!(parse_claude_response(r#"{"lines": "string not array"}"#).is_err());
-        assert!(parse_claude_response(r#"{"lines": 42}"#).is_err());
+        assert!(parse_ai_response(r#"{"lines": "string not array"}"#).is_err());
+        assert!(parse_ai_response(r#"{"lines": 42}"#).is_err());
     }
 
     #[tokio::test]
@@ -457,10 +457,8 @@ mod tests {
         assert!(!dir.path().join("novideo_description.txt").exists());
     }
 
-    use crate::ai::AiSettings;
-
     #[tokio::test]
-    async fn fetch_description_lyrics_returns_cached_lines_with_no_claude_call() {
+    async fn fetch_description_lyrics_returns_cached_lines_with_no_ai_call() {
         let dir = tempfile::tempdir().unwrap();
         // Pre-seed both cache files.
         tokio::fs::write(
@@ -476,14 +474,9 @@ mod tests {
         .await
         .unwrap();
 
-        // AiClient pointed at an unreachable URL. If the code calls Claude, the
+        // AiClient pointed at an unreachable URL. If the code calls the text AI, the
         // test hangs/errors and we'd notice.
-        let ai = AiClient::new(AiSettings {
-            api_url: "http://127.0.0.1:1/v1".into(),
-            api_key: Some("never-used".into()),
-            model: "stub".into(),
-            system_prompt_extra: None,
-        });
+        let ai = crate::ai::test_support::ai_client_at("http://127.0.0.1:1/v1").await;
 
         let bogus_ytdlp = Path::new("/definitely/does/not/exist/ytdlp");
         let out = fetch_description_lyrics(
@@ -515,12 +508,7 @@ mod tests {
             .await
             .unwrap();
 
-        let ai = AiClient::new(AiSettings {
-            api_url: "http://127.0.0.1:1/v1".into(),
-            api_key: Some("never-used".into()),
-            model: "stub".into(),
-            system_prompt_extra: None,
-        });
+        let ai = crate::ai::test_support::ai_client_at("http://127.0.0.1:1/v1").await;
         let bogus_ytdlp = Path::new("/definitely/does/not/exist/ytdlp");
 
         let out =
@@ -531,7 +519,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_description_lyrics_calls_claude_and_caches_result() {
+    async fn fetch_description_lyrics_calls_the_text_ai_and_caches_result() {
         let dir = tempfile::tempdir().unwrap();
         // Pre-seed ONLY the raw description so yt-dlp is skipped.
         tokio::fs::write(
@@ -541,7 +529,7 @@ mod tests {
         .await
         .unwrap();
 
-        // wiremock stubs the Claude endpoint.
+        // wiremock stubs the text-AI endpoint.
         let mock = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("POST"))
             .and(wiremock::matchers::path("/v1/chat/completions"))
@@ -558,12 +546,7 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let ai = AiClient::new(AiSettings {
-            api_url: format!("{}/v1", mock.uri()),
-            api_key: Some("test".into()),
-            model: "claude-opus-4-20250514".into(),
-            system_prompt_extra: None,
-        });
+        let ai = crate::ai::test_support::ai_client_at(format!("{}/v1", mock.uri())).await;
         let bogus_ytdlp = Path::new("/definitely/does/not/exist/ytdlp");
 
         let out =
@@ -580,7 +563,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_description_lyrics_caches_null_when_claude_says_no_lyrics() {
+    async fn fetch_description_lyrics_caches_null_when_the_text_ai_says_no_lyrics() {
         let dir = tempfile::tempdir().unwrap();
         tokio::fs::write(
             dir.path().join("vidNULL_description.txt"),
@@ -601,12 +584,7 @@ mod tests {
             )
             .mount(&mock)
             .await;
-        let ai = AiClient::new(AiSettings {
-            api_url: format!("{}/v1", mock.uri()),
-            api_key: Some("test".into()),
-            model: "stub".into(),
-            system_prompt_extra: None,
-        });
+        let ai = crate::ai::test_support::ai_client_at(format!("{}/v1", mock.uri())).await;
         let bogus_ytdlp = Path::new("/definitely/does/not/exist/ytdlp");
 
         let out =
@@ -626,7 +604,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_description_lyrics_no_cache_on_malformed_claude_response() {
+    async fn fetch_description_lyrics_no_cache_on_malformed_ai_response() {
         let dir = tempfile::tempdir().unwrap();
         tokio::fs::write(
             dir.path().join("vidBAD_description.txt"),
@@ -647,12 +625,7 @@ mod tests {
             )
             .mount(&mock)
             .await;
-        let ai = AiClient::new(AiSettings {
-            api_url: format!("{}/v1", mock.uri()),
-            api_key: Some("test".into()),
-            model: "stub".into(),
-            system_prompt_extra: None,
-        });
+        let ai = crate::ai::test_support::ai_client_at(format!("{}/v1", mock.uri())).await;
         let bogus_ytdlp = Path::new("/definitely/does/not/exist/ytdlp");
 
         let out = fetch_description_lyrics(&ai, bogus_ytdlp, "vidBAD", dir.path(), "S", "A")
@@ -662,25 +635,20 @@ mod tests {
         // CRITICAL: no cache file on malformed response — we MUST retry on next reprocess.
         assert!(
             !dir.path().join("vidBAD_description_lyrics.json").exists(),
-            "malformed Claude response must NOT write a cache entry"
+            "a malformed AI response must NOT write a cache entry"
         );
     }
 
     #[tokio::test]
-    async fn fetch_description_lyrics_empty_raw_caches_null_no_claude() {
+    async fn fetch_description_lyrics_empty_raw_caches_null_no_ai_call() {
         let dir = tempfile::tempdir().unwrap();
         // Empty raw description (yt-dlp returns empty string).
         tokio::fs::write(dir.path().join("vidEMPTY_description.txt"), "")
             .await
             .unwrap();
 
-        // AiClient at unreachable URL — Claude must NOT be called for empty descriptions.
-        let ai = AiClient::new(AiSettings {
-            api_url: "http://127.0.0.1:1/v1".into(),
-            api_key: Some("never".into()),
-            model: "stub".into(),
-            system_prompt_extra: None,
-        });
+        // AiClient at unreachable URL — the text AI must NOT be called for empty descriptions.
+        let ai = crate::ai::test_support::ai_client_at("http://127.0.0.1:1/v1").await;
         let bogus_ytdlp = Path::new("/definitely/does/not/exist/ytdlp");
 
         let out = fetch_description_lyrics(&ai, bogus_ytdlp, "vidEMPTY", dir.path(), "S", "A")
@@ -695,7 +663,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn clean_lyrics_via_claude_returns_parsed_lines() {
+    async fn clean_lyrics_via_ai_returns_parsed_lines() {
         let dir = tempfile::tempdir().unwrap();
         let cache_path = dir.path().join("vidCLEAN_lrclib_cleaned.json");
 
@@ -715,14 +683,9 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let ai = AiClient::new(AiSettings {
-            api_url: format!("{}/v1", mock.uri()),
-            api_key: Some("test".into()),
-            model: "stub".into(),
-            system_prompt_extra: None,
-        });
+        let ai = crate::ai::test_support::ai_client_at(format!("{}/v1", mock.uri())).await;
 
-        let out = clean_lyrics_via_claude(
+        let out = clean_lyrics_via_ai(
             &ai,
             "Song",
             "Artist",
@@ -740,11 +703,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn clean_lyrics_via_claude_uses_cache_on_second_call() {
+    async fn clean_lyrics_via_ai_uses_cache_on_second_call() {
         let dir = tempfile::tempdir().unwrap();
         let cache_path = dir.path().join("vidCACHED_lrclib_cleaned.json");
 
-        // Pre-seed the cache to skip the Claude call entirely.
+        // Pre-seed the cache to skip the text-AI call entirely.
         write_lyrics_cache(
             &cache_path,
             Some(&["cached A".to_string(), "cached B".to_string()]),
@@ -753,16 +716,11 @@ mod tests {
         .unwrap();
 
         // Intentionally bogus AI URL — if the helper ignores cache and tries
-        // to call Claude, the call will fail (and the test will fail with Err
+        // to call the text AI, the call will fail (and the test will fail with Err
         // instead of the expected cached value).
-        let ai = AiClient::new(AiSettings {
-            api_url: "http://127.0.0.1:1/v1".into(),
-            api_key: Some("test".into()),
-            model: "stub".into(),
-            system_prompt_extra: None,
-        });
+        let ai = crate::ai::test_support::ai_client_at("http://127.0.0.1:1/v1").await;
 
-        let out = clean_lyrics_via_claude(
+        let out = clean_lyrics_via_ai(
             &ai,
             "Song",
             "Artist",
@@ -777,7 +735,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn clean_lyrics_via_claude_returns_err_on_claude_error() {
+    async fn clean_lyrics_via_ai_returns_err_on_ai_error() {
         let dir = tempfile::tempdir().unwrap();
         let cache_path = dir.path().join("vidERR_lrclib_cleaned.json");
 
@@ -789,15 +747,9 @@ mod tests {
             .await;
 
         // #145: the refused call is retried; no test waits for real.
-        let ai = AiClient::new(AiSettings {
-            api_url: format!("{}/v1", mock.uri()),
-            api_key: Some("test".into()),
-            model: "stub".into(),
-            system_prompt_extra: None,
-        })
-        .with_retry_policy(crate::ai::retry::RetryPolicy::NO_WAIT);
+        let ai = crate::ai::test_support::ai_client_at(format!("{}/v1", mock.uri())).await;
 
-        let out = clean_lyrics_via_claude(
+        let out = clean_lyrics_via_ai(
             &ai,
             "Song",
             "Artist",
@@ -807,13 +759,16 @@ mod tests {
         )
         .await;
 
-        assert!(out.is_err(), "expected Err on Claude 500, got: {out:?}");
+        assert!(
+            out.is_err(),
+            "expected Err on the text AI's 500, got: {out:?}"
+        );
         // Cache file must NOT exist — failed runs are retryable.
         assert!(!cache_path.exists(), "cache file should not exist on Err");
     }
 
     #[tokio::test]
-    async fn clean_lyrics_via_claude_returns_none_when_claude_says_null() {
+    async fn clean_lyrics_via_ai_returns_none_when_the_text_ai_says_null() {
         let dir = tempfile::tempdir().unwrap();
         let cache_path = dir.path().join("vidNULL_lrclib_cleaned.json");
 
@@ -833,14 +788,9 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let ai = AiClient::new(AiSettings {
-            api_url: format!("{}/v1", mock.uri()),
-            api_key: Some("test".into()),
-            model: "stub".into(),
-            system_prompt_extra: None,
-        });
+        let ai = crate::ai::test_support::ai_client_at(format!("{}/v1", mock.uri())).await;
 
-        let out = clean_lyrics_via_claude(
+        let out = clean_lyrics_via_ai(
             &ai,
             "Song",
             "Artist",
@@ -852,7 +802,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(out, None);
-        // Null decision IS cached so we don't re-call Claude.
+        // Null decision IS cached so we don't re-call the text AI.
         let cache = read_lyrics_cache(&cache_path).await.unwrap();
         assert_eq!(cache, Some(None));
     }
@@ -888,7 +838,7 @@ mod tests {
         );
         assert!(
             user.to_lowercase().contains("keep every repeat"),
-            "scraped-lyrics prompt must tell Claude to keep every repeated line (#144)"
+            "scraped-lyrics prompt must tell the model to keep every repeated line (#144)"
         );
         // Ad-libs / vocalizations.
         assert!(
@@ -914,13 +864,13 @@ mod tests {
         );
     }
 
-    /// Verifies `clean_lyrics_via_claude` actually dispatches on `CleanupMode`.
+    /// Verifies `clean_lyrics_via_ai` actually dispatches on `CleanupMode`.
     /// A regression in the match arm (e.g., both modes using the description
     /// prompt) would silently make the lrclib-plain path useless. The test stubs
-    /// Claude and inspects the request body to confirm the SCRAPED prompt's
+    /// the text AI and inspects the request body to confirm the SCRAPED prompt's
     /// rule-text was sent, not the description prompt's.
     #[tokio::test]
-    async fn clean_lyrics_via_claude_dispatches_scraped_prompt_on_scrapedmode() {
+    async fn clean_lyrics_via_ai_dispatches_scraped_prompt_on_scrapedmode() {
         use std::sync::Arc;
         use std::sync::Mutex;
         use wiremock::matchers::{method, path};
@@ -948,14 +898,9 @@ mod tests {
             .mount(&mock)
             .await;
 
-        let ai = AiClient::new(AiSettings {
-            api_url: format!("{}/v1", mock.uri()),
-            api_key: Some("test".into()),
-            model: "stub".into(),
-            system_prompt_extra: None,
-        });
+        let ai = crate::ai::test_support::ai_client_at(format!("{}/v1", mock.uri())).await;
 
-        let _ = clean_lyrics_via_claude(
+        let _ = clean_lyrics_via_ai(
             &ai,
             "Song",
             "Artist",

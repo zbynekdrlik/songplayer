@@ -210,7 +210,7 @@ impl crate::metadata::MetadataProvider for NamesAnotherSong {
     }
 
     fn name(&self) -> &str {
-        "claude"
+        "openrouter"
     }
 }
 
@@ -393,7 +393,7 @@ impl crate::metadata::MetadataProvider for OperatorCorrectsDuringTheCall {
     }
 
     fn name(&self) -> &str {
-        "claude"
+        "openrouter"
     }
 }
 

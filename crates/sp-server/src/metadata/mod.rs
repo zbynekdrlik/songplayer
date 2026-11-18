@@ -1,14 +1,14 @@
-//! Metadata extraction — the provider chain (Claude, Gemini) + title regex parser.
+//! Metadata extraction — the provider chain (OpenRouter text AI, Gemini) + title regex parser.
 //!
 //! #136: the ONE production chain is [`chain::provider_chain`], built once in
 //! `lib.rs` and shared by the download worker, the reprocess worker and the
 //! API (`status.metadata`, `POST /api/v1/metadata/probe`).
 
 pub mod chain;
-pub mod claude;
 pub mod gemini;
 pub mod health;
 pub mod manual;
+pub mod openrouter_text;
 pub mod parser;
 pub mod sanitize;
 #[cfg(test)]

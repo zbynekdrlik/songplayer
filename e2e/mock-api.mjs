@@ -1261,6 +1261,28 @@ function paidAiRefusal(body) {
   return ["", "true", "false"].includes(v) ? null : "paid_ai_enabled must be true or false";
 }
 
+// #321: as `sp_core::ai_tasks::checked_setting` — a task's OpenRouter model
+// (`ai_model_<task>`) is stored trimmed; every task goes to OpenRouter.
+const AI_TASKS = ["translate", "register", "metadata", "description", "cleanup", "spotify"];
+function aiTaskValue(key, value) {
+  if (AI_TASKS.some((t) => key === `ai_model_${t}`)) {
+    return String(value).trim();
+  }
+  return undefined;
+}
+
+// #321: as `sp_core::ai_tasks::checked_setting` — the deleted Claude proxy
+// path's settings (`ai_model`, `ai_api_url`, `ai_provider_<task>`; V45
+// deleted the rows) refuse the whole PATCH, naming the key.
+function retiredAiRefusal(body) {
+  const key = Object.keys(body).find(
+    (k) => k === "ai_model" || k === "ai_api_url" || k.startsWith("ai_provider_"),
+  );
+  return key === undefined
+    ? null
+    : `${key} is no longer a setting: every text AI task goes to OpenRouter, its model is ai_model_<task>`;
+}
+
 // #289: as `sp_core::audio_latency::low_latency` — only "true" (trimmed,
 // any case) is on; unset, blank or anything else is off.
 function lowLatency(raw) {
@@ -1322,6 +1344,7 @@ app.patch("/api/v1/settings", (req, res) => {
   const refusal =
     outputsRefusal(req.body) ??
     paidAiRefusal(req.body) ??
+    retiredAiRefusal(req.body) ??
     lowLatencyRefusal(req.body) ??
     maxResolutionRefusal(req.body);
   if (refusal) {
@@ -1334,6 +1357,8 @@ app.patch("/api/v1/settings", (req, res) => {
     }
     if (key === "paid_ai_enabled" || key === "audio_low_latency") {
       settings[key] = String(value).trim().toLowerCase();
+    } else if (aiTaskValue(key, value) !== undefined) {
+      settings[key] = aiTaskValue(key, value);
     } else if (key === "max_resolution") {
       settings[key] = String(value).trim(); // stored trimmed, as `format::checked` does
     } else {
@@ -1601,6 +1626,7 @@ const ENV_HOLDS = {
     mode: null,
     defaults: [null, null, null],
     dstack_group_rules: null,
+    dante_leg_group_rules: null,
     block_rules_outside_group: null,
   },
   // #255: the production PC's audio profile: nothing read off Windows, so
@@ -2251,6 +2277,8 @@ function programBody() {
       compose_phase_us_p50: 0,
       compose_phase_us_p99: 0,
       compose_late: 0,
+      // #317: the last late composes / sends {utc_ms, kind, late_us, after_offer_us}.
+      late_events: [],
       slot_repicks: 0,
       device_resets: 0,
       sender_backoffs: 0,
@@ -2477,6 +2505,21 @@ function mockDanteOutput(e) {
     pump_late: 0,
     pump_missed: 0,
     pump_overruns: 0,
+    // #325: dstack v0.6.127's pump wakes and thread scheduling.
+    pump_rebootstraps: 0,
+    pump_rebootstraps_late: 0,
+    pump_rebootstraps_clock_back: 0,
+    pump_rebootstraps_reanchor: 0,
+    pump_rebootstraps_retime: 0,
+    wake_behind_max_us: 640,
+    wake_behind_minute_max_us: 410,
+    wake_behind_buckets: [5400, 12, 0, 0, 0, 0, 0, 0],
+    late_wakes: 0,
+    late_wakes_recent: [],
+    threads: [
+      { thread: "pump", scheduling: "mmcss_high", mmcss_task: 2 },
+      { thread: "tx", scheduling: "mmcss_high", mmcss_task: 3 },
+    ],
   };
   return { ...line, type: "dante", ...(line.state === "running" ? { dante } : {}) };
 }

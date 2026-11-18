@@ -14,6 +14,10 @@ sp-gpu = { path = "../sp-gpu" }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 symphonia = { workspace = true }
+# #318: the video reader on its own thread (`video_thread.rs`): a picture
+# handed over through a rendezvous channel, a seek or a stop served while
+# the thread waits to hand one over (`select!`).
+crossbeam-channel = { workspace = true }
 
 # #223 S3b: Direct3D11 + Dxgi_Common read a decoded DXGI surface's texture
 # (`ID3D11Texture2D::GetDesc`: its rows and format).

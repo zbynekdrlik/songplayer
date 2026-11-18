@@ -20,6 +20,42 @@
  * `ok`.
  */
 
+/** #289 step 0: the pacer's emit-lateness bucket edges, µs
+ * (`playback/emit_lateness.rs` `EDGES_US`). */
+export const EMIT_LATE_EDGES_US = [
+  0, 100, 250, 500, 1_000, 2_000, 3_000, 5_000, 7_500, 10_000, 15_000, 20_000, 25_000, 33_333,
+];
+
+/** A `/api/v1/ndi/health` row, the part the histogram check reads. */
+export interface PacingHistRow {
+  ndi_name: string;
+  pacing?: { enabled?: boolean; emit_late_hist?: { edges_us: number[]; counts: number[] } };
+}
+
+/**
+ * #289 step 0: every pacing-enabled pipeline serves its emit-lateness
+ * histogram with the server's edges and at least one counted emit (a paced
+ * pipeline emits on every boundary, idle or playing).
+ */
+export function emitLateHistFailures(rows: PacingHistRow[]): string[] {
+  const f: string[] = [];
+  for (const r of rows.filter((x) => x.pacing?.enabled === true)) {
+    const h = r.pacing?.emit_late_hist;
+    if (!h) {
+      f.push(`${r.ndi_name}: no pacing.emit_late_hist`);
+      continue;
+    }
+    if (JSON.stringify(h.edges_us) !== JSON.stringify(EMIT_LATE_EDGES_US)) {
+      f.push(`${r.ndi_name}: edges_us ${JSON.stringify(h.edges_us)}`);
+    }
+    if (h.counts.length !== EMIT_LATE_EDGES_US.length) {
+      f.push(`${r.ndi_name}: ${h.counts.length} counts, want ${EMIT_LATE_EDGES_US.length}`);
+    }
+    if (h.counts.reduce((a, b) => a + b, 0) <= 0) f.push(`${r.ndi_name}: no emit counted`);
+  }
+  return f;
+}
+
 /** Subset of `GET /api/v1/program` this gate reads. */
 export interface ProgramReceiverView {
   /** The source on program: a playlist id, `-1` for "OBS manuál", `null`

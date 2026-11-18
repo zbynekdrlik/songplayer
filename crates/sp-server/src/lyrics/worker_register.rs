@@ -25,7 +25,7 @@ pub(crate) enum CheckOutcome {
     /// The call failed (the proxy down, a 5xx): asked again later, never
     /// counted toward giving the song up.
     Failed,
-    /// Claude answered in a shape the check cannot read: asked again later,
+    /// The text AI answered in a shape the check cannot read: asked again later,
     /// given up after [`MAX_FAILED_CHECKS`].
     Unreadable,
 }
@@ -56,7 +56,7 @@ fn log_check(youtube_id: &str, check: &RegisterCheck) {
         ),
         RegisterVerdict::Refused => warn!(
             youtube_id,
-            "register check: Claude refused the check - the track is kept as it is"
+            "register check: the text AI refused the check - the track is kept as it is"
         ),
     }
 }
@@ -73,12 +73,12 @@ impl LyricsWorker {
         let Some(ai_client) = &self.ai_client else {
             return CheckOutcome::NotAsked;
         };
-        // #229 item C: the check is a Claude call (paid AI), held with the
+        // #229 item C: the check is a text-AI call (paid AI), held with the
         // translation it belongs to.
         if !self.translation_allowed(youtube_id).await {
             return CheckOutcome::NotAsked;
         }
-        match register_check::check_via_claude(ai_client, track).await {
+        match register_check::check_via_ai(ai_client, track).await {
             Ok(check) => {
                 log_check(youtube_id, &check);
                 track.register = Some(check);
@@ -120,7 +120,7 @@ impl LyricsWorker {
     /// Check ONE served track not checked under the current version: read
     /// it, check it, write it back in place, stamp it. Lowest priority (run
     /// with the translation passes); shares their backoff, so a refusing or
-    /// unreachable Claude is not asked every tick. A node that checks
+    /// unreachable text AI is not asked every tick. A node that checks
     /// nothing itself (no AI client, paid AI off: PP) only stamps the checks
     /// its peers' copies carry ([`Self::stamp_peer_checks`]).
     #[cfg_attr(test, mutants::skip)] // the pass glue; its paths are tested end to end
@@ -162,7 +162,7 @@ impl LyricsWorker {
             CheckOutcome::Checked => {
                 let json = serde_json::to_vec(&track).unwrap_or_default();
                 if let Err(e) = tokio::fs::write(&path, &json).await {
-                    // Never a new Claude call every tick for a file that
+                    // Never a new text-AI call every tick for a file that
                     // cannot be written: it backs off and counts.
                     warn!(youtube_id, "register check: write failed: {e}");
                     self.count_failed_check(video_id, &youtube_id).await;

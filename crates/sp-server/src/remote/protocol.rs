@@ -671,6 +671,45 @@ pub fn with_blank_scene(data: &mut Value) {
     }
 }
 
+/// #326: a forwarded `GetSceneList` answer's `scenes` with every playlist
+/// scene of SongPlayer's catalog in it, so cg OBS's own sp-* scenes can be
+/// deleted and Companion still lists them. Each one cg OBS does not list
+/// (any ASCII case) is appended as `{sceneIndex: <count>, sceneName,
+/// sceneUuid: "songplayer-<scene>"}`; a listed one is kept as it is. Data
+/// with no `scenes` list is left as it is.
+pub fn with_playlist_scenes(data: &mut Value, playlist_scenes: &[&str]) {
+    let Some(scenes) = data.get_mut("scenes").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for scene in playlist_scenes {
+        let listed = scenes.iter().any(|s| {
+            s["sceneName"]
+                .as_str()
+                .is_some_and(|n| n.eq_ignore_ascii_case(scene))
+        });
+        if !listed {
+            let index = scenes.len();
+            scenes.push(json!({
+                "sceneIndex": index,
+                "sceneName": scene,
+                "sceneUuid": format!("songplayer-{scene}"),
+            }));
+        }
+    }
+}
+
+/// #326: the `GetSceneList` data the facade builds on when cg OBS is not
+/// reachable: no scene of cg OBS's, SongPlayer's own added after.
+pub fn own_scene_list_base() -> Value {
+    json!({
+        "currentProgramSceneName": null,
+        "currentProgramSceneUuid": null,
+        "currentPreviewSceneName": null,
+        "currentPreviewSceneUuid": null,
+        "scenes": [],
+    })
+}
+
 /// The `sceneUuid` of the scene named `name` in a `GetSceneList` answer's
 /// `scenes`, else null.
 fn scene_uuid(data: &Value, name: Option<&str>) -> Value {

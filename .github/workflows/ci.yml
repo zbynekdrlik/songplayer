@@ -135,9 +135,9 @@ jobs:
       - name: Install Python eval dependencies (ruff + pytest + jsonschema + requests + numpy + soundfile)
         run: pip install ruff==0.5.7 pytest==8.3.2 jsonschema==4.23.0 requests==2.32.3 numpy==2.1.1 soundfile==0.12.1
       - name: Lint with ruff
-        run: ruff check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py scripts/program_transport.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_spout.py scripts/wall_locate.py scripts/wall_analysis.py scripts/wall_spans.py
+        run: ruff check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/rig_lease_hold.py scripts/pp_deploy_pick.py scripts/program_transport.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_spout.py scripts/wall_locate.py scripts/wall_analysis.py scripts/wall_spans.py
       - name: Format check with ruff
-        run: ruff format --check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py scripts/program_transport.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_spout.py scripts/wall_locate.py scripts/wall_analysis.py scripts/wall_spans.py
+        run: ruff format --check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/rig_lease_hold.py scripts/pp_deploy_pick.py scripts/program_transport.py scripts/wall_clip.py scripts/wall_frames.py scripts/wall_spout.py scripts/wall_locate.py scripts/wall_analysis.py scripts/wall_spans.py
       - name: Run pytest
         run: pytest eval/lyrics/tests -v
       - name: Run scripts pytest (#171 segment stitch / additivity, #156 minidump helpers)
@@ -373,7 +373,10 @@ jobs:
   frontend-e2e:
     name: Frontend E2E Tests
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    # ubuntu-latest moved to 26.04 on 16.11.2026 and the locked Playwright
+    # (1.59.1) refuses it: "Playwright does not support chromium on
+    # ubuntu26.04-x64" (run 43900608027). Pinned to the image it passed on.
+    runs-on: ubuntu-24.04
     needs: [build-wasm]
     # The job takes ~9 min. On 7.10.2026 an Ubuntu mirror stalled its old
     # apt-based browser install for 70 min (main run 37670589944); with no
@@ -1110,6 +1113,36 @@ jobs:
             exit 1
           }
 
+
+      # #314: the gate above only WAITS; this step TAKES the lease through
+      # camera-box's write routes (scripts/rig_lease_hold.py), so a camera-box
+      # run that starts now waits for this job. A detached heartbeat keeps it
+      # (every 30 s; a silent holder is reclaimable after 180 s) and the job's
+      # last step releases it, always. No RIG_LEASE_TOKEN, a server without
+      # the write routes or a lease outage = a WARN, the job runs unheld as
+      # before; another holder still there after 60 min = the job fails.
+      - name: Hold the rig lease for the deploy (#314)
+        shell: powershell
+        timeout-minutes: 70
+        env:
+          RIG_LEASE_TOKEN: ${{ secrets.RIG_LEASE_TOKEN }}
+        run: |
+          $py = "C:\Program Files\Python312\python.exe"
+          $state = "$env:RUNNER_TEMP\rig-lease-hold.json"
+          $hblog = "$env:RUNNER_TEMP\rig-lease-heartbeat.log"
+          & $py scripts\rig_lease_hold.py acquire --url "http://10.77.9.195:8890" --url "http://dev1:8890" --repo "${{ github.repository }}" --run-id "${{ github.run_id }}" --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" --job "${{ github.job }}" --resources resolume-snv --expected-secs 5400 --state-file $state --poll-seconds 30 --max-wait-seconds 3600
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            Write-Error "FAIL: the rig lease was not taken (exit $code; 3 = still held after 60 min, 2 = our token or request was refused)"
+            exit 1
+          }
+          if (Test-Path $state) {
+            # Detached and NOT redirected: a redirected child would inherit
+            # this step's output pipe and the runner would wait for it.
+            Start-Process -FilePath $py -ArgumentList @("scripts\rig_lease_hold.py", "heartbeat", "--state-file", "`"$state`"", "--log-file", "`"$hblog`"") -WindowStyle Hidden
+            Write-Host "OK: rig lease held for this job; heartbeat started"
+          }
+
       - name: Clean old artifacts
         shell: powershell
         run: |
@@ -1228,16 +1261,11 @@ jobs:
           }
           Start-Sleep -Seconds 2
 
-          # Also kill CLIProxyAPI.exe — on Windows, subprocess of an exited
-          # parent is NOT auto-killed. Orphans left behind by the previous
-          # SongPlayer keep port 18787 bound, which blocks the new
-          # SongPlayer's proxy watchdog from spawning a fresh instance
-          # (spawn exits status 0 because port is taken → watchdog loops).
-          # The runtime now ADOPTS a healthy orphan on start(), but we
-          # still prefer a clean slate on deploy so the new config + auth
-          # takes effect immediately. Matches the intent of also killing
-          # SongPlayer above.
-          Write-Host "=== Stopping CLIProxyAPI (if orphaned) ==="
+          # #321: SongPlayer no longer runs CLIProxyAPI (every text AI task
+          # goes to OpenRouter), but a build from before #321 spawned it as a
+          # child, and on Windows a child of an exited parent is NOT killed:
+          # end such a leftover so it does not run on unowned.
+          Write-Host "=== Stopping a leftover CLIProxyAPI (before #321) ==="
           taskkill /F /IM "CLIProxyAPI.exe" 2>&1 | Out-Null
           $elapsed = 0
           while ($elapsed -lt 5) {
@@ -1410,6 +1438,24 @@ jobs:
 
           Write-Host "=== All health checks passed ==="
 
+      # #314: give the rig lease back whatever happened (the heartbeat stops
+      # when the state file goes); its log names a lease lost mid-job.
+      - name: Release the rig lease (#314)
+        if: always()
+        shell: powershell
+        env:
+          RIG_LEASE_TOKEN: ${{ secrets.RIG_LEASE_TOKEN }}
+        run: |
+          $py = "C:\Program Files\Python312\python.exe"
+          $hblog = "$env:RUNNER_TEMP\rig-lease-heartbeat.log"
+          & $py scripts\rig_lease_hold.py release --state-file "$env:RUNNER_TEMP\rig-lease-hold.json"
+          $code = $LASTEXITCODE
+          if (Test-Path $hblog) { Get-Content $hblog -Tail 20 }
+          if ($code -ne 0) {
+            Write-Error "FAIL: the rig lease release itself failed (exit $code)"
+            exit 1
+          }
+
   e2e-resolume:
     name: E2E Tests (win-resolume)
     needs: [deploy-resolume]
@@ -1442,6 +1488,36 @@ jobs:
           if ($code -ne 0) {
             Write-Error "FAIL: the rig-lease gate itself failed (exit $code)"
             exit 1
+          }
+
+
+      # #314: the gate above only WAITS; this step TAKES the lease through
+      # camera-box's write routes (scripts/rig_lease_hold.py), so a camera-box
+      # run that starts now waits for this job. A detached heartbeat keeps it
+      # (every 30 s; a silent holder is reclaimable after 180 s) and the job's
+      # last step releases it, always. No RIG_LEASE_TOKEN, a server without
+      # the write routes or a lease outage = a WARN, the job runs unheld as
+      # before; another holder still there after 60 min = the job fails.
+      - name: Hold the rig lease for the E2E job (#314)
+        shell: powershell
+        timeout-minutes: 70
+        env:
+          RIG_LEASE_TOKEN: ${{ secrets.RIG_LEASE_TOKEN }}
+        run: |
+          $py = "C:\Program Files\Python312\python.exe"
+          $state = "$env:RUNNER_TEMP\rig-lease-hold.json"
+          $hblog = "$env:RUNNER_TEMP\rig-lease-heartbeat.log"
+          & $py scripts\rig_lease_hold.py acquire --url "http://10.77.9.195:8890" --url "http://dev1:8890" --repo "${{ github.repository }}" --run-id "${{ github.run_id }}" --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" --job "${{ github.job }}" --resources resolume-snv --expected-secs 5400 --state-file $state --poll-seconds 30 --max-wait-seconds 3600
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            Write-Error "FAIL: the rig lease was not taken (exit $code; 3 = still held after 60 min, 2 = our token or request was refused)"
+            exit 1
+          }
+          if (Test-Path $state) {
+            # Detached and NOT redirected: a redirected child would inherit
+            # this step's output pipe and the runner would wait for it.
+            Start-Process -FilePath $py -ArgumentList @("scripts\rig_lease_hold.py", "heartbeat", "--state-file", "`"$state`"", "--log-file", "`"$hblog`"") -WindowStyle Hidden
+            Write-Host "OK: rig lease held for this job; heartbeat started"
           }
 
       - name: Ensure OBS is running
@@ -1532,9 +1608,8 @@ jobs:
             Start-Sleep -Milliseconds 500
           }
           Write-Host "SongPlayer task state before relaunch: $((Get-ScheduledTask -TaskName SongPlayer).State)"
-          # Clean orphan CLIProxyAPI here too for the same reason as the
-          # first deploy step — the restart can otherwise land on an
-          # orphan holding port 18787.
+          # #321: a CLIProxyAPI left by a build from before #321 (the
+          # deploy step's reason).
           taskkill /F /IM "CLIProxyAPI.exe" 2>&1 | Out-Null
           Start-Sleep -Seconds 3
 
@@ -2231,151 +2306,6 @@ jobs:
           }
           Write-Host "OK: yt-dlp=$($status.tools.ytdlp_version), ffmpeg=available"
 
-      - name: Verify AI proxy healthy and not churning
-        shell: powershell
-        run: |
-          # Regression gate for the 2026-04-22 orphan-CLIProxyAPI bug:
-          # after deploy, the old SongPlayer's subprocess stayed on port
-          # 18787 and the new SongPlayer's watchdog spawned dead children
-          # every 30s forever. All previous CI was green and yet the app
-          # was broken. This step fails if the proxy is down, if the
-          # watchdog is churning, or if the proxy owner doesn't respond.
-
-          # 1. SongPlayer's own view of the proxy must report running.
-          $ai = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/ai/status" -TimeoutSec 10
-          Write-Host "ai status: running=$($ai.running) pid=$($ai.pid) authenticated=$($ai.authenticated)"
-          if (-not $ai.running) {
-            Write-Error "FAIL: /api/v1/ai/status reports running=false after deploy"
-            exit 1
-          }
-          if (-not $ai.pid) {
-            Write-Error "FAIL: /api/v1/ai/status reports pid=null (should be the adopted or spawned PID)"
-            exit 1
-          }
-
-          # 2. /v1/models on the proxy port must respond 200.
-          $models = Invoke-WebRequest -Uri "http://127.0.0.1:18787/v1/models" -UseBasicParsing -TimeoutSec 10
-          if ($models.StatusCode -ne 200) {
-            Write-Error "FAIL: CLIProxyAPI /v1/models returned $($models.StatusCode)"
-            exit 1
-          }
-          $ids = @(($models.Content | ConvertFrom-Json).data | ForEach-Object { $_.id })
-
-          # 3. #145: the model SongPlayer sends must really answer, and it
-          # must be the newest claude-opus-* the proxy lists. On 29.9.2026
-          # the proxy listed claude-opus-5-5 but refused every call to it
-          # (CLIProxyAPI 7.3.1 presented Claude Code 2.1.258, HTTP 400) and
-          # nothing noticed: a listed id is not a working id.
-          $model = "$($ai.model)"
-          Write-Host "SongPlayer sends model: $model"
-          if (-not $model) {
-            Write-Error "FAIL: /api/v1/ai/status names no model"
-            exit 1
-          }
-          if ($ids -notcontains $model) {
-            Write-Error "FAIL: the proxy's /v1/models does not list $model"
-            exit 1
-          }
-          $req = @{ model = $model; max_tokens = 16; messages = @(@{ role = "user"; content = "Reply with exactly: OK" }) } | ConvertTo-Json -Depth 4
-          function Send-Completion {
-            try {
-              $r = Invoke-WebRequest -Uri "http://127.0.0.1:18787/v1/chat/completions" -Method Post -ContentType "application/json" -Body $req -UseBasicParsing -TimeoutSec 60
-              return @{ resp = $r }
-            } catch {
-              $out = @{ error = $_.Exception.Message; status = 0; retryAfter = $null; detail = "" }
-              if ($_.Exception.Response) {
-                $out.status = [int]$_.Exception.Response.StatusCode
-                $out.retryAfter = $_.Exception.Response.Headers["Retry-After"]
-                $out.detail = (New-Object IO.StreamReader($_.Exception.Response.GetResponseStream())).ReadToEnd()
-              }
-              return $out
-            }
-          }
-          $try = Send-Completion
-          # #144: the proxy's credential cooldown after a transient upstream
-          # error (e.g. Claude's content filter refusing a lyrics cleanup the
-          # worker just sent) is a 503 auth_unavailable whose Retry-After is
-          # the cooldown left (60 s by default). Each such cooldown is waited
-          # out (Retry-After <= 120 s, the worker's own bound, ai/retry.rs),
-          # 300 s in all at most — a worker call woken at the same moment can
-          # start the next one — then the completion must answer. A quota
-          # cooldown (429 model_cooldown), a longer Retry-After or the 300 s
-          # spent still fail the gate.
-          $waited = 0
-          while ($try.error -and $try.status -eq 503 -and $try.detail -match 'auth_unavailable') {
-            $wait = 0
-            if (-not ([int]::TryParse("$($try.retryAfter)", [ref]$wait) -and $wait -ge 0 -and $wait -le 120)) { break }
-            if ($waited + $wait + 2 -gt 300) { break }
-            Write-Host "the proxy's credential cools down for $wait s (auth_unavailable: $($try.detail)): waiting it out"
-            Start-Sleep -Seconds ($wait + 2)
-            $waited += $wait + 2
-            $try = Send-Completion
-          }
-          if ($try.error) {
-            Write-Error "FAIL: a completion with $model failed: $($try.error) $($try.detail)"
-            exit 1
-          }
-          $resp = $try.resp
-          $answer = (($resp.Content | ConvertFrom-Json).choices[0].message.content)
-          Write-Host "completion with ${model}: HTTP $($resp.StatusCode) '$answer'"
-          if (-not $answer) {
-            Write-Error "FAIL: the completion with $model returned no text"
-            exit 1
-          }
-          # claude-opus-5-5 -> 5.5, claude-opus-5 -> 5.0, claude-opus-4-1-20250805 -> 4.1
-          # (a segment of 6+ digits is a snapshot date, not a version).
-          function OpusVersion([string]$id) {
-            if ($id -notmatch '^claude-opus-(.+)$') { return $null }
-            $nums = @()
-            foreach ($seg in $matches[1].Split('-')) {
-              if ($seg -notmatch '^[0-9]+$' -or $seg.Length -ge 6) { break }
-              $nums += [int]$seg
-            }
-            if ($nums.Count -eq 0) { return $null }
-            if ($nums.Count -eq 1) { $nums += 0 }
-            return [version]("{0}.{1}" -f $nums[0], $nums[1])
-          }
-          $mine = OpusVersion $model
-          if (-not $mine) {
-            Write-Error "FAIL: SongPlayer sends $model, not a claude-opus model (the flagship rule, #145)"
-            exit 1
-          }
-          $newest = $ids | Where-Object { OpusVersion $_ } | Sort-Object { OpusVersion $_ } -Descending | Select-Object -First 1
-          Write-Host "newest claude-opus the proxy lists: $newest"
-          if ((OpusVersion $newest) -gt $mine) {
-            Write-Error "FAIL: the proxy lists $newest, newer than the $model SongPlayer sends: switch DEFAULT_AI_MODEL (probe it first, scripts/cliproxy/README.md)"
-            exit 1
-          }
-
-          # 4. Watchdog must not be logging restart-failed in the last
-          # 2 min (indicates an orphan keeping the port while our spawn
-          # immediately dies). The log rolls daily (songplayer.<date>.log);
-          # the old fixed name songplayer.log never existed, so this check
-          # never ran until #145.
-          $log = Get-ChildItem "C:\ProgramData\SongPlayer" -Filter "songplayer.*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          if (-not $log) {
-            Write-Error "FAIL: no songplayer.<date>.log in C:\ProgramData\SongPlayer"
-            exit 1
-          }
-          $cutoff = (Get-Date).ToUniversalTime().AddMinutes(-2)
-          $failures = @(Get-Content $log.FullName -Tail 2000 | Where-Object {
-            $_ -match 'ai_proxy watchdog: restart failed'
-          } | ForEach-Object {
-            if ($_ -match '^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})') {
-              try {
-                $ts = [datetime]::ParseExact($matches[1], 'yyyy-MM-ddTHH:mm:ss', $null)
-                if ($ts -gt $cutoff) { $_ }
-              } catch { $_ }
-            }
-          })
-          if ($failures.Count -gt 0) {
-            Write-Host "Recent 'restart failed' entries:"
-            $failures | ForEach-Object { Write-Host "  $_" }
-            Write-Error "FAIL: ai_proxy watchdog is churning ($($failures.Count) restart failures in last 2 min). Likely an orphan CLIProxyAPI is holding the port."
-            exit 1
-          }
-          Write-Host "OK: AI proxy healthy, $model answers and is the newest claude-opus, watchdog quiet in $($log.Name)."
-
       - name: Verify Presenter reachable
         shell: powershell
         run: |
@@ -2701,3 +2631,21 @@ jobs:
             e2e/test-results/
           retention-days: 7
           if-no-files-found: ignore
+
+      # #314: give the rig lease back whatever happened (the heartbeat stops
+      # when the state file goes); its log names a lease lost mid-job.
+      - name: Release the rig lease (#314)
+        if: always()
+        shell: powershell
+        env:
+          RIG_LEASE_TOKEN: ${{ secrets.RIG_LEASE_TOKEN }}
+        run: |
+          $py = "C:\Program Files\Python312\python.exe"
+          $hblog = "$env:RUNNER_TEMP\rig-lease-heartbeat.log"
+          & $py scripts\rig_lease_hold.py release --state-file "$env:RUNNER_TEMP\rig-lease-hold.json"
+          $code = $LASTEXITCODE
+          if (Test-Path $hblog) { Get-Content $hblog -Tail 20 }
+          if ($code -ne 0) {
+            Write-Error "FAIL: the rig lease release itself failed (exit $code)"
+            exit 1
+          }

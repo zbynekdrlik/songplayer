@@ -24,7 +24,8 @@ answered correctly), and nothing ever ran the real providers.
 ## The one chain
 
 - `metadata::provider_chain(&pool, ai_client, gemini_csv, gemini_model)` =
-  [Claude (CLIProxyAPI), Gemini], gated on the node's paid-AI switch (#229
+  [the OpenRouter text provider (#321: the `metadata` task's model, name
+  `openrouter`), Gemini], gated on the node's paid-AI switch (#229
   item C, `paid-ai.md`): `ProviderChain::providers()` is async and answers
   `None` while it is off — a download then takes the title parser's name
   marked for the repair, the repair a peer's title only, and
@@ -177,7 +178,7 @@ answered correctly), and nothing ever ran the real providers.
   characters (refused before it is logged or sent to the paid providers); a
   missing field is axum's 422.
 - `e2e/post-deploy-metadata.spec.ts` probes `gq-4FVRr_ow` with its YouTube
-  title: the chain must be [claude, gemini] and every provider must answer
+  title: the chain must be [openrouter, gemini] and every provider must answer
   "Stand On Your Promise" / an artist containing "Emerging Sound" (case-
   insensitive). A new provider, model or key-format change must keep this
   gate green on the box, not just the unit tests.
@@ -197,13 +198,14 @@ answered correctly), and nothing ever ran the real providers.
 
 - `GeminiProvider::with_api_root` / `chain::provider_chain_at` point Gemini at
   a wiremock server; `metadata::test_support` has the fixed video, the
-  Claude (`/v1/chat/completions`) and Gemini answer shapes, and
+  OpenRouter (`/v1/chat/completions`, `openrouter_answers` /
+  `openrouter_refuses`) and Gemini answer shapes, and
   `received_keys` (the header of every request, in order).
 - wiremock's `header(k, v)` matcher SPLITS a request's header value on
   commas: a request carrying `k1,k2` does NOT match `header("x-goog-api-key",
   "k1")`. Assert the raw header through `received_keys` when the test is
   about what was sent.
-- A Claude mock that fails should answer a 4xx: `AiClient` retries 429 / 5xx
+- An OpenRouter mock that fails should answer a 4xx: `AiClient` retries 429 / 5xx
   (#145: after the `Retry-After`, else 5 / 20 / 60 s). A test that must
   drive a 5xx through the client injects `RetryPolicy::NO_WAIT`
   (`AiClient::with_retry_policy`, `ai/retry.rs`): the same 3 retries, no

@@ -214,6 +214,8 @@ fn the_status_lists_every_entry_in_list_order() {
     assert_eq!(st[0].state, STATE_OPENING, "no thread off Windows");
     assert_eq!((st[0].channels, st[0].delay_ms), (2, 20));
     assert!((st[0].latency_ms - (66.6666 + 20.0 + 16.6667)).abs() < 1e-3);
+    // #289 step 0: a VBAN receiver's buffer is no device SongPlayer reads.
+    assert_eq!(st[0].device_latency_ms, None);
     assert_eq!(
         st[0].vban.as_ref().unwrap().targets[0].target,
         "127.0.0.1:6980"
@@ -358,6 +360,8 @@ fn the_status_notes_a_driver_rate_off_the_network_rate() {
         ("Dante Virtual Soundcard (x64)", [0, 1], 48_000)
     );
     assert!(at96.vban.is_none());
+    // #289 step 0: the driver's own 128 frames at its 48 kHz.
+    assert_eq!(at96.device_latency_ms, Some(128.0 / 48.0));
     assert_eq!(running.status(48_000).note, None);
     // AudioOutputs::status reads the rate the list was applied with.
     let outputs = AudioOutputs::new();

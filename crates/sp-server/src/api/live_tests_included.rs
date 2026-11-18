@@ -46,7 +46,7 @@ fn build_state(pool: SqlitePool, engine_tx: mpsc::Sender<crate::EngineCommand>) 
     let (sync_tx, _) = mpsc::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
     AppState {
-        pool,
+        pool: pool.clone(),
         event_tx,
         engine_tx,
         obs_state: Arc::new(RwLock::new(crate::obs::ObsState::default())),
@@ -55,13 +55,7 @@ fn build_state(pool: SqlitePool, engine_tx: mpsc::Sender<crate::EngineCommand>) 
         sync_tx,
         resolume_tx,
         cache_dir: std::path::PathBuf::from("/tmp/cache"),
-        ai_proxy: Arc::new(crate::ai::proxy::ProxyManager::new(
-            std::path::PathBuf::from("/tmp/cache"),
-            crate::ai::proxy::ProxyManager::default_port(),
-        )),
-        ai_client: Arc::new(crate::ai::client::AiClient::new(
-            crate::ai::AiSettings::default(),
-        )),
+        ai_client: Arc::new(crate::ai::client::AiClient::new(pool.clone())),
         presenter_client: None,
         resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
         ndi_health_registry: Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),

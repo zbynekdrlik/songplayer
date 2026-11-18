@@ -21,6 +21,9 @@ pub struct PacingStats {
     pub max_late_us: u64,
     /// 99th-percentile emit jitter (emit − boundary, µs) over the recent window.
     pub jitter_p99_us: u64,
+    /// #289 step 0: every emit's lateness against its boundary since the
+    /// pipeline started, in fixed µs buckets (`emit_lateness.rs`).
+    pub emit_late_hist: crate::playback::emit_lateness::EmitLateHist,
     /// Last-frame repeats emitted on decoder underrun (one per starved boundary).
     pub repeats: u64,
     /// Grid resyncs — a lag beyond the catch-up bound with nothing buffered.

@@ -32,7 +32,7 @@ async fn test_state_with_cache_dir() -> (crate::AppState, tempfile::TempDir) {
     let (sync_tx, _) = mpsc::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
     let state = crate::AppState {
-        pool,
+        pool: pool.clone(),
         event_tx,
         engine_tx,
         obs_state: Arc::new(RwLock::new(crate::obs::ObsState::default())),
@@ -41,13 +41,7 @@ async fn test_state_with_cache_dir() -> (crate::AppState, tempfile::TempDir) {
         sync_tx,
         resolume_tx,
         cache_dir: cache_dir.clone(),
-        ai_proxy: Arc::new(crate::ai::proxy::ProxyManager::new(
-            cache_dir,
-            crate::ai::proxy::ProxyManager::default_port(),
-        )),
-        ai_client: Arc::new(crate::ai::client::AiClient::new(
-            crate::ai::AiSettings::default(),
-        )),
+        ai_client: Arc::new(crate::ai::client::AiClient::new(pool.clone())),
         presenter_client: None,
         resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
         ndi_health_registry: Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
@@ -616,7 +610,7 @@ async fn the_one_reprocess_path_keeps_the_served_lyrics_and_sets_manual_priority
 /// probe is skipped, no Claude call (empty song and artist keep the other
 /// probes off the network).
 #[tokio::test]
-async fn probe_sources_asks_no_claude_while_paid_ai_is_off() {
+async fn probe_sources_asks_no_text_ai_while_paid_ai_is_off() {
     use axum::body::Body;
     use axum::http::Request;
     use tower::ServiceExt;

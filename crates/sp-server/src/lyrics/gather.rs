@@ -29,8 +29,8 @@ pub(crate) fn lrclib_track_has_real_timing(t: &sp_core::lyrics::LyricsTrack) -> 
 /// without constructing a full `LyricsWorker`.
 ///
 /// mutants::skip: legacy LRCLIB guards + description match guard are
-/// exercised end-to-end by `gather_sources_pushes_description_candidate_when_claude_returns_lyrics`
-/// and `gather_sources_skips_description_when_claude_returns_empty_array` integration tests
+/// exercised end-to-end by `gather_sources_pushes_description_candidate_when_the_text_ai_returns_lyrics`
+/// and `gather_sources_skips_description_when_the_text_ai_returns_empty_array` integration tests
 /// (plus the structural call-order test further down); individual mutations in these
 /// I/O-bound branches cannot be killed by unit tests without a full mock harness for
 /// yt-dlp/LRCLIB, which is out of scope.
@@ -167,7 +167,7 @@ pub(crate) async fn gather_sources_impl(
         }
     }
     // Spotify priority sits between override and other Tier-1 sources;
-    // see `claude_merge::source_priority` for the exact ordering.
+    // see `candidate_pick::priority_with_timing` for the exact ordering.
     if let Some(t) = spotify_track {
         candidate_texts.push(t.into());
     }
@@ -187,7 +187,7 @@ pub(crate) async fn gather_sources_impl(
             let Some(ai) = ai_client else {
                 anyhow::bail!(
                     "gather: lrclib-plain candidate present but ai_client is None for {youtube_id}; \
-                     cannot run Claude cleanup"
+                     cannot run the text-AI cleanup"
                 );
             };
             // _v3 (#144): the cleanup keeps every sung repeat; a v2 decision was
@@ -201,7 +201,7 @@ pub(crate) async fn gather_sources_impl(
                     %youtube_id,
                     raw_count = t.lines.len(),
                     cleaned_count = cleaned.lines.len(),
-                    "gather: lrclib-plain Claude cleanup complete"
+                    "gather: lrclib-plain text-AI cleanup complete"
                 );
                 candidate_texts.push(cleaned);
             }
@@ -210,7 +210,7 @@ pub(crate) async fn gather_sources_impl(
     // lyrics.ovh returns clean plain-text lyrics — no section markers, no
     // contributor banners, no HTML. Push directly as a TextOnly candidate;
     // no Claude cleanup pass needed. Its label `lyrics_ovh` ranks at the
-    // community-lyrics-website slot of `claude_merge::priority_with_timing`.
+    // community-lyrics-website slot of `candidate_pick::priority_with_timing`.
     if let Some(lines) = lyrics_ovh_lines {
         candidate_texts.push(CandidateText {
             source: "lyrics_ovh".into(),

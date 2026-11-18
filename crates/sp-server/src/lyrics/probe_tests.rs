@@ -5,8 +5,6 @@
 //! under the file-size cap and lets each test file stay narrowly focused.
 
 use super::probe::probe_sources_impl;
-use crate::ai::AiSettings;
-use crate::ai::client::AiClient;
 use crate::db::models::VideoLyricsRow;
 
 fn fixture_row(song: &str, artist: &str, spotify_track_id: Option<&str>) -> VideoLyricsRow {
@@ -31,7 +29,7 @@ async fn probe_reports_any_text_source_false_when_all_providers_miss() {
     // providers; no spotify_track_id; bogus ytdlp path so
     // yt_subs + description return None.
     let report = probe_sources_impl(
-        None, // ai_client: not used by probe (no Claude)
+        None, // ai_client: not used by probe (no text AI)
         std::path::Path::new("/nonexistent/ytdlp"),
         std::path::Path::new("/tmp"),
         &reqwest::Client::new(),
@@ -97,7 +95,7 @@ async fn probe_reports_yt_subs_and_description_skipped_when_ytdlp_unavailable() 
 
 #[tokio::test]
 async fn probe_description_unavailable_when_no_ai_client_present() {
-    // Without ai_client the probe cannot Claude-validate description text;
+    // Without ai_client the probe cannot have the text AI check the description;
     // YouTube descriptions are mostly promo/social copy with zero lyrics,
     // so the safe default is "unavailable" rather than the old "raw lines
     // count > 0 ⇒ available" heuristic that lied for id=175 Jesus Saves.
@@ -117,8 +115,11 @@ async fn probe_description_unavailable_when_no_ai_client_present() {
     assert!(!descr.available);
     assert!(
         descr.note.to_lowercase().contains("no ai_client")
-            || descr.note.to_lowercase().contains("claude-validate"),
-        "expected note about missing Claude validation, got: {}",
+            || descr
+                .note
+                .to_lowercase()
+                .contains("cannot check the description"),
+        "expected note about missing text-AI check, got: {}",
         descr.note
     );
 }
@@ -155,7 +156,7 @@ async fn probe_description_reports_error_when_fetch_fails() {
         .await
         .unwrap();
 
-    let ai = AiClient::new(AiSettings::default());
+    let ai = crate::ai::test_support::ai_client_unused().await;
     let report = probe_sources_impl(
         Some(&ai),
         std::path::Path::new("/nonexistent/ytdlp"),

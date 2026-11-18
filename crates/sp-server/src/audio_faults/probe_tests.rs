@@ -126,6 +126,7 @@ fn output(id: &str, enabled: bool, sent: u64, dropped: u64) -> OutputStatus {
         channels: 2,
         delay_ms: 0,
         latency_ms: 83.4,
+        device_latency_ms: None,
         blocks_sent: sent,
         blocks_dropped: dropped,
         vban: None,

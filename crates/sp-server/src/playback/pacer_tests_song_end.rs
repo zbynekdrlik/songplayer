@@ -550,3 +550,7 @@ fn a_seek_back_during_the_held_tail_plays_the_picture_again() {
     assert_eq!(p.rec.shown[397..402], [299, 299, 150, 151, 152]);
     assert!(p.rec.shown[548..].iter().all(|&s| s == 299));
 }
+
+// #318: a video read that blocks mid-song, on the same mock readers.
+#[path = "pacer_tests_video_stall.rs"]
+mod video_stall;

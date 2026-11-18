@@ -1,0 +1,66 @@
+{
+  "_comment": "SNV (resolume-snv) after dstack#264's switch (#322): snv.json with its firewall moved to dstack's generic Dante-leg filter as dstack v0.6.123's tools/windows/dante-leg.ps1 -InterfaceAlias Dante70 -RemoveGroup dstack155 creates it: every profile on, default actions Allow, the group 'dstack Dante leg' with its 10 enabled Block rules (display names and program filters from Get-DanteLegRules; the rule Names are Windows' own GUIDs, written here as placeholders), each bound to Dante70, and no dstack155 rule left. Not captured from the box: the switch has not run yet.",
+  "registry": [
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU", "name": "NoAutoUpdate", "kind": "DWord", "value": 1 },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate", "name": "ExcludeWUDriversInQualityUpdate", "kind": null, "value": null },
+    { "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", "name": "SystemResponsiveness", "kind": "DWord", "value": 0 },
+    { "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", "name": "NetworkThrottlingIndex", "kind": "DWord", "value": 4294967295 },
+    { "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Pro Audio", "name": "Priority", "kind": "DWord", "value": 6 },
+    { "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Pro Audio", "name": "Scheduling Category", "kind": "String", "value": "High" },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection", "name": "DisableRealtimeMonitoring", "kind": "DWord", "value": 1 },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection", "name": "DisableBehaviorMonitoring", "kind": "DWord", "value": 1 },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection", "name": "DisableOnAccessProtection", "kind": "DWord", "value": 1 },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection", "name": "DisableScanOnRealtimeEnable", "kind": "DWord", "value": 1 },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection", "name": "DisableIOAVProtection", "kind": "DWord", "value": 1 }
+  ],
+  "soundgrid": {
+    "installed": false,
+    "preferences_user": null,
+    "preferences_path": null,
+    "preferences": null,
+    "preferences_error": null,
+    "adapters": []
+  },
+  "power": { "scheme_guid": "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c", "scheme_name": "High performance", "cpmincores_ac": 100 },
+  "defender": {
+    "service": "Running",
+    "realtime_enabled": false,
+    "tamper_protected": false,
+    "preferences": {
+      "DisableRealtimeMonitoring": true,
+      "DisableBehaviorMonitoring": true,
+      "DisableIOAVProtection": true,
+      "DisableScriptScanning": true,
+      "MAPSReporting": 0,
+      "SubmitSamplesConsent": 2
+    }
+  },
+  "firewall": { "Domain": true, "Private": true, "Public": true },
+  "firewall_standard": {
+    "defaults": { "Domain": { "inbound": "Allow", "outbound": "Allow" }, "Private": { "inbound": "Allow", "outbound": "Allow" }, "Public": { "inbound": "Allow", "outbound": "Allow" } },
+    "block_rules": [
+      {"name": "{d4e1e600-0000-4000-8000-000000000001}", "display_name": "dstack Dante leg: TCP in", "group": "dstack Dante leg", "display_group": "dstack Dante leg"},
+      {"name": "{d4e1e600-0000-4000-8000-000000000002}", "display_name": "dstack Dante leg: TCP out", "group": "dstack Dante leg", "display_group": "dstack Dante leg"},
+      {"name": "{d4e1e600-0000-4000-8000-000000000003}", "display_name": "dstack Dante leg: UDP in", "group": "dstack Dante leg", "display_group": "dstack Dante leg"},
+      {"name": "{d4e1e600-0000-4000-8000-000000000004}", "display_name": "dstack Dante leg: UDP in, ephemeral ports", "group": "dstack Dante leg", "display_group": "dstack Dante leg"},
+      {"name": "{d4e1e600-0000-4000-8000-000000000005}", "display_name": "dstack Dante leg: svchost.exe UDP inbound", "group": "dstack Dante leg", "display_group": "dstack Dante leg"},
+      {"name": "{d4e1e600-0000-4000-8000-000000000006}", "display_name": "dstack Dante leg: svchost.exe UDP outbound", "group": "dstack Dante leg", "display_group": "dstack Dante leg"},
+      {"name": "{d4e1e600-0000-4000-8000-000000000007}", "display_name": "dstack Dante leg: mDNSResponder.exe UDP inbound", "group": "dstack Dante leg", "display_group": "dstack Dante leg"},
+      {"name": "{d4e1e600-0000-4000-8000-000000000008}", "display_name": "dstack Dante leg: mDNSResponder.exe UDP outbound", "group": "dstack Dante leg", "display_group": "dstack Dante leg"},
+      {"name": "{d4e1e600-0000-4000-8000-000000000009}", "display_name": "dstack Dante leg: mDNSResponder.exe (x86) UDP inbound", "group": "dstack Dante leg", "display_group": "dstack Dante leg"},
+      {"name": "{d4e1e600-0000-4000-8000-000000000010}", "display_name": "dstack Dante leg: mDNSResponder.exe (x86) UDP outbound", "group": "dstack Dante leg", "display_group": "dstack Dante leg"}
+    ],
+    "group_rules": [
+      {"name": "{d4e1e600-0000-4000-8000-000000000001}", "display_name": "dstack Dante leg: TCP in", "group": "dstack Dante leg", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["Any"]},
+      {"name": "{d4e1e600-0000-4000-8000-000000000002}", "display_name": "dstack Dante leg: TCP out", "group": "dstack Dante leg", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["Any"]},
+      {"name": "{d4e1e600-0000-4000-8000-000000000003}", "display_name": "dstack Dante leg: UDP in", "group": "dstack Dante leg", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["Any"]},
+      {"name": "{d4e1e600-0000-4000-8000-000000000004}", "display_name": "dstack Dante leg: UDP in, ephemeral ports", "group": "dstack Dante leg", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["Any"]},
+      {"name": "{d4e1e600-0000-4000-8000-000000000005}", "display_name": "dstack Dante leg: svchost.exe UDP inbound", "group": "dstack Dante leg", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["%SystemRoot%\\System32\\svchost.exe"]},
+      {"name": "{d4e1e600-0000-4000-8000-000000000006}", "display_name": "dstack Dante leg: svchost.exe UDP outbound", "group": "dstack Dante leg", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["%SystemRoot%\\System32\\svchost.exe"]},
+      {"name": "{d4e1e600-0000-4000-8000-000000000007}", "display_name": "dstack Dante leg: mDNSResponder.exe UDP inbound", "group": "dstack Dante leg", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["%ProgramFiles%\\Bonjour\\mDNSResponder.exe"]},
+      {"name": "{d4e1e600-0000-4000-8000-000000000008}", "display_name": "dstack Dante leg: mDNSResponder.exe UDP outbound", "group": "dstack Dante leg", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["%ProgramFiles%\\Bonjour\\mDNSResponder.exe"]},
+      {"name": "{d4e1e600-0000-4000-8000-000000000009}", "display_name": "dstack Dante leg: mDNSResponder.exe (x86) UDP inbound", "group": "dstack Dante leg", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["%ProgramFiles(x86)%\\Bonjour\\mDNSResponder.exe"]},
+      {"name": "{d4e1e600-0000-4000-8000-000000000010}", "display_name": "dstack Dante leg: mDNSResponder.exe (x86) UDP outbound", "group": "dstack Dante leg", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["%ProgramFiles(x86)%\\Bonjour\\mDNSResponder.exe"]}
+    ]
+  }
+}

@@ -86,7 +86,7 @@ use std::time::{Duration, Instant};
 use sp_gpu::{ComposeStats, GpuError, MAX_TARGET, SpoutSendStats, Target, TargetId, VblankGrid};
 use tracing::{info, warn};
 
-use crate::playback::program_max::{MaxJob, MaxNext, MaxOut, Wants};
+use crate::playback::program_max::{Lateness, MaxJob, MaxNext, MaxOut, Wants};
 pub use crate::playback::program_max_gpu::{
     MaxCompositor, MaxGpu, MaxSender, SpoutGpu, is_refusal,
 };
@@ -236,7 +236,13 @@ pub struct MaxWorker<'a, G: MaxGpu> {
 }
 
 /// A sent MAX boundary's costs and timing ([`MaxWorker::send_max`]).
-type Sent = (ComposeStats, SpoutSendStats, SendTiming, Option<Aligned>);
+type Sent = (
+    ComposeStats,
+    SpoutSendStats,
+    SendTiming,
+    Option<Aligned>,
+    Lateness,
+);
 
 /// #239: a sent FHD boundary: its target's own draw (µs) and its send.
 type FhdSent = (u64, SpoutSendStats);
@@ -393,10 +399,11 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         now: Instant,
     ) -> Option<LogLine> {
         match went {
-            Ok((compose, send, timing, aligned)) => {
+            Ok((compose, send, timing, aligned, late)) => {
                 self.out.record_sent(compose, send);
                 self.out.record_send_timing(timing);
                 self.out.record_vblank(aligned);
+                self.out.record_late(job.stamp_100ns(), &late);
                 self.failing = lost.map(|error| error.to_string());
                 if let Some(why) = &self.failing {
                     self.out.record_lost(why);
@@ -834,7 +841,16 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
             compose_late,
             repicked: due.repicked,
         });
-        Ok((drawn.compose, send, timing, aligned))
+        // #317: when each late step started, against its own instant.
+        let late = Lateness {
+            offered,
+            compose: due
+                .compose_at
+                .filter(|_| compose_late)
+                .map(|at| (at, composed)),
+            send: timing.late.then_some((due.at, timing.started)),
+        };
+        Ok((drawn.compose, send, timing, aligned, late))
     }
 
     /// #239: send the FHD target, `drawn` with MAX's: right after MAX's
