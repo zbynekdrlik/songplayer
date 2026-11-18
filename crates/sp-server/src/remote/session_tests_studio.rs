@@ -173,7 +173,13 @@ async fn a_fade_from_obs_manual_parks_cg_obs_on_blank_only_after_its_window() {
         ["SetCurrentProgramScene Slido", "GetInputList "],
         "no Blank while cg OBS's program still fades out"
     );
-    rig.bus.release_due(utc_now_100ns() + 600_000_000);
+    // The program's sender serves the window: every boundary up to a minute
+    // ahead is due (the fade first waits out its cue gate, so more rounds).
+    wait_for("the fade's window served", || {
+        rig.bus.release_due(utc_now_100ns() + 600_000_000);
+        rig.bus.status().transition.active.is_none()
+    })
+    .await;
     wait_for("cg OBS parked on Blank after the fade", || {
         rig.calls()
             .iter()
