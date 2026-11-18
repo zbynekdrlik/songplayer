@@ -169,7 +169,7 @@ the answer to `Asrc::set_correction_ppm` and (through `frames_from_100ns`:
 positive = insert, negative = skip) `Splice::insert` / `skip`, and pushes
 `Splice::process(Asrc::process(block))` into the card's ring.
 
-**Since #285 step 3 the LAWS live in dstack-resample** (dstack tag v0.6.164,
+**Since #285 step 3 the LAWS live in dstack-resample** (dstack tag v0.6.178,
 MIT OR Apache-2.0, `crates/dstack-resample/src/asrc.rs` + `lib.rs` in the
 dstack checkout): `Servo` is a thin ADAPTER over
 `dstack_resample::asrc::Controller` (`Controller::new(target, floor 38.3 ms,
@@ -1635,7 +1635,7 @@ difference with its UTC time.
 - `DanteDevice` (`dante_device.rs`) implements the `AsioDevice` seam **in this
   process**, on every platform, with no `sp-dante-host` (the owner's ruling):
   `asio_out`'s worker, ring, `asrc_servo` and status serve it, so a second servo
-  never appears. dstack by git tag (v0.6.164), no Dante protocol code here.
+  never appears. dstack by git tag (v0.6.178), no Dante protocol code here.
   #328 (dstack#366): every test Dante device serves on 127.0.0.1 —
   `.cargo/config.toml` `[env] DSTACK_TEST_LOOPBACK = "1"` reaches cargo test,
   nextest and cargo-mutants, and the stack then refuses any other address the
