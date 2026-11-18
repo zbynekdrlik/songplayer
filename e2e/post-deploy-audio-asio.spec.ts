@@ -53,6 +53,7 @@ import { test, expect, type APIRequestContext } from "@playwright/test";
 import {
   DVS_DRIVER,
   WINDOW_BLOCKS,
+  dvsExpected,
   asioCount,
   asioCountReading,
   asioGateFailures,
@@ -109,15 +110,18 @@ test.describe("ASIO output (#233)", () => {
     fileStart = await fileStartOrNull(request);
   });
 
-  test("the driver list reads, with Dante Virtual Soundcard on a box expected to run ASIO", async ({
+  test("the driver list reads, with Dante Virtual Soundcard where an ASIO output plays on it", async ({
     request,
   }) => {
     const resp = await request.get("/api/v1/audio/asio-drivers");
     expect(resp.status(), "GET /api/v1/audio/asio-drivers").toBe(200);
     const drivers = (await resp.json()).drivers as string[];
-    console.log(`[#233 asio] drivers: ${JSON.stringify(drivers)} (expected outputs: ${EXPECTED})`);
-    if (EXPECTED > 0) {
-      expect(drivers, "an ASIO output is expected: DVS must be registered").toContain(DVS_DRIVER);
+    const list = await readOutputs(request);
+    expect(list, "GET /api/v1/program").not.toBeNull();
+    const wanted = dvsExpected(list as OutputStatus[]);
+    console.log(`[#233 asio] drivers: ${JSON.stringify(drivers)} (DVS expected: ${wanted})`);
+    if (wanted) {
+      expect(drivers, "an ASIO output plays on DVS: DVS must be registered").toContain(DVS_DRIVER);
     }
   });
 

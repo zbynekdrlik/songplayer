@@ -1223,11 +1223,12 @@ past 1 s parking the device, its successor told the driver is parked,
 pins the holds on Linux.
 
 **Live gate** (`e2e/post-deploy-audio-asio.spec.ts`, SNV's suite and PP's
-subset): DVS is registered — checked only when `SP_ASIO_OUTPUTS_EXPECTED`
-is over 0 (release review: a box expected to run none need not have DVS);
-exactly `SP_ASIO_OUTPUTS_EXPECTED` enabled ASIO
-outputs (`asioCount`, #229 ROZHODNUTÉ 11.11.2026; PP "2" since 11.10.2026:
-out-2 Waves SoundGrid + out-3 Dante, SNV "1"; ci.yml / deploy-pp.yml). An
+subset): DVS is registered — checked only while an enabled ASIO output
+plays on it (`dvsExpected`; #332, 18.11.2026: DVS is uninstalled on SNV
+and PP, Dante runs through the native `dante` output); exactly
+`SP_ASIO_OUTPUTS_EXPECTED` enabled ASIO-worker outputs (`asioCount`, #229
+ROZHODNUTÉ 11.11.2026; SNV "1" and, since #332, PP "1": the native Dante
+output; ci.yml / deploy-pp.yml). An
 output in a calm wait for its driver's clock (`waitingForClock`: `no_clock`
 or `clock_off_rate` — its device or network is off, PP's SoundGrid outside
 services, run 43001397048) is an enabled output behaving correctly: on a

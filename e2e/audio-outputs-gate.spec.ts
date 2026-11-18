@@ -9,6 +9,7 @@ import {
   DANTE_PUMP_SCHEDULING,
   lv1PathFailures,
   gatedAsioOutputs,
+  dvsExpected,
   waitingForClock,
   asioCount,
   asioCountReading,
@@ -598,4 +599,14 @@ test.describe("device latency (#289 step 0)", () => {
       "VBAN output out-1: device_latency_ms 2.7, want null",
     ]);
   });
+});
+
+test("DVS is expected only where an enabled ASIO output plays on it (#332)", () => {
+  const o = (type: string, enabled: boolean, driver?: string) =>
+    ({ id: "x", type, enabled, asio: driver ? { driver } : undefined }) as unknown as OutputStatus;
+  expect(dvsExpected([o("dante", true)])).toBe(false);
+  expect(dvsExpected([o("asio", true, "Waves SoundGrid ASIO")])).toBe(false);
+  expect(dvsExpected([o("asio", false, "Dante Virtual Soundcard (x64)")])).toBe(false);
+  expect(dvsExpected([o("vban", true), o("asio", true, "Dante Virtual Soundcard (x64)")])).toBe(true);
+  expect(dvsExpected([])).toBe(false);
 });

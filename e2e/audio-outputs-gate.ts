@@ -207,8 +207,17 @@ export interface AsioTelemetry {
   reason_code?: string | null;
 }
 
-/** The driver SNV's and PP's ASIO outputs play on. */
+/** The driver an ASIO output to Dante played on before the native output. */
 export const DVS_DRIVER = "Dante Virtual Soundcard (x64)";
+
+/**
+ * Whether DVS must be registered on the box: an enabled ASIO output plays on
+ * it. Since 18.11.2026 (owner, #332) neither SNV nor PP has DVS installed:
+ * Dante runs through the native `dante` output, which needs no driver.
+ */
+export function dvsExpected(list: OutputStatus[]): boolean {
+  return list.some((o) => o.enabled && o.type === "asio" && o.asio?.driver === DVS_DRIVER);
+}
 /** One minute of program blocks (30 a second). */
 export const WINDOW_BLOCKS = 1800;
 /** The drift servo's bound, ppm (`asrc_servo::MAX_PPM`). */
