@@ -337,8 +337,9 @@ def test_pp_runs_its_preview_gate_in_edge_and_never_reinstalls_edge():
     assert install < failed < step.index("npx playwright test"), step
 
 
-def test_pp_expects_its_two_running_asio_outputs():
-    # PP runs two ASIO outputs since 11.10.2026 (out-2 Waves SoundGrid and
-    # out-3 Dante, both enabled): its post-deploy ASIO gate must expect 2.
+def test_pp_expects_its_one_native_dante_output():
+    # #332 (owner, 18.11.2026: PP like SNV): DVS and Waves SoundGrid are
+    # uninstalled at PP and its one ASIO-worker output is the native Dante
+    # output, so its post-deploy ASIO gate must expect 1.
     step = _step(_deploy_pp(), "Post-deploy Playwright (PP subset)")
-    assert re.search(r'SP_ASIO_OUTPUTS_EXPECTED:\s*"2"', step), step
+    assert re.search(r'SP_ASIO_OUTPUTS_EXPECTED:\s*"1"', step), step
