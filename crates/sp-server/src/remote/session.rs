@@ -524,6 +524,7 @@ async fn switch(facade: &Facade, scene: &str, via: Via) -> Reply {
         pool: &facade.pool,
         bus: &facade.bus,
         upstream: &facade.upstream,
+        window_max: facade.transition_end_max,
     };
     match switch_scene(&ctx, scene, via).await {
         Switched::Cut => {

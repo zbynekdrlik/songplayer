@@ -215,6 +215,9 @@ pub struct SwitchCtx<'a> {
     /// window in a task of its own (`cg_obs_to_blank`).
     pub bus: &'a Arc<ProgramBus>,
     pub upstream: &'a Upstream,
+    /// How long a Blank waits at most for its cut's window: the facade's
+    /// `transition_end_max` (a test passes a bound it never reaches).
+    pub window_max: Duration,
 }
 
 /// cg OBS's answer as `cg_forward`: `ok`, `error <code>` (its own
@@ -269,6 +272,7 @@ fn cut_done(
 /// as `remote.last_remote_cut`.
 pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switched {
     let _order = ctx.bus.switch_order().lock().await;
+    ctx.bus.remote().note_switch();
     let catalog = match load_catalog(ctx.pool).await {
         Ok(catalog) => catalog,
         Err(e) => {
@@ -320,28 +324,51 @@ pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switche
 /// while an earlier cut's window still fades it out, which the on-air source
 /// does not show), so Blank always waits until the window is served (at once
 /// when nothing is mixed), then takes the `switch_order` and goes only while
-/// `cut_to` is still on air: a newer press in the window that moved the
-/// program (a manual scene) sends its own scene and no Blank follows it.
+/// nothing was switched since this press (`RemoteShared::switches`) and the
+/// source it cut to is still on air: a later press of any kind (a manual
+/// scene cg OBS accepted, "OBS manuál" itself, another playlist with its own
+/// Blank) decides what cg OBS shows, never this Blank.
 fn cg_obs_to_blank(ctx: &SwitchCtx<'_>, cut_to: i64) {
     let (bus, upstream) = (Arc::clone(ctx.bus), ctx.upstream.clone());
+    let (switch, max) = (bus.remote().switches(), ctx.window_max);
     tokio::spawn(async move {
-        let ended = wait_transition_end(&bus, BLANK_POLL, BLANK_AFTER_FADE_MAX).await;
+        let ended = wait_transition_end(&bus, BLANK_POLL, max).await;
         let _order = bus.switch_order().lock().await;
-        if blank_still_due(ended, cut_to, bus.on_air_now().source) {
-            send_blank(&upstream);
-        } else {
-            info!(
-                ended,
-                "program switch: cg OBS not parked on Blank — the fade did not end, or a newer press came"
-            );
+        let now = (bus.remote().switches(), bus.on_air_now().source);
+        match blank_decision(ended, (switch, cut_to), now) {
+            BlankDecision::Send => send_blank(&upstream),
+            BlankDecision::WindowNotServed => warn!(
+                max_s = max.as_secs(),
+                "program switch: the cut's window did not end in time — cg OBS not parked on Blank"
+            ),
+            BlankDecision::Superseded => {
+                info!("program switch: a newer switch came — cg OBS not parked on Blank")
+            }
         }
     });
 }
 
-/// Whether the Blank after a fade from "OBS manuál" still goes: the window
-/// was served and the source it cut to is still on air.
-fn blank_still_due(ended: bool, cut_to: i64, on_air: Option<i64>) -> bool {
-    ended && on_air == Some(cut_to)
+/// What the Blank after a cut does once its wait is over.
+#[derive(Debug, PartialEq, Eq)]
+enum BlankDecision {
+    Send,
+    /// The window was not served within its bound (a stalled sender): cg
+    /// OBS may still be the outgoing side, so no Blank.
+    WindowNotServed,
+    /// Something was switched since (or the cut's source left the air).
+    Superseded,
+}
+
+/// `at_press` = (the switch count after this press, the source it cut to);
+/// `now` = (the switch count, the source on air) once the wait is over.
+fn blank_decision(ended: bool, at_press: (u64, i64), now: (u64, Option<i64>)) -> BlankDecision {
+    if !ended {
+        BlankDecision::WindowNotServed
+    } else if now.0 == at_press.0 && now.1 == Some(at_press.1) {
+        BlankDecision::Send
+    } else {
+        BlankDecision::Superseded
+    }
 }
 
 fn send_blank(upstream: &Upstream) {
@@ -349,10 +376,8 @@ fn send_blank(upstream: &Upstream) {
     upstream.send("SetCurrentProgramScene", Some(data));
 }
 
-/// How often the Blank waiter looks at the window, and how long at most
-/// (the longest window is ~10.6 s; `studio_events::TRANSITION_END_MAX_WAIT`).
+/// How often the Blank waiter looks at the window.
 const BLANK_POLL: Duration = Duration::from_millis(20);
-const BLANK_AFTER_FADE_MAX: Duration = Duration::from_secs(15);
 
 /// #327: cg OBS's own black scene.
 pub const CG_OBS_BLANK_SCENE: &str = "Blank";
@@ -380,6 +405,7 @@ pub async fn switch_source(
     via: Via,
 ) -> Result<ProgramStatus, SourceError> {
     let _order = bus.switch_order().lock().await;
+    bus.remote().note_switch();
     if source == PROGRAM_INPUT_ID {
         let cut = cut_and_record(pool, bus, PROGRAM_INPUT_LABEL, via, source, None, None);
         return cut.await.map_err(SourceError::Store);

@@ -270,10 +270,24 @@ pub struct RemoteShared {
     clients: AtomicUsize,
     requests: AtomicU64,
     refused_over_cap: AtomicU64,
+    /// #327: one more for every switch under the `switch_order` (a press of
+    /// any kind, a dashboard cut), so a Blank waiting for its cut's window
+    /// knows whether anything was switched after it.
+    switches: AtomicU64,
     state: Mutex<RemoteState>,
 }
 
 impl RemoteShared {
+    /// #327: count a switch (under the `switch_order`); the new count.
+    pub(crate) fn note_switch(&self) -> u64 {
+        self.switches.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// #327: the switches counted so far.
+    pub(crate) fn switches(&self) -> u64 {
+        self.switches.load(Ordering::SeqCst)
+    }
+
     fn state(&self) -> MutexGuard<'_, RemoteState> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }

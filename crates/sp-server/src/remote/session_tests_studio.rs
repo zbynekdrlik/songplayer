@@ -229,6 +229,41 @@ async fn a_second_press_inside_a_fade_from_obs_manual_does_not_park_cg_obs_early
     }
 }
 
+/// #327 re-review 2: a manual scene cg OBS accepted while the NDI input is
+/// no source keeps the program on the playlist, yet cg OBS shows that scene
+/// now: the playlist's waiting Blank must not override it.
+#[tokio::test]
+async fn a_blank_never_overrides_a_later_manual_scene_cg_obs_accepted() {
+    let rig = rig().await;
+    let mut ws = connect(rig.addr).await;
+    hello_identify(&mut ws, 0).await;
+    assert!(
+        rig.bus
+            .set_transition(TransitionSpec::fade(300, SpecSource::Setting))
+    );
+    press(&mut ws, "sp-fast").await;
+    assert!(
+        rig.bus.status().transition.active.is_some(),
+        "the fade runs"
+    );
+    let d = press(&mut ws, "Trailer").await;
+    assert_eq!(d["requestStatus"]["code"], 100);
+    assert_eq!(rig.bus.status().source, Some(7), "the input is no source");
+    wait_for("the fade's window served", || {
+        rig.bus.release_due(utc_now_100ns() + 600_000_000);
+        rig.bus.status().transition.active.is_none()
+    })
+    .await;
+    // Only the safe direction: a Blank due now would be sent well within it.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    witness(&mut ws).await;
+    assert_eq!(
+        rig.calls(),
+        ["SetCurrentProgramScene Trailer", "GetInputList "],
+        "cg OBS keeps the scene pressed last"
+    );
+}
+
 // ---- the page-13 buttons: preview + transition -----------------------------
 
 #[tokio::test]
