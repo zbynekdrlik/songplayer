@@ -272,7 +272,6 @@ fn cut_done(
 /// as `remote.last_remote_cut`.
 pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switched {
     let _order = ctx.bus.switch_order().lock().await;
-    ctx.bus.remote().note_switch();
     let catalog = match load_catalog(ctx.pool).await {
         Ok(catalog) => catalog,
         Err(e) => {
@@ -324,10 +323,11 @@ pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switche
 /// while an earlier cut's window still fades it out, which the on-air source
 /// does not show), so Blank always waits until the window is served (at once
 /// when nothing is mixed), then takes the `switch_order` and goes only while
-/// nothing was switched since this press (`RemoteShared::switches`) and the
-/// source it cut to is still on air: a later press of any kind (a manual
-/// scene cg OBS accepted, "OBS manuál" itself, another playlist with its own
-/// Blank) decides what cg OBS shows, never this Blank.
+/// nothing was switched since this press (`RemoteShared::switches`: a cut,
+/// or a manual scene cg OBS accepted; a press that changed nothing does not
+/// count) and the source it cut to is still on air: a later switch (a
+/// manual scene, "OBS manuál" itself, another playlist with its own Blank)
+/// decides what cg OBS shows, never this Blank.
 fn cg_obs_to_blank(ctx: &SwitchCtx<'_>, cut_to: i64) {
     let (bus, upstream) = (Arc::clone(ctx.bus), ctx.upstream.clone());
     let (switch, max) = (bus.remote().switches(), ctx.window_max);
@@ -405,7 +405,6 @@ pub async fn switch_source(
     via: Via,
 ) -> Result<ProgramStatus, SourceError> {
     let _order = bus.switch_order().lock().await;
-    bus.remote().note_switch();
     if source == PROGRAM_INPUT_ID {
         let cut = cut_and_record(pool, bus, PROGRAM_INPUT_LABEL, via, source, None, None);
         return cut.await.map_err(SourceError::Store);
@@ -482,6 +481,9 @@ async fn switch_manual(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switched {
         ctx.bus.remote().record_cut(record);
         return Switched::NotSwitched(answer);
     }
+    // cg OBS shows this scene now, whatever SP-program does next (#327:
+    // a waiting Blank must not override it).
+    ctx.bus.remote().note_switch();
     let input_active = load_input_settings(ctx.pool)
         .await
         .is_ok_and(|s| s.active());
@@ -521,6 +523,7 @@ async fn cut_and_record(
     let shared = bus.remote();
     match persist_and_cut(pool, bus, source, name).await {
         Ok(status) => {
+            shared.note_switch();
             info!(
                 scene = %clip(pressed),
                 source,

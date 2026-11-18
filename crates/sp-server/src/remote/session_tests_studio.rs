@@ -264,6 +264,32 @@ async fn a_blank_never_overrides_a_later_manual_scene_cg_obs_accepted() {
     );
 }
 
+/// #327 re-review 3: a press that changed nothing (here "OBS manuál" while
+/// the NDI input is no source: a keep) does not cancel a waiting Blank.
+#[tokio::test]
+async fn a_press_that_changed_nothing_keeps_the_waiting_blank() {
+    let rig = rig().await;
+    let mut ws = connect(rig.addr).await;
+    hello_identify(&mut ws, 0).await;
+    assert!(
+        rig.bus
+            .set_transition(TransitionSpec::fade(300, SpecSource::Setting))
+    );
+    press(&mut ws, "sp-fast").await;
+    assert!(
+        rig.bus.status().transition.active.is_some(),
+        "the fade runs"
+    );
+    press(&mut ws, "OBS manuál").await;
+    assert_eq!(last_cut_json(&rig)["reason"], "input_inactive", "a keep");
+    wait_for("the fade's window served", || {
+        rig.bus.release_due(utc_now_100ns() + 600_000_000);
+        rig.bus.status().transition.active.is_none()
+    })
+    .await;
+    wait_blanks(&rig, 1).await;
+}
+
 // ---- the page-13 buttons: preview + transition -----------------------------
 
 #[tokio::test]
