@@ -889,13 +889,9 @@ Describe 'Get-ProdPcBlockers: the firewall (issue 255, dstack#155)' {
     It 'never plans a firewall action, whatever the state' {
         $mixed = Read-Fixture 'snv'
         $mixed.firewall.Public = $false
-        foreach ($facts in @((Read-Fixture 'pp'), (Read-Fixture 'snv'), (Read-Fixture 'snv-dante-leg'), (Read-Fixture 'fresh'), (Get-PlainOnFacts), $mixed)) {
+        foreach ($facts in @((Read-Fixture 'pp'), (Read-Fixture 'snv'), (Read-Fixture 'fresh'), (Get-PlainOnFacts), $mixed)) {
             @(Get-PlanLines $facts | Where-Object { $_ -like 'firewall *' }) | Should -HaveCount 0
         }
-    }
-
-    It "holds dstack's standard as SNV read it on 10.11.2026" {
-        Get-BlockerCodes (Read-Fixture 'snv') | Should -HaveCount 0
     }
 
     It 'holds every profile off whatever its rules (PP; no firewall_standard needed)' {
@@ -955,30 +951,40 @@ Describe 'Get-ProdPcBlockers: the firewall (issue 255, dstack#155)' {
         $facts.firewall_standard.block_rules = @($facts.firewall_standard.block_rules) + @(
             [pscustomobject]@{ name = '{1}'; display_name = 'Block X'; group = ''; display_group = '' },
             [pscustomobject]@{ name = '{2}'; display_name = ''; group = 'Other'; display_group = 'Other' },
-            [pscustomobject]@{ name = '{3}'; display_name = 'by display group'; group = ''; display_group = 'dstack155' }
+            [pscustomobject]@{ name = '{3}'; display_name = 'by display group'; group = ''; display_group = 'dstack Dante leg' }
         )
         $blockers = @(Get-ProdPcBlockers -Facts $facts)
         @($blockers | ForEach-Object { $_.Code }) | Should -Be @('firewall_block_outside_group')
-        $blockers[0].Text | Should -Match 'dstack155\): Block X, \{2\}$'
+        $blockers[0].Text | Should -Match 'dstack Dante leg\): Block X, \{2\}$'
     }
 
-    It 'blocks a group that does not hold exactly 14 enabled Block rules' {
+    It 'reads a leftover rule of the old group dstack155 as a Block rule outside the group (issue 322)' {
+        # The per-box group of dstack#155 is no longer accepted: its enabled
+        # Block rules are foreign ones, by either group field.
         $facts = Read-Fixture 'snv'
-        $facts.firewall_standard.group_rules = @($facts.firewall_standard.group_rules | Select-Object -First 13)
-        Get-BlockerCodes $facts | Should -Be @('firewall_group_incomplete')
-        $facts = Read-Fixture 'snv'
-        @($facts.firewall_standard.group_rules)[3].enabled = $false
-        Get-BlockerCodes $facts | Should -Be @('firewall_group_incomplete')
-        $facts = Read-Fixture 'snv'
-        @($facts.firewall_standard.group_rules)[5].action = 'Allow'
+        $facts.firewall_standard.block_rules = @($facts.firewall_standard.block_rules) + @(
+            [pscustomobject]@{ name = '{o1}'; display_name = 'dstack155 obs64.exe in'; group = 'dstack155'; display_group = 'dstack155' },
+            [pscustomobject]@{ name = '{o2}'; display_name = 'dstack155 TCP out'; group = ''; display_group = 'dstack155' }
+        )
         $blockers = @(Get-ProdPcBlockers -Facts $facts)
-        @($blockers | ForEach-Object { $_.Code }) | Should -Be @('firewall_group_incomplete')
-        $blockers[0].Text | Should -Match 'holds 14 rule\(s\), 13 of them enabled Block'
-        # Group rules but none left and default Allow: still the standard, incomplete.
+        @($blockers | ForEach-Object { $_.Code }) | Should -Be @('firewall_block_outside_group')
+        $blockers[0].Text | Should -Match 'dstack Dante leg\): dstack155 obs64\.exe in, dstack155 TCP out$'
+        # The whole old group and nothing of the new one (a PC never
+        # switched): its 14 rules are all outside, and the group is empty.
         $facts = Read-Fixture 'snv'
         $facts.firewall_standard.group_rules = @()
-        $facts.firewall_standard.block_rules = @()
-        Get-BlockerCodes $facts | Should -Be @('firewall_group_incomplete')
+        $facts.firewall_standard.block_rules = @(1..14 | ForEach-Object {
+                [pscustomobject]@{ name = "{o$_}"; display_name = "dstack155 rule $_"; group = 'dstack155'; display_group = 'dstack155' }
+            })
+        Get-BlockerCodes $facts | Should -Be @('firewall_block_outside_group', 'firewall_group_incomplete')
+        # Facts an older -SaveFacts wrote with the old group's rules as
+        # group rules: read the box again.
+        $facts = Read-Fixture 'snv'
+        $old = [pscustomobject]@{ name = '{o1}'; display_name = 'dstack155 obs64.exe in'; group = 'dstack155'; enabled = $true; action = 'Block'; interface_alias = @('Dante70'); programs = @('Any') }
+        $facts.firewall_standard.group_rules = @($facts.firewall_standard.group_rules) + @($old)
+        $blockers = @(Get-ProdPcBlockers -Facts $facts)
+        @($blockers | ForEach-Object { $_.Code }) | Should -Be @('unreadable:firewall_rules')
+        $blockers[0].Text | Should -Match "no group of dstack's: \{o1\}$"
     }
 
     It 'blocks a group rule not bound to the Dante leg alone' {
@@ -993,7 +999,7 @@ Describe 'Get-ProdPcBlockers: the firewall (issue 255, dstack#155)' {
     }
 
     It "holds dstack's generic Dante-leg filter as dante-leg.ps1 creates it (issue 322)" {
-        $facts = Read-Fixture 'snv-dante-leg'
+        $facts = Read-Fixture 'snv'
         Get-BlockerCodes $facts | Should -HaveCount 0
         Get-PlanLines $facts | Should -Be @('windows_update ExcludeWUDriversInQualityUpdate')
         # The fixture holds exactly the script's list of dstack's names.
@@ -1004,59 +1010,54 @@ Describe 'Get-ProdPcBlockers: the firewall (issue 255, dstack#155)' {
     }
 
     It 'counts a generic rule by its group or its display group' {
-        $facts = Read-Fixture 'snv-dante-leg'
+        $facts = Read-Fixture 'snv'
         $rules = @($facts.firewall_standard.block_rules)
         $rules[0].group = ''
         $rules[1].display_group = 'Other'
         $rules[2].group = ' DSTACK DANTE LEG '
         $rules[2].display_group = ''
         Get-BlockerCodes $facts | Should -HaveCount 0
-        Get-ProdPcRuleGroup ([pscustomobject]@{ group = 'dstack Dante'; display_group = 'dstack1550' }) | Should -BeNullOrEmpty
-        Get-ProdPcRuleGroup ([pscustomobject]@{ group = ''; display_group = 'dstack155' }) | Should -Be 'dstack155'
+        Test-ProdPcRuleInGroup ([pscustomobject]@{ group = 'dstack Dante'; display_group = 'dstack Dante legs' }) | Should -BeFalse
+        Test-ProdPcRuleInGroup ([pscustomobject]@{ group = ''; display_group = 'dstack155' }) | Should -BeFalse
+        Test-ProdPcRuleInGroup ([pscustomobject]@{ group = ''; display_group = 'DSTACK dante LEG ' }) | Should -BeTrue
+        Get-ProdPcFirewallGroup | Should -BeExactly 'dstack Dante leg'
     }
 
     It 'blocks a generic group that is not exactly its 10 rules, naming what differs' {
-        $facts = Read-Fixture 'snv-dante-leg'
+        $facts = Read-Fixture 'snv'
         $facts.firewall_standard.group_rules = @($facts.firewall_standard.group_rules | Select-Object -First 9)
         $blockers = @(Get-ProdPcBlockers -Facts $facts)
         @($blockers | ForEach-Object { $_.Code }) | Should -Be @('firewall_group_incomplete')
         $blockers[0].Text | Should -Match 'dstack Dante leg holds 9 rule\(s\), 9 of them enabled Block: .*its 10, all enabled Block; missing: dstack Dante leg: mDNSResponder\.exe \(x86\) UDP outbound$'
         # A rule disabled, or not a Block rule.
-        $facts = Read-Fixture 'snv-dante-leg'
+        $facts = Read-Fixture 'snv'
         @($facts.firewall_standard.group_rules)[3].enabled = $false
         @(Get-ProdPcBlockers -Facts $facts)[0].Text | Should -Match 'holds 10 rule\(s\), 9 of them enabled Block'
-        $facts = Read-Fixture 'snv-dante-leg'
+        $facts = Read-Fixture 'snv'
         @($facts.firewall_standard.group_rules)[7].action = 'Allow'
         Get-BlockerCodes $facts | Should -Be @('firewall_group_incomplete')
         # Ten rules, one of them not dstack's (another version's name).
-        $facts = Read-Fixture 'snv-dante-leg'
+        $facts = Read-Fixture 'snv'
         @($facts.firewall_standard.group_rules)[0].display_name = 'dstack Dante leg: TCP'
         $blockers = @(Get-ProdPcBlockers -Facts $facts)
         @($blockers | ForEach-Object { $_.Code }) | Should -Be @('firewall_group_incomplete')
         $blockers[0].Text | Should -Match "missing: dstack Dante leg: TCP in; not dstack's: dstack Dante leg: TCP$"
         # Eleven: one too many.
-        $facts = Read-Fixture 'snv-dante-leg'
+        $facts = Read-Fixture 'snv'
         $extra = [pscustomobject]@{ name = '{x}'; display_name = 'dstack Dante leg: TCP in'; group = 'dstack Dante leg'; enabled = $true; action = 'Block'; interface_alias = @('Dante70'); programs = @('Any') }
         $facts.firewall_standard.group_rules = @($facts.firewall_standard.group_rules) + @($extra)
         Get-BlockerCodes $facts | Should -Be @('firewall_group_incomplete')
-    }
-
-    It "blocks both of dstack's groups at once (the switch half done)" {
-        $facts = Read-Fixture 'snv-dante-leg'
-        $old = @((Read-Fixture 'snv').firewall_standard)
-        $facts.firewall_standard.block_rules = @($facts.firewall_standard.block_rules) + @($old.block_rules)
-        $facts.firewall_standard.group_rules = @($facts.firewall_standard.group_rules) + @($old.group_rules)
+        # No rule of the group left and default Allow: still the standard, incomplete.
+        $facts = Read-Fixture 'snv'
+        $facts.firewall_standard.group_rules = @()
+        $facts.firewall_standard.block_rules = @()
         $blockers = @(Get-ProdPcBlockers -Facts $facts)
-        @($blockers | ForEach-Object { $_.Code }) | Should -Be @('firewall_groups_mixed')
-        $blockers[0].Text | Should -Match '\(dstack Dante leg: 10, dstack155: 14\)'
-        # One old rule left behind is enough.
-        $facts = Read-Fixture 'snv-dante-leg'
-        $facts.firewall_standard.group_rules = @($facts.firewall_standard.group_rules) + @(@($old.group_rules)[0])
-        Get-BlockerCodes $facts | Should -Be @('firewall_groups_mixed')
+        @($blockers | ForEach-Object { $_.Code }) | Should -Be @('firewall_group_incomplete')
+        $blockers[0].Text | Should -Match 'holds 0 rule\(s\), 0 of them enabled Block'
     }
 
     It 'blocks a group rule read with no group of dstack''s' {
-        $facts = Read-Fixture 'snv-dante-leg'
+        $facts = Read-Fixture 'snv'
         @($facts.firewall_standard.group_rules)[2].group = ''
         $blockers = @(Get-ProdPcBlockers -Facts $facts)
         @($blockers | ForEach-Object { $_.Code }) | Should -Be @('unreadable:firewall_rules', 'firewall_group_incomplete')
@@ -1064,7 +1065,7 @@ Describe 'Get-ProdPcBlockers: the firewall (issue 255, dstack#155)' {
     }
 
     It 'blocks a generic rule not bound to the Dante leg alone, or naming SongPlayer.exe' {
-        $facts = Read-Fixture 'snv-dante-leg'
+        $facts = Read-Fixture 'snv'
         $rules = @($facts.firewall_standard.group_rules)
         $rules[1].interface_alias = @('Ethernet 4')
         $rules[4].programs = @('C:\Program Files\SongPlayer\SongPlayer.exe')

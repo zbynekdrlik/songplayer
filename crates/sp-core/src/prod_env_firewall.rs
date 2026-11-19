@@ -1,28 +1,19 @@
 //! #255 (dstack#155, the owner's ruling of 10.11.2026): the firewall rule
 //! follows dstack's two-network standard (dstack `docs/two-networks.md` §3).
-//! A production PC is in one of three states:
+//! A production PC is in one of two states:
 //!
-//! - **off** (a PC with no Dante leg, PP today): every profile off;
-//! - **dstack155** (the per-box standard): every profile on, each default
-//!   action (inbound and outbound) Allow, every enabled Block rule in the
-//!   group [`DSTACK_GROUP`], which holds exactly [`DSTACK_GROUP_RULES`];
-//! - **dante_leg** (#322, dstack#264: the generic filter that replaces it):
-//!   the same profiles and defaults, every enabled Block rule in the group
+//! - **off** (a PC with no Dante leg): every profile off;
+//! - **dante_leg** (#322, dstack#264: the generic Dante-leg filter, the
+//!   same on every PC): every profile on, each default action (inbound and
+//!   outbound) Allow, every enabled Block rule in the group
 //!   [`DANTE_LEG_GROUP`], which holds exactly [`DANTE_LEG_GROUP_RULES`].
 //!
-//! Both groups at once (a switch half done) is a problem, as is anything
-//! else. This module names the facts and their Slovak
-//! words; sp-server's `prod_env::firewall` decides.
+//! Anything else is a problem. dstack#155's per-box group `dstack155` is no
+//! longer accepted (#322: every PC moved to the generic filter): its rules
+//! read as Block rules outside the group. This module names the facts and
+//! their Slovak words; sp-server's `prod_env::firewall` decides.
 
 use serde::{Deserialize, Serialize};
-
-/// The rule group dstack creates (dstack#155).
-pub const DSTACK_GROUP: &str = "dstack155";
-
-/// How many enabled Block rules the group holds: in + out for obs64.exe,
-/// Arena.exe, python.exe, RustDesk.exe, svchost.exe, mDNSResponder.exe, and
-/// TCP in + out.
-pub const DSTACK_GROUP_RULES: u32 = 14;
 
 /// #322 (dstack#264): the generic Dante-leg group dstack's
 /// `tools/windows/dante-leg.ps1` creates, identical on every PC.
@@ -50,42 +41,13 @@ pub const DANTE_LEG_RULE_NAMES: [&str; 10] = [
 /// How many enabled Block rules [`DANTE_LEG_GROUP`] holds.
 pub const DANTE_LEG_GROUP_RULES: u32 = 10;
 
-/// One of dstack's two rule groups.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum FirewallGroup {
-    /// The per-box group of dstack#155.
-    Dstack155,
-    /// The generic group of dstack#264.
-    DanteLeg,
-}
-
-impl FirewallGroup {
-    /// The group's name, as the firewall lists it.
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Dstack155 => DSTACK_GROUP,
-            Self::DanteLeg => DANTE_LEG_GROUP,
-        }
-    }
-
-    /// How many enabled Block rules the group holds.
-    pub fn rules(self) -> u32 {
-        match self {
-            Self::Dstack155 => DSTACK_GROUP_RULES,
-            Self::DanteLeg => DANTE_LEG_GROUP_RULES,
-        }
-    }
-
-    /// The group a rule belongs to by its `RuleGroup` or `DisplayGroup`
-    /// (padding and ASCII case ignored), or none.
-    pub fn of(rule_group: Option<&str>, display_group: Option<&str>) -> Option<Self> {
-        [Self::Dstack155, Self::DanteLeg].into_iter().find(|g| {
-            [rule_group, display_group]
-                .into_iter()
-                .flatten()
-                .any(|name| name.trim().eq_ignore_ascii_case(g.name()))
-        })
-    }
+/// Whether a rule belongs to [`DANTE_LEG_GROUP`]: by its `RuleGroup` or its
+/// `DisplayGroup` (padding and ASCII case ignored).
+pub fn in_dante_leg_group(rule_group: Option<&str>, display_group: Option<&str>) -> bool {
+    [rule_group, display_group]
+        .into_iter()
+        .flatten()
+        .any(|name| name.trim().eq_ignore_ascii_case(DANTE_LEG_GROUP))
 }
 
 /// A default action's value (`MSFT_NetFirewallProfile`
@@ -118,8 +80,6 @@ impl FirewallDefaults {
 pub enum FirewallMode {
     /// Every profile off.
     Off,
-    /// dstack's per-box standard, every fact as it wants.
-    Dstack155,
     /// #322: dstack's generic Dante-leg filter, every fact as it wants.
     #[serde(rename = "dante_leg")]
     DanteLeg,

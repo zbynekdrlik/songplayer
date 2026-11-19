@@ -1,7 +1,7 @@
-//! #255 (dstack#155), #322 (dstack#264): the firewall's three accepted
+//! #255 (dstack#155), #322 (dstack#264): the firewall's two accepted
 //! states and every way a box misses them.
 
-use sp_core::prod_env::firewall::{FirewallDefaults, FirewallGroup, FirewallMode};
+use sp_core::prod_env::firewall::{FirewallDefaults, FirewallMode};
 use sp_core::prod_env::{EnvProblem, FirewallProfile, Unreadable};
 
 use super::*;
@@ -18,21 +18,12 @@ const WINDOWS: FirewallDefaults = FirewallDefaults {
     outbound: 2,
 };
 
-/// `dstack155` rules of the per-box standard and the named rules outside.
-fn rules(dstack155: u32, outside: &[&str]) -> Option<BlockRules> {
+/// That many rules of the group `dstack Dante leg` and the named rules
+/// outside it.
+fn rules(dante_leg: u32, outside: &[&str]) -> Option<BlockRules> {
     Some(BlockRules {
-        dstack155,
-        dante_leg: 0,
-        outside: outside.iter().map(|n| n.to_string()).collect(),
-    })
-}
-
-/// #322: rules of both groups and none outside.
-fn groups(dstack155: u32, dante_leg: u32) -> Option<BlockRules> {
-    Some(BlockRules {
-        dstack155,
         dante_leg,
-        outside: Vec::new(),
+        outside: outside.iter().map(|n| n.to_string()).collect(),
     })
 }
 
@@ -50,9 +41,11 @@ fn facts(
     }
 }
 
-/// dstack's standard as resolume-snv read it (10.11.2026 12:00Z).
+/// #322 (dstack#264): dstack's generic Dante-leg filter as `dante-leg.ps1`
+/// leaves resolume-snv and resolume-pp (both read 19.11.2026): every
+/// profile on with Allow both ways, the group's 10 rules, nothing else.
 fn standard() -> EnvFacts {
-    facts([Some(true); 3], [Some(ALLOW); 3], rules(14, &[]))
+    facts([Some(true); 3], [Some(ALLOW); 3], rules(10, &[]))
 }
 
 use FirewallProfile::{Domain, Private, Public};
@@ -69,10 +62,10 @@ fn every_profile_off_holds_whatever_its_rules_and_defaults() {
 }
 
 #[test]
-fn dstacks_standard_holds() {
+fn dstacks_generic_filter_holds() {
     let f = standard();
     assert_eq!(problems(&f), []);
-    assert_eq!(mode(&f, &problems(&f)), Some(FirewallMode::Dstack155));
+    assert_eq!(mode(&f, &problems(&f)), Some(FirewallMode::DanteLeg));
     // Through the whole verdict: no firewall problem.
     assert!(
         !verdict(&f)
@@ -159,7 +152,7 @@ fn a_block_rule_outside_the_group_is_named() {
     let f = facts(
         [Some(true); 3],
         [Some(ALLOW); 3],
-        rules(14, &["Block X", "Block Y"]),
+        rules(10, &["Block X", "Block Y"]),
     );
     assert_eq!(
         problems(&f),
@@ -168,30 +161,25 @@ fn a_block_rule_outside_the_group_is_named() {
             "Block Y".to_string()
         ])]
     );
+    assert_eq!(mode(&f, &problems(&f)), Some(FirewallMode::Other));
 }
 
 #[test]
-fn the_group_holds_exactly_fourteen_enabled_block_rules() {
-    for count in [1, 13, 15] {
+fn the_group_holds_exactly_ten_enabled_block_rules() {
+    for count in [1, 9, 11, 14] {
         let f = facts([Some(true); 3], [Some(ALLOW); 3], rules(count, &[]));
         assert_eq!(
             problems(&f),
-            [EnvProblem::FirewallGroupIncomplete {
-                group: FirewallGroup::Dstack155,
-                rules: count
-            }],
+            [EnvProblem::FirewallGroupIncomplete { rules: count }],
             "{count}"
         );
+        assert_eq!(mode(&f, &problems(&f)), Some(FirewallMode::Other));
     }
-    // No rule of either group: judged against the generic group, the one
-    // dstack sets up now.
+    // No rule of the group, the defaults allowing: the standard, incomplete.
     let f = facts([Some(true); 3], [Some(ALLOW); 3], rules(0, &[]));
     assert_eq!(
         problems(&f),
-        [EnvProblem::FirewallGroupIncomplete {
-            group: FirewallGroup::DanteLeg,
-            rules: 0
-        }]
+        [EnvProblem::FirewallGroupIncomplete { rules: 0 }]
     );
     // A group rule alone is an attempt: Windows' defaults then fail.
     let f = facts(
@@ -212,11 +200,79 @@ fn the_group_holds_exactly_fourteen_enabled_block_rules() {
             },
             EnvProblem::FirewallOff(Public),
             EnvProblem::FirewallBlockOutsideGroup(vec!["Block X".to_string()]),
-            EnvProblem::FirewallGroupIncomplete {
-                group: FirewallGroup::Dstack155,
-                rules: 3
-            },
+            EnvProblem::FirewallGroupIncomplete { rules: 3 },
         ]
+    );
+}
+
+/// The whole group alone is an attempt too: Windows' defaults then fail,
+/// and nothing of the rules does.
+#[test]
+fn the_whole_group_alone_is_an_attempt() {
+    let f = facts(
+        [Some(true), Some(true), Some(false)],
+        [Some(WINDOWS); 3],
+        rules(10, &[]),
+    );
+    assert_eq!(
+        problems(&f),
+        [
+            EnvProblem::FirewallDefaultBlock {
+                profile: Domain,
+                defaults: WINDOWS
+            },
+            EnvProblem::FirewallDefaultBlock {
+                profile: Private,
+                defaults: WINDOWS
+            },
+            EnvProblem::FirewallOff(Public),
+        ]
+    );
+}
+
+/// #322: dstack#155's per-box group `dstack155` is no longer accepted. Its
+/// rules are no rules of the group, so the reader names them outside it
+/// (`prod_env_read_tests_firewall.rs`), and they are judged like any other
+/// foreign Block rule.
+#[test]
+fn rules_of_the_old_group_are_block_rules_outside_the_group() {
+    // A PC that never switched: the old group's 14 rules, Allow defaults.
+    let old: Vec<String> = (1..=14).map(|i| format!("dstack155 rule {i}")).collect();
+    let never_switched = facts(
+        [Some(true); 3],
+        [Some(ALLOW); 3],
+        Some(BlockRules {
+            dante_leg: 0,
+            outside: old.clone(),
+        }),
+    );
+    assert_eq!(
+        problems(&never_switched),
+        [
+            EnvProblem::FirewallBlockOutsideGroup(old),
+            EnvProblem::FirewallGroupIncomplete { rules: 0 },
+        ]
+    );
+    assert_eq!(
+        mode(&never_switched, &problems(&never_switched)),
+        Some(FirewallMode::Other)
+    );
+    // A switch that left one old rule behind: the generic group is whole,
+    // the leftover is named.
+    let leftover = facts(
+        [Some(true); 3],
+        [Some(ALLOW); 3],
+        rules(10, &["dstack155 obs64.exe in"]),
+    );
+    assert_eq!(
+        problems(&leftover),
+        [EnvProblem::FirewallBlockOutsideGroup(vec![
+            "dstack155 obs64.exe in".to_string()
+        ])]
+    );
+    assert_eq!(
+        mode(&leftover, &problems(&leftover)),
+        Some(FirewallMode::Other)
     );
 }
 
@@ -264,148 +320,33 @@ fn an_unread_profile_is_named_and_nothing_else_is_judged() {
     assert_eq!(mode(&f, &problems(&f)), None);
 }
 
-/// #322 (dstack#264): dstack's generic Dante-leg filter as v0.6.123's
-/// `dante-leg.ps1` leaves resolume-snv: every profile on with Allow both
-/// ways, the group's 10 rules, nothing else.
-fn generic() -> EnvFacts {
-    facts([Some(true); 3], [Some(ALLOW); 3], groups(0, 10))
-}
-
 #[test]
-fn dstacks_generic_filter_holds() {
-    let f = generic();
-    assert_eq!(problems(&f), []);
-    assert_eq!(mode(&f, &problems(&f)), Some(FirewallMode::DanteLeg));
-    assert!(
-        !verdict(&f)
-            .problems
-            .iter()
-            .any(|p| p.code().starts_with("firewall")),
-        "{:?}",
-        verdict(&f).problems
-    );
-}
-
-#[test]
-fn the_generic_group_holds_exactly_ten_enabled_block_rules() {
-    for count in [1, 9, 11, 14] {
-        let f = facts([Some(true); 3], [Some(ALLOW); 3], groups(0, count));
-        assert_eq!(
-            problems(&f),
-            [EnvProblem::FirewallGroupIncomplete {
-                group: FirewallGroup::DanteLeg,
-                rules: count
-            }],
-            "{count}"
-        );
-        assert_eq!(mode(&f, &problems(&f)), Some(FirewallMode::Other));
-    }
-}
-
-/// A generic rule alone is an attempt too: Windows' defaults then fail.
-#[test]
-fn a_generic_rule_alone_is_an_attempt() {
-    let f = facts(
-        [Some(true), Some(true), Some(false)],
-        [Some(WINDOWS); 3],
-        groups(0, 10),
-    );
-    assert_eq!(
-        problems(&f),
-        [
-            EnvProblem::FirewallDefaultBlock {
-                profile: Domain,
-                defaults: WINDOWS
-            },
-            EnvProblem::FirewallDefaultBlock {
-                profile: Private,
-                defaults: WINDOWS
-            },
-            EnvProblem::FirewallOff(Public),
-        ]
-    );
-}
-
-/// Both groups holding rules (the switch half done, or `-RemoveGroup`
-/// forgotten): one named problem, never either standard.
-#[test]
-fn both_groups_at_once_are_named() {
-    for (old, new) in [(14, 10), (1, 10), (14, 1), (3, 7)] {
-        let f = facts([Some(true); 3], [Some(ALLOW); 3], groups(old, new));
-        assert_eq!(
-            problems(&f),
-            [EnvProblem::FirewallGroupsMixed {
-                dstack155: old,
-                dante_leg: new
-            }],
-            "{old} {new}"
-        );
-        assert_eq!(mode(&f, &problems(&f)), Some(FirewallMode::Other));
-    }
-}
-
-#[test]
-fn a_block_rule_outside_both_groups_is_named_with_the_generic_filter() {
-    let mut f = generic();
-    f.firewall_rules = Some(BlockRules {
-        dstack155: 0,
-        dante_leg: 10,
-        outside: vec!["Block X".to_string()],
-    });
-    assert_eq!(
-        problems(&f),
-        [EnvProblem::FirewallBlockOutsideGroup(vec![
-            "Block X".to_string()
-        ])]
-    );
-    assert_eq!(mode(&f, &problems(&f)), Some(FirewallMode::Other));
-}
-
-/// The per-box standard still holds while a PC waits for its switch.
-#[test]
-fn the_per_box_standard_is_still_its_own_mode() {
-    let f = facts([Some(true); 3], [Some(ALLOW); 3], groups(14, 0));
-    assert_eq!(mode(&f, &problems(&f)), Some(FirewallMode::Dstack155));
-}
-
-#[test]
-fn a_rule_is_counted_by_its_group_and_named_outside_both() {
+fn a_rule_is_counted_in_the_group_or_named_outside_it() {
     let mut r = BlockRules::default();
-    r.add(Some(FirewallGroup::Dstack155), "a".to_string());
-    r.add(Some(FirewallGroup::DanteLeg), "b".to_string());
-    r.add(Some(FirewallGroup::DanteLeg), "c".to_string());
-    r.add(None, "Block X".to_string());
+    r.add(true, "a".to_string());
+    r.add(true, "b".to_string());
+    r.add(false, "Block X".to_string());
     assert_eq!(
         r,
         BlockRules {
-            dstack155: 1,
             dante_leg: 2,
             outside: vec!["Block X".to_string()],
         }
     );
 }
 
-#[test]
-fn the_rules_are_judged_by_the_group_that_holds_them() {
-    let group = |old, new| groups(old, new).unwrap().group();
-    assert_eq!(group(0, 0), Some(FirewallGroup::DanteLeg));
-    assert_eq!(group(0, 3), Some(FirewallGroup::DanteLeg));
-    assert_eq!(group(2, 0), Some(FirewallGroup::Dstack155));
-    assert_eq!(group(2, 3), None);
-}
-
-/// #322: `scripts/setup-prod-pc.ps1` judges the same generic rules by name
-/// and the same two groups.
+/// #322: `scripts/setup-prod-pc.ps1` judges the same rules by name and the
+/// same group.
 #[test]
 fn the_setup_script_knows_dstacks_generic_rules() {
-    use sp_core::prod_env::firewall::{DANTE_LEG_GROUP, DANTE_LEG_RULE_NAMES, DSTACK_GROUP};
+    use sp_core::prod_env::firewall::{DANTE_LEG_GROUP, DANTE_LEG_RULE_NAMES};
     let script = include_str!("../../../scripts/setup-prod-pc.ps1");
-    let line = |names: &[&str]| {
-        let quoted: Vec<String> = names.iter().map(|n| format!("'{n}'")).collect();
-        format!("return @({})", quoted.join(", "))
-    };
-    let names = line(&DANTE_LEG_RULE_NAMES);
+    let quoted: Vec<String> = DANTE_LEG_RULE_NAMES
+        .iter()
+        .map(|n| format!("'{n}'"))
+        .collect();
+    let names = format!("return @({})", quoted.join(", "));
     assert!(script.contains(&names), "{names}");
-    let groups = line(&[DSTACK_GROUP, DANTE_LEG_GROUP]);
-    assert!(script.contains(&groups), "{groups}");
+    let group = format!("function Get-ProdPcFirewallGroup {{\n    return '{DANTE_LEG_GROUP}'\n}}");
+    assert!(script.contains(&group), "{group}");
 }

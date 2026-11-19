@@ -34,7 +34,7 @@ pub mod firewall;
 pub mod network;
 
 use audio::{AudioProfile, MmcssSetting, NicSetting};
-use firewall::{DANTE_LEG_GROUP, DSTACK_GROUP, FirewallDefaults, FirewallGroup, FirewallMode};
+use firewall::{DANTE_LEG_GROUP, DANTE_LEG_GROUP_RULES, FirewallDefaults, FirewallMode};
 use network::{NetProblem, TwoNetworksView};
 
 /// A Windows Firewall profile.
@@ -129,15 +129,12 @@ pub enum EnvProblem {
         profile: FirewallProfile,
         defaults: FirewallDefaults,
     },
-    /// #255: enabled Block rules outside dstack's groups (their names).
+    /// #255: enabled Block rules outside dstack's group (their names; a
+    /// leftover rule of the old group `dstack155` is one, #322).
     FirewallBlockOutsideGroup(Vec<String>),
-    /// #255: the group does not hold exactly its enabled Block rules (which
-    /// group: the one that holds rules, else the generic one; how many it
-    /// holds).
-    FirewallGroupIncomplete { group: FirewallGroup, rules: u32 },
-    /// #322 (dstack#264): both of dstack's groups hold enabled Block rules
-    /// (the switch to the generic filter half done; how many each holds).
-    FirewallGroupsMixed { dstack155: u32, dante_leg: u32 },
+    /// #255: the group does not hold exactly its enabled Block rules (how
+    /// many it holds).
+    FirewallGroupIncomplete { rules: u32 },
     /// #255: SoundGrid is installed and its driver has no port chosen (no
     /// preferences, no or an empty `LocalLanPort`).
     SoundGridPortUnset,
@@ -217,7 +214,6 @@ impl EnvProblem {
             }
             Self::FirewallBlockOutsideGroup(_) => "firewall_block_outside_group".to_string(),
             Self::FirewallGroupIncomplete { .. } => "firewall_group_incomplete".to_string(),
-            Self::FirewallGroupsMixed { .. } => "firewall_groups_mixed".to_string(),
             Self::SoundGridPortUnset => "soundgrid_port_unset".to_string(),
             Self::SoundGridPortMissing { .. } => "soundgrid_port_missing".to_string(),
             Self::SoundGridNicNetAdapterCx { .. } => "soundgrid_nic_netadaptercx".to_string(),
@@ -279,7 +275,7 @@ impl EnvProblem {
             Self::AntivirusOn(name) => format!("antivírus „{name}“ je zapnutý"),
             Self::FirewallOn(p) => format!(
                 "brána firewall je zapnutá ({} profil) a nie je nastavená podľa štandardu dstack \
-                 (skupina pravidiel „{DANTE_LEG_GROUP}“ alebo {DSTACK_GROUP})",
+                 (skupina pravidiel „{DANTE_LEG_GROUP}“)",
                 p.name_sk()
             ),
             Self::FirewallOff(p) => format!(
@@ -295,22 +291,13 @@ impl EnvProblem {
                 firewall::action_sk(defaults.outbound)
             ),
             Self::FirewallBlockOutsideGroup(names) => format!(
-                "brána firewall má zapnuté blokovacie pravidlá mimo skupín dstack \
-                 („{DANTE_LEG_GROUP}“, {DSTACK_GROUP}): {}",
+                "brána firewall má zapnuté blokovacie pravidlá mimo skupiny dstack \
+                 („{DANTE_LEG_GROUP}“): {}",
                 firewall::names_sk(names)
             ),
-            Self::FirewallGroupIncomplete { group, rules } => format!(
-                "skupina pravidiel „{}“ má {rules} zapnutých blokovacích pravidiel (má ich mať {})",
-                group.name(),
-                group.rules()
-            ),
-            Self::FirewallGroupsMixed {
-                dstack155,
-                dante_leg,
-            } => format!(
-                "brána firewall má zapnuté obe skupiny pravidiel dstack („{DANTE_LEG_GROUP}“: \
-                 {dante_leg}, {DSTACK_GROUP}: {dstack155}) — prechod na novú skupinu nie je \
-                 dokončený, platiť má len jedna"
+            Self::FirewallGroupIncomplete { rules } => format!(
+                "skupina pravidiel „{DANTE_LEG_GROUP}“ má {rules} zapnutých blokovacích \
+                 pravidiel (má ich mať {DANTE_LEG_GROUP_RULES})"
             ),
             Self::SoundGridPortUnset => {
                 "SoundGrid nemá zvolený sieťový port — nastav ho v SoundGrid \
@@ -463,17 +450,13 @@ pub struct FirewallState {
     pub private: Option<bool>,
     #[serde(default)]
     pub public: Option<bool>,
-    /// `off`, `dstack155`, `dante_leg` or `other` (`None`: a profile was
-    /// not read).
+    /// `off`, `dante_leg` or `other` (`None`: a profile was not read).
     #[serde(default)]
     pub mode: Option<FirewallMode>,
     /// Each profile's default actions (domain, private, public; `None`: not
     /// read).
     #[serde(default)]
     pub defaults: [Option<FirewallDefaults>; 3],
-    /// The enabled Block rules of the group `dstack155` (`None`: not read).
-    #[serde(default)]
-    pub dstack_group_rules: Option<u32>,
     /// #322: the enabled Block rules of the group `dstack Dante leg`
     /// (`None`: not read, or an older server).
     #[serde(default)]
@@ -579,8 +562,8 @@ pub const RULE_SK: &str = "Produkčný počítač musí bežať na Windows LTSC 
      Enterprise, s vypnutou ochranou Windows Defender v reálnom čase (ani v pasívnom režime), \
      bez iného antivírusu — nič nesmie kontrolovať programy, ktoré SongPlayer spúšťa. \
      Brána firewall je vypnutá vo všetkých profiloch, alebo (počítač so sieťou Dante) zapnutá vo všetkých \
-     podľa štandardu dstack: predvolene všetko povolené a blokuje len jedna skupina pravidiel dstack \
-     („dstack Dante leg“, predtým dstack155). \
+     podľa štandardu dstack: predvolene všetko povolené a blokuje len skupina pravidiel dstack \
+     („dstack Dante leg“). \
      Sieťová karta, ktorú má ovládač SoundGrid zvolenú ako port, beží na ovládači NDIS s vypnutým moderovaním \
      prerušení, riadením toku a úsporou energie, automatické aktualizácie Windows sú vypnuté a MMCSS je nastavené \
      pre Pro Audio. Počítač so sieťou Dante má zapnutú jednu fyzickú sieťovú kartu, jednu predvolenú trasu cez LAN \
