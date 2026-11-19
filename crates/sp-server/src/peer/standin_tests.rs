@@ -230,11 +230,13 @@ async fn a_stand_in_of_a_video_an_operator_or_a_dub_owns_is_kept_for_good() {
     ] {
         let (snv, pp, rows, json) = snv_and_pp_standin().await;
         snv_lyrics(&snv).await;
-        sqlx::query(&format!("UPDATE videos SET {owner} WHERE id = ?"))
-            .bind(rows[1])
-            .execute(pp.pool())
-            .await
-            .unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "UPDATE videos SET {owner} WHERE id = ?"
+        )))
+        .bind(rows[1])
+        .execute(pp.pool())
+        .await
+        .unwrap();
         assert!(supersede_next(Some(&pp.ex)).await.is_empty(), "{owner}");
         assert_eq!(json_at(&pp), Some(json), "{owner}");
         assert!(standins(&pp).await.is_empty(), "{owner}");
@@ -280,11 +282,13 @@ async fn an_operators_mark_the_queue_never_acts_on_does_not_keep_the_stand_in() 
     ] {
         let (snv, pp, rows, _) = snv_and_pp_standin().await;
         snv_lyrics(&snv).await;
-        sqlx::query(&format!("UPDATE videos SET {mark} WHERE id = ?"))
-            .bind(rows[1])
-            .execute(pp.pool())
-            .await
-            .unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "UPDATE videos SET {mark} WHERE id = ?"
+        )))
+        .bind(rows[1])
+        .execute(pp.pool())
+        .await
+        .unwrap();
         if inactive {
             sqlx::query("UPDATE playlists SET is_active = 0 WHERE id = 2")
                 .execute(pp.pool())
@@ -658,11 +662,11 @@ async fn a_failing_fetch_from_another_peer_keeps_the_stand_in() {
 async fn a_stand_in_is_over_only_once_every_row_took_the_copy() {
     let (snv, pp, rows, _) = snv_and_pp_standin().await;
     let snv_json = snv_lyrics(&snv).await;
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         "CREATE TRIGGER no_write BEFORE UPDATE ON videos WHEN OLD.id = {} \
          BEGIN SELECT RAISE(ABORT, 'test: no write'); END",
         rows[1]
-    ))
+    )))
     .execute(pp.pool())
     .await
     .unwrap();

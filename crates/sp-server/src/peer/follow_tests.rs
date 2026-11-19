@@ -458,11 +458,13 @@ async fn an_operators_lyrics_or_a_dub_track_stay_here() {
     ] {
         let (_snv, pp) = snv_and_pp(&[YT]).await;
         let old = pp_took(&pp, YT, OLD_SOURCE).await;
-        sqlx::query(&format!("UPDATE videos SET {owner} WHERE youtube_id = ?"))
-            .bind(YT)
-            .execute(pp.pool())
-            .await
-            .unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "UPDATE videos SET {owner} WHERE youtube_id = ?"
+        )))
+        .bind(YT)
+        .execute(pp.pool())
+        .await
+        .unwrap();
         let before = now_ms();
         assert!(follow_next(Some(&pp.ex)).await.is_empty(), "{owner}");
         let after = now_ms();

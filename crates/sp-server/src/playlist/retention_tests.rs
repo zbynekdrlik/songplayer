@@ -93,7 +93,10 @@ async fn row_exists(pool: &SqlitePool, id: i64) -> bool {
 }
 
 async fn count(pool: &SqlitePool, sql: &str) -> i64 {
-    sqlx::query_scalar(sql).fetch_one(pool).await.unwrap()
+    sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+        .fetch_one(pool)
+        .await
+        .unwrap()
 }
 
 fn on_disk(paths: &[PathBuf]) -> Vec<bool> {

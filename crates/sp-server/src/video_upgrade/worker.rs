@@ -160,7 +160,7 @@ pub(crate) async fn next_song(
          GROUP BY v.youtube_id ORDER BY MIN(v.id) LIMIT 1",
         crate::db::queue_row!()
     );
-    sqlx::query_scalar(&sql)
+    sqlx::query_scalar(sqlx::AssertSqlSafe(sql.as_str()))
         .bind(i64::from(cap))
         .bind(now_ms - BUSY_RETRY_MS)
         .bind(now_ms - FAILED_RETRY_MS)
@@ -175,7 +175,7 @@ pub(crate) async fn download_due(pool: &SqlitePool) -> Result<bool, sqlx::Error>
          WHERE {})",
         crate::downloader::DOWNLOAD_DUE
     );
-    sqlx::query_scalar(&sql)
+    sqlx::query_scalar(sqlx::AssertSqlSafe(sql.as_str()))
         .bind(chrono::Utc::now().to_rfc3339())
         .fetch_one(pool)
         .await
@@ -314,7 +314,7 @@ pub(crate) async fn counts(pool: &SqlitePool, cap: u32) -> Result<Counts, sqlx::
         crate::db::queue_row!(),
         crate::db::active_playlist!()
     );
-    sqlx::query_as(&sql)
+    sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
         .bind(i64::from(cap))
         .fetch_one(pool)
         .await

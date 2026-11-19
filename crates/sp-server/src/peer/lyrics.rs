@@ -179,7 +179,7 @@ fn local_only_sql() -> String {
 /// it made for a video with a pending reprocess is dropped by the look.
 pub(crate) async fn kept_local(pool: &SqlitePool, youtube_id: &str) -> Result<bool, sqlx::Error> {
     let paid_ai = crate::paid_ai::enabled(pool).await;
-    sqlx::query_scalar(&local_only_sql())
+    sqlx::query_scalar(sqlx::AssertSqlSafe(local_only_sql()))
         .bind(youtube_id)
         .bind(SOURCE_LIVE_TRANSLATE)
         .bind(i64::from(paid_ai))

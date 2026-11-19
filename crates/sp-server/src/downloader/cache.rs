@@ -289,10 +289,10 @@ pub const RECORDING_COLUMNS: [&str; 5] = [
 /// startup self-heal needs no lock: it runs before any renamer is started).
 pub async fn recorded_by_a_row(pool: &sqlx::SqlitePool, path: &Path) -> Result<bool, sqlx::Error> {
     let any_column = RECORDING_COLUMNS.map(|column| format!("{column} = ?1"));
-    sqlx::query_scalar(&format!(
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT EXISTS(SELECT 1 FROM videos WHERE {})",
         any_column.join(" OR ")
-    ))
+    )))
     .bind(path_column(path))
     .fetch_one(pool)
     .await

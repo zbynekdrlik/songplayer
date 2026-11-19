@@ -310,7 +310,7 @@ pub async fn update_playlist(
     sets.push("updated_at = datetime('now')");
     let sql = format!("UPDATE playlists SET {} WHERE id = ?", sets.join(", "));
 
-    let mut query = sqlx::query(&sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()));
     for val in &binds {
         query = query.bind(val);
     }
@@ -539,7 +539,7 @@ pub async fn patch_video(
     }
     let sql = format!("UPDATE videos SET {} WHERE id = ?", sets.join(", "));
 
-    let mut q = sqlx::query(&sql);
+    let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()));
     if let Some(flag) = req.suppress_resolume_en {
         q = q.bind(flag as i32);
     }

@@ -192,9 +192,9 @@ pub async fn due_ids(
     cutoff_ms: i64,
     limit: i64,
 ) -> Result<Vec<i64>, sqlx::Error> {
-    sqlx::query_scalar(&format!(
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT id FROM videos WHERE {DUE_WHERE} ORDER BY removed_at, id LIMIT ?"
-    ))
+    )))
     .bind(cutoff_ms)
     .bind(limit)
     .fetch_all(pool)
@@ -208,10 +208,10 @@ pub async fn due_row(
     id: i64,
     cutoff_ms: i64,
 ) -> Result<Option<DueRow>, sqlx::Error> {
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT id, youtube_id, title, COALESCE(file_path, '') AS video, audio_file_path \
          FROM videos WHERE id = ? AND {DUE_WHERE}"
-    ))
+    )))
     .bind(id)
     .bind(cutoff_ms)
     .fetch_optional(pool)
@@ -260,20 +260,22 @@ pub async fn delete_row(
     removed: &[PathBuf],
 ) -> Result<bool, sqlx::Error> {
     let mut tx = pool.begin().await?;
-    let deleted = sqlx::query(&format!("DELETE FROM videos WHERE id = ? AND {DUE_WHERE}"))
-        .bind(row.id)
-        .bind(cutoff_ms)
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
+    let deleted = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "DELETE FROM videos WHERE id = ? AND {DUE_WHERE}"
+    )))
+    .bind(row.id)
+    .bind(cutoff_ms)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
     if deleted == 0 {
         return Ok(false);
     }
     for table in PEER_TABLES {
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "DELETE FROM {table} WHERE youtube_id = ?1 \
              AND NOT EXISTS (SELECT 1 FROM videos WHERE youtube_id = ?1)"
-        ))
+        )))
         .bind(&row.youtube_id)
         .execute(&mut *tx)
         .await?;

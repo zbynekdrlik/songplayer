@@ -29,27 +29,33 @@ async fn insert_video(pool: &SqlitePool, youtube_id: &str, title: &str) -> i64 {
 }
 
 async fn col_i64(pool: &SqlitePool, id: i64, col: &str) -> i64 {
-    sqlx::query_scalar(&format!("SELECT {col} FROM videos WHERE id = ?"))
-        .bind(id)
-        .fetch_one(pool)
-        .await
-        .unwrap()
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT {col} FROM videos WHERE id = ?"
+    )))
+    .bind(id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
 }
 
 async fn col_str(pool: &SqlitePool, id: i64, col: &str) -> String {
-    sqlx::query_scalar(&format!("SELECT {col} FROM videos WHERE id = ?"))
-        .bind(id)
-        .fetch_one(pool)
-        .await
-        .unwrap()
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT {col} FROM videos WHERE id = ?"
+    )))
+    .bind(id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
 }
 
 async fn col_opt_str(pool: &SqlitePool, id: i64, col: &str) -> Option<String> {
-    sqlx::query_scalar(&format!("SELECT {col} FROM videos WHERE id = ?"))
-        .bind(id)
-        .fetch_one(pool)
-        .await
-        .unwrap()
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT {col} FROM videos WHERE id = ?"
+    )))
+    .bind(id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
 }
 
 #[tokio::test]

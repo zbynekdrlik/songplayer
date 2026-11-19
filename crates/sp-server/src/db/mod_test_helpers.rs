@@ -94,7 +94,7 @@ pub(crate) async fn apply_upto(pool: &SqlitePool, max_version: i32) {
 /// Fetch the column names of `table` via `PRAGMA table_info(<table>)`.
 /// Used by migration tests asserting a new column exists.
 pub(crate) async fn column_names(pool: &SqlitePool, table: &str) -> Vec<String> {
-    sqlx::query(&format!("PRAGMA table_info({table})"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("PRAGMA table_info({table})")))
         .fetch_all(pool)
         .await
         .unwrap()

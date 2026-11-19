@@ -38,10 +38,10 @@ const STEM_WORKER_ENABLED: &str = "stem_worker_enabled";
 pub async fn queued(pool: &SqlitePool) -> Result<Vec<(String, Job)>, sqlx::Error> {
     let mut jobs = Vec::new();
     let now = chrono::Utc::now().to_rfc3339();
-    let downloads: Vec<String> = sqlx::query_scalar(&format!(
+    let downloads: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT DISTINCT v.youtube_id FROM videos v JOIN playlists p ON p.id = v.playlist_id \
          WHERE {DOWNLOAD_DUE} ORDER BY v.youtube_id"
-    ))
+    )))
     .bind(&now)
     .fetch_all(pool)
     .await?;
@@ -54,9 +54,9 @@ pub async fn queued(pool: &SqlitePool) -> Result<Vec<(String, Job)>, sqlx::Error
         add(&mut jobs, lyrics, Job::Lyrics);
     }
     if stems_on {
-        let stems: Vec<String> = sqlx::query_scalar(&format!(
+        let stems: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT DISTINCT youtube_id FROM videos WHERE {STEM_ELIGIBLE_PRED} ORDER BY youtube_id"
-        ))
+        )))
         .fetch_all(pool)
         .await?;
         add(&mut jobs, stems, Job::Stems);
@@ -91,12 +91,12 @@ async fn lyrics_queued(pool: &SqlitePool, stems_on: bool) -> Result<Vec<String>,
 /// (`peer::follow`): those rows are the lyrics hook's.
 pub(crate) async fn lyrics_rows(pool: &SqlitePool, body: &str) -> Result<Vec<String>, sqlx::Error> {
     let version = i64::from(crate::lyrics::LYRICS_PIPELINE_VERSION);
-    sqlx::query_scalar(&format!(
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT DISTINCT v.youtube_id FROM videos v JOIN playlists p ON p.id = v.playlist_id \
          WHERE {body} AND NOT EXISTS (SELECT 1 FROM videos d WHERE d.youtube_id = v.youtube_id \
              AND (d.dub_requested = 1 OR d.lyrics_source = ?)) \
          ORDER BY v.youtube_id"
-    ))
+    )))
     .bind(version)
     .bind(version)
     .bind(version)

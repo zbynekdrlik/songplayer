@@ -40,7 +40,7 @@ pub async fn fetch_next_stale_register(
     pool: &SqlitePool,
     current_version: u32,
 ) -> Result<Option<(i64, String)>, sqlx::Error> {
-    sqlx::query_as(&format!("{STALE_REGISTER} LIMIT 1"))
+    sqlx::query_as(sqlx::AssertSqlSafe(format!("{STALE_REGISTER} LIMIT 1")))
         .bind(current_version as i64)
         .bind(crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE)
         .fetch_optional(pool)

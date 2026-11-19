@@ -263,7 +263,9 @@ impl ReprocessWorker {
              WHERE {REPAIR_QUEUE_WHERE}
              ORDER BY id"
         );
-        let rows = sqlx::query(&sql).fetch_all(&self.pool).await?;
+        let rows = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
+            .fetch_all(&self.pool)
+            .await?;
 
         Ok(rows
             .iter()
@@ -376,13 +378,14 @@ impl ReprocessWorker {
         // is written. The row is re-checked against the queue under it: a
         // correction made while the providers answered took it out (#136).
         let _files = crate::downloader::cache::SONG_FILES.lock().await;
-        let queued: Option<(String, Option<String>)> = sqlx::query_as(&format!(
-            "SELECT COALESCE(file_path, ''), audio_file_path FROM videos \
+        let queued: Option<(String, Option<String>)> =
+            sqlx::query_as(sqlx::AssertSqlSafe(format!(
+                "SELECT COALESCE(file_path, ''), audio_file_path FROM videos \
              WHERE id = ? AND {REPAIR_QUEUE_WHERE}"
-        ))
-        .bind(row.id)
-        .fetch_optional(&self.pool)
-        .await?;
+            )))
+            .bind(row.id)
+            .fetch_optional(&self.pool)
+            .await?;
         let Some((file_path, audio_file_path)) = queued else {
             return Ok(ReprocessOutcome::LeftQueue);
         };

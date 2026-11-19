@@ -227,7 +227,7 @@ pub(crate) async fn held_titles(
     youtube_id: Option<&str>,
 ) -> Result<Vec<HeldTitle>, sqlx::Error> {
     let metadata = ArtifactKind::Metadata.as_str();
-    let rows: Vec<HeldRow> = sqlx::query_as(&format!(
+    let rows: Vec<HeldRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT v.youtube_id, \
          (SELECT f.node FROM peer_fetches f WHERE f.youtube_id = v.youtube_id AND f.kind = ?), \
          (SELECT f.sha256 FROM peer_fetches f WHERE f.youtube_id = v.youtube_id AND f.kind = ?) \
@@ -236,7 +236,7 @@ pub(crate) async fn held_titles(
              AND {REPAIR_QUEUE_WHERE}) \
          AND (? IS NULL OR v.youtube_id = ?) \
          GROUP BY v.youtube_id ORDER BY v.youtube_id"
-    ))
+    )))
     .bind(metadata)
     .bind(metadata)
     .bind(youtube_id)

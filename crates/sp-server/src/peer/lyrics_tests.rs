@@ -288,11 +288,13 @@ async fn an_operators_ask_on_another_row_of_the_video_keeps_the_lyrics_here() {
     ] {
         let (_snv, pp, id, _) = snv_and_pp().await;
         let two = pp.add_video_to(2, YT).await;
-        sqlx::query(&format!("UPDATE videos SET {owner} WHERE id = ?"))
-            .bind(two)
-            .execute(pp.pool())
-            .await
-            .unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "UPDATE videos SET {owner} WHERE id = ?"
+        )))
+        .bind(two)
+        .execute(pp.pool())
+        .await
+        .unwrap();
         let PeerStep::Local(Some(_guard)) = first(Some(&pp.ex), &lyrics_row(&pp, id).await).await
         else {
             panic!("{owner} on another row: runs here")
@@ -349,11 +351,13 @@ async fn an_operators_mark_the_queue_never_acts_on_does_not_keep_the_lyrics_here
     ] {
         let (_snv, pp, id, json) = snv_and_pp().await;
         let two = pp.add_video_to(2, YT).await;
-        sqlx::query(&format!("UPDATE videos SET {mark} WHERE id = ?"))
-            .bind(two)
-            .execute(pp.pool())
-            .await
-            .unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "UPDATE videos SET {mark} WHERE id = ?"
+        )))
+        .bind(two)
+        .execute(pp.pool())
+        .await
+        .unwrap();
         if inactive {
             sqlx::query("UPDATE playlists SET is_active = 0 WHERE id = 2")
                 .execute(pp.pool())

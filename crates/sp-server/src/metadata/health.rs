@@ -109,7 +109,9 @@ impl MetadataHealth {
 /// The number of rows in the repair queue ([`REPAIR_QUEUE_WHERE`]).
 pub async fn failed_videos(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
     let sql = format!("SELECT COUNT(*) AS c FROM videos WHERE {REPAIR_QUEUE_WHERE}");
-    let row = sqlx::query(&sql).fetch_one(pool).await?;
+    let row = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
+        .fetch_one(pool)
+        .await?;
     Ok(row.get("c"))
 }
 

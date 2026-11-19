@@ -181,7 +181,7 @@ pub async fn list_songs(
     }
     sql.push_str(" ORDER BY song, artist, youtube_id");
 
-    let mut query = sqlx::query(&sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()));
     if let Some(pid) = q.playlist_id {
         query = query.bind(pid);
     }
@@ -210,7 +210,7 @@ pub async fn get_song_detail(
     Path(video_id): Path<i64>,
 ) -> impl IntoResponse {
     let sql = format!("SELECT {SONG_COLUMNS} FROM videos WHERE id = ? AND normalized = 1");
-    let row = match sqlx::query(&sql)
+    let row = match sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
         .bind(video_id)
         .fetch_optional(&state.pool)
         .await
@@ -280,7 +280,8 @@ pub async fn post_reprocess(
                 "SELECT COUNT(*) FROM videos WHERE lyrics_source = 'asr_gap' AND id IN ({})",
                 placeholders.join(",")
             );
-            let mut blocked_q = sqlx::query_scalar::<_, i64>(&blocked_sql);
+            let mut blocked_q =
+                sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(blocked_sql.as_str()));
             for id in &ids {
                 blocked_q = blocked_q.bind(*id);
             }
@@ -301,7 +302,7 @@ pub async fn post_reprocess(
                  WHERE youtube_id IN (SELECT youtube_id FROM videos WHERE id IN ({}))",
                 placeholders.join(",")
             );
-            let mut q = sqlx::query(&sql);
+            let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()));
             for id in &ids {
                 q = q.bind(*id);
             }

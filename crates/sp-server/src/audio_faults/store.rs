@@ -158,7 +158,8 @@ pub async fn bucket_counts(
          GROUP BY path, severity, bucket ORDER BY path, severity, bucket",
         bucket_case(edges.len())
     );
-    let mut query = sqlx::query_as::<_, (String, String, i64, i64)>(&sql);
+    let mut query =
+        sqlx::query_as::<_, (String, String, i64, i64)>(sqlx::AssertSqlSafe(sql.as_str()));
     for edge in &edges {
         query = query.bind(*edge);
     }

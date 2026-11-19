@@ -145,11 +145,13 @@ async fn migration_v31_creates_the_stand_ins_and_back_fills_them() {
             .await
             .unwrap();
             if !extra.is_empty() {
-                sqlx::query(&format!("UPDATE videos SET id = id{extra} WHERE id = ?"))
-                    .bind(id)
-                    .execute(&pool)
-                    .await
-                    .unwrap();
+                sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "UPDATE videos SET id = id{extra} WHERE id = ?"
+                )))
+                .bind(id)
+                .execute(&pool)
+                .await
+                .unwrap();
             }
         }
         for (kind, from_snv) in [("audio", audio_from_snv), ("lyrics", lyrics_from_snv)] {
