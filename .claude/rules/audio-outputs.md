@@ -14,6 +14,7 @@ paths:
   - "crates/sp-server/src/playback/asrc*.rs"
   - "crates/sp-core/src/dante_status*.rs"
   - "crates/sp-server/src/playback/dante_device*.rs"
+  - "crates/sp-server/src/playback/dante_slots*.rs"
   - "sp-ui/src/components/audio_outputs_dante.rs"
   - "crates/sp-server/src/playback/asio_*.rs"
   - "crates/sp-server/src/api/audio*.rs"
@@ -1673,6 +1674,29 @@ difference with its UTC time.
   8782 windows, late 0 in every one, peak max 4365 us, p99 3719 us, median
   2208 us at 10 ms latency. So the `normal` profile stands; the 31.10 rule
   against it applied to the old pump, not to dlink.
+- **The control ports come from the first free dstack slot** (#324, design
+  7004285679): slot k = ARC 4440 + k, CMC 8800 + k, flows 4455 + k, process
+  id k, k in 0..15 (`dante_slots.rs`, copied from dstack v0.6.178
+  `crates/dstack-endpoint/src/slots.rs`, MIT OR Apache-2.0, origin in its
+  header; deleted once dstack moves it into dlink — `dstack-endpoint` pulls
+  cpal). `DanteDevice::open` probes AFTER it holds `HELD` (a predecessor of
+  ours has stopped and given its ports back), each port on the device's IP
+  and then on the wildcard address (ConMon's 0.0.0.0:8800, dstack #200), and
+  builds the stack's config on `Some(slot)`; no slot free = `None`,
+  Dante's defaults, and the stack names the port. The RX / TX flow ports
+  follow the slot by dlink's rule (29800 + 64k). A predecessor whose stack
+  was still stopping after dlink's stop wait leaves its ports in
+  `LINGERING`: its successor takes those same ports (fails its start on
+  them and retries on the backoff, never a second slot beside our own
+  device), cleared by the next start. A test device's own `ports`
+  (`claim_slot`) is kept and nothing is probed. One INFO at the start
+  (`device announced`, with arc / cmc / flows / process_id / slot_free);
+  `outputs[i].dante` carries `arc`, `cmc`, `flows`, `process_id`. A stack
+  refusal (`"<what> on UDP <port>: …"`) is named with the port's holder
+  where Windows tells (`dante_slots::holder_text`; the IP Helper's
+  `GetExtendedUdpTable` + the owner's image in `dante_slots_win.rs`, no
+  process spawned): "…; UDP 4440 is held by Arena.exe (pid 812)". The UI
+  shows none of the four (no device-field list there).
 - One Dante device at a time in the process (`dante_device::HELD`): `open`
   takes the hold, `close` (also at a drop: a dropped `Link` does not stop its
   stack) gives it back after the stack stopped. A rebuilt entry's successor
