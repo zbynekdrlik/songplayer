@@ -128,7 +128,9 @@ fn the_constant_buffer_is_six_registers_in_the_hlsl_order() {
     assert_eq!(bytes.len(), QUAD_CONSTANTS_BYTES);
     assert_eq!(QUAD_CONSTANTS_BYTES, 96, "six float4 registers");
     let floats: Vec<f32> = bytes
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
         .collect();
     let mut want: Vec<f32> = (1..=21).map(|v| v as f32).collect();

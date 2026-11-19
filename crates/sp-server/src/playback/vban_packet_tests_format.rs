@@ -168,7 +168,7 @@ fn a_96k_block_is_16_packets_of_200_frames_in_order() {
     assert_eq!(out.len(), 16 * 1228);
     let mut enc = VbanEncoder::default();
     enc.encode_into(f, &stream_name_bytes("sp-e2e-96k"), Some(&block), &mut out);
-    for (k, packet) in out.chunks_exact(1228).enumerate() {
+    for (k, packet) in out.as_chunks::<1228>().0.iter().enumerate() {
         let p = parse_packet(packet);
         assert_eq!((p.format_sr, p.nbs, p.counter), (4, 199, k as u32));
         let want: Vec<i32> = block[k * 400..k * 400 + 400]
@@ -213,10 +213,17 @@ fn a_wrong_length_block_is_silence_at_any_rate() {
     let mut enc = VbanEncoder::default();
     enc.encode_into(f, &stream_name_bytes("x"), Some(&[0.5; 3200]), &mut out);
     assert!(
-        out.chunks_exact(1228)
+        out.as_chunks::<1228>()
+            .0
+            .iter()
             .all(|p| p[28..].iter().all(|&b| b == 0))
     );
-    assert!(out.chunks_exact(1228).all(|p| &p[0..4] == b"VBAN"));
+    assert!(
+        out.as_chunks::<1228>()
+            .0
+            .iter()
+            .all(|p| &p[0..4] == b"VBAN")
+    );
     enc.encode_into(f, &stream_name_bytes("x"), None, &mut out);
     assert_eq!(enc.next_counter(), 32, "silence still counts its packets");
 }

@@ -247,10 +247,11 @@ pub fn parse_translation_response(text: &str, expected_count: usize) -> Vec<Stri
 
         if let Some((num_part, rest)) = trimmed.split_once(':') {
             let num_trimmed = num_part.trim();
-            if let Ok(n) = num_trimmed.parse::<usize>() {
-                if n >= 1 && n <= expected_count {
-                    result[n - 1] = rest.trim().to_string();
-                }
+            if let Ok(n) = num_trimmed.parse::<usize>()
+                && n >= 1
+                && n <= expected_count
+            {
+                result[n - 1] = rest.trim().to_string();
             }
         }
     }

@@ -69,12 +69,11 @@ pub fn seek_display_ms(
     if dragging {
         return dragged_ms;
     }
-    if let Some(p) = pending {
-        if live_ms < p.target_ms.saturating_sub(SEEK_CATCH_UP_MS)
-            && now_ms.saturating_sub(p.committed_at_ms) < SEEK_HOLD_MS
-        {
-            return p.target_ms;
-        }
+    if let Some(p) = pending
+        && live_ms < p.target_ms.saturating_sub(SEEK_CATCH_UP_MS)
+        && now_ms.saturating_sub(p.committed_at_ms) < SEEK_HOLD_MS
+    {
+        return p.target_ms;
     }
     live_ms
 }

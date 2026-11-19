@@ -16,7 +16,7 @@ resolver = "2"
 version = "0.94.0-dev.1"
 edition = "2024"
 license = "MIT"
-rust-version = "1.87"
+rust-version = "1.94"
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }

@@ -110,7 +110,9 @@ fn the_constant_buffer_is_the_three_rows_in_order() {
     assert_eq!(UYVY_CONSTANTS_BYTES, 48, "three float4 registers");
     assert_eq!(bytes.len(), UYVY_CONSTANTS_BYTES);
     let floats: Vec<f32> = bytes
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
         .collect();
     let want: Vec<f32> = rows_f32().into_iter().flatten().collect();

@@ -546,7 +546,12 @@ impl FitPlan {
             let row = tap(y, self.height / 2, self.src.height.div_ceil(2));
             let (r0, r1) = (&src[s_uv + row.i0 * ss..], &src[s_uv + row.i1 * ss..]);
             let at = d_uv + (self.y0 / 2 + y as usize) * ds + self.x0;
-            for (uv, c) in out[at..at + width].chunks_exact_mut(2).zip(&self.chroma) {
+            for (uv, c) in out[at..at + width]
+                .as_chunks_mut::<2>()
+                .0
+                .iter_mut()
+                .zip(&self.chroma)
+            {
                 for (k, o) in uv.iter_mut().enumerate() {
                     let (a, b) = (2 * c.i0 + k, 2 * c.i1 + k);
                     *o = bilinear(r0[a], r0[b], r1[a], r1[b], c.w, row.w);

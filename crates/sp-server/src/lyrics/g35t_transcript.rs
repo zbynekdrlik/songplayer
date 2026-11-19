@@ -118,10 +118,11 @@ fn group_on_silence(words: &[AsrWord]) -> Vec<Vec<&AsrWord>> {
         if w.text.trim().is_empty() {
             continue;
         }
-        if let Some(pe) = prev_end {
-            if w.start_ms.saturating_sub(pe) > LINE_GAP_MS && !current.is_empty() {
-                groups.push(std::mem::take(&mut current));
-            }
+        if let Some(pe) = prev_end
+            && w.start_ms.saturating_sub(pe) > LINE_GAP_MS
+            && !current.is_empty()
+        {
+            groups.push(std::mem::take(&mut current));
         }
         current.push(w);
         prev_end = Some(w.end_ms);

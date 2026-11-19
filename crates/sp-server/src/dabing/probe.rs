@@ -256,7 +256,9 @@ pub struct DubLevel {
 /// partial sample is ignored).
 pub fn level_of(pcm: &[u8]) -> DubLevel {
     let samples: Vec<f32> = pcm
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
         .collect();
     let frames = samples.len() as u64;

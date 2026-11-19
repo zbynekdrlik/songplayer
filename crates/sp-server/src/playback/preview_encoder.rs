@@ -160,10 +160,11 @@ pub fn parse_available_encoders(encoders_stdout: &str) -> Vec<String> {
     let mut found = Vec::new();
     for line in encoders_stdout.lines() {
         // The name is the second whitespace-separated token (after the flag col).
-        if let Some(name) = line.split_whitespace().nth(1) {
-            if ENCODER_LADDER.contains(&name) && !found.iter().any(|f| f == name) {
-                found.push(name.to_string());
-            }
+        if let Some(name) = line.split_whitespace().nth(1)
+            && ENCODER_LADDER.contains(&name)
+            && !found.iter().any(|f| f == name)
+        {
+            found.push(name.to_string());
         }
     }
     found

@@ -95,14 +95,13 @@ impl EventWindow {
     /// differencing across the discontinuity and reporting a bogus giant (or,
     /// with the saturating subtraction, zero) count.
     pub fn push(&mut self, ts_100ns: i64, seq: u64, late: u64, repeats: u64, resyncs: u64) {
-        if let Some(back) = self.ring.back() {
-            if seq < back.seq
+        if let Some(back) = self.ring.back()
+            && (seq < back.seq
                 || late < back.late
                 || repeats < back.repeats
-                || resyncs < back.resyncs
-            {
-                self.ring.clear();
-            }
+                || resyncs < back.resyncs)
+        {
+            self.ring.clear();
         }
         self.ring.push_back(Sample {
             ts_100ns,

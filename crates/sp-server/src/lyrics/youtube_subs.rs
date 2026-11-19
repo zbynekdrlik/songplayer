@@ -104,10 +104,11 @@ fn find_json3_file(dir: &Path, youtube_id: &str) -> Result<Option<std::path::Pat
 
     for entry in read_dir.flatten() {
         let path = entry.path();
-        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            if name.contains(youtube_id) && name.ends_with(".json3") {
-                return Ok(Some(path));
-            }
+        if let Some(name) = path.file_name().and_then(|n| n.to_str())
+            && name.contains(youtube_id)
+            && name.ends_with(".json3")
+        {
+            return Ok(Some(path));
         }
     }
 

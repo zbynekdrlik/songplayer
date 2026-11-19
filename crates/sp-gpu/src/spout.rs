@@ -143,7 +143,7 @@ pub(crate) fn map_mutex_name(map: &str) -> String {
 /// the map.
 pub fn parse_sender_names(map: &[u8]) -> Vec<String> {
     let mut names = Vec::new();
-    for slot in map.chunks_exact(NAME_SLOT_LEN) {
+    for slot in map.as_chunks::<NAME_SLOT_LEN>().0 {
         if slot[0] == 0 || slot[0] >= 0x80 {
             break;
         }

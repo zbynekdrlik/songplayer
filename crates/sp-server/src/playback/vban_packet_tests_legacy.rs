@@ -38,7 +38,7 @@ pub(crate) fn legacy_encode_block(
             match samples {
                 Some(s) => {
                     let chunk = &s[k * 400..k * 400 + 400];
-                    for (dst, &x) in payload.chunks_exact_mut(3).zip(chunk) {
+                    for (dst, &x) in payload.as_chunks_mut::<3>().0.iter_mut().zip(chunk) {
                         let b = legacy_f32_to_int24(x).to_le_bytes();
                         dst.copy_from_slice(&[b[0], b[1], b[2]]);
                     }

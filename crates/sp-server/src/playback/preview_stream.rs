@@ -454,13 +454,13 @@ impl StreamShared {
     // behavioural test can distinguish them (they are equivalent by design).
     #[cfg_attr(test, mutants::skip)]
     fn take_buffer(&self) -> Vec<u8> {
-        if let Ok(mut p) = self.pool.try_lock() {
-            if let Some(mut b) = p.pop() {
-                if b.len() != OUT_NV12_LEN {
-                    b.resize(OUT_NV12_LEN, 0);
-                }
-                return b;
+        if let Ok(mut p) = self.pool.try_lock()
+            && let Some(mut b) = p.pop()
+        {
+            if b.len() != OUT_NV12_LEN {
+                b.resize(OUT_NV12_LEN, 0);
             }
+            return b;
         }
         vec![0u8; OUT_NV12_LEN]
     }
@@ -476,10 +476,10 @@ impl StreamShared {
         if buf.len() != OUT_NV12_LEN {
             return;
         }
-        if let Ok(mut p) = self.pool.try_lock() {
-            if p.len() < POOL_MAX {
-                p.push(buf);
-            }
+        if let Ok(mut p) = self.pool.try_lock()
+            && p.len() < POOL_MAX
+        {
+            p.push(buf);
         }
     }
 

@@ -402,10 +402,10 @@ pub(crate) fn classify_bad_poll(
     if observed_fps < nominal_fps / 2.0 {
         return true;
     }
-    if let Some(ts) = last_submit_ts {
-        if now.duration_since(ts) > std::time::Duration::from_secs(10) {
-            return true;
-        }
+    if let Some(ts) = last_submit_ts
+        && now.duration_since(ts) > std::time::Duration::from_secs(10)
+    {
+        return true;
     }
     false
 }

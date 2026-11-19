@@ -65,12 +65,12 @@ impl QuadConstants {
             self.matrix[1],
             self.matrix[2],
         ];
-        for (register, values) in floats.chunks_exact_mut(4).zip(registers) {
+        for (register, values) in floats.as_chunks_mut::<4>().0.iter_mut().zip(registers) {
             register.copy_from_slice(&values);
         }
         floats[20] = self.weight;
         let mut bytes = [0u8; QUAD_CONSTANTS_BYTES];
-        for (out, value) in bytes.chunks_exact_mut(4).zip(floats) {
+        for (out, value) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(floats) {
             out.copy_from_slice(&value.to_le_bytes());
         }
         bytes

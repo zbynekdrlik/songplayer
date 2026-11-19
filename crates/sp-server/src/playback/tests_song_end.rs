@@ -74,10 +74,10 @@ async fn presenter_empty_payload_on_song_end() {
     // before assertions fire on drop.
     for _ in 0..20 {
         let recv = mock.received_requests().await;
-        if let Some(reqs) = recv {
-            if !reqs.is_empty() {
-                break;
-            }
+        if let Some(reqs) = recv
+            && !reqs.is_empty()
+        {
+            break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }

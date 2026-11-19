@@ -108,7 +108,9 @@ fn a_1khz_tone_stays_1khz_at_96k_with_a_correction() {
 /// The largest step between neighbouring frames of the left channel.
 fn max_step(samples: &[f32]) -> f32 {
     samples
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .collect::<Vec<_>>()
         .windows(2)
         .map(|w| (w[1][0] - w[0][0]).abs())
@@ -120,7 +122,12 @@ const FADE_STEP: f32 = 0.5 / 480.0 + 1e-6;
 
 /// Silent frames (left channel exactly 0) after the hold's 480-frame start-up.
 fn silent_frames(out: &[f32]) -> usize {
-    out[960..].chunks_exact(2).filter(|f| f[0] == 0.0).count()
+    out[960..]
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .filter(|f| f[0] == 0.0)
+        .count()
 }
 
 #[test]

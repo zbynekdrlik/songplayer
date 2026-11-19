@@ -68,7 +68,9 @@ pub const REG_MULTI_SZ: u32 = 7;
 /// string up to its NUL, a list of strings, a little-endian DWORD.
 pub fn reg_value_from(kind: u32, bytes: &[u8]) -> RegValue {
     let units: Vec<u16> = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
         .collect();
     match kind {

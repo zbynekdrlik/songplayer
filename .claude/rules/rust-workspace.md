@@ -414,16 +414,21 @@ Lint job on code that passed a day earlier. The 1.99 drift that broke run
   `cargo update -p async-trait --precise 0.1.92` (dtolnay/async-trait#303). Never paper over it with allows on the
   traits.
 - **`Atomic*::fetch_update` deprecated (renamed `try_update`):** `try_update`
-  is newer than the workspace MSRV 1.87 (`clippy::incompatible_msrv`), so write
+  was newer than the workspace MSRV when written (`clippy::incompatible_msrv`), so the code has
   the explicit `load` + `compare_exchange_weak` loop (`preview_stream.rs`
   `ViewerGuard::drop`).
 
-**The workspace MSRV is 1.87 (#233 release review: rubato 5.0.1 needs it).**
-Raising `rust-version` (root `Cargo.toml` and `src-tauri/Cargo.toml`) turns
-on clippy's MSRV-gated lints at the new version: `manual_is_multiple_of`
-(1.87) then rejects `x % n == 0` under `-D warnings`. Write
-`x.is_multiple_of(n)` (unsigned integers), and grep the tree for `% … == 0`
-in the same commit as the bump.
+**The workspace MSRV is 1.94 (#296: sqlx 0.9 declares it; before that 1.87
+for rubato 5.0.1, #233).** Raising `rust-version` (root `Cargo.toml`,
+`sp-ui/Cargo.toml` and `src-tauri/Cargo.toml`) turns on clippy's MSRV-gated
+lints at the new version, so run `cargo clippy --workspace --all-targets
+--fix --allow-dirty` in the same commit and hand-fix the rest. 1.87 brought
+`manual_is_multiple_of` (`x.is_multiple_of(n)`, unsigned integers). 1.94
+brought `collapsible_if` over let chains (`if let Some(x) = a && cond {`)
+and `chunks_exact_to_as_chunks`: `s.chunks_exact(2)` with a constant size
+becomes `s.as_chunks::<2>().0.iter()` (items are `&[T; 2]`, so a comparison
+with an array needs `*uv == [a, b]`), `chunks_exact_mut` becomes
+`as_chunks_mut::<N>().0.iter_mut()`.
 
 When the Lint job fails on files the diff never touched, check the toolchain
 version in the job log first (`rust-1.99.0` in the clippy help URLs).
@@ -459,8 +464,8 @@ formatted in.
 sqlx 0.9.1 takes `libsqlite3-sys` as a range (`>=0.30.1, <0.41.0`), and
 `cargo update -p sqlx` alone keeps the locked one: run `cargo update -p
 libsqlite3-sys` too when an advisory names it (RUSTSEC-2026-0459 needed
-0.39+). sqlx 0.9 declares `rust-version` 1.94; the workspace still declares
-1.87 and CI builds on stable.
+0.39+). sqlx 0.9 declares `rust-version` 1.94, which is why the workspace
+declares 1.94 too.
 
 **The root lock is not the exe's lock.** `src-tauri` is its own workspace
 with an untracked `Cargo.lock`, resolved fresh in CI's Build Tauri job. It
