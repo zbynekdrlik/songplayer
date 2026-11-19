@@ -423,6 +423,29 @@ test.describe("production environment gate (#233)", () => {
     expect(failing(null)).toEqual(["audio.wired_nics is null, not a list of adapters"]);
   });
 
+  // A contract pin of what the gate prints for the code (the gate has no
+  // per-code list: it fails on every problem). The code and the text
+  // themselves are pinned in sp-core's and sp-server's tests.
+  test("#337: a Dante adapter on a driver too old fails by its code and its adapter", () => {
+    const text =
+      "sieťová karta „Ethernet 4“ nesie Dante a jej ovládač je príliš starý: neponúka " +
+      "nastavenie vysielacej fronty — nainštaluj ovládač Realtek RTL8156 verzie 11.19 alebo novšej";
+    const status = holds({
+      ok: false,
+      problems: [{ code: "dante_nic_driver_old", text_sk: text }],
+      audio: audioHolds({
+        wired_nics: [
+          { name: "soundgrid-pcie", guid: "{A}", ok: true },
+          { name: "Ethernet 4", guid: "{B}", ok: false },
+        ],
+      }),
+    });
+    expect(environmentFailures(status)).toEqual([
+      `dante_nic_driver_old: ${text}`,
+      "audio.wired_nics[Ethernet 4].ok is false, not true",
+    ]);
+  });
+
   test("#255: a status from before the audio profile fails on it", () => {
     const old = holds();
     delete old.audio;

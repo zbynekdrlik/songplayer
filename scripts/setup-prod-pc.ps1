@@ -59,10 +59,12 @@
 #      USB 2.5GbE Family Controller") also gets "Transmit URBs"
 #      (PendingTransmits) 8 and "Transmit Buffers" (TransmitBufferLen) 64
 #      through its driver (issue 255 / 285, dstack's receiver A/B of
-#      10.11.2026), only on the adapter that carries a Dante leg and only
-#      where its driver offers the keyword (issue 255, 11.11.2026; dstack
-#      docs/two-networks.md section 6, PR 179): a PC with no Dante leg (PP)
-#      and a driver without the keyword pass, nothing is set.
+#      10.11.2026), only on the adapter that carries a Dante leg (issue
+#      255, 11.11.2026; dstack docs/two-networks.md section 6): a PC with no
+#      Dante leg passes, nothing is set. A driver there that does not offer
+#      a keyword (Microsoft's inbox 11.4.211.2022) is too old for a Dante
+#      leg: a blocker, dante_nic_driver_old (issue 337); this script never
+#      installs a driver.
 # Not here: the NIC driver swap (lane 3), a radio (a PC may use it on purpose),
 # CPU reservation (unmeasured), the Windows edition.
 #
@@ -338,8 +340,8 @@ function Get-ProdPcRtl8156Values {
 # leg its firewall group dstack155 is bound to). The RTL8156's transmit
 # values are dstack's Dante-TX tuning, so they apply only there (issue 255,
 # 11.11.2026, the owner: Dante is one audio path, a PC without it passes
-# clean; PP has no Dante leg, and its RTL8156 driver 11.4.211.2022 offers
-# neither keyword). SongPlayer's own check asks the same of an enabled Dante
+# clean; PP had no Dante leg then, and its RTL8156 driver 11.4.211.2022
+# offered neither keyword). SongPlayer's own check asks the same of an enabled Dante
 # output (prod_env_network.rs leg_carriers). Facts with no dante_leg (an
 # older capture) read as no leg.
 function Test-ProdPcDanteLeg {
@@ -367,12 +369,22 @@ function Get-ProdPcDanteCarrier {
 # Whether an adapter's driver offers a keyword: an entry of its class key's
 # Ndi\Params (the adapter's driver_keywords). Not read (null, an older
 # capture): taken as offered, so setting it through the driver reports its
-# own error. A driver that does not offer it passes (dstack, PR 179).
+# own error. On the adapter carrying the Dante leg a driver that does not
+# offer an RTL8156 value is too old (issue 337, Get-ProdPcRtl8156Lacking).
 function Test-ProdPcDriverOffers {
     param($Adapter, [string]$Keyword)
     $member = Find-ProdPcMember -Object $Adapter -Name 'driver_keywords'
     if ($null -eq $member -or $null -eq $member.Value) { return $true }
-    return (@($member.Value | Where-Object { [string]$_ -eq $Keyword }).Count -gt 0)
+    return (@($member.Value | Where-Object { ([string]$_).Trim() -eq $Keyword }).Count -gt 0)
+}
+
+# The RTL8156 keywords an adapter's driver does not offer (issue 337):
+# Microsoft's inbox driver 11.4.211.2022 offers neither and runs a 3 / 18
+# transmit queue (dstack, issue 334: 6400-9700 late Dante packets in a busy
+# minute, against 198 an hour on 11.19.602.2025 at 8 / 64).
+function Get-ProdPcRtl8156Lacking {
+    param($Adapter)
+    return @(Get-ProdPcRtl8156Values | Where-Object { -not (Test-ProdPcDriverOffers -Adapter $Adapter -Keyword $_.Keyword) } | ForEach-Object { $_.Keyword })
 }
 
 # Whether a registry fact holds what a want sets: a DWORD of that value (a
@@ -566,9 +578,17 @@ function Add-ProdPcEveryNicReview {
         }
         if ($guid -ne $carrier) { continue }
         if (-not (Test-ProdPcRtl8156 ([string](Get-ProdPcField $adapter 'pnp_device_id')))) { continue }
+        # Issue 337: a keyword the driver does not offer is never set
+        # (nothing shows the driver reads it, whatever the registry holds):
+        # the driver is too old for a Dante leg, and installing one is the
+        # operator's.
+        $lacking = @(Get-ProdPcRtl8156Lacking $adapter)
+        if ($lacking.Count -gt 0) {
+            $Blockers.Add((New-ProdPcBlocker 'dante_nic_driver_old' "sietova karta '$name' nesie Dante a jej ovladac je prilis stary: neponuka $($lacking -join ', ') - nainstaluj ovladac Realtek RTL8156 verzie 11.19 alebo novsej (this script never installs a driver)" -AdapterGuid $guid))
+        }
         foreach ($own in @(Get-ProdPcRtl8156Values)) {
+            if ($lacking -contains $own.Keyword) { continue }
             $present = $null -ne (Find-ProdPcMember -Object $settings -Name $own.Keyword)
-            if (-not $present -and -not (Test-ProdPcDriverOffers -Adapter $adapter -Keyword $own.Keyword)) { continue }
             $value = if ($present) { ([string](Get-ProdPcField $settings $own.Keyword)).Trim() } else { '(none)' }
             $number = if ($present) { ConvertTo-ProdPcUInt32 $value } else { $null }
             if ($null -ne $number -and $number -eq [uint32]$own.Wanted) { continue }

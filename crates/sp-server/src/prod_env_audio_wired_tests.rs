@@ -482,6 +482,12 @@ fn the_rtl8156_rule_is_the_setup_scripts() {
     ] {
         assert!(script.contains(function), "{function}");
     }
+    // #337: a keyword the carrier's driver does not offer blocks under the
+    // gate's own code.
+    let code = EnvProblem::DanteNicDriverOld { nic: String::new() }.code();
+    assert_eq!(code, "dante_nic_driver_old");
+    let blocker = format!("New-ProdPcBlocker '{code}' ");
+    assert!(script.contains(&blocker), "{blocker}");
 }
 
 /// #255 (the owner, 11.11.2026; dstack two-networks §6, dstack PR 179): the
@@ -511,34 +517,125 @@ fn an_rtl8156_off_the_dante_leg_is_not_judged() {
     assert!(judged(nic, "*EEE", &[]));
 }
 
-/// PP's driver 11.4.211.2022 offers neither keyword (no `Ndi\Params`
-/// entry): even on a leg that passes; one it offers and the registry lacks
-/// is named.
+/// The adapter's one "driver too old" problem.
+fn driver_old() -> EnvProblem {
+    EnvProblem::DanteNicDriverOld {
+        nic: "Dante".to_string(),
+    }
+}
+
+/// `rtl8156_box` with its driver's keyword list as given.
+fn offering(reg: &mut Fake, keywords: &[&str]) {
+    reg.subkeys_of(
+        &format!(r"{}\Ndi\Params", class_key("0014")),
+        Ok(keywords.iter().map(|k| k.to_string()).collect()),
+    );
+}
+
+/// #337: PP's driver 11.4.211.2022 offers neither keyword (no `Ndi\Params`
+/// entry). On an adapter that carries a Dante leg that is the driver being
+/// too old, named once for the adapter, never once per keyword.
 #[test]
-fn a_transmit_value_the_driver_does_not_offer_passes() {
+fn a_driver_that_offers_no_transmit_keyword_is_too_old_for_a_dante_leg() {
+    let mut reg = rtl8156_box();
+    reg.set(&class_key("0014"), "PendingTransmits", RegValue::Absent);
+    reg.set(&class_key("0014"), "TransmitBufferLen", RegValue::Absent);
+    offering(&mut reg, &["PendingReceives", "*EEE"]);
+    let nics = read(&reg);
+    assert_eq!(problems(&nics), [driver_old()]);
+    let shown = view(&nics.as_ref().unwrap()[0]);
+    assert_eq!(shown.ok, Some(false));
+    assert_eq!(shown.values.len(), 15);
+    assert_eq!(shown.values[13].ok, Some(false));
+    assert_eq!(shown.values[14].ok, Some(false));
+    assert_eq!(shown.values[12].ok, Some(true), "PnPCapabilities holds");
+}
+
+/// #337 (the owner: a PC without Dante passes clean): the same driver on an
+/// adapter that carries no leg is not judged at all.
+#[test]
+fn a_driver_that_offers_no_transmit_keyword_passes_off_the_dante_leg() {
+    let mut reg = rtl8156_box();
+    reg.set(&class_key("0014"), "PendingTransmits", RegValue::Absent);
+    reg.set(&class_key("0014"), "TransmitBufferLen", RegValue::Absent);
+    offering(&mut reg, &["PendingReceives"]);
+    let nics = read(&reg);
+    for carriers in [vec![], vec!["Ethernet 4".to_string()]] {
+        assert_eq!(problems_besides(&nics, &[], &carriers), []);
+        let shown = view_on(&nics.as_ref().unwrap()[0], &carriers);
+        assert_eq!(shown.ok, Some(true));
+        assert_eq!(shown.values.len(), 13);
+    }
+}
+
+/// #337: a driver that offers both, at 8 / 64 on the leg, holds; and the
+/// keyword list is matched trimmed, ASCII case ignored.
+#[test]
+fn a_driver_that_offers_both_at_8_and_64_holds_on_the_dante_leg() {
+    let mut reg = rtl8156_box();
+    reg.set(&class_key("0014"), "PendingTransmits", t("8"));
+    reg.set(&class_key("0014"), "TransmitBufferLen", t("64"));
+    offering(&mut reg, &[" pendingtransmits", "TRANSMITBUFFERLEN "]);
+    let nics = read(&reg);
+    assert_eq!(problems(&nics), []);
+    assert_eq!(view(&nics.unwrap()[0]).ok, Some(true));
+}
+
+/// #337: one keyword offered and one not is still the one driver problem,
+/// next to the offered keyword's own verdict (missing, or wrong as read).
+#[test]
+fn one_keyword_not_offered_names_the_driver_once_and_the_other_by_its_value() {
+    let mut reg = rtl8156_box();
+    reg.set(&class_key("0014"), "PendingTransmits", RegValue::Absent);
+    reg.set(&class_key("0014"), "TransmitBufferLen", RegValue::Absent);
+    offering(&mut reg, &["PendingTransmits"]);
+    assert_eq!(
+        problems(&read(&reg)),
+        [driver_old(), value_problem("PendingTransmits", None)]
+    );
+    offering(&mut reg, &["TransmitBufferLen"]);
+    reg.set(&class_key("0014"), "TransmitBufferLen", t("18"));
+    assert_eq!(
+        problems(&read(&reg)),
+        [driver_old(), value_problem("TransmitBufferLen", Some("18"))]
+    );
+}
+
+/// #337: a value a newer driver left in the registry is no evidence under
+/// a driver that does not declare its keyword (nothing shows it reads it):
+/// 8 / 64 there is still the driver being too old.
+#[test]
+fn a_leftover_value_under_a_driver_that_does_not_offer_it_is_not_judged_by_its_number() {
+    let mut reg = rtl8156_box();
+    reg.set(&class_key("0014"), "PendingTransmits", t("8"));
+    reg.set(&class_key("0014"), "TransmitBufferLen", t("64"));
+    offering(&mut reg, &["PendingReceives"]);
+    let nics = read(&reg);
+    assert_eq!(problems(&nics), [driver_old()]);
+    assert_eq!(view(&nics.unwrap()[0]).ok, Some(false));
+}
+
+/// The keyword list unread: taken as offered (a missing value is named,
+/// never the driver); a value that cannot be read stays unreadable whatever
+/// the driver offers.
+#[test]
+fn an_unread_keyword_list_is_taken_as_offered() {
     let mut reg = rtl8156_box();
     reg.set(&class_key("0014"), "PendingTransmits", RegValue::Absent);
     reg.set(&class_key("0014"), "TransmitBufferLen", RegValue::Absent);
     let params = format!(r"{}\Ndi\Params", class_key("0014"));
-    reg.subkeys_of(
-        &params,
-        Ok(vec!["PendingReceives".to_string(), "*EEE".to_string()]),
-    );
-    let nics = read(&reg);
-    assert_eq!(problems(&nics), []);
-    assert_eq!(view(&nics.unwrap()[0]).ok, Some(true));
-    reg.subkeys_of(
-        &params,
-        Ok(vec![
-            "PendingReceives".to_string(),
-            " pendingtransmits".to_string(),
-        ]),
-    );
+    reg.subkeys_of(&params, Err(5));
     assert_eq!(
         problems(&read(&reg)),
-        [value_problem("PendingTransmits", None)]
+        [
+            value_problem("PendingTransmits", None),
+            value_problem("TransmitBufferLen", None),
+        ]
     );
-    // The list unread: taken as offered.
-    reg.subkeys_of(&params, Err(5));
-    assert_eq!(problems(&read(&reg)).len(), 2);
+    let unread = WiredValue {
+        keyword: "PendingTransmits",
+        value: Reading::Unread,
+        offered: false,
+    };
+    assert_eq!(verdict(&unread), Verdict::Unread);
 }

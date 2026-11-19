@@ -166,6 +166,11 @@ pub enum EnvProblem {
     },
     /// #285: a wired adapter's values could not be read.
     WiredNicUnreadable { nic: String },
+    /// #337: an RTL8156 that carries a Dante leg runs a driver that does
+    /// not offer its transmit-queue settings (Microsoft's inbox
+    /// 11.4.211.2022: a 3 / 18 queue, thousands of late Dante packets a
+    /// minute). No deploy repairs it: the driver is installed by hand.
+    DanteNicDriverOld { nic: String },
     /// #255: Windows Update's automatic updates are not off
     /// (`NoAutoUpdate` is not 1).
     AutoUpdateOn,
@@ -222,6 +227,7 @@ impl EnvProblem {
             Self::SoundGridNicUnreadable { .. } => "unreadable:soundgrid_nic".to_string(),
             Self::WiredNicValue { keyword, .. } => format!("wired_nic_value:{keyword}"),
             Self::WiredNicUnreadable { .. } => "unreadable:wired_nic".to_string(),
+            Self::DanteNicDriverOld { .. } => "dante_nic_driver_old".to_string(),
             Self::AutoUpdateOn => "windows_auto_update_on".to_string(),
             Self::DriversNotExcluded => "windows_update_drivers_on".to_string(),
             Self::StoreAutoUpdatesOn => "store_auto_updates_on".to_string(),
@@ -356,6 +362,11 @@ impl EnvProblem {
             Self::WiredNicUnreadable { nic } => {
                 format!("nastavenia sieťovej karty „{nic}“ sa nepodarilo zistiť")
             }
+            Self::DanteNicDriverOld { nic } => format!(
+                "sieťová karta „{nic}“ nesie Dante a jej ovládač je príliš starý: neponúka \
+                 nastavenie vysielacej fronty — nainštaluj ovládač Realtek RTL8156 verzie 11.19 \
+                 alebo novšej"
+            ),
             Self::AutoUpdateOn => {
                 "automatické aktualizácie Windows nie sú vypnuté (NoAutoUpdate)".to_string()
             }
