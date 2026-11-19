@@ -50,6 +50,25 @@ fn standard() -> EnvFacts {
 
 use FirewallProfile::{Domain, Private, Public};
 
+/// #340: the same firewall facts on a PC with a Dante leg (resolume-snv's
+/// two networks: an enabled Dante output on 10.77.7.107).
+fn with_leg(facts: EnvFacts) -> EnvFacts {
+    EnvFacts {
+        network: crate::prod_env::network::snv_example(),
+        ..facts
+    }
+}
+
+/// The firewall's problems in a whole verdict, by code.
+fn firewall_codes(facts: &EnvFacts) -> Vec<String> {
+    verdict(facts)
+        .problems
+        .iter()
+        .map(EnvProblem::code)
+        .filter(|code| code.contains("firewall"))
+        .collect()
+}
+
 #[test]
 fn every_profile_off_holds_whatever_its_rules_and_defaults() {
     for block in [rules(0, &[]), rules(3, &["Block X"]), None] {
@@ -334,6 +353,129 @@ fn an_unread_profile_is_named_and_nothing_else_is_judged() {
         ]
     );
     assert_eq!(mode(&f, &problems(&f)), None);
+}
+
+/// #340: with a Dante leg, every profile off is ONE problem of its own,
+/// whatever the rules and the default actions read (off, they filter
+/// nothing); the mode still names the state the profiles are in.
+#[test]
+fn every_profile_off_with_a_dante_leg_is_one_problem() {
+    for block in [rules(0, &[]), rules(10, &[]), rules(3, &["Block X"]), None] {
+        for defaults in [[Some(WINDOWS); 3], [Some(ALLOW); 3], [None; 3]] {
+            let f = with_leg(facts([Some(false); 3], defaults, block.clone()));
+            assert_eq!(
+                problems(&f),
+                [EnvProblem::FirewallOffWithDanteLeg],
+                "{block:?} {defaults:?}"
+            );
+            assert_eq!(mode(&f, &problems(&f)), Some(FirewallMode::Off));
+        }
+    }
+    // Through the whole verdict: exactly that one, and the box fails.
+    let f = with_leg(facts([Some(false); 3], [Some(ALLOW); 3], rules(10, &[])));
+    assert_eq!(firewall_codes(&f), ["firewall_off_with_dante_leg"]);
+    assert!(!verdict(&f).ok);
+}
+
+/// #340: a PC with no Dante leg keeps "off = clean" (the owner,
+/// 11.11.2026: Dante is one audio path, a PC without it passes clean).
+/// The outputs unread is no leg either: that is its own problem.
+#[test]
+fn every_profile_off_with_no_dante_leg_holds() {
+    use crate::prod_env::network::{NetworkFacts, has_leg, snv_example};
+    let off = facts([Some(false); 3], [Some(WINDOWS); 3], rules(0, &[]));
+    assert!(!has_leg(&off.network));
+    assert_eq!(firewall_codes(&off), Vec::<String>::new());
+    // SNV's adapters and routes with no enabled Dante output.
+    let no_output = EnvFacts {
+        network: NetworkFacts {
+            dante_ips: Some(Vec::new()),
+            ..snv_example()
+        },
+        ..off.clone()
+    };
+    assert!(!has_leg(&no_output.network));
+    assert_eq!(problems(&no_output), []);
+    let unread = EnvFacts {
+        network: NetworkFacts {
+            dante_ips: None,
+            ..snv_example()
+        },
+        ..off
+    };
+    assert!(!has_leg(&unread.network));
+    assert_eq!(problems(&unread), []);
+    assert!(has_leg(&snv_example()));
+}
+
+/// #340: both production PCs today (a Dante leg, dstack's standard) read
+/// clean.
+#[test]
+fn dstacks_standard_with_a_dante_leg_holds() {
+    let f = with_leg(standard());
+    assert_eq!(problems(&f), []);
+    assert_eq!(mode(&f, &problems(&f)), Some(FirewallMode::DanteLeg));
+    assert_eq!(firewall_codes(&f), Vec::<String>::new());
+}
+
+/// #340: a firewall that is partly on, or unread, reads on a PC with a
+/// Dante leg exactly as on one without: the new problem is for every
+/// profile off only.
+#[test]
+fn a_dante_leg_changes_no_other_firewall_verdict() {
+    let mut one_off = standard();
+    one_off.firewall[2] = Some(false);
+    let cases = [
+        // Simply on: nothing of the standard.
+        facts([Some(true); 3], [Some(WINDOWS); 3], rules(0, &["Block X"])),
+        facts(
+            [Some(false), Some(true), Some(false)],
+            [Some(WINDOWS); 3],
+            rules(0, &[]),
+        ),
+        // The standard with a profile off, a default that blocks, a rule
+        // outside the group, a group that is short.
+        one_off,
+        facts([Some(true); 3], [Some(WINDOWS); 3], rules(10, &[])),
+        facts([Some(true); 3], [Some(ALLOW); 3], rules(10, &["Block X"])),
+        facts([Some(true); 3], [Some(ALLOW); 3], rules(9, &[])),
+        facts([Some(true); 3], [Some(ALLOW); 3], None),
+        // A profile unread, the others off.
+        facts([None, Some(false), Some(false)], [None; 3], rules(0, &[])),
+    ];
+    for f in cases {
+        let plain = problems(&f);
+        assert!(!plain.is_empty(), "{f:?}");
+        let leg = with_leg(f.clone());
+        assert_eq!(problems(&leg), plain, "{:?}", f.firewall);
+        assert!(
+            !plain.contains(&EnvProblem::FirewallOffWithDanteLeg),
+            "{:?}",
+            f.firewall
+        );
+        assert_eq!(mode(&leg, &problems(&leg)), mode(&f, &plain));
+    }
+}
+
+/// #340: `scripts/setup-prod-pc.ps1` blocks on the same state under the
+/// same code, by its own Dante-leg fact (each line matched alone: a
+/// Windows checkout holds the script with CRLF line ends).
+#[test]
+fn the_setup_script_blocks_a_dante_leg_with_the_firewall_off() {
+    let script = include_str!("../../../scripts/setup-prod-pc.ps1");
+    let code = EnvProblem::FirewallOffWithDanteLeg.code();
+    assert_eq!(code, "firewall_off_with_dante_leg");
+    let blocker = format!("New-ProdPcBlocker '{code}' ");
+    let lines: Vec<&str> = script.lines().collect();
+    let at: Vec<usize> = (0..lines.len())
+        .filter(|&i| lines[i].contains(&blocker))
+        .collect();
+    assert_eq!(at.len(), 1, "{blocker}");
+    // Inside the every-profile-off branch, under the leg's own test.
+    let [i] = at[..] else { unreachable!() };
+    assert!(i >= 2, "{blocker}");
+    assert_eq!(lines[i - 1].trim(), "if (Test-ProdPcDanteLeg $Facts) {");
+    assert_eq!(lines[i - 2].trim(), "if ($on.Count -eq 0) {");
 }
 
 #[test]

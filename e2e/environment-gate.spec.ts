@@ -298,6 +298,36 @@ test.describe("production environment gate (#233)", () => {
     ]);
   });
 
+  // #340: resolume-pp ran a Dante leg with every firewall profile off from
+  // 18.11.2026 and the gate read it clean. The gate has no per-code list (it
+  // fails on every problem); this pins what it prints, and that the fact
+  // fails by name even from a server that names no problem.
+  test("#340: every firewall profile off fails on a PC with a Dante leg, and only there", () => {
+    const text =
+      "brána firewall je vypnutá a sieť Dante nie je filtrovaná — zapni ju podľa štandardu dstack: " +
+      "všetky profily zapnuté, predvolená akcia povoliť (prichádzajúce aj odchádzajúce), " +
+      "skupina pravidiel „dstack Dante leg“";
+    const fact =
+      'firewall.mode is "off" on a PC with a Dante leg (two_networks.dante_ips ["10.77.7.107"]), not "dante_leg"';
+    const status = holds({
+      ok: false,
+      firewall: FIREWALL_OFF,
+      two_networks: SNV_TWO_NETWORKS,
+      problems: [{ code: "firewall_off_with_dante_leg", text_sk: text }],
+    });
+    expect(environmentFailures(status)).toEqual([`firewall_off_with_dante_leg: ${text}`, fact]);
+    // An older server that names no problem for it: the fact alone fails.
+    expect(environmentFailures(holds({ firewall: FIREWALL_OFF, two_networks: SNV_TWO_NETWORKS }))).toEqual([fact]);
+    // No Dante leg (PP before its leg): off holds.
+    expect(environmentFailures(holds({ firewall: FIREWALL_OFF, two_networks: NO_DANTE_LEG }))).toEqual([]);
+    // A Dante leg on dstack's standard (both PCs today) holds.
+    expect(environmentFailures(holds({ firewall: FIREWALL_DANTE_LEG, two_networks: SNV_TWO_NETWORKS }))).toEqual([]);
+    // The outputs unread: the leg is not known, only that is named.
+    expect(
+      environmentFailures(holds({ firewall: FIREWALL_OFF, two_networks: { ...NO_DANTE_LEG, dante_ips: null } })),
+    ).toEqual(["two_networks.dante_ips is null, not a list"]);
+  });
+
   test("a status from before the guard knew a fact fails on it", () => {
     // An older server: no passive mode, no antivirus list, no firewall.
     const old = holds();

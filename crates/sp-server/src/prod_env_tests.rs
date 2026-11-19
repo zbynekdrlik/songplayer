@@ -14,9 +14,10 @@ use tower::ServiceExt;
 
 use super::*;
 
-/// A production box: IoT Enterprise LTSC, Defender real-time off, every
-/// firewall profile off (Windows' own default actions, no Block rule),
-/// resolume-snv's two networks as dstack set them up (#255 item D).
+/// A production box: IoT Enterprise LTSC, Defender real-time off,
+/// resolume-snv's two networks as dstack set them up (#255 item D) and,
+/// since it has a Dante leg (#340), the firewall on dstack's standard
+/// (every profile on, Allow both ways, the group's 10 rules).
 fn production() -> EnvFacts {
     EnvFacts {
         edition_id: Some("IoTEnterpriseS".to_string()),
@@ -28,12 +29,32 @@ fn production() -> EnvFacts {
         defender_mode: Some("Normal".to_string()),
         defender_antivirus_enabled: Some(true),
         antivirus_on: Some(Vec::new()),
-        firewall: [Some(false); 3],
-        firewall_defaults: [Some(WINDOWS_DEFAULTS); 3],
-        firewall_rules: Some(firewall::BlockRules::default()),
+        firewall: [Some(true); 3],
+        firewall_defaults: [Some(ALLOW_DEFAULTS); 3],
+        firewall_rules: Some(firewall::BlockRules {
+            dante_leg: 10,
+            outside: Vec::new(),
+        }),
         audio: audio::production_example(),
         network: network::snv_example(),
         read_errors: Vec::new(),
+    }
+}
+
+/// The standard's default actions: Allow both ways.
+const ALLOW_DEFAULTS: FirewallDefaults = FirewallDefaults {
+    inbound: 2,
+    outbound: 2,
+};
+
+/// Production but for a firewall nothing of the standard was set up on:
+/// those profiles, Windows' own default actions, no Block rule.
+fn with_plain_firewall(firewall: [Option<bool>; 3]) -> EnvFacts {
+    EnvFacts {
+        firewall,
+        firewall_defaults: [Some(WINDOWS_DEFAULTS); 3],
+        firewall_rules: Some(firewall::BlockRules::default()),
+        ..production()
     }
 }
 
@@ -332,23 +353,46 @@ fn each_firewall_profile_on_or_unread_is_named_by_its_profile() {
     for (i, profile) in FirewallProfile::ALL.into_iter().enumerate() {
         let mut firewall = [Some(false); 3];
         firewall[i] = Some(true);
-        let on = verdict(&EnvFacts {
-            firewall,
-            ..production()
-        });
+        let on = verdict(&with_plain_firewall(firewall));
         assert!(!on.ok, "{profile:?}");
         assert_eq!(on.problems, [EnvProblem::FirewallOn(profile)]);
         firewall[i] = None;
-        let unread = verdict(&EnvFacts {
-            firewall,
-            ..production()
-        });
+        let unread = verdict(&with_plain_firewall(firewall));
         assert!(!unread.ok, "{profile:?}");
         assert_eq!(
             unread.problems,
             [EnvProblem::Unreadable(Unreadable::Firewall(profile))]
         );
     }
+}
+
+/// #340: the state resolume-pp ran in from 18.11.2026 (a Dante leg, every
+/// firewall profile off) fails the box with its own problem; the same box
+/// with no enabled Dante output holds, as before.
+#[test]
+fn a_dante_leg_with_the_firewall_off_fails_the_box() {
+    use sp_core::prod_env::firewall::FirewallMode;
+    let off = with_plain_firewall([Some(false); 3]);
+    let (status, problems) = status_of(&Check::Read(off.clone()), 1_000);
+    assert_eq!(problems, [EnvProblem::FirewallOffWithDanteLeg]);
+    assert!(!status.ok);
+    assert_eq!(status.firewall.mode, Some(FirewallMode::Off));
+    assert_eq!(
+        status.problems,
+        [EnvProblem::FirewallOffWithDanteLeg.view()]
+    );
+    assert_eq!(status.problems[0].code, "firewall_off_with_dante_leg");
+    let no_leg = EnvFacts {
+        network: network::NetworkFacts {
+            dante_ips: Some(Vec::new()),
+            ..network::snv_example()
+        },
+        ..off
+    };
+    let (status, problems) = status_of(&Check::Read(no_leg), 2_000);
+    assert_eq!(problems, []);
+    assert!(status.ok);
+    assert_eq!(status.firewall.mode, Some(FirewallMode::Off));
 }
 
 #[test]
@@ -711,10 +755,7 @@ async fn get_json(state: crate::AppState, uri: &str) -> serde_json::Value {
 async fn both_routes_answer_the_published_status() {
     let _serial = GLOBAL.lock().await;
     let state = crate::api::routes::tests::test_state().await;
-    let check = Check::Read(EnvFacts {
-        firewall: [Some(false), Some(true), Some(false)],
-        ..production()
-    });
+    let check = Check::Read(with_plain_firewall([Some(false), Some(true), Some(false)]));
     let (published, _) = status_of(&check, 1_791_608_681_366);
     global().publish(published.clone());
     let expected = serde_json::to_value(&published).unwrap();

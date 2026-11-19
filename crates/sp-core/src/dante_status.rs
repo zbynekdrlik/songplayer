@@ -46,6 +46,14 @@ pub struct DanteFigures {
     pub late_wakes_recent: Vec<LateWake>,
     /// The stack's media threads and the scheduling each took.
     pub threads: Vec<MediaThread>,
+    /// #324: the device's control ports and process id, from the first
+    /// free dstack slot on its address (slot k: ARC 4440 + k, CMC 8800 + k,
+    /// flows 4455 + k, process id k); Dante's defaults (slot 0) when none
+    /// was free.
+    pub arc: u16,
+    pub cmc: u16,
+    pub flows: u16,
+    pub process_id: u16,
 }
 
 /// One late wake of the Dante pump (`late_wakes_recent`).

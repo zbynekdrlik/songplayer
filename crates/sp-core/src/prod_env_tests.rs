@@ -486,7 +486,8 @@ fn the_rule_names_the_audio_profile() {
         "Produkčný počítač musí bežať na Windows LTSC alebo Windows 11 IoT Enterprise, s \
          vypnutou ochranou Windows Defender v reálnom čase (ani v pasívnom režime), bez iného \
          antivírusu — nič nesmie kontrolovať programy, ktoré SongPlayer spúšťa. Brána firewall \
-         je vypnutá vo všetkých profiloch, alebo (počítač so sieťou Dante) zapnutá vo všetkých \
+         je vypnutá vo všetkých profiloch (len počítač bez siete Dante), alebo zapnutá vo \
+         všetkých \
          podľa štandardu dstack: predvolene všetko povolené a blokuje len skupina pravidiel \
          dstack („dstack Dante leg“)."
     ));

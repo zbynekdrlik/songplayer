@@ -342,7 +342,8 @@ function Get-ProdPcRtl8156Values {
 # 11.11.2026, the owner: Dante is one audio path, a PC without it passes
 # clean; PP had no Dante leg then, and its RTL8156 driver 11.4.211.2022
 # offered neither keyword). SongPlayer's own check asks the same of an enabled Dante
-# output (prod_env_network.rs leg_carriers). Facts with no dante_leg (an
+# output (prod_env_network.rs has_leg, which leg_carriers and issue 340's
+# firewall rule share). Facts with no dante_leg (an
 # older capture) read as no leg.
 function Test-ProdPcDanteLeg {
     param($Facts)
@@ -600,7 +601,10 @@ function Add-ProdPcEveryNicReview {
 # The firewall (issue 255, dstack#155, the owner's ruling of 10.11.2026):
 # dstack's two-network standard (dstack docs/two-networks.md section 3)
 # replaces issue 233's "every profile off" on a PC with a Dante leg. Two
-# states hold: every profile off (a PC with no Dante leg), or dstack's
+# states hold: every profile off, on a PC with no Dante leg only (issue 340:
+# with a leg, Test-ProdPcDanteLeg, the group's rules filter nothing while the
+# profiles are off, so it is the blocker firewall_off_with_dante_leg, the
+# code of SongPlayer's own check), or dstack's
 # standard: every profile on, its default actions Allow, every enabled Block
 # rule in dstack's group "dstack Dante leg" (issue 322, dstack#264, dstack
 # v0.6.123's tools/windows/dante-leg.ps1: the generic filter, the same on
@@ -674,7 +678,13 @@ function Add-ProdPcFirewallReview {
             $Blockers.Add((New-ProdPcBlocker "unreadable:firewall:$($profileName.ToLower())" "the $profileName firewall profile reads $shown in the active store"))
         }
     }
-    if ($unread -or $on.Count -eq 0) { return }
+    if ($unread) { return }
+    if ($on.Count -eq 0) {
+        if (Test-ProdPcDanteLeg $Facts) {
+            $Blockers.Add((New-ProdPcBlocker 'firewall_off_with_dante_leg' "brana firewall je vypnuta a siet Dante (Dante70) nie je filtrovana - every profile is off on a PC with a Dante leg, so the rules of dstack's group filter nothing: switch the firewall on to dstack's standard (every profile on, default Allow in and out, the group dstack Dante leg); this script never switches the firewall"))
+        }
+        return
+    }
     $standard = Get-ProdPcField $Facts 'firewall_standard'
     if ($null -eq $standard) {
         $Blockers.Add((New-ProdPcBlocker 'unreadable:firewall_rules' "a firewall profile is on and its rules were not read (no firewall_standard in the facts)"))

@@ -198,20 +198,32 @@ export interface FirewallStatus {
 }
 
 /** #255 (dstack#155, the owner's ruling of 10.11.2026): the firewall is in
- * one of two states. "off": every profile off (a PC with no Dante leg).
+ * one of two states. "off": every profile off, accepted only on a PC with
+ * no Dante leg (#340: with a leg, `two_networks.dante_ips` not empty, the
+ * group's rules filter nothing and the leg is unfiltered).
  * "dante_leg" (#322, dstack#264): dstack's two-network standard, every
  * profile on, each default action Allow (2), every enabled Block rule in
  * dstack's generic group "dstack Dante leg", which holds exactly 10. The old
  * per-box mode "dstack155" is no longer accepted (#322: every PC moved); its
  * rules read as Block rules outside the group. Each fact by name, whatever
  * the mode says. */
-function firewallFailures(fw: FirewallStatus | undefined, shown: (v: unknown) => string): string[] {
+function firewallFailures(
+  fw: FirewallStatus | undefined,
+  danteIps: string[] | null | undefined,
+  shown: (v: unknown) => string,
+): string[] {
   const f: string[] = [];
   const mode = fw?.mode ?? null;
   const profiles = ["domain", "private", "public"] as const;
   if (mode === "off") {
     for (const p of profiles) {
       if (fw?.[p] !== false) f.push(`firewall.${p} is ${shown(fw?.[p])}, not false`);
+    }
+    // #340: resolume-pp ran a Dante leg with every profile off and read clean.
+    if (Array.isArray(danteIps) && danteIps.length > 0) {
+      f.push(
+        `firewall.mode is "off" on a PC with a Dante leg (two_networks.dante_ips ${shown(danteIps)}), not "dante_leg"`,
+      );
     }
   } else if (mode === "dante_leg") {
     profiles.forEach((p, i) => {
@@ -253,7 +265,7 @@ export const MMCSS_PRODUCTION = {
 /** The facts a production box shows, each by name, whatever `ok` says
  * (review finding 9: the gate never trusts `ok` alone): an allowed edition,
  * Defender's real-time protection and passive mode off, no other antivirus
- * on, the firewall off or dstack's standard; #255: SoundGrid not installed, or its
+ * on, the firewall off (no Dante leg, #340) or dstack's standard; #255: SoundGrid not installed, or its
  * chosen adapter found on NDIS with its settings off, automatic updates
  * off and drivers excluded from Windows Update (lane 2), MMCSS for Pro
  * Audio. A fact
@@ -267,7 +279,7 @@ function factFailures(env: EnvironmentStatus): string[] {
   want("edition_allowed", env.edition_allowed, true);
   want("defender_realtime", env.defender_realtime, false);
   want("defender_passive", env.defender_passive, false);
-  f.push(...firewallFailures(env.firewall, shown));
+  f.push(...firewallFailures(env.firewall, env.two_networks?.dante_ips, shown));
   if (!Array.isArray(env.antivirus_on) || env.antivirus_on.length > 0) {
     f.push(`antivirus_on is ${shown(env.antivirus_on)}, not []`);
   }

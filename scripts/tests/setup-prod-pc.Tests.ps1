@@ -627,10 +627,11 @@ Describe 'Get-ProdPcPlan: every wired adapter (issue 285, the owner''s rule)' {
         $facts.dante_leg = $false
         @(Get-ProdPcBlockers -Facts $facts) | Should -HaveCount 0
         @(Get-ProdPcPlan -Facts $facts) | Should -HaveCount 0
-        # The same keyword list on an adapter that is no RTL8156.
+        # The same keyword list on an adapter that is no RTL8156: only the
+        # firewall's blocker is left (issue 340: a leg, every profile off).
         $facts = Read-Fixture 'pp-dante-old-driver'
         $facts.adapters[1].pnp_device_id = 'USB\VID_0BDA&PID_8153\000001'
-        @(Get-ProdPcBlockers -Facts $facts) | Should -HaveCount 0
+        @(Get-ProdPcBlockers -Facts $facts | ForEach-Object { $_.Code }) | Should -Be @('firewall_off_with_dante_leg')
     }
 
     It 'blocks PP with a Dante leg on the inbox driver 11.4.211.2022 and plans nothing (issue 337)' {
@@ -638,9 +639,10 @@ Describe 'Get-ProdPcPlan: every wired adapter (issue 285, the owner''s rule)' {
         foreach ($read in @($facts, (Copy-Facts $facts))) {
             Get-ProdPcDanteCarrier $read | Should -BeExactly '{0B5E0000-0000-4000-8000-000000000002}'
             @(Get-ProdPcPlan -Facts $read) | Should -HaveCount 0
+            # Issue 340: PP ran that leg with every firewall profile off too.
             $blockers = @(Get-ProdPcBlockers -Facts $read)
-            @($blockers | ForEach-Object { $_.Code }) | Should -Be @('dante_nic_driver_old')
-            $blockers[0].Text | Should -BeExactly "sietova karta 'Ethernet 4' nesie Dante a jej ovladac je prilis stary: neponuka PendingTransmits, TransmitBufferLen - nainstaluj ovladac Realtek RTL8156 verzie 11.19 alebo novsej (this script never installs a driver)"
+            @($blockers | ForEach-Object { $_.Code }) | Should -Be @('firewall_off_with_dante_leg', 'dante_nic_driver_old')
+            $blockers[1].Text | Should -BeExactly "sietova karta 'Ethernet 4' nesie Dante a jej ovladac je prilis stary: neponuka PendingTransmits, TransmitBufferLen - nainstaluj ovladac Realtek RTL8156 verzie 11.19 alebo novsej (this script never installs a driver)"
         }
     }
 
@@ -902,6 +904,55 @@ Describe 'Get-ProdPcBlockers: the firewall (issue 255, dstack#155)' {
         Get-BlockerCodes $facts | Should -HaveCount 0
     }
 
+    # Issue 340: PP ran a Dante leg with every profile off from 18.11.2026
+    # and read clean. With a leg (the facts' dante_leg: the adapter Dante70)
+    # that state is a blocker of its own, whatever the rules and the default
+    # actions read; with no leg it holds as before. Nothing is ever planned.
+    It 'blocks every profile off on a PC with a Dante leg, and only there (issue 340)' {
+        $facts = Read-Fixture 'pp-dante-firewall-off'
+        foreach ($read in @($facts, (Copy-Facts $facts))) {
+            Test-ProdPcDanteLeg $read | Should -BeTrue
+            @(Get-ProdPcPlan -Facts $read) | Should -HaveCount 0
+            $blockers = @(Get-ProdPcBlockers -Facts $read)
+            @($blockers | ForEach-Object { $_.Code }) | Should -Be @('firewall_off_with_dante_leg')
+            $blockers[0].Text | Should -BeExactly "brana firewall je vypnuta a siet Dante (Dante70) nie je filtrovana - every profile is off on a PC with a Dante leg, so the rules of dstack's group filter nothing: switch the firewall on to dstack's standard (every profile on, default Allow in and out, the group dstack Dante leg); this script never switches the firewall"
+        }
+        # Whatever the active store reads besides the profiles.
+        $bare = Read-Fixture 'pp-dante-firewall-off'
+        $bare.PSObject.Properties.Remove('firewall_standard')
+        Get-BlockerCodes $bare | Should -Be @('firewall_off_with_dante_leg')
+        $empty = Read-Fixture 'pp-dante-firewall-off'
+        $empty.firewall_standard.group_rules = @()
+        $empty.firewall_standard.block_rules = @()
+        foreach ($p in @('Domain', 'Private', 'Public')) { $empty.firewall_standard.defaults.$p.inbound = 'Block' }
+        Get-BlockerCodes $empty | Should -Be @('firewall_off_with_dante_leg')
+        # No leg (no Dante70, or facts of an older capture): off holds.
+        $noLeg = Read-Fixture 'pp-dante-firewall-off'
+        $noLeg.dante_leg = $false
+        Get-BlockerCodes $noLeg | Should -HaveCount 0
+        $older = Read-Fixture 'pp-dante-firewall-off'
+        $older.PSObject.Properties.Remove('dante_leg')
+        Get-BlockerCodes $older | Should -HaveCount 0
+    }
+
+    It 'holds a Dante leg on dstack''s standard, and names a profile off by the standard''s own code (issue 340)' {
+        # PP as it was set on 19.11.2026: the same facts, every profile on.
+        $facts = Read-Fixture 'pp-dante-firewall-off'
+        foreach ($p in @('Domain', 'Private', 'Public')) { $facts.firewall.$p = $true }
+        Get-BlockerCodes $facts | Should -HaveCount 0
+        # Partly on: the existing verdicts, never the new one.
+        $facts.firewall.Public = $false
+        Get-BlockerCodes $facts | Should -Be @('firewall_off:public')
+        $plain = Get-PlainOnFacts
+        $plain | Add-Member -NotePropertyName dante_leg -NotePropertyValue $true -Force
+        $plain.firewall.Domain = $false
+        Get-BlockerCodes $plain | Should -Be @('firewall_on:private', 'firewall_on:public')
+        # SNV (its fixture is older than the dante_leg fact) with the leg named.
+        $snv = Read-Fixture 'snv'
+        $snv | Add-Member -NotePropertyName dante_leg -NotePropertyValue $true -Force
+        Get-BlockerCodes $snv | Should -HaveCount 0
+    }
+
     It 'blocks a firewall that is on and follows nothing of the standard, never turning it off' {
         $facts = Get-PlainOnFacts
         Get-BlockerCodes $facts | Should -Be @('firewall_on:domain', 'firewall_on:private', 'firewall_on:public')
@@ -1112,8 +1163,18 @@ Describe 'setup-prod-pc.ps1 itself' {
         $LASTEXITCODE | Should -Be 0
         $text = ($output | ForEach-Object { "$_" }) -join "`n"
         $text | Should -Match "BLOCKED dante_nic_driver_old: sietova karta 'Ethernet 4' nesie Dante"
-        $text | Should -Match 'plan: 0 change\(s\), 1 blocker\(s\)'
+        # Issue 340: that fixture's firewall is off with the leg.
+        $text | Should -Match 'plan: 0 change\(s\), 2 blocker\(s\)'
         $text | Should -Not -Match 'PLAN  nic'
+    }
+
+    It 'names the Dante leg with the firewall off in -Plan and still exits 0 (issue 340)' {
+        $output = & $script:Pwsh -NoProfile -NonInteractive -File $script:ScriptPath -Plan -FactsJson (Join-Path $script:FixtureDir 'pp-dante-firewall-off.json') 2>&1
+        $LASTEXITCODE | Should -Be 0
+        $text = ($output | ForEach-Object { "$_" }) -join "`n"
+        $text | Should -Match 'BLOCKED firewall_off_with_dante_leg: brana firewall je vypnuta a siet Dante \(Dante70\) nie je filtrovana'
+        $text | Should -Match 'plan: 0 change\(s\), 1 blocker\(s\)'
+        $text | Should -Not -Match 'PLAN  firewall'
     }
 
     It "names each firewall blocker in -Plan and still exits 0 (issue 255)" {

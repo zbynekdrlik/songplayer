@@ -1,0 +1,417 @@
+{
+  "_comment": "issue 340: PP (RESOLUME-PP) with a Dante leg and EVERY firewall profile off, the state it ran in from 18.11.2026 until it was set to dstack's standard for good on 19.11.2026 10:14 CET (after dstack's two trials 09:37-09:46 and 09:52-10:12 CET), and that the gate read clean. NOT captured from the box: pp-dante-old-driver.json's facts with 'Ethernet 4' on Realtek's driver 11.19.602.2025 (it offers PendingTransmits and TransmitBufferLen, held at 8 / 64, per issue 337) and firewall_standard as snv.json's (the group 'dstack Dante leg' was on PP since 18.11.2026; what PP's active store read for the default actions while the profiles were off is not recorded, and the rule decides on the profiles and the leg alone). The adapter GUIDs are placeholders.",
+  "registry": [
+    {
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU",
+      "name": "NoAutoUpdate",
+      "kind": "DWord",
+      "value": 1
+    },
+    {
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate",
+      "name": "ExcludeWUDriversInQualityUpdate",
+      "kind": "DWord",
+      "value": 1
+    },
+    {
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\WindowsStore",
+      "name": "AutoDownload",
+      "kind": "DWord",
+      "value": 2
+    },
+    {
+      "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile",
+      "name": "SystemResponsiveness",
+      "kind": "DWord",
+      "value": 0
+    },
+    {
+      "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile",
+      "name": "NetworkThrottlingIndex",
+      "kind": "DWord",
+      "value": 4294967295
+    },
+    {
+      "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Pro Audio",
+      "name": "Priority",
+      "kind": "DWord",
+      "value": 6
+    },
+    {
+      "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Pro Audio",
+      "name": "Scheduling Category",
+      "kind": "String",
+      "value": "High"
+    },
+    {
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection",
+      "name": "DisableRealtimeMonitoring",
+      "kind": "DWord",
+      "value": 1
+    },
+    {
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection",
+      "name": "DisableBehaviorMonitoring",
+      "kind": "DWord",
+      "value": 1
+    },
+    {
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection",
+      "name": "DisableOnAccessProtection",
+      "kind": "DWord",
+      "value": 1
+    },
+    {
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection",
+      "name": "DisableScanOnRealtimeEnable",
+      "kind": "DWord",
+      "value": 1
+    },
+    {
+      "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection",
+      "name": "DisableIOAVProtection",
+      "kind": "DWord",
+      "value": 1
+    }
+  ],
+  "soundgrid": {
+    "installed": true,
+    "preferences_user": "newlevel (the SongPlayer task's user)",
+    "preferences_path": "C:\\Users\\newlevel\\AppData\\Roaming\\Waves Audio\\Preferences\\SoundGrid.Driver.preferences",
+    "preferences": "<?xml version=\"1.0\"?>\n<Preferences>\n    <FileFormatVersion>2</FileFormatVersion>\n    <Configuration>\n        <LocalLanPort>6c:24:08:e5:9c:91</LocalLanPort>\n        <IOMode>0</IOMode>\n        <NativeDevice></NativeDevice>\n        <WdmChannelCount>0</WdmChannelCount>\n        <BlockSize>256</BlockSize>\n        <ProToolsBufferSize>1024</ProToolsBufferSize>\n    </Configuration>\n</Preferences>\n",
+    "preferences_error": null,
+    "adapters": [
+      {
+        "name": "soundgrid-pcie",
+        "guid": "{DBFC2CF4-0000-4000-8000-000000000001}",
+        "description": "Realtek PCIe GbE Family Controller",
+        "mac": "6C-24-08-E5-9C-91",
+        "permanent_mac": "6C2408E59C91",
+        "class_key": "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e972-e325-11ce-bfc1-08002be10318}\\0007",
+        "settings": {
+          "*InterruptModeration": "0",
+          "*FlowControl": "0",
+          "*EEE": "0",
+          "EnableGreenEthernet": "0",
+          "PowerSavingMode": "0",
+          "GigaLite": "0",
+          "PnPCapabilities": "24"
+        }
+      },
+      {
+        "name": "Ethernet 4",
+        "guid": "{0B5E0000-0000-4000-8000-000000000002}",
+        "description": "Realtek Gaming USB 2.5GbE Family Controller",
+        "mac": "6C-1F-F7-73-C7-D9",
+        "permanent_mac": "6C1FF773C7D9",
+        "class_key": "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e972-e325-11ce-bfc1-08002be10318}\\0012",
+        "settings": {
+          "*InterruptModeration": "1",
+          "*FlowControl": "3",
+          "*EEE": "1"
+        }
+      },
+      {
+        "name": "Wi-Fi",
+        "guid": "{1F1F0000-0000-4000-8000-000000000003}",
+        "description": "Intel(R) Wi-Fi 6 AX201 160MHz",
+        "mac": "A0-B1-C2-D3-E4-F5",
+        "permanent_mac": "A0B1C2D3E4F5",
+        "class_key": null,
+        "settings": null
+      }
+    ]
+  },
+  "power": {
+    "scheme_guid": "e9a42b02-d5df-448d-aa00-03f14749eb61",
+    "scheme_name": "Bitsum Highest Performance",
+    "cpmincores_ac": 100
+  },
+  "defender": {
+    "service": "Running",
+    "realtime_enabled": false,
+    "tamper_protected": false,
+    "preferences": {
+      "DisableRealtimeMonitoring": true,
+      "DisableBehaviorMonitoring": true,
+      "DisableIOAVProtection": true,
+      "DisableScriptScanning": true,
+      "MAPSReporting": 0,
+      "SubmitSamplesConsent": 2
+    }
+  },
+  "firewall": {
+    "Domain": false,
+    "Private": false,
+    "Public": false
+  },
+  "dante_leg": true,
+  "adapters": [
+    {
+      "name": "soundgrid-pcie",
+      "guid": "{DBFC2CF4-0000-4000-8000-000000000001}",
+      "description": "Realtek PCIe GbE Family Controller",
+      "mac": "6C-24-08-E5-9C-91",
+      "permanent_mac": "6C2408E59C91",
+      "class_key": "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e972-e325-11ce-bfc1-08002be10318}\\0007",
+      "settings": {
+        "*InterruptModeration": "0",
+        "*FlowControl": "0",
+        "*EEE": "0",
+        "EnableGreenEthernet": "0",
+        "PowerSavingMode": "0",
+        "GigaLite": "0",
+        "PnPCapabilities": "24",
+        "EEE": "0",
+        "AdvancedEEE": "0",
+        "EnableExtraPowerSaving": "0",
+        "*SelectiveSuspend": "0"
+      },
+      "media": "802.3",
+      "status": "Disconnected",
+      "pnp_device_id": "PCI\\VEN_10EC&DEV_8168&SUBSYS_0"
+    },
+    {
+      "name": "Ethernet 4",
+      "guid": "{0B5E0000-0000-4000-8000-000000000002}",
+      "description": "Realtek Gaming USB 2.5GbE Family Controller",
+      "mac": "6C-1F-F7-73-C7-D9",
+      "permanent_mac": "6C1FF773C7D9",
+      "media": "802.3",
+      "status": "Up",
+      "pnp_device_id": "USB\\VID_0BDA&PID_8156\\4F1300131B",
+      "class_key": "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e972-e325-11ce-bfc1-08002be10318}\\0012",
+      "driver_keywords": [
+        "*FlowControl",
+        "*EEE",
+        "PendingReceives",
+        "ReceiveBufferLen",
+        "PendingTransmits",
+        "TransmitBufferLen"
+      ],
+      "settings": {
+        "*FlowControl": "0",
+        "*EEE": "0",
+        "EEE": "0",
+        "EnableGreenEthernet": "0",
+        "AdvancedEEE": "0",
+        "EnableExtraPowerSaving": "0",
+        "GigaLite": "0",
+        "*SelectiveSuspend": "0",
+        "PnPCapabilities": "24",
+        "PendingTransmits": "8",
+        "TransmitBufferLen": "64"
+      }
+    }
+  ],
+  "firewall_standard": {
+    "defaults": {
+      "Domain": {
+        "inbound": "Allow",
+        "outbound": "Allow"
+      },
+      "Private": {
+        "inbound": "Allow",
+        "outbound": "Allow"
+      },
+      "Public": {
+        "inbound": "Allow",
+        "outbound": "Allow"
+      }
+    },
+    "block_rules": [
+      {
+        "name": "{d4e1e600-0000-4000-8000-000000000001}",
+        "display_name": "dstack Dante leg: TCP in",
+        "group": "dstack Dante leg",
+        "display_group": "dstack Dante leg"
+      },
+      {
+        "name": "{d4e1e600-0000-4000-8000-000000000002}",
+        "display_name": "dstack Dante leg: TCP out",
+        "group": "dstack Dante leg",
+        "display_group": "dstack Dante leg"
+      },
+      {
+        "name": "{d4e1e600-0000-4000-8000-000000000003}",
+        "display_name": "dstack Dante leg: UDP in",
+        "group": "dstack Dante leg",
+        "display_group": "dstack Dante leg"
+      },
+      {
+        "name": "{d4e1e600-0000-4000-8000-000000000004}",
+        "display_name": "dstack Dante leg: UDP in, ephemeral ports",
+        "group": "dstack Dante leg",
+        "display_group": "dstack Dante leg"
+      },
+      {
+        "name": "{d4e1e600-0000-4000-8000-000000000005}",
+        "display_name": "dstack Dante leg: svchost.exe UDP inbound",
+        "group": "dstack Dante leg",
+        "display_group": "dstack Dante leg"
+      },
+      {
+        "name": "{d4e1e600-0000-4000-8000-000000000006}",
+        "display_name": "dstack Dante leg: svchost.exe UDP outbound",
+        "group": "dstack Dante leg",
+        "display_group": "dstack Dante leg"
+      },
+      {
+        "name": "{d4e1e600-0000-4000-8000-000000000007}",
+        "display_name": "dstack Dante leg: mDNSResponder.exe UDP inbound",
+        "group": "dstack Dante leg",
+        "display_group": "dstack Dante leg"
+      },
+      {
+        "name": "{d4e1e600-0000-4000-8000-000000000008}",
+        "display_name": "dstack Dante leg: mDNSResponder.exe UDP outbound",
+        "group": "dstack Dante leg",
+        "display_group": "dstack Dante leg"
+      },
+      {
+        "name": "{d4e1e600-0000-4000-8000-000000000009}",
+        "display_name": "dstack Dante leg: mDNSResponder.exe (x86) UDP inbound",
+        "group": "dstack Dante leg",
+        "display_group": "dstack Dante leg"
+      },
+      {
+        "name": "{d4e1e600-0000-4000-8000-000000000010}",
+        "display_name": "dstack Dante leg: mDNSResponder.exe (x86) UDP outbound",
+        "group": "dstack Dante leg",
+        "display_group": "dstack Dante leg"
+      }
+    ],
+    "group_rules": [
+      {
+        "name": "{d4e1e600-0000-4000-8000-000000000001}",
+        "display_name": "dstack Dante leg: TCP in",
+        "group": "dstack Dante leg",
+        "enabled": true,
+        "action": "Block",
+        "interface_alias": [
+          "Dante70"
+        ],
+        "programs": [
+          "Any"
+        ]
+      },
+      {
+        "name": "{d4e1e600-0000-4000-8000-000000000002}",
+        "display_name": "dstack Dante leg: TCP out",
+        "group": "dstack Dante leg",
+        "enabled": true,
+        "action": "Block",
+        "interface_alias": [
+          "Dante70"
+        ],
+        "programs": [
+          "Any"
+        ]
+      },
+      {
+        "name": "{d4e1e600-0000-4000-8000-000000000003}",
+        "display_name": "dstack Dante leg: UDP in",
+        "group": "dstack Dante leg",
+        "enabled": true,
+        "action": "Block",
+        "interface_alias": [
+          "Dante70"
+        ],
+        "programs": [
+          "Any"
+        ]
+      },
+      {
+        "name": "{d4e1e600-0000-4000-8000-000000000004}",
+        "display_name": "dstack Dante leg: UDP in, ephemeral ports",
+        "group": "dstack Dante leg",
+        "enabled": true,
+        "action": "Block",
+        "interface_alias": [
+          "Dante70"
+        ],
+        "programs": [
+          "Any"
+        ]
+      },
+      {
+        "name": "{d4e1e600-0000-4000-8000-000000000005}",
+        "display_name": "dstack Dante leg: svchost.exe UDP inbound",
+        "group": "dstack Dante leg",
+        "enabled": true,
+        "action": "Block",
+        "interface_alias": [
+          "Dante70"
+        ],
+        "programs": [
+          "%SystemRoot%\\System32\\svchost.exe"
+        ]
+      },
+      {
+        "name": "{d4e1e600-0000-4000-8000-000000000006}",
+        "display_name": "dstack Dante leg: svchost.exe UDP outbound",
+        "group": "dstack Dante leg",
+        "enabled": true,
+        "action": "Block",
+        "interface_alias": [
+          "Dante70"
+        ],
+        "programs": [
+          "%SystemRoot%\\System32\\svchost.exe"
+        ]
+      },
+      {
+        "name": "{d4e1e600-0000-4000-8000-000000000007}",
+        "display_name": "dstack Dante leg: mDNSResponder.exe UDP inbound",
+        "group": "dstack Dante leg",
+        "enabled": true,
+        "action": "Block",
+        "interface_alias": [
+          "Dante70"
+        ],
+        "programs": [
+          "%ProgramFiles%\\Bonjour\\mDNSResponder.exe"
+        ]
+      },
+      {
+        "name": "{d4e1e600-0000-4000-8000-000000000008}",
+        "display_name": "dstack Dante leg: mDNSResponder.exe UDP outbound",
+        "group": "dstack Dante leg",
+        "enabled": true,
+        "action": "Block",
+        "interface_alias": [
+          "Dante70"
+        ],
+        "programs": [
+          "%ProgramFiles%\\Bonjour\\mDNSResponder.exe"
+        ]
+      },
+      {
+        "name": "{d4e1e600-0000-4000-8000-000000000009}",
+        "display_name": "dstack Dante leg: mDNSResponder.exe (x86) UDP inbound",
+        "group": "dstack Dante leg",
+        "enabled": true,
+        "action": "Block",
+        "interface_alias": [
+          "Dante70"
+        ],
+        "programs": [
+          "%ProgramFiles(x86)%\\Bonjour\\mDNSResponder.exe"
+        ]
+      },
+      {
+        "name": "{d4e1e600-0000-4000-8000-000000000010}",
+        "display_name": "dstack Dante leg: mDNSResponder.exe (x86) UDP outbound",
+        "group": "dstack Dante leg",
+        "enabled": true,
+        "action": "Block",
+        "interface_alias": [
+          "Dante70"
+        ],
+        "programs": [
+          "%ProgramFiles(x86)%\\Bonjour\\mDNSResponder.exe"
+        ]
+      }
+    ]
+  }
+}
