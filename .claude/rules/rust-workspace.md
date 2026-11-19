@@ -443,6 +443,25 @@ text order), or number the fragment too. A scratch `python3 -c "import
 sqlite3"` of the exact query, with the binds sqlx would give, shows it
 before CI does.
 
+## sqlx 0.9: a built SQL string goes in `sqlx::AssertSqlSafe` (#296)
+
+Since sqlx 0.9 every `sqlx::query*()` takes `impl SqlSafeStr`: a `&'static
+str` literal as it is, anything built at run time (`format!`, a pushed
+`String`) only inside `sqlx::AssertSqlSafe(…)`, else E0277 "dynamic SQL
+strings should be audited for possible injections". Write
+`sqlx::query(sqlx::AssertSqlSafe(format!("… {FRAGMENT} …")))` or
+`sqlx::AssertSqlSafe(sql.as_str())` for a `String` used again below. The
+wrapper is a claim, so keep it true: splice only the tree's own constants,
+`queue_row!()`-style fragments, `?` placeholders and integers; every value
+from a request, a file name or a peer is bound with `.bind()`, never
+formatted in.
+
+sqlx 0.9.1 takes `libsqlite3-sys` as a range (`>=0.30.1, <0.41.0`), and
+`cargo update -p sqlx` alone keeps the locked one: run `cargo update -p
+libsqlite3-sys` too when an advisory names it (RUSTSEC-2026-0459 needed
+0.39+). sqlx 0.9 declares `rust-version` 1.94; the workspace still declares
+1.87 and CI builds on stable.
+
 ## Two compile errors review rounds missed (#218/#219 integration)
 
 Six fresh-context review rounds passed both of these, and the first CI run
