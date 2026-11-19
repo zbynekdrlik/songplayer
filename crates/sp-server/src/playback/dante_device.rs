@@ -16,7 +16,7 @@
 //! `Link::start` sets up and starts in one call, so a device the stack refuses
 //! (a name, an address no adapter holds) fails the seam's `start`, not `open`.
 
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -33,6 +33,7 @@ use crate::playback::asio_format::AsioSample;
 use crate::playback::asio_hold::{DriverHold, DriverHolds};
 use crate::playback::asio_out::{AsioDevice, Opened, Started};
 use crate::playback::asio_state::{DeviceEvents, Reason};
+use crate::playback::dante_slots;
 
 /// The largest block the stack's pump runs (its `block` setting).
 const MAX_BLOCK: usize = 256;
@@ -107,12 +108,17 @@ impl DanteParams {
     /// state file, and the channels carry DVS's names: a receiver subscribed
     /// to `01@resolume-snv` needs no change.
     pub fn config(&self) -> Config {
+        self.config_on(self.ports)
+    }
+
+    /// [`Self::config`] on `ports` (`None`: Dante's defaults).
+    fn config_on(&self, ports: Option<(Ports, u16)>) -> Config {
         let config = Config::new(self.device.clone(), self.dir.join("state.toml"))
             .tx(["01", "02"])
             .sample_rate(self.rate)
             .network_rate(self.network_rate)
             .product("New Level", "SongPlayer");
-        match self.ports {
+        match ports {
             Some((ports, id)) => config.ports(ports).process_id(id),
             None => config,
         }
@@ -219,21 +225,36 @@ pub fn figures_of(line: &str) -> Option<DanteFigures> {
     Some(f)
 }
 
-/// The running device's media, for the status: the worker sets it at the
-/// start and clears it at the close, `GET /api/v1/program` reads it. Nothing
-/// on the audio path takes this lock.
+/// The running device's media and its ports, for the status: the worker
+/// sets them at the start and clears them at the close, `GET
+/// /api/v1/program` reads them. Nothing on the audio path takes this lock.
 #[derive(Clone, Default)]
-pub struct DanteLink(Arc<Mutex<Option<Arc<Media>>>>);
+pub struct DanteLink(Arc<Mutex<Option<Running>>>);
+
+/// A running device's media and its control ports + process id.
+type Running = (Arc<Media>, (Ports, u16));
 
 impl DanteLink {
-    fn set(&self, media: Option<Arc<Media>>) {
-        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = media;
+    fn set(&self, running: Option<Running>) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = running;
     }
 
-    /// The stack's figures now; `None` while no device runs.
+    /// The stack's figures now, with the device's ports; `None` while no
+    /// device runs.
     pub fn figures(&self) -> Option<DanteFigures> {
-        let media = self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()?;
-        figures_of(&ctl::status(&media))
+        let (media, ports) = self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()?;
+        figures_of(&ctl::status(&media)).map(|f| with_ports(f, ports))
+    }
+}
+
+/// `f` with the device's control ports and process id (#324).
+fn with_ports(f: DanteFigures, (ports, id): (Ports, u16)) -> DanteFigures {
+    DanteFigures {
+        arc: ports.arc,
+        cmc: ports.cmc,
+        flows: ports.flows,
+        process_id: id,
+        ..f
     }
 }
 
@@ -299,10 +320,13 @@ impl Process for RingProcess {
     }
 }
 
-fn reason(e: HostError) -> Reason {
+/// The stack's refusal as the worker's reason, a refused port named with
+/// its holder where Windows can tell (#324): `holder` answers a port's
+/// `(pid, image)`.
+fn reason(e: HostError, holder: impl Fn(u16) -> Option<(u32, String)>) -> Reason {
     match e {
-        HostError::Setup(text) => Reason::Refused(text),
-        HostError::Run(text) => Reason::Failed(text),
+        HostError::Setup(text) => Reason::Refused(dante_slots::holder_text(&text, holder)),
+        HostError::Run(text) => Reason::Failed(dante_slots::holder_text(&text, holder)),
     }
 }
 
@@ -313,6 +337,17 @@ fn reason(e: HostError) -> Reason {
 static HELD: DriverHolds = DriverHolds::new();
 const HOLD_NAME: &str = "dante";
 
+/// The ports of a device whose stack was still stopping after dlink's stop
+/// wait (#324): its successor takes the same ports, so it fails its start
+/// on them and retries on the backoff until they are free, never moving to
+/// another slot beside a device of ours that still announces the name.
+/// Cleared by the next device that starts.
+static LINGERING: Mutex<Option<(Ports, u16)>> = Mutex::new(None);
+
+fn lingering() -> std::sync::MutexGuard<'static, Option<(Ports, u16)>> {
+    LINGERING.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// The output's device on its worker thread.
 pub struct DanteDevice {
     params: DanteParams,
@@ -322,6 +357,8 @@ pub struct DanteDevice {
     link: DanteLink,
     /// From `open` until after the stack stopped.
     hold: Option<DriverHold<'static>>,
+    /// The ports `open` chose (#324): a slot's, `None` for Dante's defaults.
+    chosen: Option<(Ports, u16)>,
 }
 
 impl DanteDevice {
@@ -338,7 +375,14 @@ impl DanteDevice {
             counts: Arc::default(),
             link,
             hold: None,
+            chosen: None,
         }
+    }
+
+    /// The control ports and process id the device opened on: the chosen
+    /// slot's, else Dante's defaults (slot 0).
+    pub fn ports(&self) -> (Ports, u16) {
+        dante_slots::effective(self.chosen)
     }
 }
 
@@ -351,7 +395,12 @@ impl AsioDevice for DanteDevice {
             .device()
             .map_err(|problems| Reason::Refused(problems.join("; ")))?;
         self.hold = Some(HELD.claim(HOLD_NAME).ok_or(Reason::Held)?);
-        self.config = Some(config);
+        // #324: the slot is probed only now, with the hold: a predecessor of
+        // ours has stopped and given its ports back (or, still stopping,
+        // left them to its successor: `LINGERING`).
+        let given = self.params.ports.or(*lingering());
+        self.chosen = dante_slots::choose(self.params.ip, given, |at| UdpSocket::bind(at).is_ok());
+        self.config = Some(self.params.config_on(self.chosen));
         Ok(Opened {
             rate: f64::from(self.params.rate),
             buffer_frames: self.params.app_block(device.block),
@@ -372,14 +421,23 @@ impl AsioDevice for DanteDevice {
             tx: vec![0, 1],
         };
         let place = Place::Ip(self.params.ip);
-        let running =
-            Link::start_on(&config, &place, map, process, self.params.clock).map_err(reason)?;
+        let ip = self.params.ip;
+        let running = Link::start_on(&config, &place, map, process, self.params.clock)
+            .map_err(|e| reason(e, |port| dante_slots::port_holder(ip, port)))?;
+        *lingering() = None;
+        let (ports, id) = self.ports();
         info!(
             rate = self.params.rate,
             network_rate = self.params.network_rate,
-            "dante output: device announced"
+            arc = ports.arc,
+            cmc = ports.cmc,
+            flows = ports.flows,
+            process_id = id,
+            slot_free = self.chosen.is_some(),
+            "dante output: device announced (its control ports: the first dstack slot free on its address)"
         );
-        self.link.set(Some(Arc::clone(running.media())));
+        self.link
+            .set(Some((Arc::clone(running.media()), self.ports())));
         self.running = Some(running);
         Ok(Started {
             output_latency_frames: self.output_latency_frames(),
@@ -430,6 +488,7 @@ impl AsioDevice for DanteDevice {
                 // must come back without a restart: a successor that finds the
                 // ports still bound fails its start and retries on the backoff.
                 warn!("dante output: the stack is still stopping after dlink's stop wait");
+                *lingering() = Some(self.ports());
             }
         }
         // After the stop: the hold covers the ports and the name until then.

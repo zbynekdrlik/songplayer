@@ -413,6 +413,11 @@ fn the_link_reads_the_running_stack_and_nothing_after_the_close() {
     device.start(rx).unwrap();
     let figures = link.figures().expect("the running stack answers");
     assert!(figures.clock_ready, "the system clock is ready at once");
+    // #324: the device's control ports and process id on the status.
+    assert_eq!(
+        (figures.arc, figures.cmc, figures.flows, figures.process_id),
+        (slot.ports.arc, slot.ports.cmc, slot.ports.flows, slot.id)
+    );
     assert_eq!(figures.live_flows, 0);
     // #325: the engine's wake buckets and the pump's scheduling come from
     // the stack's own line under the names SongPlayer reads (a renamed
@@ -468,9 +473,54 @@ fn an_address_no_adapter_holds_fails_the_start_and_names_no_panic() {
     // the stack judges an address it does not find as in production).
     let mut device = DanteDevice::new(params(dir.path(), Ipv4Addr::new(192, 0, 2, 77)));
     device.open("", [0, 1]).unwrap();
+    // #324: no slot binds on an address no adapter holds: Dante's defaults.
+    assert_eq!(device.ports(), crate::playback::dante_slots::slot(0));
     let (_tx, rx) = rtrb::RingBuffer::new(1024);
     assert!(device.start(rx).is_err());
     device.close();
+}
+
+/// #324: the output's device (no ports given) takes the first free dstack
+/// slot on its address at its open; slot 0's ARC held there skips slot 0.
+#[test]
+fn an_outputs_device_opens_on_the_first_free_slot_of_its_address() {
+    use crate::playback::dante_slots::{binds, slot};
+    let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let ip = test_ipv4();
+    // Ours, or held by another program already: either way not free.
+    let _arc = UdpSocket::bind((ip, DANTE_ARC_PORT));
+    assert!(!binds(ip, &slot(0).0));
+    let mut device = DanteDevice::new(params(dir.path(), ip));
+    device.open("", [0, 1]).unwrap();
+    let (ports, id) = device.ports();
+    assert!((1..15).contains(&id), "slot {id}");
+    assert_eq!((ports, id), slot(id), "a slot's ports and its process id");
+    device.close();
+}
+
+/// #324: a refusal of a chosen port names its holder where Windows tells.
+#[test]
+fn a_bind_refusal_names_the_ports_holder() {
+    let holder = |port: u16| (port == 4441).then(|| (812, "Arena.exe".to_string()));
+    let run = HostError::Run("ARC on UDP 4441: Address already in use".into());
+    assert_eq!(
+        reason(run, holder),
+        Reason::Failed(
+            "ARC on UDP 4441: Address already in use; UDP 4441 is held by Arena.exe (pid 812)"
+                .into()
+        )
+    );
+    let setup = HostError::Setup("CMC on UDP 4441: denied".into());
+    assert_eq!(
+        reason(setup, holder),
+        Reason::Refused("CMC on UDP 4441: denied; UDP 4441 is held by Arena.exe (pid 812)".into())
+    );
+    let other = HostError::Run("ARC on UDP 4440: Address already in use".into());
+    assert_eq!(
+        reason(other, holder),
+        Reason::Failed("ARC on UDP 4440: Address already in use".into())
+    );
 }
 
 /// A rebuilt entry's successor starts while its predecessor still stops: it

@@ -24,6 +24,9 @@ pub mod band_pool; // #223: the SP-program sender's persistent row-band workers 
 mod clear_lyrics;
 pub mod clock_health;
 pub mod dante_device; // #285: the native Dante output — the stack behind the ASIO worker's device seam
+pub mod dante_slots; // #324: the Dante output's control ports from dstack's first free slot
+#[cfg(windows)]
+mod dante_slots_win; // #324: a UDP port's holder (IP Helper), Windows glue
 pub mod dashboard_replay; // #225: the engine's last dashboard state per playlist, replayed on WS connect
 pub mod decode_thread; // #223 S0: the one way a decode thread starts (producer + decode bench)
 pub mod early_end; // #277: a video that ends long before its duration is a failure (pure)
