@@ -582,18 +582,65 @@ Describe 'Get-ProdPcPlan: every wired adapter (issue 285, the owner''s rule)' {
         Get-Rtl8156Actions $facts | Should -HaveCount 0
     }
 
-    It 'sets only what the driver offers on the adapter carrying the Dante leg, and passes a keyword it lacks' {
+    # Issue 337: on the adapter carrying the Dante leg a keyword the driver
+    # does not offer is the driver being too old: a blocker (the script never
+    # installs a driver), and that keyword is never set.
+    It 'blocks an RTL8156 driver that lacks a transmit keyword on the adapter carrying the Dante leg, once' {
         $facts = Read-Fixture 'fresh'
         $facts | Add-Member -NotePropertyName dante_leg -NotePropertyValue $true -Force
         $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(New-Adapter 'Ethernet 4' '0014' -PnpDeviceId $script:Rtl8156) -Force
         $facts.adapters[0] | Add-Member -NotePropertyName driver_keywords -NotePropertyValue @('pendingtransmits', 'PendingReceives') -Force
         foreach ($read in @($facts, (Copy-Facts $facts))) {
             @(Get-Rtl8156Actions $read | ForEach-Object { "$($_.Name) $($_.Current) $($_.Wanted)" }) | Should -Be @('PendingTransmits (none) 8')
+            $old = @(Get-ProdPcBlockers -Facts $read | Where-Object { $_.Code -eq 'dante_nic_driver_old' })
+            $old | Should -HaveCount 1
+            $old[0].Text | Should -Match "^sietova karta 'Ethernet 4' nesie Dante a jej ovladac je prilis stary: neponuka TransmitBufferLen - nainstaluj ovladac Realtek RTL8156 verzie 11\.19 alebo novsej"
+            $old[0].AdapterGuid | Should -BeExactly '0014'
             @(Get-ProdPcBlockers -Facts $read | Where-Object { $_.Code -like 'wired_nic*' }) | Should -HaveCount 0
         }
-        # A value the registry holds is set through the driver as before.
+        Get-ProdPcRtl8156Lacking $facts.adapters[0] | Should -Be @('TransmitBufferLen')
+        # A value left in the registry is not set through a driver that does
+        # not offer its keyword (it would refuse it): still only the blocker.
         $facts.adapters[0].settings | Add-Member -NotePropertyName TransmitBufferLen -NotePropertyValue '18' -Force
+        @(Get-Rtl8156Actions $facts | ForEach-Object { $_.Name }) | Should -Be @('PendingTransmits')
+        @(Get-ProdPcBlockers -Facts $facts | ForEach-Object { $_.Code }) | Should -Contain 'dante_nic_driver_old'
+        # Neither offered: one blocker naming both, nothing set.
+        $facts.adapters[0].driver_keywords = @('PendingReceives')
+        Get-Rtl8156Actions $facts | Should -HaveCount 0
+        $old = @(Get-ProdPcBlockers -Facts $facts | Where-Object { $_.Code -eq 'dante_nic_driver_old' })
+        $old | Should -HaveCount 1
+        $old[0].Text | Should -Match 'neponuka PendingTransmits, TransmitBufferLen - '
+        # Both offered: no blocker, both set.
+        $facts.adapters[0].driver_keywords = @('PendingTransmits', 'TransmitBufferLen')
         @(Get-Rtl8156Actions $facts | ForEach-Object { $_.Name }) | Should -Be @('PendingTransmits', 'TransmitBufferLen')
+        @(Get-ProdPcBlockers -Facts $facts | Where-Object { $_.Code -eq 'dante_nic_driver_old' }) | Should -HaveCount 0
+        Get-ProdPcRtl8156Lacking $facts.adapters[0] | Should -HaveCount 0
+        # The keyword list not read (an older capture): taken as offered.
+        $facts.adapters[0].PSObject.Properties.Remove('driver_keywords')
+        @(Get-Rtl8156Actions $facts | ForEach-Object { $_.Name }) | Should -Be @('PendingTransmits', 'TransmitBufferLen')
+        @(Get-ProdPcBlockers -Facts $facts | Where-Object { $_.Code -eq 'dante_nic_driver_old' }) | Should -HaveCount 0
+    }
+
+    It 'never blocks the old driver off the Dante leg or on another adapter (issue 337)' {
+        $facts = Read-Fixture 'pp-dante-old-driver'
+        $facts.dante_leg = $false
+        @(Get-ProdPcBlockers -Facts $facts) | Should -HaveCount 0
+        @(Get-ProdPcPlan -Facts $facts) | Should -HaveCount 0
+        # The same keyword list on an adapter that is no RTL8156.
+        $facts = Read-Fixture 'pp-dante-old-driver'
+        $facts.adapters[1].pnp_device_id = 'USB\VID_0BDA&PID_8153\000001'
+        @(Get-ProdPcBlockers -Facts $facts) | Should -HaveCount 0
+    }
+
+    It 'blocks PP with a Dante leg on the inbox driver 11.4.211.2022 and plans nothing (issue 337)' {
+        $facts = Read-Fixture 'pp-dante-old-driver'
+        foreach ($read in @($facts, (Copy-Facts $facts))) {
+            Get-ProdPcDanteCarrier $read | Should -BeExactly '{0B5E0000-0000-4000-8000-000000000002}'
+            @(Get-ProdPcPlan -Facts $read) | Should -HaveCount 0
+            $blockers = @(Get-ProdPcBlockers -Facts $read)
+            @($blockers | ForEach-Object { $_.Code }) | Should -Be @('dante_nic_driver_old')
+            $blockers[0].Text | Should -BeExactly "sietova karta 'Ethernet 4' nesie Dante a jej ovladac je prilis stary: neponuka PendingTransmits, TransmitBufferLen - nainstaluj ovladac Realtek RTL8156 verzie 11.19 alebo novsej (this script never installs a driver)"
+        }
     }
 
     It 'sets the transmit values only on the adapter carrying the Dante leg' {
@@ -1056,6 +1103,15 @@ Describe 'setup-prod-pc.ps1 itself' {
         $LASTEXITCODE | Should -Be 0
         @($output | Where-Object { "$_" -like 'PLAN  *' }) | Should -HaveCount 26
         (($output | ForEach-Object { "$_" }) -join "`n") | Should -Match "PLAN  soundgrid_nic adapter 'Ethernet' \*FlowControl: 3 -> 0"
+    }
+
+    It 'names the driver blocker in -Plan and still exits 0 (issue 337)' {
+        $output = & $script:Pwsh -NoProfile -NonInteractive -File $script:ScriptPath -Plan -FactsJson (Join-Path $script:FixtureDir 'pp-dante-old-driver.json') 2>&1
+        $LASTEXITCODE | Should -Be 0
+        $text = ($output | ForEach-Object { "$_" }) -join "`n"
+        $text | Should -Match "BLOCKED dante_nic_driver_old: sietova karta 'Ethernet 4' nesie Dante"
+        $text | Should -Match 'plan: 0 change\(s\), 1 blocker\(s\)'
+        $text | Should -Not -Match 'PLAN  nic'
     }
 
     It "names each firewall blocker in -Plan and still exits 0 (issue 255)" {

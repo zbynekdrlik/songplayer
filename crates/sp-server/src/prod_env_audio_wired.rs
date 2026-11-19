@@ -62,10 +62,15 @@ pub const RTL8156_DEVICE: &str = r"USB\VID_0BDA&PID_8156";
 /// a test compares them).
 ///
 /// #255 (11.11.2026, the owner: Dante is one audio path, a PC without it
-/// passes clean; dstack two-networks §6, dstack PR 179): judged only on an
-/// adapter that carries a Dante leg ([`judged`]), and a value its driver does
-/// not offer passes ([`WiredValue::offered`]). PP has no leg, and its
-/// RTL8156's driver 11.4.211.2022 offers neither keyword.
+/// passes clean; dstack two-networks §6): judged only on an adapter that
+/// carries a Dante leg ([`judged`]).
+///
+/// #337: on that adapter a keyword its driver does not offer
+/// ([`WiredValue::offered`]) is the driver being too old for a Dante leg
+/// ([`Verdict::NotOffered`], one `dante_nic_driver_old` per adapter). dstack
+/// PR 179 let it pass while PP had no leg; PP then ran Dante on Microsoft's
+/// inbox 11.4.211.2022 (a 3 / 18 queue) with a clean gate, 6400–9700 late
+/// packets in a busy minute against 198 an hour on 11.19.602.2025 at 8 / 64.
 pub const RTL8156_VALUES: [(&str, u32); 2] = [("PendingTransmits", 8), ("TransmitBufferLen", 64)];
 
 /// Whether a keyword is one of the RTL8156's own values.
@@ -122,8 +127,8 @@ pub struct WiredValue {
     /// #255: the adapter's driver offers it (its class key's `Ndi\Params`
     /// lists it); read for the RTL8156's values only, `true` for the rest
     /// (written to the class key whether offered or not) and when the list
-    /// could not be read. A value the driver does not offer and the
-    /// registry lacks passes (dstack PR 179).
+    /// could not be read. #337: one the driver does not offer is
+    /// [`Verdict::NotOffered`], whatever the registry holds.
     pub offered: bool,
 }
 
@@ -160,16 +165,20 @@ pub enum Verdict {
     Wrong(String),
     /// A value the adapter must have is not there.
     Missing,
+    /// #337: the driver does not offer the keyword, so it does not read it:
+    /// a value left in the registry by a newer driver proves nothing.
+    NotOffered,
     Unread,
 }
 
 /// A value's verdict. Absent holds only for [`WHERE_PRESENT`]; a value that
-/// is no number is wrong.
+/// is no number is wrong; one the driver does not offer is never judged by
+/// what the registry holds.
 pub fn verdict(value: &WiredValue) -> Verdict {
     let text = match &value.value {
         Reading::Unread => return Verdict::Unread,
+        _ if !value.offered => return Verdict::NotOffered,
         Reading::Absent if WHERE_PRESENT.contains(&value.keyword) => return Verdict::Holds,
-        Reading::Absent if !value.offered => return Verdict::Holds,
         Reading::Absent => return Verdict::Missing,
         Reading::Value(text) => text.trim(),
     };
@@ -272,7 +281,8 @@ pub fn wired_nics(
 /// The problems, leaving out each `(guid, keyword)` another check already
 /// judges on that adapter (the SoundGrid adapter's own settings), so one
 /// wrong value is named once, and each value not [`judged`] there (the
-/// RTL8156's off the adapters in `carriers`).
+/// RTL8156's off the adapters in `carriers`). #337: an adapter whose driver
+/// does not offer a judged keyword is named once, as a driver too old.
 pub fn problems_besides(
     nics: &Option<Vec<WiredNicFacts>>,
     elsewhere: &[(String, String)],
@@ -296,6 +306,9 @@ pub fn problems_besides(
         {
             problems.push(EnvProblem::WiredNicUnreadable { nic: name.clone() });
         }
+        if verdicts.iter().any(|(_, v)| *v == Verdict::NotOffered) {
+            problems.push(EnvProblem::DanteNicDriverOld { nic: name.clone() });
+        }
         for (keyword, verdict) in verdicts {
             let judged_elsewhere = elsewhere
                 .iter()
@@ -306,7 +319,7 @@ pub fn problems_besides(
             let value = match verdict {
                 Verdict::Wrong(value) => Some(value),
                 Verdict::Missing => None,
-                Verdict::Holds | Verdict::Unread => continue,
+                Verdict::Holds | Verdict::Unread | Verdict::NotOffered => continue,
             };
             problems.push(EnvProblem::WiredNicValue {
                 nic: name.clone(),
@@ -345,7 +358,7 @@ pub fn view_on(nic: &WiredNicFacts, carriers: &[String]) -> WiredNicView {
                 value: v.value.value(),
                 ok: match verdict {
                     Verdict::Holds => Some(true),
-                    Verdict::Wrong(_) | Verdict::Missing => Some(false),
+                    Verdict::Wrong(_) | Verdict::Missing | Verdict::NotOffered => Some(false),
                     Verdict::Unread => None,
                 },
             })

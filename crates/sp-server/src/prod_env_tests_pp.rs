@@ -7,7 +7,7 @@
 //! `TransmitBufferLen`, up (its LAN, the default route), Wi-Fi
 //! disconnected, every firewall profile off. And resolume-snv's RTL8156,
 //! the adapter carrying its Dante leg, still judged (dstack two-networks
-//! §6, dstack PR 179: only where its driver offers the keyword).
+//! §6); #337: a driver there that does not offer a keyword is too old.
 
 use sp_core::prod_env::EnvProblem;
 
@@ -107,6 +107,22 @@ fn pp_with_no_dante_leg_holds_whatever_its_rtl8156_lacks() {
     assert_eq!(two.dante_ips, Some(Vec::new()));
 }
 
+/// #337: PP before its Dante leg, on the inbox driver that offers neither
+/// keyword: with no leg that driver is nobody's problem.
+#[test]
+fn pp_s_old_rtl8156_driver_is_not_judged_with_no_leg() {
+    let mut facts = pp();
+    facts.audio.wired_nics.as_mut().unwrap()[1]
+        .values
+        .retain(|v| !RTL8156_VALUES.iter().any(|(k, _)| *k == v.keyword));
+    with_rtl8156(&mut facts, Reading::Absent, false);
+    assert_eq!(verdict(&facts).problems, Vec::<EnvProblem>::new());
+    let (status, _) = status_of(&Check::Read(facts), 1);
+    assert!(status.ok);
+    let wired = status.audio.wired_nics.unwrap();
+    assert!(wired.iter().all(|n| n.ok == Some(true)), "{wired:?}");
+}
+
 /// The same RTL8156 at the wrong values with no leg: still nothing.
 #[test]
 fn pp_s_rtl8156_at_wrong_values_is_not_judged_with_no_leg() {
@@ -144,11 +160,20 @@ fn the_adapter_carrying_the_dante_leg_is_judged() {
     let wired = status.audio.wired_nics.unwrap();
     assert_eq!(wired[1].ok, Some(false));
     assert_eq!(wired[1].values.len(), 15);
-    // A driver that offers neither keyword passes (dstack PR 179); one the
-    // driver offers and the registry lacks is named.
+    // #337: a driver that offers neither keyword is too old for the leg,
+    // named once with the adapter; one the driver offers and the registry
+    // lacks is named by its keyword.
     let mut lacking = super::production();
     with_rtl8156(&mut lacking, Reading::Absent, false);
-    assert!(verdict(&lacking).ok, "{:?}", verdict(&lacking).problems);
+    assert_eq!(
+        verdict(&lacking).problems,
+        [EnvProblem::DanteNicDriverOld {
+            nic: "Ethernet 4".to_string()
+        }]
+    );
+    let (status, _) = status_of(&Check::Read(lacking), 1);
+    assert!(!status.ok);
+    assert_eq!(status.audio.wired_nics.unwrap()[1].ok, Some(false));
     let mut offered = super::production();
     with_rtl8156(&mut offered, Reading::Absent, true);
     let codes: Vec<String> = verdict(&offered)
