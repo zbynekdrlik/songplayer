@@ -342,7 +342,8 @@ function Get-ProdPcRtl8156Values {
 # 11.11.2026, the owner: Dante is one audio path, a PC without it passes
 # clean; PP had no Dante leg then, and its RTL8156 driver 11.4.211.2022
 # offered neither keyword). SongPlayer's own check asks the same of an enabled Dante
-# output (prod_env_network.rs leg_carriers). Facts with no dante_leg (an
+# output (prod_env_network.rs has_leg, which leg_carriers and issue 340's
+# firewall rule share). Facts with no dante_leg (an
 # older capture) read as no leg.
 function Test-ProdPcDanteLeg {
     param($Facts)

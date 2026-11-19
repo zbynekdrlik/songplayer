@@ -601,10 +601,10 @@ pub fn leg_carriers(f: &NetworkFacts) -> Vec<String> {
 /// Every two-network problem, in order (each once): the outputs unread;
 /// else nothing with no Dante leg; else §6.1, §6.2, then each leg.
 pub fn problems(f: &NetworkFacts) -> Vec<EnvProblem> {
-    let Some(ips) = &f.dante_ips else {
+    if f.dante_ips.is_none() {
         return vec![EnvProblem::Network(NetProblem::UnreadableDanteOutputs)];
-    };
-    if ips.is_empty() {
+    }
+    if !has_leg(f) {
         return Vec::new();
     }
     let mut all = Vec::new();

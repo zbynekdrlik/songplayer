@@ -466,15 +466,16 @@ fn the_setup_script_blocks_a_dante_leg_with_the_firewall_off() {
     let code = EnvProblem::FirewallOffWithDanteLeg.code();
     assert_eq!(code, "firewall_off_with_dante_leg");
     let blocker = format!("New-ProdPcBlocker '{code}' ");
-    let lines: Vec<&str> = script.lines().filter(|l| l.contains(&blocker)).collect();
-    assert_eq!(lines.len(), 1, "{blocker}");
-    assert_eq!(
-        script
-            .lines()
-            .filter(|l| l.trim() == "if (Test-ProdPcDanteLeg $Facts) {")
-            .count(),
-        1
-    );
+    let lines: Vec<&str> = script.lines().collect();
+    let at: Vec<usize> = (0..lines.len())
+        .filter(|&i| lines[i].contains(&blocker))
+        .collect();
+    assert_eq!(at.len(), 1, "{blocker}");
+    // Inside the every-profile-off branch, under the leg's own test.
+    let [i] = at[..] else { unreachable!() };
+    assert!(i >= 2, "{blocker}");
+    assert_eq!(lines[i - 1].trim(), "if (Test-ProdPcDanteLeg $Facts) {");
+    assert_eq!(lines[i - 2].trim(), "if ($on.Count -eq 0) {");
 }
 
 #[test]

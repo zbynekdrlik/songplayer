@@ -246,6 +246,10 @@ fn wmi() -> WmiRead {
     }
 }
 
+/// The READER's test: what the reads become, never a verdict. These facts
+/// (SNV's Dante leg with every firewall profile off) are no passing state
+/// since #340 (`firewall_off_with_dante_leg`); the verdict tests use
+/// `prod_env_tests.rs::production()`, the leg on dstack's standard.
 #[test]
 fn a_production_box_reads_as_its_facts() {
     assert_eq!(
