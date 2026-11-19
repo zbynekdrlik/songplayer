@@ -119,9 +119,18 @@ jobs:
       - name: Run security audit
         # No ignores (#296): the root Cargo.lock holds libsqlite3-sys 0.40 under sqlx 0.9.1
         # (RUSTSEC-2026-0459) and no rsa crate (RUSTSEC-2023-0071). This audits the root lock
-        # only; the exe's own resolution (src-tauri, an untracked lock) is held at
-        # libsqlite3-sys >= 0.39 by the floor in crates/sp-server/Cargo.toml.
+        # only; the next step audits the lock the exe is built from.
         run: cargo audit
+      - name: Audit the exe's own dependency resolution (#335)
+        # src-tauri is its own workspace with an untracked Cargo.lock that
+        # Build Tauri resolves fresh, so the root audit never saw what the exe
+        # ships. Resolve it here the same way (same manifests, same registry,
+        # minutes apart) and audit that lock. The UI's lock is tracked.
+        run: |
+          set -euo pipefail
+          (cd src-tauri && cargo generate-lockfile)
+          cargo audit -f src-tauri/Cargo.lock
+          cargo audit -f sp-ui/Cargo.lock
 
   eval-checks:
     name: Eval Checks (ruff + pytest)
