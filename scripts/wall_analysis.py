@@ -768,7 +768,8 @@ def refresh_report(
     verdict needs none (review rounds 5-6: a 60 fps camera on a 75 Hz wall
     left a 4-refresh boundary open; a stall that also stalled dxcam hid
     judder). ``uneven_boundaries`` numbers each uneven boundary and gives the
-    fewest refreshes it surely held. ``None`` without a refresh rate."""
+    fewest refreshes it surely held and the sample it began at (#330: the
+    reader puts a UTC on it). ``None`` without a refresh rate."""
     if not timing.period:
         return None
     allowance = round(SEAM_HOLD_S / timing.period)
@@ -789,12 +790,16 @@ def refresh_report(
             if lo > max(expected) + allowance or hi < min(expected):
                 judged += 1
                 uneven.append(run.first_sample)
-                uneven_boundaries.append({"boundary": n, "refreshes": lo})
+                uneven_boundaries.append(
+                    {"boundary": n, "refreshes": lo, "sample": run.first_sample}
+                )
             continue
         if lo > max(expected) or hi < min(expected):
             judged += 1
             uneven.append(run.first_sample)
-            uneven_boundaries.append({"boundary": n, "refreshes": lo})
+            uneven_boundaries.append(
+                {"boundary": n, "refreshes": lo, "sample": run.first_sample}
+            )
         elif hi <= max(expected) and all(m in expected for m in range(lo, hi + 1)):
             judged += 1
         elif 0 < n < last:

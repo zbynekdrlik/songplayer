@@ -54,3 +54,12 @@ def test_a_lost_boundary_gets_the_utc_of_the_picture_after_it():
         {"boundary": 5, "sample": 2, "lost": 1, "utc_ms": 2000},
         {"boundary": 9, "sample": 9, "lost": 2, "utc_ms": None},
     ], "ms on the anchors' line; a sample past the capture has no time"
+
+
+def test_an_uneven_boundary_gets_the_utc_of_its_first_sample():
+    # #330: the analysis's entry shape, {boundary, refreshes, sample}.
+    uneven = [{"boundary": 154, "refreshes": 3, "sample": 1}]
+    out = wf.lost_boundary_utc(
+        uneven, [10.0, 10.5, 11.0], (10.0, 1_000_000_000), (11.0, 2_000_000_000)
+    )
+    assert out == [{"boundary": 154, "refreshes": 3, "sample": 1, "utc_ms": 1500}]

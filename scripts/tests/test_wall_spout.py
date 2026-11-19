@@ -101,6 +101,8 @@ def test_a_slip_still_reads_as_judder_at_the_spout_time_error():
     long, short = report["refreshes"]["uneven_boundaries"]
     assert short["boundary"] == long["boundary"] + 1
     assert (long["refreshes"], short["refreshes"]) == (3, 1)
+    # #330: each names the sample it began at, the reader's key to its UTC.
+    assert [long["sample"], short["sample"]] == report["refreshes"]["uneven_samples"]
 
 
 def test_the_list_holds_every_boundary_of_arena_s_budget():
