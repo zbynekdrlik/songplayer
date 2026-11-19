@@ -876,25 +876,25 @@ impl PlaybackEngine {
 
             PlayAction::ReplayCurrent => {
                 let mut played = false;
-                if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
-                    if let Some(video_id) = pp.current_video_id {
-                        debug!(playlist_id, "replaying current video");
-                        match crate::db::models::get_song_paths(&self.pool, video_id).await {
-                            Ok(Some((video_path, audio_path))) => {
-                                pp.begin_play(0);
-                                pp.pipeline.send(PipelineCommand::Play {
-                                    video: video_path.into(),
-                                    audio: audio_path.into(),
-                                    start_position_ms: None,
-                                });
-                                played = true;
-                            }
-                            Ok(None) => {
-                                warn!(playlist_id, video_id, "no song paths for replay");
-                            }
-                            Err(e) => {
-                                warn!(playlist_id, video_id, %e, "failed to get song paths for replay");
-                            }
+                if let Some(pp) = self.pipelines.get_mut(&playlist_id)
+                    && let Some(video_id) = pp.current_video_id
+                {
+                    debug!(playlist_id, "replaying current video");
+                    match crate::db::models::get_song_paths(&self.pool, video_id).await {
+                        Ok(Some((video_path, audio_path))) => {
+                            pp.begin_play(0);
+                            pp.pipeline.send(PipelineCommand::Play {
+                                video: video_path.into(),
+                                audio: audio_path.into(),
+                                start_position_ms: None,
+                            });
+                            played = true;
+                        }
+                        Ok(None) => {
+                            warn!(playlist_id, video_id, "no song paths for replay");
+                        }
+                        Err(e) => {
+                            warn!(playlist_id, video_id, %e, "failed to get song paths for replay");
                         }
                     }
                 }

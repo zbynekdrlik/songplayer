@@ -178,10 +178,10 @@ pub async fn set_dub_requested(
 /// first (`dub_requested_at DESC`, tie-broken by `id DESC` so a batch added in
 /// the same millisecond stays deterministic), for the Dabing section list.
 pub async fn list_dub_videos(pool: &SqlitePool) -> Result<Vec<DubRow>, sqlx::Error> {
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         "{DUB_ROW_SELECT} WHERE dub_requested = 1 AND removed_at IS NULL \
          ORDER BY dub_requested_at DESC, id DESC"
-    ))
+    )))
     .fetch_all(pool)
     .await?;
     Ok(rows.iter().map(row_to_dub_row).collect())

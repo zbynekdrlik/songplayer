@@ -154,10 +154,10 @@ impl FullRefreshReason {
         // Retry backoff: suppress a demand-driven refresh that was ATTEMPTED
         // too recently, so a failing /composition is retried at most once per
         // window instead of on every liveness tick.
-        if let Some(attempt) = last_full_attempt {
-            if now.duration_since(attempt) < retry_after {
-                return None;
-            }
+        if let Some(attempt) = last_full_attempt
+            && now.duration_since(attempt) < retry_after
+        {
+            return None;
         }
         Some(reason)
     }
@@ -790,10 +790,10 @@ impl HostDriver {
     /// and passes the endpoint to every parallel write: no write reads the
     /// cache, whose TTL could run out mid-fade (#217).
     pub(crate) async fn ensure_endpoint(&mut self) -> Result<ResolvedEndpoint, anyhow::Error> {
-        if let Some(ref cached) = self.endpoint_cache {
-            if !cached.is_expired() {
-                return Ok(cached.clone());
-            }
+        if let Some(ref cached) = self.endpoint_cache
+            && !cached.is_expired()
+        {
+            return Ok(cached.clone());
         }
         let ep = if is_ip_literal(&self.host) {
             ResolvedEndpoint::from_ip(&self.host, self.port)

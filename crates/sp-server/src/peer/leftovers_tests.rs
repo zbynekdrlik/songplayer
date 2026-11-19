@@ -54,9 +54,9 @@ async fn pool() -> SqlitePool {
 
 /// `(youtube_id, other key)` of every record of `table`, sorted.
 async fn records(pool: &SqlitePool, table: &str, key: &str) -> Vec<(String, String)> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT youtube_id, {key} FROM {table} ORDER BY youtube_id, {key}"
-    ))
+    )))
     .fetch_all(pool)
     .await
     .unwrap()

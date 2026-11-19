@@ -103,6 +103,7 @@ fn quiet() -> AudioProfile {
         windows_update: WindowsUpdateView {
             no_auto_update: Some(true),
             drivers_excluded: Some(true),
+            store_auto_updates_off: Some(true),
         },
         power: PowerView {
             scheme_guid: Some("8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c".to_string()),
@@ -128,6 +129,18 @@ fn the_windows_update_driver_exclusion_is_no_note() {
         let mut p = quiet();
         p.windows_update.drivers_excluded = drivers_excluded;
         assert_eq!(notes(&p), Vec::<String>::new(), "{drivers_excluded:?}");
+    }
+}
+
+/// #333: the Store's automatic app updates are a gate
+/// (`EnvProblem::StoreAutoUpdatesOn`, `unreadable:windows_update`), never a
+/// note.
+#[test]
+fn the_store_s_automatic_updates_are_no_note() {
+    for off in [Some(false), None] {
+        let mut p = quiet();
+        p.windows_update.store_auto_updates_off = off;
+        assert_eq!(notes(&p), Vec::<String>::new(), "{off:?}");
     }
 }
 

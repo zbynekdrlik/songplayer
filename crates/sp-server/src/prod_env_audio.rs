@@ -18,7 +18,8 @@
 //! - **Windows Update** (GATE): automatic updates off (`NoAutoUpdate` 1)
 //!   and no driver through it (`ExcludeWUDriversInQualityUpdate` 1; a gate
 //!   since lane 2's `scripts/setup-prod-pc.ps1` applies it at every
-//!   deploy).
+//!   deploy); #333: no Microsoft Store app updates itself (the Store's
+//!   `AutoDownload` 2, applied by the same setup).
 //! - **MMCSS** (GATE, #210 part 2): `SystemResponsiveness` 0,
 //!   `NetworkThrottlingIndex` 0xFFFFFFFF, the Pro Audio task at priority 6,
 //!   scheduling category High.
@@ -156,6 +157,8 @@ pub struct AudioFacts {
     /// `ExcludeWUDriversInQualityUpdate` is 1 (a gate since lane 2's setup
     /// applies it).
     pub drivers_excluded: Option<bool>,
+    /// #333: the Store's `AutoDownload` is 2.
+    pub store_auto_updates_off: Option<bool>,
     pub mmcss: MmcssFacts,
     pub power: PowerFacts,
     /// #285: every wired adapter (`None`: could not be listed).
@@ -359,9 +362,12 @@ pub fn soundgrid_problems(soundgrid: &SoundGridFacts) -> Vec<EnvProblem> {
 /// leg, `network::leg_carriers`). The report-only facts are never one.
 pub fn problems(audio: &AudioFacts, carriers: &[String]) -> Vec<EnvProblem> {
     let mut problems = soundgrid_problems(&audio.soundgrid);
-    // Windows Update: one "cannot be read" for either policy, then each
-    // policy that is not set.
-    if audio.no_auto_update.is_none() || audio.drivers_excluded.is_none() {
+    // Windows Update (and #333 the Store): one "cannot be read" for any
+    // policy, then each policy that is not set.
+    if audio.no_auto_update.is_none()
+        || audio.drivers_excluded.is_none()
+        || audio.store_auto_updates_off.is_none()
+    {
         problems.push(EnvProblem::Unreadable(Unreadable::WindowsUpdate));
     }
     if audio.no_auto_update == Some(false) {
@@ -369,6 +375,9 @@ pub fn problems(audio: &AudioFacts, carriers: &[String]) -> Vec<EnvProblem> {
     }
     if audio.drivers_excluded == Some(false) {
         problems.push(EnvProblem::DriversNotExcluded);
+    }
+    if audio.store_auto_updates_off == Some(false) {
+        problems.push(EnvProblem::StoreAutoUpdatesOn);
     }
     problems.extend(mmcss_problems(&audio.mmcss));
     let judged = soundgrid_judged(&audio.soundgrid);
@@ -450,6 +459,7 @@ pub fn view(audio: &AudioFacts, carriers: &[String]) -> AudioProfile {
         windows_update: WindowsUpdateView {
             no_auto_update: audio.no_auto_update,
             drivers_excluded: audio.drivers_excluded,
+            store_auto_updates_off: audio.store_auto_updates_off,
         },
         mmcss: MmcssView {
             system_responsiveness: audio.mmcss.system_responsiveness.value(),
@@ -511,6 +521,7 @@ pub fn production_example() -> AudioFacts {
         },
         no_auto_update: Some(true),
         drivers_excluded: Some(true),
+        store_auto_updates_off: Some(true),
         mmcss: MmcssFacts {
             system_responsiveness: Reading::Value(SYSTEM_RESPONSIVENESS),
             network_throttling_index: Reading::Value(NETWORK_THROTTLING_OFF),

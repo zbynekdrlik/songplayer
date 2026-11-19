@@ -541,14 +541,14 @@ pub(crate) async fn fetch_next_unprocessed(
     pool: &SqlitePool,
 ) -> Result<Option<VideoRow>, sqlx::Error> {
     let now = chrono::Utc::now().to_rfc3339();
-    let row = sqlx::query_as::<_, VideoRow>(&format!(
+    let row = sqlx::query_as::<_, VideoRow>(sqlx::AssertSqlSafe(format!(
         "SELECT v.id, v.youtube_id, COALESCE(v.title, '') as title
          FROM videos v
          JOIN playlists p ON p.id = v.playlist_id
          WHERE {DOWNLOAD_DUE}
          ORDER BY (v.next_attempt_at IS NOT NULL), v.id
          LIMIT 1",
-    ))
+    )))
     .bind(&now)
     .fetch_optional(pool)
     .await?;

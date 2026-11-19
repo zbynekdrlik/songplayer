@@ -335,10 +335,10 @@ async fn reconcile<D: MdnsRegistrar>(
     advertised_fullname: &mut Option<String>,
     status: &LanStatusHandle,
 ) {
-    if let Some(old) = advertised_fullname.take() {
-        if let Err(e) = daemon.unregister_service(&old) {
-            warn!("mdns: unregister of stale record failed: {e}");
-        }
+    if let Some(old) = advertised_fullname.take()
+        && let Err(e) = daemon.unregister_service(&old)
+    {
+        warn!("mdns: unregister of stale record failed: {e}");
     }
 
     let Some(new_ip) = ip else {

@@ -71,54 +71,51 @@ impl PlaybackEngine {
                 }
 
                 // Load lyrics for karaoke display
-                if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
-                    if let Some(video_id) = pp.current_video_id {
-                        let cache_dir = self.cache_dir.clone();
-                        let pool = self.pool.clone();
-                        match lyrics_loader::load_lyrics_for_video(&pool, &cache_dir, video_id)
-                            .await
-                        {
-                            Ok(Some((track, offset_ms))) => {
-                                let lead_ms = lyrics_loader::load_lyrics_lead_ms(&pool).await;
-                                let line_count = track.lines.len();
-                                let source = track.source.clone();
-                                let pipeline_version = track.version;
-                                let state =
-                                    crate::lyrics::renderer::LyricsState::with_lead_and_offset(
-                                        track, lead_ms, offset_ms,
-                                    );
-                                // #217: how many wall lines the fragments merged into,
-                                // and whether the wall leads (song) or not (speech).
-                                let display_lines = state.display_plan().lines().len();
-                                let display_profile = state.display_plan().profile();
-                                pp.lyrics_state = Some(state);
-                                info!(
-                                    playlist_id,
-                                    video_id,
-                                    lines = line_count,
-                                    display_lines,
-                                    ?display_profile,
-                                    source = %source,
-                                    pipeline_version,
-                                    lead_ms,
-                                    offset_ms,
-                                    "lyrics: loaded"
-                                );
-                            }
-                            Ok(None) => {
-                                pp.lyrics_state = None;
-                                info!(
-                                    playlist_id,
-                                    video_id,
-                                    "lyrics: no track available — wall will show no subtitles"
-                                );
-                                self.clear_lyrics_display(playlist_id);
-                            }
-                            Err(e) => {
-                                warn!(playlist_id, video_id, "failed to load lyrics: {e}");
-                                pp.lyrics_state = None;
-                                self.clear_lyrics_display(playlist_id);
-                            }
+                if let Some(pp) = self.pipelines.get_mut(&playlist_id)
+                    && let Some(video_id) = pp.current_video_id
+                {
+                    let cache_dir = self.cache_dir.clone();
+                    let pool = self.pool.clone();
+                    match lyrics_loader::load_lyrics_for_video(&pool, &cache_dir, video_id).await {
+                        Ok(Some((track, offset_ms))) => {
+                            let lead_ms = lyrics_loader::load_lyrics_lead_ms(&pool).await;
+                            let line_count = track.lines.len();
+                            let source = track.source.clone();
+                            let pipeline_version = track.version;
+                            let state = crate::lyrics::renderer::LyricsState::with_lead_and_offset(
+                                track, lead_ms, offset_ms,
+                            );
+                            // #217: how many wall lines the fragments merged into,
+                            // and whether the wall leads (song) or not (speech).
+                            let display_lines = state.display_plan().lines().len();
+                            let display_profile = state.display_plan().profile();
+                            pp.lyrics_state = Some(state);
+                            info!(
+                                playlist_id,
+                                video_id,
+                                lines = line_count,
+                                display_lines,
+                                ?display_profile,
+                                source = %source,
+                                pipeline_version,
+                                lead_ms,
+                                offset_ms,
+                                "lyrics: loaded"
+                            );
+                        }
+                        Ok(None) => {
+                            pp.lyrics_state = None;
+                            info!(
+                                playlist_id,
+                                video_id,
+                                "lyrics: no track available — wall will show no subtitles"
+                            );
+                            self.clear_lyrics_display(playlist_id);
+                        }
+                        Err(e) => {
+                            warn!(playlist_id, video_id, "failed to load lyrics: {e}");
+                            pp.lyrics_state = None;
+                            self.clear_lyrics_display(playlist_id);
                         }
                     }
                 }

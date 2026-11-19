@@ -144,11 +144,11 @@ impl AudioHold {
     /// Hold one tapped block (arrival µs since the feeder started). Past
     /// [`MAX_HELD_BLOCKS`] the OLDEST held block is dropped and counted.
     pub fn push(&mut self, arrival_us: u64, samples: Vec<f32>) {
-        if self.held.len() >= MAX_HELD_BLOCKS {
-            if let Some((_, oldest)) = self.held.pop_front() {
-                self.skipped_frames += (oldest.len() / 2) as u64;
-                self.dropped_blocks += 1;
-            }
+        if self.held.len() >= MAX_HELD_BLOCKS
+            && let Some((_, oldest)) = self.held.pop_front()
+        {
+            self.skipped_frames += (oldest.len() / 2) as u64;
+            self.dropped_blocks += 1;
         }
         self.held.push_back((arrival_us, samples));
     }

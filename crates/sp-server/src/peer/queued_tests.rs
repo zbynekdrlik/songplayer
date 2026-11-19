@@ -11,11 +11,13 @@ const DOWNLOADED: &str = "normalized = 1, audio_file_path = '/c/x_audio.flac'";
 /// A row of `youtube_id` in `playlist`, then `UPDATE videos SET <set>`.
 async fn row(node: &TestNode, playlist: i64, youtube_id: &str, set: &str) -> i64 {
     let id = node.add_video_to(playlist, youtube_id).await;
-    sqlx::query(&format!("UPDATE videos SET {set} WHERE id = ?"))
-        .bind(id)
-        .execute(node.pool())
-        .await
-        .unwrap();
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "UPDATE videos SET {set} WHERE id = ?"
+    )))
+    .bind(id)
+    .execute(node.pool())
+    .await
+    .unwrap();
     id
 }
 

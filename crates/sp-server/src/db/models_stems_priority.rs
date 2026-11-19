@@ -99,13 +99,13 @@ fn row_to_stem_job(r: &sqlx::sqlite::SqliteRow) -> StemJob {
 /// `lyrics::reprocess::fetch_bucket_null`).
 #[cfg_attr(test, mutants::skip)]
 pub async fn next_stem_manual(pool: &SqlitePool) -> Result<Option<StemJob>, sqlx::Error> {
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT id, youtube_id, audio_file_path, duration_ms, song, artist \
          FROM videos \
          WHERE {STEM_ELIGIBLE_PRED} AND stem_manual_priority > 0 \
          ORDER BY stem_manual_priority DESC, id ASC \
          LIMIT 1"
-    ))
+    )))
     .fetch_optional(pool)
     .await?;
     Ok(row.map(|r| row_to_stem_job(&r)))
@@ -122,14 +122,14 @@ pub async fn next_stem_for_playlists(
     if ids.is_empty() {
         return Ok(None); // empty tier is skipped — never `IN ()`
     }
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT id, youtube_id, audio_file_path, duration_ms, song, artist \
          FROM videos \
          WHERE {STEM_ELIGIBLE_PRED} AND playlist_id IN ({}) \
          ORDER BY stem_manual_priority DESC, id ASC \
          LIMIT 1",
         int_list(ids)
-    ))
+    )))
     .fetch_optional(pool)
     .await?;
     Ok(row.map(|r| row_to_stem_job(&r)))
@@ -185,10 +185,10 @@ pub async fn queue_position(
     let case = tier_case_sql(&restricted);
 
     // This row's (priority, tier) — `None` when it is not queue-eligible.
-    let this: Option<(i64, i64)> = sqlx::query_as(&format!(
+    let this: Option<(i64, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT stem_manual_priority AS prio, ({case}) AS tier \
          FROM videos WHERE id = ? AND {STEM_ELIGIBLE_PRED}"
-    ))
+    )))
     .bind(video_id)
     .fetch_optional(pool)
     .await?;
@@ -197,14 +197,14 @@ pub async fn queue_position(
     };
 
     // Count eligible rows that sort BEFORE it under (tier ASC, prio DESC, id ASC).
-    let before: i64 = sqlx::query_scalar(&format!(
+    let before: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT COUNT(*) FROM videos \
          WHERE {STEM_ELIGIBLE_PRED} \
            AND ( ({case}) < ? \
                  OR ( ({case}) = ? \
                       AND ( stem_manual_priority > ? \
                             OR (stem_manual_priority = ? AND id < ?) ) ) )"
-    ))
+    )))
     .bind(tier)
     .bind(tier)
     .bind(prio)

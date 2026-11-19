@@ -61,7 +61,10 @@ fn the_ticks_line_counts_losses_risks_and_starts() {
 }
 
 async fn count(pool: &SqlitePool, sql: &str) -> i64 {
-    sqlx::query_scalar(sql).fetch_one(pool).await.unwrap()
+    sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+        .fetch_one(pool)
+        .await
+        .unwrap()
 }
 
 /// `start` spawns the task: its first tick (at once) writes the program's

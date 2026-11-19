@@ -134,7 +134,8 @@ pub(super) fn add_cx_nic(reg: &mut Fake) {
     reg.set(&wdf("rtucx21x64"), "KmdfLibraryVersion", t("1.33"));
 }
 
-/// Windows Update off with drivers excluded, MMCSS for Pro Audio.
+/// Windows Update off with drivers excluded, the Store's automatic app
+/// updates off (#333), MMCSS for Pro Audio.
 pub(super) fn add_policies(reg: &mut Fake) {
     reg.set(WINDOWS_UPDATE_AU, "NoAutoUpdate", RegValue::Dword(1));
     reg.set(
@@ -142,6 +143,7 @@ pub(super) fn add_policies(reg: &mut Fake) {
         "ExcludeWUDriversInQualityUpdate",
         RegValue::Dword(1),
     );
+    reg.set(WINDOWS_STORE, "AutoDownload", RegValue::Dword(2));
     reg.set(MMCSS_PROFILE, "SystemResponsiveness", RegValue::Dword(0));
     reg.set(
         MMCSS_PROFILE,

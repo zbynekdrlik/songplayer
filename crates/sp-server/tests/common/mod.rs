@@ -200,26 +200,26 @@ async fn handle_client(
     loop {
         match read.next().await {
             Some(Ok(Message::Text(text))) => {
-                if let Ok(val) = serde_json::from_str::<Value>(&text) {
-                    if val["op"] == 1 {
-                        let identified = json!({
-                            "op": 2,
-                            "d": { "negotiatedRpcVersion": 1 }
-                        });
-                        if write
-                            .send(Message::Text(identified.to_string().into()))
-                            .await
-                            .is_err()
-                        {
-                            return;
-                        }
-                        let close_now = { state.lock().await.close_after_identify };
-                        if close_now {
-                            let _ = write.send(Message::Close(None)).await;
-                            return;
-                        }
-                        break;
+                if let Ok(val) = serde_json::from_str::<Value>(&text)
+                    && val["op"] == 1
+                {
+                    let identified = json!({
+                        "op": 2,
+                        "d": { "negotiatedRpcVersion": 1 }
+                    });
+                    if write
+                        .send(Message::Text(identified.to_string().into()))
+                        .await
+                        .is_err()
+                    {
+                        return;
                     }
+                    let close_now = { state.lock().await.close_after_identify };
+                    if close_now {
+                        let _ = write.send(Message::Close(None)).await;
+                        return;
+                    }
+                    break;
                 }
             }
             Some(Ok(Message::Close(_))) | None => return,

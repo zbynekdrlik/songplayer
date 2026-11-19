@@ -308,11 +308,13 @@ async fn a_stand_in_past_the_bound_is_held() {
 
 /// Row `id` with `columns` (an SQL `SET` list).
 async fn mark(node: &TestNode, id: i64, columns: &str) {
-    sqlx::query(&format!("UPDATE videos SET {columns} WHERE id = ?"))
-        .bind(id)
-        .execute(node.pool())
-        .await
-        .unwrap();
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "UPDATE videos SET {columns} WHERE id = ?"
+    )))
+    .bind(id)
+    .execute(node.pool())
+    .await
+    .unwrap();
 }
 
 async fn kept_here(node: &TestNode) -> bool {

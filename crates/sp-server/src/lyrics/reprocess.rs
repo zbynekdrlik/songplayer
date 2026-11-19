@@ -55,7 +55,7 @@ async fn fetch_bucket_manual(
     // filter a failed manual-reprocess loops forever.
     // Exception: if a row's recorded failure is from an OLDER pipeline version,
     // allow it through — the worker may have new capability that succeeds now.
-    let row = sqlx::query_as::<_, VideoLyricsRow>(&format!(
+    let row = sqlx::query_as::<_, VideoLyricsRow>(sqlx::AssertSqlSafe(format!(
         "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
                 COALESCE(v.artist, '') AS artist, v.duration_ms, v.audio_file_path, \
                 p.youtube_url, v.lyrics_override_text, v.lyrics_time_offset_ms, \
@@ -63,7 +63,7 @@ async fn fetch_bucket_manual(
          FROM videos v JOIN playlists p ON p.id = v.playlist_id \
          WHERE v.lyrics_manual_priority = 1 AND {LYRICS_NOT_PARKED} AND {LYRICS_DUE} \
          ORDER BY v.id ASC LIMIT 1",
-    ))
+    )))
     .bind(current_version as i64)
     .fetch_optional(pool)
     .await?;
@@ -101,7 +101,7 @@ async fn fetch_bucket_null(
     // Seeded-earlier playlists drained entirely before any newer playlist
     // got a pickup. Uniform-random spreads coverage across playlists so a
     // live event has lyrics for all scenes, not just the oldest one.
-    let row = sqlx::query_as::<_, VideoLyricsRow>(&format!(
+    let row = sqlx::query_as::<_, VideoLyricsRow>(sqlx::AssertSqlSafe(format!(
         "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
                 COALESCE(v.artist, '') AS artist, v.duration_ms, v.audio_file_path, \
                 p.youtube_url, v.lyrics_override_text, v.lyrics_time_offset_ms, \
@@ -110,7 +110,7 @@ async fn fetch_bucket_null(
          WHERE (v.has_lyrics IS NULL OR v.has_lyrics = 0) AND {LYRICS_NOT_PARKED} \
                AND v.lyrics_manual_priority = 0 AND {LYRICS_DUE} \
          ORDER BY RANDOM() LIMIT 1",
-    ))
+    )))
     .bind(current_version as i64)
     .fetch_optional(pool)
     .await?;
@@ -133,7 +133,7 @@ async fn fetch_bucket_stale(
     // row on the catalog is stale legacy output now, and must re-queue
     // under v21's Lever-2 reference regime like everything else instead of
     // being permanently protected from ever being touched again.
-    let row = sqlx::query_as::<_, VideoLyricsRow>(&format!(
+    let row = sqlx::query_as::<_, VideoLyricsRow>(sqlx::AssertSqlSafe(format!(
         "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
                 COALESCE(v.artist, '') AS artist, v.duration_ms, v.audio_file_path, \
                 p.youtube_url, v.lyrics_override_text, v.lyrics_time_offset_ms, \
@@ -143,7 +143,7 @@ async fn fetch_bucket_stale(
                AND v.lyrics_pipeline_version < ? \
                AND v.lyrics_manual_priority = 0 AND {LYRICS_DUE} \
          ORDER BY v.lyrics_quality_score ASC NULLS FIRST, RANDOM() LIMIT 1",
-    ))
+    )))
     .bind(current_version as i64)
     .fetch_optional(pool)
     .await?;
@@ -169,7 +169,7 @@ async fn fetch_bucket_fullmix_upgrade(
     // leaves this bucket the moment isolation yields a vocal. `next_attempt_at`
     // is still honoured so a deferred upgrade waits out its backoff.
     let processed_before = format!("-{FULLMIX_UPGRADE_MIN_AGE_SECS} seconds");
-    let row = sqlx::query_as::<_, VideoLyricsRow>(&format!(
+    let row = sqlx::query_as::<_, VideoLyricsRow>(sqlx::AssertSqlSafe(format!(
         "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
                 COALESCE(v.artist, '') AS artist, v.duration_ms, v.audio_file_path, \
                 p.youtube_url, v.lyrics_override_text, v.lyrics_time_offset_ms, \
@@ -182,7 +182,7 @@ async fn fetch_bucket_fullmix_upgrade(
                AND (v.lyrics_processed_at IS NULL \
                     OR v.lyrics_processed_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)) \
          ORDER BY v.lyrics_processed_at ASC NULLS FIRST, RANDOM() LIMIT 1",
-    ))
+    )))
     .bind(SOURCE_G35T_FULLMIX)
     .bind(current_version as i64)
     .bind(processed_before)
@@ -631,7 +631,10 @@ mod tests {
                 stmt.push(',');
             }
         }
-        sqlx::query(&stmt).execute(&pool).await.unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(stmt.as_str()))
+            .execute(&pool)
+            .await
+            .unwrap();
 
         let mut hi_picks = 0;
         for _ in 0..100 {
@@ -700,7 +703,10 @@ mod tests {
                 stmt.push(',');
             }
         }
-        sqlx::query(&stmt).execute(&pool).await.unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(stmt.as_str()))
+            .execute(&pool)
+            .await
+            .unwrap();
 
         // Statistical reasoning for `high_picks > 10`: 100 rows tied on
         // eligibility, 50% on playlist 10 (low ids 1-50), 50% on playlist 20

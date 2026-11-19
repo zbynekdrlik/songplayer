@@ -69,17 +69,16 @@ impl PlaybackEngine {
             .fetch_optional(&self.pool)
             .await
             .unwrap_or_default();
-        if kind.as_deref() == Some("custom") {
-            if let Ok(Some(pos)) =
+        if kind.as_deref() == Some("custom")
+            && let Ok(Some(pos)) =
                 crate::db::models::position_for_playlist_item(&self.pool, playlist_id, video_id)
                     .await
-            {
-                let _ = sqlx::query("UPDATE playlists SET current_position = ? WHERE id = ?")
-                    .bind(pos)
-                    .bind(playlist_id)
-                    .execute(&self.pool)
-                    .await;
-            }
+        {
+            let _ = sqlx::query("UPDATE playlists SET current_position = ? WHERE id = ?")
+                .bind(pos)
+                .bind(playlist_id)
+                .execute(&self.pool)
+                .await;
         }
 
         // #215: a pick inside a transition hold ends the hold (review rounds
@@ -96,10 +95,10 @@ impl PlaybackEngine {
         // Send the pipeline command and update engine bookkeeping.
         let (video_path, audio_path) = paths;
         if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
-            if let Some(prev) = pp.current_video_id {
-                if prev != video_id {
-                    pp.history.push_back(prev);
-                }
+            if let Some(prev) = pp.current_video_id
+                && prev != video_id
+            {
+                pp.history.push_back(prev);
             }
             pp.current_video_id = Some(video_id);
             pp.last_presenter_text = None;

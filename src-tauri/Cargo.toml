@@ -1,9 +1,9 @@
 [package]
 name = "sp-tauri"
-version = "0.93.0"
+version = "0.94.0"
 edition = "2024"
 license = "MIT"
-rust-version = "1.87"
+rust-version = "1.94"
 # #233: two binaries, so Tauri's bundler needs the main one named; every
 # other one (`sp-audio-host`) is installed next to it by the NSIS installer.
 default-run = "SongPlayer"

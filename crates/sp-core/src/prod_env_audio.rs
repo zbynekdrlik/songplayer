@@ -241,7 +241,7 @@ impl NicView {
     }
 }
 
-/// Windows Update's policies.
+/// Windows Update's policies and (#333) the Microsoft Store's.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WindowsUpdateView {
     /// `NoAutoUpdate` is 1: automatic updates are off (`None`: unread).
@@ -252,6 +252,10 @@ pub struct WindowsUpdateView {
     /// applies it at every deploy).
     #[serde(default)]
     pub drivers_excluded: Option<bool>,
+    /// #333: the Store's `AutoDownload` is 2: no Store app updates itself
+    /// (`scripts/setup-prod-pc.ps1` applies it at every deploy).
+    #[serde(default)]
+    pub store_auto_updates_off: Option<bool>,
 }
 
 /// MMCSS's system profile (`None`: missing or unread).

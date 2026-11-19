@@ -118,7 +118,7 @@ impl Asrc {
             ));
         }
         let frames = VBAN_BLOCK_FRAMES;
-        for (i, frame) in block.chunks_exact(VBAN_CHANNELS).enumerate() {
+        for (i, frame) in block.as_chunks::<VBAN_CHANNELS>().0.iter().enumerate() {
             for (c, &x) in frame.iter().enumerate() {
                 self.input[c * frames + i] = f64::from(x);
             }
@@ -130,7 +130,9 @@ impl Asrc {
         let max_out = self.max_out;
         let samples = produced * VBAN_CHANNELS;
         for (i, frame) in self.out[..samples]
-            .chunks_exact_mut(VBAN_CHANNELS)
+            .as_chunks_mut::<VBAN_CHANNELS>()
+            .0
+            .iter_mut()
             .enumerate()
         {
             for (c, y) in frame.iter_mut().enumerate() {
@@ -207,7 +209,13 @@ impl Splice {
         let fade = self.fade;
         self.out.clear();
         if (self.insert > 0 || self.skip > 0) && !self.muted {
-            for (i, frame) in self.hold.chunks_exact_mut(VBAN_CHANNELS).enumerate() {
+            for (i, frame) in self
+                .hold
+                .as_chunks_mut::<VBAN_CHANNELS>()
+                .0
+                .iter_mut()
+                .enumerate()
+            {
                 let g = (fade - i - 1) as f32 / fade as f32;
                 frame.iter_mut().for_each(|x| *x *= g);
             }
@@ -226,7 +234,7 @@ impl Splice {
             self.muted = false;
             self.fade_in_left = fade;
         }
-        for frame in self.out[start..].chunks_exact_mut(VBAN_CHANNELS) {
+        for frame in self.out[start..].as_chunks_mut::<VBAN_CHANNELS>().0 {
             if self.fade_in_left == 0 {
                 break;
             }

@@ -188,7 +188,9 @@ fn peak_frame(c: &mut VbanRateConverter, blocks: usize) -> usize {
         stream.extend_from_slice(c.convert(Some(&input[..])).unwrap());
     }
     stream
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .enumerate()
         .max_by(|a, b| a.1[0].abs().total_cmp(&b.1[0].abs()))
         .unwrap()

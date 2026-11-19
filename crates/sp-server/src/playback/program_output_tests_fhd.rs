@@ -200,7 +200,11 @@ fn every_source_size_reaches_sp_program_as_the_1920x1080_canvas() {
                 );
             } else {
                 assert!(
-                    chroma.chunks_exact(2).all(|uv| uv == [90u8, 170]),
+                    chroma
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .all(|uv| *uv == [90u8, 170]),
                     "{w}×{h}: chroma row {row} keeps U 90 / V 170 interleaved"
                 );
             }
@@ -292,7 +296,11 @@ fn a_fade_between_two_sizes_is_drawn_in_the_canvas() {
         "(200 · 128 + 40 · 128 + 128) >> 8"
     );
     assert!(
-        mixed[W * H..].chunks_exact(2).all(|uv| uv == [125u8, 135]),
+        mixed[W * H..]
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .all(|uv| *uv == [125u8, 135]),
         "U (90, 160) → 125, V (170, 100) → 135"
     );
     assert_eq!(out.fit_plans(), 2, "one plan per side");
@@ -322,7 +330,11 @@ fn a_fade_between_two_sizes_is_drawn_in_the_canvas() {
             [144, 114]
         };
         assert!(
-            chroma_row(&mixed, row).chunks_exact(2).all(|uv| uv == want),
+            chroma_row(&mixed, row)
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .all(|uv| *uv == want),
             "chroma row {row}: {want:?} (a bar: UV 128 blended with 160 / 100)"
         );
     }
@@ -381,8 +393,10 @@ fn a_fade_between_two_1440p_songs_scales_both_sides_by_one_plan() {
     for row in 0..H / 2 {
         assert!(
             chroma_row(&mixed, row)
-                .chunks_exact(2)
-                .all(|uv| uv == [125u8, 135]),
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .all(|uv| *uv == [125u8, 135]),
             "chroma row {row}: U (90, 160) → 125, V (170, 100) → 135"
         );
     }

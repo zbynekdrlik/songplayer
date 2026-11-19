@@ -84,7 +84,7 @@ impl AsioSample {
         let full = self.full_scale();
         for (out, frame) in dst
             .chunks_exact_mut(self.bytes())
-            .zip(stereo.chunks_exact(2))
+            .zip(stereo.as_chunks::<2>().0.iter())
         {
             let x = clean_f32(frame[ch]);
             match (self, full) {

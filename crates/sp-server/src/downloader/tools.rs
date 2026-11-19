@@ -365,17 +365,17 @@ impl ToolsManager {
             let mut cmd = tokio::process::Command::new(candidate);
             cmd.arg("--version");
             super::hide_console_window(&mut cmd);
-            if let Ok(output) = cmd.output().await {
-                if output.status.success() {
-                    // Resolve to an absolute path so the caller doesn't need
-                    // to rely on PATH being set in child processes.
-                    if let Ok(path) = which_on_path(candidate, None).await {
-                        tracing::info!("Python detected: {} ({:?})", candidate, path);
-                        return Some(path);
-                    }
-                    // Fallback: just return the bare command name as a PathBuf.
-                    return Some(PathBuf::from(candidate));
+            if let Ok(output) = cmd.output().await
+                && output.status.success()
+            {
+                // Resolve to an absolute path so the caller doesn't need
+                // to rely on PATH being set in child processes.
+                if let Ok(path) = which_on_path(candidate, None).await {
+                    tracing::info!("Python detected: {} ({:?})", candidate, path);
+                    return Some(path);
                 }
+                // Fallback: just return the bare command name as a PathBuf.
+                return Some(PathBuf::from(candidate));
             }
         }
         tracing::info!("Python not found on PATH; lyrics ASR/alignment disabled");

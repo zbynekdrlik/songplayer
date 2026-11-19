@@ -89,7 +89,7 @@ async fn wait_secs(pool: &SqlitePool, column: &str, id: i64) -> Option<i64> {
         "SELECT CAST(ROUND((julianday({column}) - julianday('now')) * 86400) AS INTEGER) \
          FROM videos WHERE id = ?"
     );
-    sqlx::query_scalar(&sql)
+    sqlx::query_scalar(sqlx::AssertSqlSafe(sql.as_str()))
         .bind(id)
         .fetch_one(pool)
         .await

@@ -47,7 +47,7 @@ async fn rows(set: &str) -> Rows {
         ids.push(id);
     }
     if !set.is_empty() {
-        sqlx::query(&format!("UPDATE videos SET {set}"))
+        sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE videos SET {set}")))
             .execute(&pool)
             .await
             .unwrap();

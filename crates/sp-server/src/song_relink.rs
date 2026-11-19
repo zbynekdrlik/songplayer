@@ -127,7 +127,7 @@ pub(crate) async fn relink_song(
             );
         }
     }
-    let rows = sqlx::query(&format!("{ROWS} AND id = ?"))
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!("{ROWS} AND id = ?")))
         .bind(video_id)
         .fetch_all(pool)
         .await?;

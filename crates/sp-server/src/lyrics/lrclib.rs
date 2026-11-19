@@ -100,16 +100,16 @@ pub async fn fetch_lyrics(
     // loose enough to occasionally return records from a different
     // recording of the same song (live cut vs studio); reject those
     // before we align them against the audio. See issue #63.
-    if let Some(lrclib_dur) = body.duration {
-        if !is_duration_acceptable(lrclib_dur, duration_s, LRCLIB_DURATION_TOLERANCE_SECS) {
-            debug!(
-                lrclib_duration = lrclib_dur,
-                youtube_duration = duration_s,
-                tolerance = LRCLIB_DURATION_TOLERANCE_SECS,
-                "LRCLIB: rejecting record — duration delta exceeds tolerance"
-            );
-            return Ok(None);
-        }
+    if let Some(lrclib_dur) = body.duration
+        && !is_duration_acceptable(lrclib_dur, duration_s, LRCLIB_DURATION_TOLERANCE_SECS)
+    {
+        debug!(
+            lrclib_duration = lrclib_dur,
+            youtube_duration = duration_s,
+            tolerance = LRCLIB_DURATION_TOLERANCE_SECS,
+            "LRCLIB: rejecting record — duration delta exceeds tolerance"
+        );
+        return Ok(None);
     }
 
     // Prefer synced lyrics (LRC format with timestamps)

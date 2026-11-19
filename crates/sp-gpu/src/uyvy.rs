@@ -88,7 +88,7 @@ pub const UYVY_CONSTANTS_BYTES: usize = 48;
 pub fn constants_bytes() -> [u8; UYVY_CONSTANTS_BYTES] {
     let mut bytes = [0u8; UYVY_CONSTANTS_BYTES];
     let values = rows_f32().into_iter().flatten();
-    for (out, value) in bytes.chunks_exact_mut(4).zip(values) {
+    for (out, value) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(values) {
         out.copy_from_slice(&value.to_le_bytes());
     }
     bytes
@@ -143,7 +143,7 @@ pub fn reference(bgra: &[u8], width: u32, height: u32) -> Vec<u8> {
     let mut uyvy = Vec::new();
     // `max(1)`: a zero width has no pixels (and `chunks_exact(0)` panics).
     for line in bgra.chunks_exact(row.max(1)).take(height as usize) {
-        for pair in line.chunks_exact(8) {
+        for pair in line.as_chunks::<8>().0 {
             let left = [pair[0], pair[1], pair[2], pair[3]];
             let right = [pair[4], pair[5], pair[6], pair[7]];
             uyvy.extend(pack_pair(left, right));

@@ -92,10 +92,10 @@ pub async fn row_facts(pool: &SqlitePool) -> Result<RowFacts, sqlx::Error> {
         Option<String>,
         Option<String>,
     );
-    let rows: Vec<Row> = sqlx::query_as(&format!(
+    let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT youtube_id, {} FROM videos",
         RECORDING_COLUMNS.join(", ")
-    ))
+    )))
     .fetch_all(pool)
     .await?;
     let mut facts = RowFacts::default();

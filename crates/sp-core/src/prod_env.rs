@@ -88,7 +88,7 @@ pub enum Unreadable {
     /// interfaces).
     SoundGrid,
     /// #255: Windows Update's policies (automatic updates, the driver
-    /// exclusion).
+    /// exclusion) and (#333) the Microsoft Store's automatic app updates.
     WindowsUpdate,
     /// #255: MMCSS's system profile.
     Mmcss,
@@ -174,6 +174,13 @@ pub enum EnvProblem {
     /// undo PP's NDIS driver swap. `scripts/setup-prod-pc.ps1` sets it at
     /// every deploy.
     DriversNotExcluded,
+    /// #333: the Microsoft Store may update apps by itself
+    /// (`HKLM\SOFTWARE\Policies\Microsoft\WindowsStore` `AutoDownload` is
+    /// not 2): dsync measured a Store update (Microsoft.WindowsAppRuntime.2,
+    /// 18.11.2026) as a 72–84 µs clock disturbance on PP, and `NoAutoUpdate`
+    /// does not cover the Store. `scripts/setup-prod-pc.ps1` sets it at every
+    /// deploy.
+    StoreAutoUpdatesOn,
     /// #255: an MMCSS value is not the production one: its value as read,
     /// or `None` when it is missing.
     Mmcss {
@@ -217,6 +224,7 @@ impl EnvProblem {
             Self::WiredNicUnreadable { .. } => "unreadable:wired_nic".to_string(),
             Self::AutoUpdateOn => "windows_auto_update_on".to_string(),
             Self::DriversNotExcluded => "windows_update_drivers_on".to_string(),
+            Self::StoreAutoUpdatesOn => "store_auto_updates_on".to_string(),
             Self::Mmcss { setting, .. } => format!("mmcss:{}", setting.name()),
             Self::Network(p) => p.code(),
             Self::Unreadable(Unreadable::Edition) => "unreadable:edition".to_string(),
@@ -356,6 +364,11 @@ impl EnvProblem {
                  aktualizácia môže vymeniť ovládač sieťovej karty"
                     .to_string()
             }
+            Self::StoreAutoUpdatesOn => {
+                "automatické aktualizácie aplikácií z Microsoft Store nie sú vypnuté \
+                 (AutoDownload) — aktualizácia rozruší hodiny počítača"
+                    .to_string()
+            }
             Self::Mmcss {
                 setting,
                 value: Some(value),
@@ -400,7 +413,8 @@ impl EnvProblem {
                 "väzby protokolu SoundGrid na sieťové karty sa nepodarilo zistiť".to_string()
             }
             Self::Unreadable(Unreadable::WindowsUpdate) => {
-                "nastavenia Windows Update sa nepodarilo zistiť".to_string()
+                "nastavenia aktualizácií (Windows Update, Microsoft Store) sa nepodarilo zistiť"
+                    .to_string()
             }
             Self::Unreadable(Unreadable::Mmcss) => {
                 "nastavenia MMCSS sa nepodarilo zistiť".to_string()

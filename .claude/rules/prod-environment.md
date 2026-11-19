@@ -292,6 +292,7 @@ name** (a reinstalled PC with other adapter names is covered), matched by
 | SoundGrid's chosen port | `SoundGrid.Driver.preferences` `LocalLanPort` (service installed) | a port chosen and on one hardware adapter | PP's file 13.10.2026 (above) | **GATE** `soundgrid_port_unset` ("SoundGrid nemá zvolený sieťový port — nastav ho v SoundGrid Studio / ovládači"), `soundgrid_port_missing` (names the MAC), `unreadable:soundgrid` (the service, the file, the interfaces) |
 | `NoAutoUpdate` | `HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU` | DWORD 1 (missing, another number or type = on) | a Windows Update driver push would undo PP's NDIS swap; both boxes 1 (12.10.2026) | **GATE** `windows_auto_update_on`, `unreadable:windows_update` |
 | `ExcludeWUDriversInQualityUpdate` | `…\WindowsUpdate` | DWORD 1 (missing, another number or type = not excluded) | a driver push would undo PP's NDIS swap; PP 1 (set 12.10.2026), SNV lacked it until lane 2's setup set it at its first deploy | **GATE** since lane 2 (the setup applies it before every start) `windows_update_drivers_on`, `unreadable:windows_update` (ONE for either policy) |
+| `AutoDownload` (#333) | `HKLM\SOFTWARE\Policies\Microsoft\WindowsStore` | DWORD 2 (missing, another number or type = the Store updates apps by itself) | dsync measured a Microsoft Store app update on PP (Microsoft.WindowsAppRuntime.2, 18.11.2026 23:03Z) as a 72–84 µs clock disturbance; `NoAutoUpdate` does not cover the Store; both boxes set by hand to 2 and read back 18.11.2026 | **GATE** `store_auto_updates_on`, `unreadable:windows_update` (the same ONE for any of the three policies; its Slovak text names Windows Update and the Store) |
 | MMCSS | `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile` `SystemResponsiveness` 0, `NetworkThrottlingIndex` 0xFFFFFFFF; `…\Tasks\Pro Audio` `Priority` 6, `Scheduling Category` High (case and padding ignored) | each exact; missing = `mmcss:<name>` "chýba"; another type = unreadable | #210 part 2 (`vban-out.md`); both boxes hold | **GATE** `mmcss:<system_responsiveness\|network_throttling_index\|pro_audio_priority\|pro_audio_scheduling_category>`, `unreadable:mmcss` |
 | power | `PowerGetActiveScheme`, `PowerReadFriendlyName`, `PowerReadACValueIndex(SUB_PROCESSOR, CPMINCORES)` | `CPMINCORES` < 100 = a note; Balanced or Power saver active = a note (`ECONOMY_SCHEMES`, any other scheme is the operator's) | Waves' guide; PP Bitsum Highest Performance 100 %, SNV High performance 100 %; PP's Lenovo Legion Toolkit puts Balanced back at every boot, so the setup sets no scheme | **report only** (the setup applies 100 on the active scheme; it stays a note here) |
 
@@ -428,7 +429,7 @@ leg. It replaced the DVS note.
   audio: {soundgrid:
   "not_installed"|"unreadable"|"port_unset"|"port_missing"|"found",
   soundgrid_port_mac (12 hex digits), soundgrid_nic: NIC, windows_update: {no_auto_update,
-  drivers_excluded}, mmcss: {system_responsiveness, network_throttling_index,
+  drivers_excluded, store_auto_updates_off}, mmcss: {system_responsiveness, network_throttling_index,
   pro_audio_priority, pro_audio_scheduling_category}, power: {scheme_guid,
   scheme_name, core_parking_min_cores_pct}, wired_nics: [{guid, name,
   description, values: [{keyword, value, ok}], ok}] | null, notes},
@@ -454,7 +455,8 @@ leg. It replaced the DVS note.
   or its adapter's `unreadable:soundgrid_nic`, `soundgrid_nic_netadaptercx`,
   `soundgrid_nic_setting:<name>` (in `NicSetting::ALL`'s order), then
   `unreadable:windows_update` (once, for either policy),
-  `windows_auto_update_on`, `windows_update_drivers_on` (lane 2), then
+  `windows_auto_update_on`, `windows_update_drivers_on` (lane 2),
+  `store_auto_updates_on` (#333), then
   `unreadable:mmcss` (once, first) and `mmcss:<name>`, then #285's
   `unreadable:wired_nics` or, per adapter, `unreadable:wired_nic` /
   `wired_nic_value:<keyword>`, then #255 item D's (above, "The
@@ -501,7 +503,7 @@ missing from an older server reads null and fails; #255: `audio.soundgrid`
 "not_installed", or "found" with `audio.soundgrid_nic` `driver_model` "ndis"
 and `settings_ok` true,
 `audio.windows_update.no_auto_update` true, `audio.windows_update.drivers_excluded`
-true (lane 2), `audio.mmcss` 0 / 4294967295 / 6 / "High"), with the read
+true (lane 2), `audio.windows_update.store_auto_updates_off` true (#333), `audio.mmcss` 0 / 4294967295 / 6 / "High"), with the read
 errors next to them, and on a missing, unchecked or
 "not Windows" status; then the dashboard's bar reads
 `data-environment="ok"` and shows no segment, the notes segment shows the
@@ -529,7 +531,9 @@ shell; ASCII only, it is read as cp1252) and pwsh 7 (the Linux tests).
 
 - **What it applies, in this order** (the plan's order):
   1. Windows Update: `…\WindowsUpdate\AU` `NoAutoUpdate` and
-     `…\WindowsUpdate` `ExcludeWUDriversInQualityUpdate`, DWORD 1;
+     `…\WindowsUpdate` `ExcludeWUDriversInQualityUpdate`, DWORD 1; then
+     (#333, area `windows_store`) `HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore`
+     `AutoDownload`, DWORD 2 (the key created when absent);
   2. MMCSS: `SystemResponsiveness` 0, `NetworkThrottlingIndex` 0xFFFFFFFF
      (written as the Int32 -1), Pro Audio `Priority` 6, `Scheduling Category`
      REG_SZ `High` (a string that reads `High` with case and padding ignored
@@ -652,7 +656,7 @@ shell; ASCII only, it is read as cp1252) and pwsh 7 (the Linux tests).
   `powercfg`'s AC index, the plan on PP (empty), SNV (exactly
   `ExcludeWUDriversInQualityUpdate`; its firewall is dstack's standard as
   read on 10.11.2026, the rules' names and paths written from dstack's
-  design), a fresh PC (all 25 actions, in order; its firewall off), every
+  design), a fresh PC (all 26 actions, in order; its firewall off), every
   firewall blocker and that no state ever plans a firewall action,
   #322's generic filter (`snv-dante-leg.json`: SNV after the switch, the
   rule set dante-leg.ps1 creates, rule Names placeholders for Windows'

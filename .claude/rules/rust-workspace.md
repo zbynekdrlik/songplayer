@@ -414,16 +414,21 @@ Lint job on code that passed a day earlier. The 1.99 drift that broke run
   `cargo update -p async-trait --precise 0.1.92` (dtolnay/async-trait#303). Never paper over it with allows on the
   traits.
 - **`Atomic*::fetch_update` deprecated (renamed `try_update`):** `try_update`
-  is newer than the workspace MSRV 1.87 (`clippy::incompatible_msrv`), so write
+  was newer than the workspace MSRV when written (`clippy::incompatible_msrv`), so the code has
   the explicit `load` + `compare_exchange_weak` loop (`preview_stream.rs`
   `ViewerGuard::drop`).
 
-**The workspace MSRV is 1.87 (#233 release review: rubato 5.0.1 needs it).**
-Raising `rust-version` (root `Cargo.toml` and `src-tauri/Cargo.toml`) turns
-on clippy's MSRV-gated lints at the new version: `manual_is_multiple_of`
-(1.87) then rejects `x % n == 0` under `-D warnings`. Write
-`x.is_multiple_of(n)` (unsigned integers), and grep the tree for `% … == 0`
-in the same commit as the bump.
+**The workspace MSRV is 1.94 (#296: sqlx 0.9 declares it; before that 1.87
+for rubato 5.0.1, #233).** Raising `rust-version` (root `Cargo.toml`,
+`sp-ui/Cargo.toml` and `src-tauri/Cargo.toml`) turns on clippy's MSRV-gated
+lints at the new version, so run `cargo clippy --workspace --all-targets
+--fix --allow-dirty` in the same commit and hand-fix the rest. 1.87 brought
+`manual_is_multiple_of` (`x.is_multiple_of(n)`, unsigned integers). 1.94
+brought `collapsible_if` over let chains (`if let Some(x) = a && cond {`)
+and `chunks_exact_to_as_chunks`: `s.chunks_exact(2)` with a constant size
+becomes `s.as_chunks::<2>().0.iter()` (items are `&[T; 2]`, so a comparison
+with an array needs `*uv == [a, b]`), `chunks_exact_mut` becomes
+`as_chunks_mut::<N>().0.iter_mut()`.
 
 When the Lint job fails on files the diff never touched, check the toolchain
 version in the job log first (`rust-1.99.0` in the clippy help URLs).
@@ -432,7 +437,7 @@ version in the job log first (`rust-1.99.0` in the clippy help URLs).
 
 SQLite numbers a bare `?` one above the largest number used so far, so a
 `?` after `?1` and `?2` is parameter 3. But it has no NAME, and sqlx-sqlite
-(0.8.6, `arguments.rs`) binds a nameless parameter from the FIRST value
+(0.8.6 and 0.9.1, `arguments.rs`) binds a nameless parameter from the FIRST value
 (`arg_i += 1` → `values[0]`). Round 8's `kept_local` spliced
 `queue_sql::LYRICS_NOT_PARKED` (`… lyrics_pipeline_version < ?`) after
 `?1` / `?2`: the version compare got the YouTube id (an integer vs a text
@@ -442,6 +447,40 @@ bare `?` everywhere in a query that splices a shared fragment (they bind in
 text order), or number the fragment too. A scratch `python3 -c "import
 sqlite3"` of the exact query, with the binds sqlx would give, shows it
 before CI does.
+
+## sqlx 0.9: a built SQL string goes in `sqlx::AssertSqlSafe` (#296)
+
+Since sqlx 0.9 every `sqlx::query*()` takes `impl SqlSafeStr`: a `&'static
+str` literal as it is, anything built at run time (`format!`, a pushed
+`String`) only inside `sqlx::AssertSqlSafe(…)`, else E0277 "dynamic SQL
+strings should be audited for possible injections". Write
+`sqlx::query(sqlx::AssertSqlSafe(format!("… {FRAGMENT} …")))` or
+`sqlx::AssertSqlSafe(sql.as_str())` for a `String` used again below. The
+wrapper is a claim, so keep it true: splice only the tree's own constants,
+`queue_row!()`-style fragments, `?` placeholders and integers; every value
+from a request, a file name or a peer is bound with `.bind()`, never
+formatted in.
+
+sqlx 0.9.1 takes `libsqlite3-sys` as a range (`>=0.30.1, <0.41.0`), and
+`cargo update -p sqlx` alone keeps the locked one: run `cargo update -p
+libsqlite3-sys` too when an advisory names it (RUSTSEC-2026-0459 needed
+0.39+). sqlx 0.9 declares `rust-version` 1.94, which is why the workspace
+declares 1.94 too.
+
+**The root lock is not the exe's lock.** `src-tauri` is its own workspace
+with an untracked `Cargo.lock`, resolved fresh in CI's Build Tauri job. It
+has no `resolver` key, so edition 2024 gives it the MSRV-aware resolver
+(the root sets `resolver = "2"`): with `rust-version` 1.87 it takes the
+newest version that DECLARES Rust <= 1.87 inside a range, so it picked
+`libsqlite3-sys` 0.38.2 (0.39+ declares 1.88) while the root lock and
+`cargo audit` read 0.40.0 (#296 review). A range the exe must not fall
+under gets a floor as a direct dependency of sp-server
+(`libsqlite3-sys = ">=0.39.0, <0.41.0"`, `default-features = false`,
+nothing calls it). Check what the exe gets with a manifests-only copy in
+the scratchpad (every `Cargo.toml`, empty `src/lib.rs` / `main.rs` /
+`build.rs`): `cargo generate-lockfile` in its `src-tauri`, then
+`cargo audit -f Cargo.lock`. A worktree's own `src-tauri` cannot be
+resolved in place (cargo finds the main checkout's workspace above it).
 
 ## Two compile errors review rounds missed (#218/#219 integration)
 

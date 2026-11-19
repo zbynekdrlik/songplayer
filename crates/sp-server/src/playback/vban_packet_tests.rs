@@ -33,7 +33,9 @@ pub(crate) fn parse_packet(p: &[u8]) -> Parsed {
         name,
         counter: u32::from_le_bytes([p[24], p[25], p[26], p[27]]),
         samples: p[28..]
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|b| {
                 let sign = if b[2] & 0x80 != 0 { 0xFF } else { 0x00 };
                 i32::from_le_bytes([b[0], b[1], b[2], sign])

@@ -118,15 +118,16 @@ pub async fn preprocess_vocals(
     // 1 MB minimum avoids reusing truncated/aborted files from a previous
     // run — a real Demucs output for a song of any length is always much
     // larger (≥ ~6 MB for a 60 s chunk at 16 kHz float32).
-    if let Ok(meta) = tokio::fs::metadata(wav_out).await {
-        if meta.is_file() && meta.len() > 1_000_000 {
-            debug!(
-                "preprocess-vocals: cache hit, reusing existing WAV: {} ({} bytes)",
-                wav_out.display(),
-                meta.len()
-            );
-            return Ok(wav_out.to_path_buf());
-        }
+    if let Ok(meta) = tokio::fs::metadata(wav_out).await
+        && meta.is_file()
+        && meta.len() > 1_000_000
+    {
+        debug!(
+            "preprocess-vocals: cache hit, reusing existing WAV: {} ({} bytes)",
+            wav_out.display(),
+            meta.len()
+        );
+        return Ok(wav_out.to_path_buf());
     }
     // #144 r2: the heavy slot is acquired by the caller
     // (`heavy_plan::isolate_with_regime` via `acquire_slot_for_spawn`) and held

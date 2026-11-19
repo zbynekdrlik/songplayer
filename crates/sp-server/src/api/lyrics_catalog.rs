@@ -140,11 +140,11 @@ mod tests {
         .unwrap();
         // Row 1: anomaly (LYRICS_PIPELINE_VERSION + 1 — above the current
         // constant) — should be restamped to 19, then queued.
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "INSERT INTO videos (playlist_id, youtube_id, title, lyrics_source, lyrics_pipeline_version) \
              VALUES (1, 'aaa', 't1', 'yt_subs', {})",
             LYRICS_PIPELINE_VERSION + 1
-        ))
+        )))
         .execute(&pool)
         .await
         .unwrap();
@@ -174,11 +174,11 @@ mod tests {
         .unwrap();
         // Row 5: current version (LYRICS_PIPELINE_VERSION) — must NOT be
         // queued (already at current; not < the constant).
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "INSERT INTO videos (playlist_id, youtube_id, title, lyrics_source, lyrics_pipeline_version) \
              VALUES (1, 'eee', 't5', 'yt_subs', {})",
             LYRICS_PIPELINE_VERSION
-        ))
+        )))
         .execute(&pool)
         .await
         .unwrap();
@@ -458,7 +458,7 @@ mod tests {
         .execute(&state.pool)
         .await
         .unwrap();
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "INSERT INTO videos (playlist_id, youtube_id, title, lyrics_source, \
                                  lyrics_pipeline_version, lyrics_manual_priority) VALUES \
              (1, 'r-v21', 't', 'yt_subs', {anomaly}, 0), \
@@ -467,7 +467,7 @@ mod tests {
              (1, 'r-asr', 't', 'asr_gap', {current}, 1)",
             anomaly = LYRICS_PIPELINE_VERSION + 1,
             current = LYRICS_PIPELINE_VERSION
-        ))
+        )))
         .execute(&state.pool)
         .await
         .unwrap();
@@ -536,14 +536,14 @@ mod tests {
         .execute(&state.pool)
         .await
         .unwrap();
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "INSERT INTO videos (playlist_id, youtube_id, title, lyrics_source, \
                                  lyrics_pipeline_version, lyrics_manual_priority, \
                                  lyrics_attempts, lyrics_next_attempt_at) VALUES \
              (1, 'r-kept', 't', 'yt_subs', {current}, 0, 2, '2999-01-01T00:00:00.000Z'), \
              (1, 'r-queued', 't', 'lrclib', 15, 0, 2, '2999-01-01T00:00:00.000Z')",
             current = LYRICS_PIPELINE_VERSION
-        ))
+        )))
         .execute(&state.pool)
         .await
         .unwrap();

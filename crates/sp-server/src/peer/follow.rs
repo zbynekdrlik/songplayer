@@ -411,7 +411,7 @@ async fn held_videos(pool: &SqlitePool) -> Result<Vec<Held>, sqlx::Error> {
         .into_iter()
         .collect();
     let lyrics = ArtifactKind::Lyrics.as_str();
-    let rows: Vec<HeldRow> = sqlx::query_as(&format!(
+    let rows: Vec<HeldRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT v.youtube_id, MAX(COALESCE(v.has_lyrics, 0) = 1), \
          (SELECT f.node FROM peer_fetches f WHERE f.youtube_id = v.youtube_id AND f.kind = ?), \
          (SELECT f.sha256 FROM peer_fetches f WHERE f.youtube_id = v.youtube_id AND f.kind = ?) \
@@ -419,7 +419,7 @@ async fn held_videos(pool: &SqlitePool) -> Result<Vec<Held>, sqlx::Error> {
          WHERE {LYRICS_ELIGIBLE} AND NOT EXISTS (SELECT 1 FROM peer_standins s \
              WHERE s.youtube_id = v.youtube_id AND s.job = ?) \
          GROUP BY v.youtube_id ORDER BY v.youtube_id"
-    ))
+    )))
     .bind(lyrics)
     .bind(lyrics)
     .bind(Job::Lyrics.as_str())

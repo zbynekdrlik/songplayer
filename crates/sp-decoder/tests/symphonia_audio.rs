@@ -61,7 +61,7 @@ fn collect_frames(reader: &mut dyn AudioStream, min_frames: usize) -> (u64, Vec<
         if first_ts.is_none() {
             first_ts = Some(chunk.timestamp_ms);
         }
-        for f in chunk.data.chunks_exact(2) {
+        for f in chunk.data.as_chunks::<2>().0 {
             frames.push((ramp_index(f[0]), ramp_index(f[1])));
         }
     }
@@ -151,7 +151,7 @@ fn ramp_fixtures_encode_their_own_frame_index() {
         let mut reader = open_ramp(block);
         let mut frames = Vec::new();
         while let Some(chunk) = reader.next_samples().expect("decode should succeed") {
-            for f in chunk.data.chunks_exact(2) {
+            for f in chunk.data.as_chunks::<2>().0 {
                 frames.push((ramp_index(f[0]), ramp_index(f[1])));
             }
         }

@@ -374,15 +374,19 @@ pub fn uyvy_to_nv12(
     let (luma, chroma) = out.split_at_mut(luma_len);
     for (y, dst) in luma.chunks_exact_mut(width).enumerate() {
         let line = &src[y * stride..y * stride + row];
-        for (d, px) in dst.iter_mut().zip(line.chunks_exact(2)) {
+        for (d, px) in dst.iter_mut().zip(line.as_chunks::<2>().0.iter()) {
             *d = px[1];
         }
     }
     for (pair, dst) in chroma.chunks_exact_mut(width).enumerate() {
         let top = &src[2 * pair * stride..2 * pair * stride + row];
         let bottom = &src[(2 * pair + 1) * stride..(2 * pair + 1) * stride + row];
-        let pairs = top.chunks_exact(4).zip(bottom.chunks_exact(4));
-        for (d, (a, b)) in dst.chunks_exact_mut(2).zip(pairs) {
+        let pairs = top
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(bottom.as_chunks::<4>().0.iter());
+        for (d, (a, b)) in dst.as_chunks_mut::<2>().0.iter_mut().zip(pairs) {
             d[0] = avg(a[0], b[0]);
             d[1] = avg(a[2], b[2]);
         }

@@ -386,7 +386,7 @@ impl LoopAnalyzer {
             }
             self.recv_end += (received.len() / self.inputs) as u64;
         }
-        for frame in sent.chunks_exact(2) {
+        for frame in sent.as_chunks::<2>().0 {
             self.sent[0].push_back(frame[0]);
             self.sent[1].push_back(frame[1]);
         }
@@ -432,7 +432,7 @@ impl LoopAnalyzer {
     /// While searching: count the sent frames with energy, a block at a
     /// time (`no_return`).
     fn count_loud(&mut self, sent: &[f32]) {
-        for frame in sent.chunks_exact(2) {
+        for frame in sent.as_chunks::<2>().0 {
             for (acc, &v) in self.loud_acc.iter_mut().zip(frame) {
                 *acc += f64::from(v) * f64::from(v);
             }

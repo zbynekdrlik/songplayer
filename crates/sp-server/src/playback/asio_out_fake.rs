@@ -90,7 +90,9 @@ impl FakeDevice {
                     copy_played(&got[..n_got], &mut played);
                     let k = self.loop_inputs as usize;
                     let back: Vec<f32> = played
-                        .chunks_exact(2)
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
                         .flat_map(|f| std::iter::repeat_n(f[0], k))
                         .collect();
                     taps.push(&played, &back);

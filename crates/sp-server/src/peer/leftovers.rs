@@ -61,10 +61,10 @@ pub fn names_a_video(path: &str, ids: &HashSet<&[u8]>, lengths: &BTreeSet<usize>
 pub async fn pass(pool: &SqlitePool) -> Result<Dropped, sqlx::Error> {
     let mut records = 0;
     for table in PEER_TABLES {
-        records += sqlx::query(&format!(
+        records += sqlx::query(sqlx::AssertSqlSafe(format!(
             "DELETE FROM {table} WHERE NOT EXISTS \
              (SELECT 1 FROM videos v WHERE v.youtube_id = {table}.youtube_id)"
-        ))
+        )))
         .execute(pool)
         .await?
         .rows_affected();

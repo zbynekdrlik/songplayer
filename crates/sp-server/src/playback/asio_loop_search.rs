@@ -80,7 +80,9 @@ pub fn energy(p: &[f64], from: usize, len: usize) -> f64 {
 
 /// `x` summed over every [`DECIMATE`] frames (a trailing part dropped).
 pub fn box_sums(x: &[f32]) -> Vec<f64> {
-    x.chunks_exact(DECIMATE)
+    x.as_chunks::<DECIMATE>()
+        .0
+        .iter()
         .map(|b| b.iter().map(|&v| f64::from(v)).sum::<f64>())
         .collect()
 }

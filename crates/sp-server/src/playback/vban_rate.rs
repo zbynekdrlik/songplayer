@@ -211,7 +211,7 @@ impl Conversion {
         let frames = VBAN_BLOCK_FRAMES;
         match block {
             Some(b) => {
-                for (i, pair) in b.chunks_exact(VBAN_CHANNELS).enumerate() {
+                for (i, pair) in b.as_chunks::<VBAN_CHANNELS>().0.iter().enumerate() {
                     for (ch, &x) in pair.iter().enumerate() {
                         self.input[ch * frames + i] = f64::from(x);
                     }

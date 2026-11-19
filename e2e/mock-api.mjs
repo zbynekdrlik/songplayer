@@ -1636,7 +1636,7 @@ const ENV_HOLDS = {
     soundgrid: null,
     soundgrid_port_mac: null,
     soundgrid_nic: null,
-    windows_update: { no_auto_update: null, drivers_excluded: null },
+    windows_update: { no_auto_update: null, drivers_excluded: null, store_auto_updates_off: null },
     mmcss: {
       system_responsiveness: null,
       network_throttling_index: null,

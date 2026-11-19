@@ -260,7 +260,9 @@ fn decode_block(rest: &[u8]) -> Result<BlockFrame, ProtoError> {
             return Err(ProtoError::BadBlock("not one block of samples"));
         }
         let samples: Arc<[f32]> = tail
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
             .collect();
         Some(samples)

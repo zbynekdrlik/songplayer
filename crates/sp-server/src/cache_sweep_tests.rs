@@ -448,9 +448,9 @@ async fn every_recording_column_records_a_file() {
         let name = format!("other{i:06}_lyrics.json");
         let path: PathBuf = cache.join(&name);
         assert!(!recorded_by_a_row(&pool, &path).await.unwrap(), "{column}");
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "INSERT INTO videos (playlist_id, youtube_id, {column}) VALUES (1, 'x{i:010}', ?)"
-        ))
+        )))
         .bind(path.to_string_lossy().into_owned())
         .execute(&pool)
         .await
