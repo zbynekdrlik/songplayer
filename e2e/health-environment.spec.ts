@@ -106,6 +106,22 @@ test("the environment segment appears red while violated, names the problems, an
   await expect(page.getByTestId("health-environment")).toHaveCount(0);
 });
 
+test("#337: a Dante adapter on a driver too old is named on the bar", async ({ page, request }) => {
+  const text =
+    "sieťová karta „Ethernet 4“ nesie Dante a jej ovládač je príliš starý: neponúka " +
+    "nastavenie vysielacej fronty — nainštaluj ovládač Realtek RTL8156 verzie 11.19 alebo novšej";
+  await request.post("/__mock/environment", {
+    data: { note: null, ok: false, problems: [{ code: "dante_nic_driver_old", text_sk: text }] },
+  });
+  await page.goto("/");
+  const bar = page.getByTestId("health-bar");
+  await expect(bar).toHaveAttribute("data-environment", "violated", { timeout: 15000 });
+  const segment = page.getByTestId("health-environment");
+  await expect(segment).toHaveText(`Prostredie: ${text}`, { timeout: 10000 });
+  await expect(segment).toHaveClass(/health-error/);
+  expect(await segment.getAttribute("title")).toContain(`Zistené: ${text}.`);
+});
+
 test("the environment segment shows on every page's health bar", async ({
   page,
   request,

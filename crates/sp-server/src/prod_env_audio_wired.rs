@@ -128,7 +128,10 @@ pub struct WiredValue {
     /// lists it); read for the RTL8156's values only, `true` for the rest
     /// (written to the class key whether offered or not) and when the list
     /// could not be read. #337: one the driver does not offer is
-    /// [`Verdict::NotOffered`], whatever the registry holds.
+    /// [`Verdict::NotOffered`], whatever the registry holds. `false` only
+    /// for an RTL8156's own values ([`RTL8156_VALUES`], `wired_nic`), which
+    /// are judged only on a Dante leg ([`judged`]): the problem's text
+    /// names both, so no other keyword may ever be built not offered.
     pub offered: bool,
 }
 
@@ -165,8 +168,9 @@ pub enum Verdict {
     Wrong(String),
     /// A value the adapter must have is not there.
     Missing,
-    /// #337: the driver does not offer the keyword, so it does not read it:
-    /// a value left in the registry by a newer driver proves nothing.
+    /// #337: the driver does not declare the keyword, so nothing shows it
+    /// reads it: a value left in the registry by a newer driver is no
+    /// evidence of an 8 / 64 queue (not measured on 11.4.211.2022).
     NotOffered,
     Unread,
 }

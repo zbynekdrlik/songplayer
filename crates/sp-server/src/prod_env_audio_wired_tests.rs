@@ -601,9 +601,9 @@ fn one_keyword_not_offered_names_the_driver_once_and_the_other_by_its_value() {
     );
 }
 
-/// #337: a value a newer driver left in the registry proves nothing under a
-/// driver that does not offer its keyword (it does not read it): 8 / 64
-/// there is still the driver being too old.
+/// #337: a value a newer driver left in the registry is no evidence under
+/// a driver that does not declare its keyword (nothing shows it reads it):
+/// 8 / 64 there is still the driver being too old.
 #[test]
 fn a_leftover_value_under_a_driver_that_does_not_offer_it_is_not_judged_by_its_number() {
     let mut reg = rtl8156_box();

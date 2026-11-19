@@ -423,6 +423,9 @@ test.describe("production environment gate (#233)", () => {
     expect(failing(null)).toEqual(["audio.wired_nics is null, not a list of adapters"]);
   });
 
+  // A contract pin of what the gate prints for the code (the gate has no
+  // per-code list: it fails on every problem). The code and the text
+  // themselves are pinned in sp-core's and sp-server's tests.
   test("#337: a Dante adapter on a driver too old fails by its code and its adapter", () => {
     const text =
       "sieťová karta „Ethernet 4“ nesie Dante a jej ovládač je príliš starý: neponúka " +

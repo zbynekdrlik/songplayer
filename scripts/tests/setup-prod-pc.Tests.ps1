@@ -589,7 +589,8 @@ Describe 'Get-ProdPcPlan: every wired adapter (issue 285, the owner''s rule)' {
         $facts = Read-Fixture 'fresh'
         $facts | Add-Member -NotePropertyName dante_leg -NotePropertyValue $true -Force
         $facts | Add-Member -NotePropertyName adapters -NotePropertyValue @(New-Adapter 'Ethernet 4' '0014' -PnpDeviceId $script:Rtl8156) -Force
-        $facts.adapters[0] | Add-Member -NotePropertyName driver_keywords -NotePropertyValue @('pendingtransmits', 'PendingReceives') -Force
+        # Matched like the gate's list: trimmed, case ignored.
+        $facts.adapters[0] | Add-Member -NotePropertyName driver_keywords -NotePropertyValue @(' pendingtransmits ', 'PendingReceives') -Force
         foreach ($read in @($facts, (Copy-Facts $facts))) {
             @(Get-Rtl8156Actions $read | ForEach-Object { "$($_.Name) $($_.Current) $($_.Wanted)" }) | Should -Be @('PendingTransmits (none) 8')
             $old = @(Get-ProdPcBlockers -Facts $read | Where-Object { $_.Code -eq 'dante_nic_driver_old' })

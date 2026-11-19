@@ -340,8 +340,8 @@ function Get-ProdPcRtl8156Values {
 # leg its firewall group dstack155 is bound to). The RTL8156's transmit
 # values are dstack's Dante-TX tuning, so they apply only there (issue 255,
 # 11.11.2026, the owner: Dante is one audio path, a PC without it passes
-# clean; PP has no Dante leg, and its RTL8156 driver 11.4.211.2022 offers
-# neither keyword). SongPlayer's own check asks the same of an enabled Dante
+# clean; PP had no Dante leg then, and its RTL8156 driver 11.4.211.2022
+# offered neither keyword). SongPlayer's own check asks the same of an enabled Dante
 # output (prod_env_network.rs leg_carriers). Facts with no dante_leg (an
 # older capture) read as no leg.
 function Test-ProdPcDanteLeg {
@@ -375,7 +375,7 @@ function Test-ProdPcDriverOffers {
     param($Adapter, [string]$Keyword)
     $member = Find-ProdPcMember -Object $Adapter -Name 'driver_keywords'
     if ($null -eq $member -or $null -eq $member.Value) { return $true }
-    return (@($member.Value | Where-Object { [string]$_ -eq $Keyword }).Count -gt 0)
+    return (@($member.Value | Where-Object { ([string]$_).Trim() -eq $Keyword }).Count -gt 0)
 }
 
 # The RTL8156 keywords an adapter's driver does not offer (issue 337):
@@ -578,9 +578,10 @@ function Add-ProdPcEveryNicReview {
         }
         if ($guid -ne $carrier) { continue }
         if (-not (Test-ProdPcRtl8156 ([string](Get-ProdPcField $adapter 'pnp_device_id')))) { continue }
-        # Issue 337: a keyword the driver does not offer is never set (the
-        # driver does not read it, whatever the registry holds): the driver
-        # is too old for a Dante leg, and installing one is the operator's.
+        # Issue 337: a keyword the driver does not offer is never set
+        # (nothing shows the driver reads it, whatever the registry holds):
+        # the driver is too old for a Dante leg, and installing one is the
+        # operator's.
         $lacking = @(Get-ProdPcRtl8156Lacking $adapter)
         if ($lacking.Count -gt 0) {
             $Blockers.Add((New-ProdPcBlocker 'dante_nic_driver_old' "sietova karta '$name' nesie Dante a jej ovladac je prilis stary: neponuka $($lacking -join ', ') - nainstaluj ovladac Realtek RTL8156 verzie 11.19 alebo novsej (this script never installs a driver)" -AdapterGuid $guid))
