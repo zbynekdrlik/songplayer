@@ -28,6 +28,7 @@ fn every_firewall_problem() -> Vec<EnvProblem> {
         EnvProblem::FirewallGroupIncomplete { rules: 9 },
         EnvProblem::Unreadable(Unreadable::FirewallDefaults(FirewallProfile::Private)),
         EnvProblem::Unreadable(Unreadable::FirewallRules),
+        EnvProblem::FirewallOffWithDanteLeg,
     ]
 }
 
@@ -59,6 +60,7 @@ fn every_firewall_problem_has_its_stable_code() {
             "firewall_group_incomplete",
             "unreadable:firewall_defaults:private",
             "unreadable:firewall_rules",
+            "firewall_off_with_dante_leg",
         ]
     );
 }
@@ -86,6 +88,9 @@ fn every_firewall_problem_reads_in_slovak() {
              mať 10)",
             "predvolené akcie brány firewall (súkromný profil) sa nepodarilo zistiť",
             "blokovacie pravidlá brány firewall sa nepodarilo zistiť",
+            "brána firewall je vypnutá a sieť Dante nie je filtrovaná — zapni ju podľa \
+             štandardu dstack: všetky profily zapnuté, predvolená akcia povoliť (prichádzajúce \
+             aj odchádzajúce), skupina pravidiel „dstack Dante leg“",
         ]
     );
 }

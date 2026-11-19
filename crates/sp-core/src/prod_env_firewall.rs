@@ -2,7 +2,9 @@
 //! follows dstack's two-network standard (dstack `docs/two-networks.md` §3).
 //! A production PC is in one of two states:
 //!
-//! - **off** (a PC with no Dante leg): every profile off;
+//! - **off**: every profile off, accepted only on a PC with no Dante leg
+//!   (#340: with a leg it is `firewall_off_with_dante_leg`, the leg is
+//!   unfiltered);
 //! - **dante_leg** (#322, dstack#264: the generic Dante-leg filter, the
 //!   same on every PC): every profile on, each default action (inbound and
 //!   outbound) Allow, every enabled Block rule in the group

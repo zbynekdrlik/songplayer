@@ -5,8 +5,9 @@
 //! SoundGrid driver resync, an audible pop each time. The owner's rule: a
 //! production PC runs Windows LTSC or Windows IoT Enterprise, with Defender's
 //! real-time protection OFF, and no startup check or test may let a box run
-//! otherwise. The firewall (#255, dstack#155, 10.11.2026): every profile off,
-//! or dstack's two-network standard ([`firewall`]).
+//! otherwise. The firewall (#255, dstack#155, 10.11.2026): every profile off
+//! (#340: a PC with no Dante leg only), or dstack's two-network standard
+//! ([`firewall`]).
 //!
 //! This module turns the facts read from the box ([`EnvFacts`]: the raw
 //! reads of `prod_env_win.rs`, on Windows with no process spawned, made into

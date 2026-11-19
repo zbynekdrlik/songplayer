@@ -122,6 +122,26 @@ test("#337: a Dante adapter on a driver too old is named on the bar", async ({ p
   expect(await segment.getAttribute("title")).toContain(`Zistené: ${text}.`);
 });
 
+test("#340: a Dante leg with the firewall off is named on the bar", async ({ page, request }) => {
+  const text =
+    "brána firewall je vypnutá a sieť Dante nie je filtrovaná — zapni ju podľa štandardu dstack: " +
+    "všetky profily zapnuté, predvolená akcia povoliť (prichádzajúce aj odchádzajúce), " +
+    "skupina pravidiel „dstack Dante leg“";
+  await request.post("/__mock/environment", {
+    data: { note: null, ok: false, problems: [{ code: "firewall_off_with_dante_leg", text_sk: text }] },
+  });
+  await page.goto("/");
+  const bar = page.getByTestId("health-bar");
+  await expect(bar).toHaveAttribute("data-environment", "violated", { timeout: 15000 });
+  const segment = page.getByTestId("health-environment");
+  await expect(segment).toHaveText(`Prostredie: ${text}`, { timeout: 10000 });
+  await expect(segment).toHaveClass(/health-error/);
+  const title = await segment.getAttribute("title");
+  expect(title).toContain(`Zistené: ${text}.`);
+  // The rule the tooltip opens with says when "off" is accepted.
+  expect(title).toContain("Brána firewall je vypnutá vo všetkých profiloch (len počítač bez siete Dante), alebo");
+});
+
 test("the environment segment shows on every page's health bar", async ({
   page,
   request,

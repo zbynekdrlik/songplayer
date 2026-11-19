@@ -2,7 +2,9 @@
 //! the firewall's verdict. Two states are accepted
 //! (`sp_core::prod_env::firewall`):
 //!
-//! - every profile off (a PC with no Dante leg);
+//! - every profile off, on a PC with no Dante leg only (#340: with a leg,
+//!   `network::has_leg`, it is the ONE problem `firewall_off_with_dante_leg`:
+//!   the group's Block rules filter nothing while the profiles are off);
 //! - dstack's generic Dante-leg filter (#322): every profile on, its default
 //!   actions Allow, every enabled Block rule in the group `dstack Dante
 //!   leg`, which holds exactly 10. The per-box group `dstack155` is no
@@ -43,8 +45,9 @@ impl BlockRules {
 }
 
 /// Every firewall problem, in order: each profile that cannot be read
-/// (nothing else is judged then), else, with a profile on, the state the box
-/// is in (module doc).
+/// (nothing else is judged then), else, with every profile off, #340's one
+/// problem on a PC with a Dante leg, else, with a profile on, the state the
+/// box is in (module doc).
 pub fn problems(facts: &EnvFacts) -> Vec<EnvProblem> {
     let mut problems = Vec::new();
     for (profile, on) in FirewallProfile::ALL.into_iter().zip(facts.firewall) {
@@ -52,7 +55,13 @@ pub fn problems(facts: &EnvFacts) -> Vec<EnvProblem> {
             problems.push(EnvProblem::Unreadable(Unreadable::Firewall(profile)));
         }
     }
-    if !problems.is_empty() || !facts.firewall.contains(&Some(true)) {
+    if !problems.is_empty() {
+        return problems;
+    }
+    if !facts.firewall.contains(&Some(true)) {
+        if super::network::has_leg(&facts.network) {
+            problems.push(EnvProblem::FirewallOffWithDanteLeg);
+        }
         return problems;
     }
     let profiles = FirewallProfile::ALL.into_iter().enumerate();
@@ -100,8 +109,10 @@ pub fn problems(facts: &EnvFacts) -> Vec<EnvProblem> {
 }
 
 /// The accepted state the firewall is in, given its problems: `None` while
-/// a profile is unread, `Off` with every profile off, `DanteLeg` with every
-/// profile on and no firewall problem, else `Other`.
+/// a profile is unread, `Off` with every profile off (a state, not a
+/// verdict: #340's problem says when a PC with a Dante leg may not be in
+/// it), `DanteLeg` with every profile on and no firewall problem, else
+/// `Other`.
 pub fn mode(facts: &EnvFacts, problems: &[EnvProblem]) -> Option<FirewallMode> {
     if facts.firewall.contains(&None) {
         return None;

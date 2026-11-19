@@ -10,9 +10,9 @@
 //! Defender scan of a launched yt-dlp made
 //! the Waves SoundGrid driver resync (A/B/A, kernel trace). sp-server's
 //! `prod_env` reads the facts and decides; this module only names the outcome
-//! (WASM-safe: the dashboard shows it). The firewall: every profile off, or
-//! (a PC with a Dante leg) dstack's standard ([`firewall`], #255, the owner's
-//! ruling on dstack#155, 10.11.2026).
+//! (WASM-safe: the dashboard shows it). The firewall: every profile off (a
+//! PC with no Dante leg only, #340), or dstack's standard ([`firewall`],
+//! #255, the owner's ruling on dstack#155, 10.11.2026).
 //!
 //! #255 adds the production PC's audio profile ([`audio`]): the network
 //! adapter the SoundGrid driver uses (its chosen port) runs an NDIS driver
@@ -135,6 +135,9 @@ pub enum EnvProblem {
     /// #255: the group does not hold exactly its enabled Block rules (how
     /// many it holds).
     FirewallGroupIncomplete { rules: u32 },
+    /// #340: every profile is off on a PC that has a Dante leg: the group's
+    /// rules filter nothing, the leg is unfiltered.
+    FirewallOffWithDanteLeg,
     /// #255: SoundGrid is installed and its driver has no port chosen (no
     /// preferences, no or an empty `LocalLanPort`).
     SoundGridPortUnset,
@@ -214,6 +217,7 @@ impl EnvProblem {
             }
             Self::FirewallBlockOutsideGroup(_) => "firewall_block_outside_group".to_string(),
             Self::FirewallGroupIncomplete { .. } => "firewall_group_incomplete".to_string(),
+            Self::FirewallOffWithDanteLeg => "firewall_off_with_dante_leg".to_string(),
             Self::SoundGridPortUnset => "soundgrid_port_unset".to_string(),
             Self::SoundGridPortMissing { .. } => "soundgrid_port_missing".to_string(),
             Self::SoundGridNicNetAdapterCx { .. } => "soundgrid_nic_netadaptercx".to_string(),
@@ -298,6 +302,11 @@ impl EnvProblem {
             Self::FirewallGroupIncomplete { rules } => format!(
                 "skupina pravidiel „{DANTE_LEG_GROUP}“ má {rules} zapnutých blokovacích \
                  pravidiel (má ich mať {DANTE_LEG_GROUP_RULES})"
+            ),
+            Self::FirewallOffWithDanteLeg => format!(
+                "brána firewall je vypnutá a sieť Dante nie je filtrovaná — zapni ju podľa \
+                 štandardu dstack: všetky profily zapnuté, predvolená akcia povoliť \
+                 (prichádzajúce aj odchádzajúce), skupina pravidiel „{DANTE_LEG_GROUP}“"
             ),
             Self::SoundGridPortUnset => {
                 "SoundGrid nemá zvolený sieťový port — nastav ho v SoundGrid \
@@ -561,7 +570,7 @@ pub fn marker(status: &EnvironmentStatus) -> &'static str {
 pub const RULE_SK: &str = "Produkčný počítač musí bežať na Windows LTSC alebo Windows 11 IoT \
      Enterprise, s vypnutou ochranou Windows Defender v reálnom čase (ani v pasívnom režime), \
      bez iného antivírusu — nič nesmie kontrolovať programy, ktoré SongPlayer spúšťa. \
-     Brána firewall je vypnutá vo všetkých profiloch, alebo (počítač so sieťou Dante) zapnutá vo všetkých \
+     Brána firewall je vypnutá vo všetkých profiloch (len počítač bez siete Dante), alebo zapnutá vo všetkých \
      podľa štandardu dstack: predvolene všetko povolené a blokuje len skupina pravidiel dstack \
      („dstack Dante leg“). \
      Sieťová karta, ktorú má ovládač SoundGrid zvolenú ako port, beží na ovládači NDIS s vypnutým moderovaním \

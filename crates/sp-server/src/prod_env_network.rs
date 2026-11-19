@@ -558,6 +558,14 @@ fn leg_problems(leg: &LegFacts, f: &NetworkFacts) -> Vec<NetProblem> {
     problems
 }
 
+/// Whether the PC has a Dante leg: an enabled Dante output names an
+/// address (the fact the two-network rules, the leg's carriers and #340's
+/// firewall rule are judged by). The outputs unread = not known = no (that
+/// is `unreadable:dante_outputs`, a problem of its own).
+pub fn has_leg(f: &NetworkFacts) -> bool {
+    f.dante_ips.as_ref().is_some_and(|ips| !ips.is_empty())
+}
+
 /// #255: the adapters that carry a Dante leg, by name (dstack
 /// two-networks §6, dstack PR 179: a NIC value tuned for Dante applies
 /// only there): each leg's own interface (a native NIC holding the
@@ -567,7 +575,7 @@ fn leg_problems(leg: &LegFacts, f: &NetworkFacts) -> Vec<NetProblem> {
 /// the outputs unread (PP: the owner's ruling of 11.11.2026, Dante is one
 /// audio path and a PC without it passes clean).
 pub fn leg_carriers(f: &NetworkFacts) -> Vec<String> {
-    if !f.dante_ips.as_ref().is_some_and(|ips| !ips.is_empty()) {
+    if !has_leg(f) {
         return Vec::new();
     }
     let mut names: Vec<String> = f
