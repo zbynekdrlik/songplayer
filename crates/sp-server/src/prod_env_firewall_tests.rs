@@ -274,6 +274,22 @@ fn rules_of_the_old_group_are_block_rules_outside_the_group() {
         mode(&leftover, &problems(&leftover)),
         Some(FirewallMode::Other)
     );
+    // Old-group rules are no attempt at the standard: with Windows' own
+    // defaults and no rule of the group the firewall is simply on.
+    let plain = facts(
+        [Some(true); 3],
+        [Some(WINDOWS); 3],
+        rules(0, &["dstack155 obs64.exe in", "dstack155 TCP out"]),
+    );
+    assert_eq!(
+        problems(&plain),
+        [
+            EnvProblem::FirewallOn(Domain),
+            EnvProblem::FirewallOn(Private),
+            EnvProblem::FirewallOn(Public),
+        ]
+    );
+    assert_eq!(mode(&plain, &problems(&plain)), Some(FirewallMode::Other));
 }
 
 /// The rules not read with a profile on: never taken as the standard, the

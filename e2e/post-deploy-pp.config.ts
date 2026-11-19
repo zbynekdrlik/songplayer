@@ -11,7 +11,7 @@ import { defineConfig } from "@playwright/test";
  * SongPlayer spawns disturbs none of them: the ASIO host process; #257: no
  * audio path records a loss in the audio fault ledger meanwhile) +
  * `post-deploy-environment.spec.ts` (#233: Windows LTSC or IoT Enterprise,
- * Defender real-time and every firewall profile off) +
+ * Defender real-time off, the firewall off or dstack's standard) +
  * `post-deploy-audio-faults-ui.spec.ts` (#257: the dashboard's audio
  * segment reads PP's own fault ledger, its panel lists every path) +
  * `post-deploy-wall.spec.ts` (#259: the LED wall report reads PP's box; it

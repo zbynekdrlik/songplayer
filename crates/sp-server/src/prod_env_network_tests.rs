@@ -264,7 +264,7 @@ fn snv_s_view_names_every_fact() {
     );
 }
 
-/// PP today: no enabled Dante output, so nothing is judged, whatever its
+/// A PC with no enabled Dante output: nothing is judged, whatever its
 /// adapters and routes are; the view still lists them.
 #[test]
 fn a_pc_with_no_dante_leg_is_not_judged() {

@@ -128,10 +128,15 @@ process for this.
     generic filter, so the transition's second state, its mode
     `dstack155`, the problem `firewall_groups_mixed` and the status field
     `dstack_group_rules` are deleted, not kept as a fallback). An enabled
-    Block rule of that group is a rule OUTSIDE the group:
-    `firewall_block_outside_group`, named like any foreign Block rule; a
-    PC that never switched reads that plus `firewall_group_incomplete`
-    (0). Tests: `rules_of_the_old_group_are_block_rules_outside_the_group`
+    Block rule of that group is a rule OUTSIDE the group, named like any
+    foreign Block rule: `firewall_block_outside_group` once the standard
+    is attempted (a default Allow or a rule of the generic group); a PC
+    that never switched reads that plus `firewall_group_incomplete` (0).
+    Old-group rules are no attempt themselves: with Windows' own default
+    Block and no generic rule such a PC reads `firewall_on:<p>` alone (a
+    failure either way). A DISABLED leftover rule of the old group
+    filters nothing: neither check reads it (the script blocked on one as
+    `firewall_groups_mixed` during the transition). Tests: `rules_of_the_old_group_are_block_rules_outside_the_group`
     (sp-server), `the_groups_block_rules_are_counted_and_the_rest_named`
     (the reader), Pester "reads a leftover rule of the old group …".
   - Depth of each check: the in-process one COUNTS the group's enabled

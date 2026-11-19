@@ -619,7 +619,11 @@ function Add-ProdPcEveryNicReview {
 # dante-leg.ps1 -Mode check is the full verdict of the rule shapes. A rule
 # of the group counts here whether enabled or not (a disabled one makes the
 # group incomplete); SongPlayer's in-process check sees only enabled Block
-# rules.
+# rules. A rule of the old group dstack155 is read only while it is an
+# enabled Block rule (then it is one outside the group, once the standard is
+# attempted: a default Allow or a rule of the group; with neither the
+# firewall is simply on, firewall_on); a disabled leftover of it filters
+# nothing, is not read and blocks nothing.
 # (The group's name, its rules and the leg's alias are written as
 # literals: the tests load only this file's functions.)
 
