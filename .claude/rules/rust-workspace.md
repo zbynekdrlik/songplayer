@@ -1604,3 +1604,9 @@ around engine DB work (`failure_retry_tests.rs`, the Plays at 0/5/35/… s):
   mutant that drops the retry then fails the test instead of hanging it.
 - Bound the loop structurally (`for _ in 0..64`): the old code's Plays at
   0 s never move the clock, so a time-only exit would spin forever.
+
+**`include_str!` of a repo script in a test: never match across a line break
+as written (#322, CI 44472799589).** The Windows runner checks text files
+out with CRLF, so `script.contains("…{\n    return …")` passes on Linux and
+fails in Build (Windows). Normalise first
+(`include_str!(…).replace("\r\n", "\n")`) or match one line at a time.

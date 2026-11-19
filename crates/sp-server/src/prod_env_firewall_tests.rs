@@ -356,7 +356,8 @@ fn a_rule_is_counted_in_the_group_or_named_outside_it() {
 #[test]
 fn the_setup_script_knows_dstacks_generic_rules() {
     use sp_core::prod_env::firewall::{DANTE_LEG_GROUP, DANTE_LEG_RULE_NAMES};
-    let script = include_str!("../../../scripts/setup-prod-pc.ps1");
+    // A Windows checkout holds the script with CRLF line ends.
+    let script = include_str!("../../../scripts/setup-prod-pc.ps1").replace("\r\n", "\n");
     let quoted: Vec<String> = DANTE_LEG_RULE_NAMES
         .iter()
         .map(|n| format!("'{n}'"))
