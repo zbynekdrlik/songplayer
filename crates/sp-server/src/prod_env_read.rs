@@ -8,7 +8,7 @@
 //! the policy as it applies), the registry only when that cannot be read.
 
 use sp_core::prod_env::FirewallProfile;
-use sp_core::prod_env::firewall::{FirewallDefaults, FirewallGroup};
+use sp_core::prod_env::firewall::{FirewallDefaults, in_dante_leg_group};
 
 use super::firewall::BlockRules;
 
@@ -230,9 +230,9 @@ pub fn block_rules(wmi: &Result<WmiRead, String>) -> Result<BlockRules, String> 
     };
     let mut rules = BlockRules::default();
     for row in rows {
-        let group = FirewallGroup::of(row.rule_group.as_deref(), row.display_group.as_deref());
+        let in_group = in_dante_leg_group(row.rule_group.as_deref(), row.display_group.as_deref());
         let name = row.display_name.clone().unwrap_or_else(|| row.id.clone());
-        rules.add(group, name);
+        rules.add(in_group, name);
     }
     Ok(rules)
 }

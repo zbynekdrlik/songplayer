@@ -1625,7 +1625,6 @@ const ENV_HOLDS = {
     public: null,
     mode: null,
     defaults: [null, null, null],
-    dstack_group_rules: null,
     dante_leg_group_rules: null,
     block_rules_outside_group: null,
   },

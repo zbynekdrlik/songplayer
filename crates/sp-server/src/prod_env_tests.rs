@@ -457,7 +457,6 @@ fn the_status_carries_every_fact_and_problem() {
         firewall: [Some(true), None, Some(false)],
         firewall_defaults: [Some(WINDOWS_DEFAULTS), None, Some(WINDOWS_DEFAULTS)],
         firewall_rules: Some(firewall::BlockRules {
-            dstack155: 2,
             dante_leg: 1,
             outside: vec!["Block X".to_string()],
         }),
@@ -510,7 +509,6 @@ fn the_status_carries_every_fact_and_problem() {
                 public: Some(false),
                 mode: None,
                 defaults: [Some(WINDOWS_DEFAULTS), None, Some(WINDOWS_DEFAULTS)],
-                dstack_group_rules: Some(2),
                 dante_leg_group_rules: Some(1),
                 block_rules_outside_group: Some(vec!["Block X".to_string()]),
             },
@@ -726,7 +724,7 @@ async fn both_routes_answer_the_published_status() {
         serde_json::json!([{
             "code": "firewall_on:private",
             "text_sk": "brána firewall je zapnutá (súkromný profil) a nie je nastavená podľa \
-                        štandardu dstack (skupina pravidiel „dstack Dante leg“ alebo dstack155)",
+                        štandardu dstack (skupina pravidiel „dstack Dante leg“)",
         }])
     );
     assert_eq!(

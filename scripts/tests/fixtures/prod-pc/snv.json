@@ -1,5 +1,5 @@
 {
-  "_comment": "SNV (win-resolume) as #255 lane 1 read it live on 13.10.2026: SoundGrid not installed, MMCSS and power set, Defender off as #233 recorded (11.10.2026), and ExcludeWUDriversInQualityUpdate MISSING: the one change its next deploy applies. The firewall as read on 10.11.2026 12:00Z (#255, dstack#155): every profile on, default actions Allow, 14 enabled Block rules, all of the group dstack155; the rules' names and program paths are written from dstack's design (in + out for obs64, Arena, python, RustDesk, svchost, mDNSResponder, and TCP in + out, each on Dante70), not captured. AutoDownload (issue 333) 2 as set by hand on 18.11.2026 (its read-back reported by the main session on issue 333, not read from the box by the lane that added it).",
+  "_comment": "SNV (resolume-snv): SoundGrid not installed, MMCSS and power set, Defender off as #233 recorded (11.10.2026), as #255 lane 1 read it live on 13.10.2026, and ExcludeWUDriversInQualityUpdate MISSING (as on 13.10.2026): the one change this fixture plans. The firewall is dstack's generic Dante-leg filter (#322, dstack#264) as dstack's tools/windows/dante-leg.ps1 -InterfaceAlias Dante70 creates it and as the box reads since 13.11.2026 (resolume-pp the same since 18.11.2026; both read 19.11.2026: 10 enabled Block rules in the group, none outside): every profile on, default actions Allow, the group 'dstack Dante leg' with its 10 enabled Block rules (display names and program filters from Get-DanteLegRules; the rule Names are Windows' own GUIDs, written here as placeholders), each bound to Dante70. The rule rows are written from dstack's script, not captured from the box. AutoDownload (issue 333) 2 as set by hand on 18.11.2026 (its read-back reported by the main session on issue 333, not read from the box by the lane that added it).",
   "registry": [
     { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU", "name": "NoAutoUpdate", "kind": "DWord", "value": 1 },
     { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate", "name": "ExcludeWUDriversInQualityUpdate", "kind": null, "value": null },
@@ -40,36 +40,28 @@
   "firewall_standard": {
     "defaults": { "Domain": { "inbound": "Allow", "outbound": "Allow" }, "Private": { "inbound": "Allow", "outbound": "Allow" }, "Public": { "inbound": "Allow", "outbound": "Allow" } },
     "block_rules": [
-      { "name": "dstack155-obs64.exe-In", "display_name": "dstack155 block obs64.exe in on Dante70", "group": "dstack155", "display_group": "dstack155" },
-      { "name": "dstack155-obs64.exe-Out", "display_name": "dstack155 block obs64.exe out on Dante70", "group": "dstack155", "display_group": "dstack155" },
-      { "name": "dstack155-Arena.exe-In", "display_name": "dstack155 block Arena.exe in on Dante70", "group": "dstack155", "display_group": "dstack155" },
-      { "name": "dstack155-Arena.exe-Out", "display_name": "dstack155 block Arena.exe out on Dante70", "group": "dstack155", "display_group": "dstack155" },
-      { "name": "dstack155-python.exe-In", "display_name": "dstack155 block python.exe in on Dante70", "group": "dstack155", "display_group": "dstack155" },
-      { "name": "dstack155-python.exe-Out", "display_name": "dstack155 block python.exe out on Dante70", "group": "dstack155", "display_group": "dstack155" },
-      { "name": "dstack155-RustDesk.exe-In", "display_name": "dstack155 block RustDesk.exe in on Dante70", "group": "dstack155", "display_group": "dstack155" },
-      { "name": "dstack155-RustDesk.exe-Out", "display_name": "dstack155 block RustDesk.exe out on Dante70", "group": "dstack155", "display_group": "dstack155" },
-      { "name": "dstack155-svchost.exe-In", "display_name": "dstack155 block svchost.exe in on Dante70", "group": "dstack155", "display_group": "dstack155" },
-      { "name": "dstack155-svchost.exe-Out", "display_name": "dstack155 block svchost.exe out on Dante70", "group": "dstack155", "display_group": "dstack155" },
-      { "name": "dstack155-mDNSResponder.exe-In", "display_name": "dstack155 block mDNSResponder.exe in on Dante70", "group": "dstack155", "display_group": "dstack155" },
-      { "name": "dstack155-mDNSResponder.exe-Out", "display_name": "dstack155 block mDNSResponder.exe out on Dante70", "group": "dstack155", "display_group": "dstack155" },
-      { "name": "dstack155-TCP-In", "display_name": "dstack155 block TCP in on Dante70", "group": "dstack155", "display_group": "dstack155" },
-      { "name": "dstack155-TCP-Out", "display_name": "dstack155 block TCP out on Dante70", "group": "dstack155", "display_group": "dstack155" }
+      {"name": "{d4e1e600-0000-4000-8000-000000000001}", "display_name": "dstack Dante leg: TCP in", "group": "dstack Dante leg", "display_group": "dstack Dante leg"},
+      {"name": "{d4e1e600-0000-4000-8000-000000000002}", "display_name": "dstack Dante leg: TCP out", "group": "dstack Dante leg", "display_group": "dstack Dante leg"},
+      {"name": "{d4e1e600-0000-4000-8000-000000000003}", "display_name": "dstack Dante leg: UDP in", "group": "dstack Dante leg", "display_group": "dstack Dante leg"},
+      {"name": "{d4e1e600-0000-4000-8000-000000000004}", "display_name": "dstack Dante leg: UDP in, ephemeral ports", "group": "dstack Dante leg", "display_group": "dstack Dante leg"},
+      {"name": "{d4e1e600-0000-4000-8000-000000000005}", "display_name": "dstack Dante leg: svchost.exe UDP inbound", "group": "dstack Dante leg", "display_group": "dstack Dante leg"},
+      {"name": "{d4e1e600-0000-4000-8000-000000000006}", "display_name": "dstack Dante leg: svchost.exe UDP outbound", "group": "dstack Dante leg", "display_group": "dstack Dante leg"},
+      {"name": "{d4e1e600-0000-4000-8000-000000000007}", "display_name": "dstack Dante leg: mDNSResponder.exe UDP inbound", "group": "dstack Dante leg", "display_group": "dstack Dante leg"},
+      {"name": "{d4e1e600-0000-4000-8000-000000000008}", "display_name": "dstack Dante leg: mDNSResponder.exe UDP outbound", "group": "dstack Dante leg", "display_group": "dstack Dante leg"},
+      {"name": "{d4e1e600-0000-4000-8000-000000000009}", "display_name": "dstack Dante leg: mDNSResponder.exe (x86) UDP inbound", "group": "dstack Dante leg", "display_group": "dstack Dante leg"},
+      {"name": "{d4e1e600-0000-4000-8000-000000000010}", "display_name": "dstack Dante leg: mDNSResponder.exe (x86) UDP outbound", "group": "dstack Dante leg", "display_group": "dstack Dante leg"}
     ],
     "group_rules": [
-      { "name": "dstack155-obs64.exe-In", "display_name": "dstack155 block obs64.exe in on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe"] },
-      { "name": "dstack155-obs64.exe-Out", "display_name": "dstack155 block obs64.exe out on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe"] },
-      { "name": "dstack155-Arena.exe-In", "display_name": "dstack155 block Arena.exe in on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\Resolume Arena\\Arena.exe"] },
-      { "name": "dstack155-Arena.exe-Out", "display_name": "dstack155 block Arena.exe out on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\Resolume Arena\\Arena.exe"] },
-      { "name": "dstack155-python.exe-In", "display_name": "dstack155 block python.exe in on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Python312\\python.exe"] },
-      { "name": "dstack155-python.exe-Out", "display_name": "dstack155 block python.exe out on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Python312\\python.exe"] },
-      { "name": "dstack155-RustDesk.exe-In", "display_name": "dstack155 block RustDesk.exe in on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\RustDesk\\RustDesk.exe"] },
-      { "name": "dstack155-RustDesk.exe-Out", "display_name": "dstack155 block RustDesk.exe out on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\RustDesk\\RustDesk.exe"] },
-      { "name": "dstack155-svchost.exe-In", "display_name": "dstack155 block svchost.exe in on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["%SystemRoot%\\System32\\svchost.exe"] },
-      { "name": "dstack155-svchost.exe-Out", "display_name": "dstack155 block svchost.exe out on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["%SystemRoot%\\System32\\svchost.exe"] },
-      { "name": "dstack155-mDNSResponder.exe-In", "display_name": "dstack155 block mDNSResponder.exe in on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\Bonjour\\mDNSResponder.exe"] },
-      { "name": "dstack155-mDNSResponder.exe-Out", "display_name": "dstack155 block mDNSResponder.exe out on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["C:\\Program Files\\Bonjour\\mDNSResponder.exe"] },
-      { "name": "dstack155-TCP-In", "display_name": "dstack155 block TCP in on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["Any"] },
-      { "name": "dstack155-TCP-Out", "display_name": "dstack155 block TCP out on Dante70", "group": "dstack155", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["Any"] }
+      {"name": "{d4e1e600-0000-4000-8000-000000000001}", "display_name": "dstack Dante leg: TCP in", "group": "dstack Dante leg", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["Any"]},
+      {"name": "{d4e1e600-0000-4000-8000-000000000002}", "display_name": "dstack Dante leg: TCP out", "group": "dstack Dante leg", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["Any"]},
+      {"name": "{d4e1e600-0000-4000-8000-000000000003}", "display_name": "dstack Dante leg: UDP in", "group": "dstack Dante leg", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["Any"]},
+      {"name": "{d4e1e600-0000-4000-8000-000000000004}", "display_name": "dstack Dante leg: UDP in, ephemeral ports", "group": "dstack Dante leg", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["Any"]},
+      {"name": "{d4e1e600-0000-4000-8000-000000000005}", "display_name": "dstack Dante leg: svchost.exe UDP inbound", "group": "dstack Dante leg", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["%SystemRoot%\\System32\\svchost.exe"]},
+      {"name": "{d4e1e600-0000-4000-8000-000000000006}", "display_name": "dstack Dante leg: svchost.exe UDP outbound", "group": "dstack Dante leg", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["%SystemRoot%\\System32\\svchost.exe"]},
+      {"name": "{d4e1e600-0000-4000-8000-000000000007}", "display_name": "dstack Dante leg: mDNSResponder.exe UDP inbound", "group": "dstack Dante leg", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["%ProgramFiles%\\Bonjour\\mDNSResponder.exe"]},
+      {"name": "{d4e1e600-0000-4000-8000-000000000008}", "display_name": "dstack Dante leg: mDNSResponder.exe UDP outbound", "group": "dstack Dante leg", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["%ProgramFiles%\\Bonjour\\mDNSResponder.exe"]},
+      {"name": "{d4e1e600-0000-4000-8000-000000000009}", "display_name": "dstack Dante leg: mDNSResponder.exe (x86) UDP inbound", "group": "dstack Dante leg", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["%ProgramFiles(x86)%\\Bonjour\\mDNSResponder.exe"]},
+      {"name": "{d4e1e600-0000-4000-8000-000000000010}", "display_name": "dstack Dante leg: mDNSResponder.exe (x86) UDP outbound", "group": "dstack Dante leg", "enabled": true, "action": "Block", "interface_alias": ["Dante70"], "programs": ["%ProgramFiles(x86)%\\Bonjour\\mDNSResponder.exe"]}
     ]
   }
 }

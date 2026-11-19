@@ -14,7 +14,7 @@
 //!
 //! The Dante leg: the interface that holds the `ip` of an enabled `type:
 //! dante` audio output (`dante_guard::dante_ips`, the same rule the LAN
-//! services' guard uses). No such output (PP today) = nothing judged.
+//! services' guard uses). No such output = nothing judged.
 //!
 //! Where each fact comes from (nothing spawns a process,
 //! `prod_env_network_win.rs` only reads):

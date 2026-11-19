@@ -234,11 +234,11 @@ fn every_problem_reads_in_slovak() {
             "Windows Defender beží v režime „EDR Block Mode“ a súbory stále kontroluje",
             "antivírus „ESET Security“ je zapnutý",
             "brána firewall je zapnutá (doménový profil) a nie je nastavená podľa štandardu \
-             dstack (skupina pravidiel „dstack Dante leg“ alebo dstack155)",
+             dstack (skupina pravidiel „dstack Dante leg“)",
             "brána firewall je zapnutá (súkromný profil) a nie je nastavená podľa štandardu \
-             dstack (skupina pravidiel „dstack Dante leg“ alebo dstack155)",
+             dstack (skupina pravidiel „dstack Dante leg“)",
             "brána firewall je zapnutá (verejný profil) a nie je nastavená podľa štandardu \
-             dstack (skupina pravidiel „dstack Dante leg“ alebo dstack155)",
+             dstack (skupina pravidiel „dstack Dante leg“)",
             "edíciu Windows sa nepodarilo zistiť",
             "zostavu Windows sa nepodarilo zistiť",
             "stav ochrany Windows Defender v reálnom čase sa nepodarilo zistiť",
@@ -258,7 +258,7 @@ fn a_problem_is_shown_by_its_code_and_text() {
         ProblemView {
             code: "firewall_on:public".to_string(),
             text_sk: "brána firewall je zapnutá (verejný profil) a nie je nastavená podľa \
-                      štandardu dstack (skupina pravidiel „dstack Dante leg“ alebo dstack155)"
+                      štandardu dstack (skupina pravidiel „dstack Dante leg“)"
                 .to_string(),
         }
     );
@@ -304,8 +304,7 @@ fn the_status_serializes_every_field_by_name() {
                     outbound: 2,
                 }),
             ],
-            dstack_group_rules: Some(14),
-            dante_leg_group_rules: Some(0),
+            dante_leg_group_rules: Some(10),
             block_rules_outside_group: Some(vec!["Block X".to_string()]),
         },
         audio: AudioProfile {
@@ -346,8 +345,7 @@ fn the_status_serializes_every_field_by_name() {
                     null,
                     {"inbound": 4, "outbound": 2},
                 ],
-                "dstack_group_rules": 14,
-                "dante_leg_group_rules": 0,
+                "dante_leg_group_rules": 10,
                 "block_rules_outside_group": ["Block X"],
             },
             "audio": {
@@ -469,7 +467,7 @@ fn more_problems_show_the_first_and_count_the_rest() {
         format!(
             "{RULE_SK} Zistené: ochrana Windows Defender v reálnom čase je zapnutá; brána \
              firewall je zapnutá (doménový profil) a nie je nastavená podľa štandardu dstack \
-             (skupina pravidiel „dstack Dante leg“ alebo dstack155)."
+             (skupina pravidiel „dstack Dante leg“)."
         )
     );
     let three = [
@@ -489,11 +487,11 @@ fn the_rule_names_the_audio_profile() {
          vypnutou ochranou Windows Defender v reálnom čase (ani v pasívnom režime), bez iného \
          antivírusu — nič nesmie kontrolovať programy, ktoré SongPlayer spúšťa. Brána firewall \
          je vypnutá vo všetkých profiloch, alebo (počítač so sieťou Dante) zapnutá vo všetkých \
-         podľa štandardu dstack: predvolene všetko povolené a blokuje len jedna skupina \
-         pravidiel dstack („dstack Dante leg“, predtým dstack155)."
+         podľa štandardu dstack: predvolene všetko povolené a blokuje len skupina pravidiel \
+         dstack („dstack Dante leg“)."
     ));
     assert!(RULE_SK.ends_with(
-        "(„dstack Dante leg“, predtým dstack155). Sieťová karta, ktorú má ovládač SoundGrid zvolenú \
+        "(„dstack Dante leg“). Sieťová karta, ktorú má ovládač SoundGrid zvolenú \
          ako port, beží na ovládači NDIS s vypnutým moderovaním prerušení, riadením toku a \
          úsporou energie, automatické aktualizácie Windows sú vypnuté a MMCSS je nastavené pre \
          Pro Audio. Počítač so sieťou Dante má zapnutú jednu fyzickú sieťovú kartu, jednu \

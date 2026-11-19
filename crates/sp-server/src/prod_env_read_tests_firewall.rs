@@ -60,20 +60,17 @@ fn each_profile_reads_its_own_default_actions() {
 }
 
 #[test]
-fn the_block_rules_are_counted_by_group_and_the_rest_named() {
+fn the_groups_block_rules_are_counted_and_the_rest_named() {
     let read = Ok(WmiRead {
         firewall_rules: Ok(vec![
+            // #322: a rule of the old group `dstack155` is outside the group,
+            // by either name.
             rule("{1}", Some("dstack155 obs in"), Some("dstack155"), None),
             rule("{2}", Some("dstack155 obs out"), None, Some("dstack155")),
             rule("{3}", Some("Block X"), Some("Other"), Some("Other")),
             rule("{4}", None, None, None),
-            rule(
-                "{5}",
-                Some("dstack155 tcp in"),
-                Some("dstack155"),
-                Some("dstack155"),
-            ),
-            // #322: dstack's generic group, as `dante-leg.ps1` creates it.
+            rule("{5}", None, Some("dstack155"), Some("dstack155")),
+            // dstack's generic group, as `dante-leg.ps1` creates it.
             rule(
                 "{6}",
                 Some("dstack Dante leg: TCP in"),
@@ -86,23 +83,31 @@ fn the_block_rules_are_counted_by_group_and_the_rest_named() {
                 None,
                 Some("DSTACK DANTE LEG"),
             ),
+            rule("{8}", None, Some(" dstack Dante leg "), Some("Other")),
         ]),
         ..wmi()
     });
+    let outside: Vec<String> = [
+        "dstack155 obs in",
+        "dstack155 obs out",
+        "Block X",
+        "{4}",
+        "{5}",
+    ]
+    .map(str::to_string)
+    .to_vec();
     assert_eq!(
         block_rules(&read),
         Ok(BlockRules {
-            dstack155: 3,
-            dante_leg: 2,
-            outside: vec!["Block X".to_string(), "{4}".to_string()],
+            dante_leg: 3,
+            outside: outside.clone(),
         })
     );
     assert_eq!(
         facts_from(&direct(), &read).firewall_rules,
         Some(BlockRules {
-            dstack155: 3,
-            dante_leg: 2,
-            outside: vec!["Block X".to_string(), "{4}".to_string()],
+            dante_leg: 3,
+            outside,
         })
     );
 }

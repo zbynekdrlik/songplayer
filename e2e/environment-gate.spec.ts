@@ -94,35 +94,25 @@ const FIREWALL_OFF = {
     { inbound: 4, outbound: 2 },
     { inbound: 4, outbound: 2 },
   ],
-  dstack_group_rules: 0,
   dante_leg_group_rules: 0,
   block_rules_outside_group: [],
 };
 
-/** #255 (dstack#155): dstack's two-network standard as resolume-snv read it
- * on 10.11.2026. */
-const FIREWALL_DSTACK = {
+/** #322 (dstack#264): dstack's generic Dante-leg filter, as dante-leg.ps1
+ * leaves resolume-snv and resolume-pp (the group "dstack Dante leg", 10;
+ * both read 19.11.2026). */
+const FIREWALL_DANTE_LEG = {
   domain: true,
   private: true,
   public: true,
-  mode: "dstack155",
+  mode: "dante_leg",
   defaults: [
     { inbound: 2, outbound: 2 },
     { inbound: 2, outbound: 2 },
     { inbound: 2, outbound: 2 },
   ],
-  dstack_group_rules: 14,
-  dante_leg_group_rules: 0,
-  block_rules_outside_group: [],
-};
-
-/** #322 (dstack#264): dstack's generic Dante-leg filter, as v0.6.123's
- * dante-leg.ps1 leaves resolume-snv (the group "dstack Dante leg", 10). */
-const FIREWALL_DANTE_LEG = {
-  ...FIREWALL_DSTACK,
-  mode: "dante_leg",
-  dstack_group_rules: 0,
   dante_leg_group_rules: 10,
+  block_rules_outside_group: [],
 };
 
 /** PP as it must be: IoT Enterprise LTSC, Defender real-time and passive
@@ -177,16 +167,16 @@ test.describe("production environment gate (#233)", () => {
             "edícia Windows „Professional“ (zostava 22631) nie je povolená (povolené sú len Windows LTSC a Windows 11 IoT Enterprise)",
         },
         { code: "defender_realtime_on", text_sk: "ochrana Windows Defender v reálnom čase je zapnutá" },
-        { code: "firewall_on:domain", text_sk: "brána firewall je zapnutá (doménový profil) a nie je nastavená podľa štandardu dstack (skupina pravidiel „dstack Dante leg“ alebo dstack155)" },
+        { code: "firewall_on:domain", text_sk: "brána firewall je zapnutá (doménový profil) a nie je nastavená podľa štandardu dstack (skupina pravidiel „dstack Dante leg“)" },
       ],
     });
     expect(environmentFailures(env)).toEqual([
       "edition_not_allowed: edícia Windows „Professional“ (zostava 22631) nie je povolená (povolené sú len Windows LTSC a Windows 11 IoT Enterprise)",
       "defender_realtime_on: ochrana Windows Defender v reálnom čase je zapnutá",
-      "firewall_on:domain: brána firewall je zapnutá (doménový profil) a nie je nastavená podľa štandardu dstack (skupina pravidiel „dstack Dante leg“ alebo dstack155)",
+      "firewall_on:domain: brána firewall je zapnutá (doménový profil) a nie je nastavená podľa štandardu dstack (skupina pravidiel „dstack Dante leg“)",
       "edition_allowed is false, not true",
       "defender_realtime is true, not false",
-      'firewall.mode is "other", not "off", "dstack155" or "dante_leg"',
+      'firewall.mode is "other", not "off" or "dante_leg"',
     ]);
   });
 
@@ -252,55 +242,59 @@ test.describe("production environment gate (#233)", () => {
   // #255 (dstack#155): a PC with a Dante leg keeps its firewall on, as
   // dstack's two-network standard wants it; every fact of it by name.
   test("dstack's two-network standard holds, and each of its facts is checked", () => {
-    expect(environmentFailures(holds({ firewall: FIREWALL_DSTACK }))).toEqual([]);
-    expect(environmentFailures(holds({ firewall: { ...FIREWALL_DSTACK, private: false } }))).toEqual([
+    // #322 (dstack#264): the generic filter holds, each of its facts by name.
+    expect(environmentFailures(holds({ firewall: FIREWALL_DANTE_LEG }))).toEqual([]);
+    expect(environmentFailures(holds({ firewall: { ...FIREWALL_DANTE_LEG, private: false } }))).toEqual([
       "firewall.private is false, not true",
     ]);
-    const defaults: ({ inbound: number; outbound: number } | null)[] = [...FIREWALL_DSTACK.defaults];
+    expect(environmentFailures(holds({ firewall: { ...FIREWALL_DANTE_LEG, public: false } }))).toEqual([
+      "firewall.public is false, not true",
+    ]);
+    const defaults: ({ inbound: number; outbound: number } | null)[] = [...FIREWALL_DANTE_LEG.defaults];
     defaults[2] = { inbound: 4, outbound: 2 };
-    expect(environmentFailures(holds({ firewall: { ...FIREWALL_DSTACK, defaults } }))).toEqual([
+    expect(environmentFailures(holds({ firewall: { ...FIREWALL_DANTE_LEG, defaults } }))).toEqual([
       'firewall.defaults.public is {"inbound":4,"outbound":2}, not {"inbound":2,"outbound":2}',
     ]);
     expect(
-      environmentFailures(holds({ firewall: { ...FIREWALL_DSTACK, defaults: [null, null, null] } })),
+      environmentFailures(holds({ firewall: { ...FIREWALL_DANTE_LEG, defaults: [null, null, null] } })),
     ).toEqual([
       'firewall.defaults.domain is null, not {"inbound":2,"outbound":2}',
       'firewall.defaults.private is null, not {"inbound":2,"outbound":2}',
       'firewall.defaults.public is null, not {"inbound":2,"outbound":2}',
     ]);
-    expect(
-      environmentFailures(holds({ firewall: { ...FIREWALL_DSTACK, dante_leg_group_rules: null } })),
-    ).toEqual(["firewall.dante_leg_group_rules is null, not 0"]);
-    expect(environmentFailures(holds({ firewall: { ...FIREWALL_DSTACK, dstack_group_rules: 13 } }))).toEqual([
-      "firewall.dstack_group_rules is 13, not 14",
-    ]);
-    expect(
-      environmentFailures(holds({ firewall: { ...FIREWALL_DSTACK, block_rules_outside_group: ["Block X"] } })),
-    ).toEqual(['firewall.block_rules_outside_group is ["Block X"], not []']);
-    expect(
-      environmentFailures(holds({ firewall: { ...FIREWALL_DSTACK, block_rules_outside_group: null } })),
-    ).toEqual(["firewall.block_rules_outside_group is null, not []"]);
-    // #322 (dstack#264): the generic filter holds, each of its facts by name.
-    expect(environmentFailures(holds({ firewall: FIREWALL_DANTE_LEG }))).toEqual([]);
-    expect(environmentFailures(holds({ firewall: { ...FIREWALL_DANTE_LEG, dante_leg_group_rules: 9 } }))).toEqual([
-      "firewall.dante_leg_group_rules is 9, not 10",
-    ]);
-    expect(
-      environmentFailures(holds({ firewall: { ...FIREWALL_DANTE_LEG, dante_leg_group_rules: null } })),
-    ).toEqual(["firewall.dante_leg_group_rules is null, not 10"]);
-    expect(environmentFailures(holds({ firewall: { ...FIREWALL_DANTE_LEG, dstack_group_rules: 14 } }))).toEqual([
-      "firewall.dstack_group_rules is 14, not 0",
-    ]);
-    expect(environmentFailures(holds({ firewall: { ...FIREWALL_DANTE_LEG, public: false } }))).toEqual([
-      "firewall.public is false, not true",
-    ]);
+    for (const [count, shown] of [
+      [9, "9"],
+      [11, "11"],
+      [0, "0"],
+      [null, "null"],
+    ] as const) {
+      expect(
+        environmentFailures(holds({ firewall: { ...FIREWALL_DANTE_LEG, dante_leg_group_rules: count } })),
+      ).toEqual([`firewall.dante_leg_group_rules is ${shown}, not 10`]);
+    }
     expect(
       environmentFailures(holds({ firewall: { ...FIREWALL_DANTE_LEG, block_rules_outside_group: ["Block X"] } })),
     ).toEqual(['firewall.block_rules_outside_group is ["Block X"], not []']);
+    expect(
+      environmentFailures(holds({ firewall: { ...FIREWALL_DANTE_LEG, block_rules_outside_group: null } })),
+    ).toEqual(["firewall.block_rules_outside_group is null, not []"]);
+    // #322: the old per-box mode "dstack155" is no longer accepted, whatever
+    // else the status says (an older server on a PC that never switched).
+    expect(
+      environmentFailures(
+        holds({ firewall: { ...FIREWALL_DANTE_LEG, mode: "dstack155", dante_leg_group_rules: 0 } }),
+      ),
+    ).toEqual(['firewall.mode is "dstack155", not "off" or "dante_leg"']);
+    // A leftover rule of the old group is a Block rule outside the group.
+    expect(
+      environmentFailures(
+        holds({ firewall: { ...FIREWALL_DANTE_LEG, block_rules_outside_group: ["dstack155 obs64.exe in"] } }),
+      ),
+    ).toEqual(['firewall.block_rules_outside_group is ["dstack155 obs64.exe in"], not []']);
     // A firewall that is on and follows nothing of the standard.
     const on = { ...FIREWALL_OFF, domain: true, private: true, public: true, mode: "other" };
     expect(environmentFailures(holds({ firewall: on }))).toEqual([
-      'firewall.mode is "other", not "off", "dstack155" or "dante_leg"',
+      'firewall.mode is "other", not "off" or "dante_leg"',
     ]);
   });
 
@@ -313,7 +307,7 @@ test.describe("production environment gate (#233)", () => {
     delete old.defender_protections_on;
     expect(environmentFailures(old)).toEqual([
       "defender_passive is null, not false",
-      'firewall.mode is null, not "off", "dstack155" or "dante_leg"',
+      'firewall.mode is null, not "off" or "dante_leg"',
       "antivirus_on is null, not []",
       "defender_protections_on is null, not []",
     ]);
@@ -515,9 +509,9 @@ test.describe("production environment gate (#233)", () => {
   });
 
   test("#255 item D: SNV's two networks hold and every fact of §6 1-3 is checked", () => {
-    expect(environmentFailures(holds({ firewall: FIREWALL_DSTACK, two_networks: SNV_TWO_NETWORKS }))).toEqual([]);
+    expect(environmentFailures(holds({ firewall: FIREWALL_DANTE_LEG, two_networks: SNV_TWO_NETWORKS }))).toEqual([]);
     const snv = (over: Partial<TwoNetworks>) =>
-      environmentFailures(holds({ firewall: FIREWALL_DSTACK, two_networks: { ...SNV_TWO_NETWORKS, ...over } }));
+      environmentFailures(holds({ firewall: FIREWALL_DANTE_LEG, two_networks: { ...SNV_TWO_NETWORKS, ...over } }));
     const leg = SNV_TWO_NETWORKS.legs![0];
     const withLeg = (over: object) => snv({ legs: [{ ...leg, ...over }] });
     expect(snv({ physical_enabled: ["Ethernet 4", "Ethernet"] })).toEqual([
