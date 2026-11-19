@@ -517,7 +517,9 @@ def lost_boundary_utc(
 ) -> list[dict]:
     """``lost_boundary_list`` with each entry's ``utc_ms``: when the picture
     after the skip was seen (#272: a lost boundary put on the time line the
-    bridge and SongPlayer's trace read)."""
+    bridge and SongPlayer's trace read). The same for ``uneven_boundaries``
+    (#330): when the unevenly held picture was first seen, so a slip lines
+    up with wall-bridge's late gaps."""
     out = []
     for entry in lost:
         k = entry["sample"]
@@ -593,6 +595,10 @@ def capture(args: argparse.Namespace) -> dict:
         report["lost_boundary_list"] = lost_boundary_utc(
             report["lost_boundary_list"], times, start, end
         )
+        if report.get("refreshes"):
+            report["refreshes"]["uneven_boundaries"] = lost_boundary_utc(
+                report["refreshes"]["uneven_boundaries"], times, start, end
+            )
     return report
 
 

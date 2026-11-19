@@ -189,8 +189,7 @@ jobs:
       # The phase-0 task `SongPlayer` (MultipleInstances=IgnoreNew): end the
       # task INSTANCE first, else Task Scheduler can still report it Running
       # after a taskkill and the later `schtasks /run` does nothing
-      # (ci-workflows.md). Then a CLIProxyAPI a build from before #321 left
-      # (SongPlayer no longer runs it).
+      # (ci-workflows.md).
       # Each of the next two steps has its own bound: a hung stop or
       # installer fails its step in minutes (a plain step failure), and the
       # always() Start step brings SongPlayer back, instead of PP waiting
@@ -218,7 +217,6 @@ jobs:
             if (-not $proc -and $state -ne "Running") { break }
             Start-Sleep -Milliseconds 500
           }
-          taskkill /F /IM "CLIProxyAPI.exe" 2>&1 | Out-Null
           $deadline = (Get-Date).AddSeconds(30)
           while ((Get-Date) -lt $deadline) {
             $listening = netstat -an | Select-String ":8920 " | Select-String "LISTENING"

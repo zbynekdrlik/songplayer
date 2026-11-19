@@ -132,11 +132,9 @@ live. A change of provider, model or gate updates it in the same push.
 
 ## Leftovers on the boxes
 
-A SongPlayer from before #321 spawned `CLIProxyAPI.exe` as a child; the
-deploy steps (ci.yml "Deploy SongPlayer" + the E2E restart,
-deploy-pp.yml "Stop SongPlayer") still `taskkill` such a leftover, so it
-never runs on unowned; those lines go once SNV and PP both run a build of
-0.93.0 or later. `C:\ProgramData\SongPlayer\cache\.cli-proxy-api\` (the old
+A SongPlayer from before #321 spawned `CLIProxyAPI.exe` as a child. The
+deploy steps' `taskkill` of such a leftover was removed on 19.11.2026, once
+SNV and PP both ran 0.94.0 with no such process. `C:\ProgramData\SongPlayer\cache\.cli-proxy-api\` (the old
 Claude OAuth tokens) is no longer read by anything; the session's
 revocation is the owner's follow-up, never a deploy step. The old
 `ai_model` / `ai_api_url` / `ai_provider_<task>` settings rows go with V45

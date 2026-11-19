@@ -44,7 +44,7 @@ export interface WallFramesReport {
     uneven_samples?: number[];
     /** Each uneven boundary's number and the fewest refreshes it surely
      *  held; absent = none listed. */
-    uneven_boundaries?: { boundary: number; refreshes: number }[];
+    uneven_boundaries?: { boundary: number; refreshes: number; sample?: number; utc_ms?: number | null }[];
   } | null;
   unverified: { steps: number };
   /** #272 v2: the copies of the clip's strip the reader found, their cell

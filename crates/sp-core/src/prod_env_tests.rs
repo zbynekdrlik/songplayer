@@ -88,6 +88,9 @@ fn every_audio_problem() -> Vec<EnvProblem> {
         value: None,
     });
     all.push(EnvProblem::WiredNicUnreadable { nic: nic() });
+    all.push(EnvProblem::DanteNicDriverOld {
+        nic: "Ethernet 4".to_string(),
+    });
     all
 }
 
@@ -124,6 +127,7 @@ fn every_audio_problem_has_its_stable_code() {
             "wired_nic_value:*EEE",
             "wired_nic_value:*SelectiveSuspend",
             "unreadable:wired_nic",
+            "dante_nic_driver_old",
         ]
     );
 }
@@ -178,6 +182,9 @@ fn every_audio_problem_reads_in_slovak() {
             "sieťová karta „soundgrid-pcie“: hodnota „*SelectiveSuspend“ v registri chýba \
              (ovládač ju mohol pri inštalácii zmazať, najbližší deploy ju zapíše)",
             "nastavenia sieťovej karty „soundgrid-pcie“ sa nepodarilo zistiť",
+            "sieťová karta „Ethernet 4“ nesie Dante a jej ovládač je príliš starý: neponúka \
+             nastavenie vysielacej fronty — nainštaluj ovládač Realtek RTL8156 verzie 11.19 \
+             alebo novšej",
         ]
     );
 }

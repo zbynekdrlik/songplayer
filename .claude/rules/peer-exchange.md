@@ -463,7 +463,7 @@ wait for a peer that has the song", below).
   the phase-0 `SongPlayer` task BEFORE it stops anything: each failure
   leaves PP running. The always() Start step and the `e2e-pp` job check
   the box too, so a wrong box is never touched at all. Then: stop (the task instance first, then the process,
-  a leftover CLIProxyAPI of a build before #321, port 8920 free; its own
+  port 8920 free; its own
   5 min step bound), install `/S` (exit
   code read; a 10 min step bound), copy `dist`, apply the production PC
   profile (#255 lane 2: `scripts/setup-prod-pc.ps1` in a child process, a

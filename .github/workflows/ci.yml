@@ -119,9 +119,23 @@ jobs:
       - name: Run security audit
         # No ignores (#296): the root Cargo.lock holds libsqlite3-sys 0.40 under sqlx 0.9.1
         # (RUSTSEC-2026-0459) and no rsa crate (RUSTSEC-2023-0071). This audits the root lock
-        # only; the exe's own resolution (src-tauri, an untracked lock) is held at
-        # libsqlite3-sys >= 0.39 by the floor in crates/sp-server/Cargo.toml.
+        # only; the next step audits the lock the exe is built from.
         run: cargo audit
+      - name: Audit the exe's own dependency resolution (#335)
+        # src-tauri is its own workspace with an untracked Cargo.lock that
+        # Build Tauri resolves fresh, so the root audit never saw what the exe
+        # ships. Resolve it here the same way (same manifests, same registry,
+        # minutes apart) and audit that lock. The UI's lock is tracked.
+        # Accepted (release 0.95.0 review): a crate published between this
+        # job and Build Tauri can make the two resolutions differ, and this
+        # lock also lists Tauri's non-Windows crates, so an advisory in one
+        # of those fails the Gate although the exe does not ship it; such a
+        # one is then judged by hand, never ignored by default.
+        run: |
+          set -euo pipefail
+          (cd src-tauri && cargo generate-lockfile)
+          cargo audit -f src-tauri/Cargo.lock
+          cargo audit -f sp-ui/Cargo.lock
 
   eval-checks:
     name: Eval Checks (ruff + pytest)
@@ -1278,20 +1292,6 @@ jobs:
           }
           Start-Sleep -Seconds 2
 
-          # #321: SongPlayer no longer runs CLIProxyAPI (every text AI task
-          # goes to OpenRouter), but a build from before #321 spawned it as a
-          # child, and on Windows a child of an exited parent is NOT killed:
-          # end such a leftover so it does not run on unowned.
-          Write-Host "=== Stopping a leftover CLIProxyAPI (before #321) ==="
-          taskkill /F /IM "CLIProxyAPI.exe" 2>&1 | Out-Null
-          $elapsed = 0
-          while ($elapsed -lt 5) {
-            $proc = Get-Process -Name "CLIProxyAPI" -ErrorAction SilentlyContinue
-            if (-not $proc) { break }
-            Start-Sleep -Seconds 1
-            $elapsed++
-          }
-
           $DataDir = "C:\ProgramData\SongPlayer"
           # NEVER delete songplayer.db-wal / -shm here (#184 round A, 2026-09-21):
           # the pool runs SQLite in WAL mode now, so the -wal file HOLDS every
@@ -1625,9 +1625,6 @@ jobs:
             Start-Sleep -Milliseconds 500
           }
           Write-Host "SongPlayer task state before relaunch: $((Get-ScheduledTask -TaskName SongPlayer).State)"
-          # #321: a CLIProxyAPI left by a build from before #321 (the
-          # deploy step's reason).
-          taskkill /F /IM "CLIProxyAPI.exe" 2>&1 | Out-Null
           Start-Sleep -Seconds 3
 
           # #255 lane 2: the production PC profile while SongPlayer is
