@@ -307,6 +307,23 @@ jobs:
           Get-ChildItem $dest | Format-Table Name, Length
       - name: Build Tauri app
         run: cargo tauri build
+      - name: Check the exe's own lock holds the fixed SQLite (#296)
+        # src-tauri is its own workspace: its Cargo.lock is untracked and
+        # resolved by the build above, so the Security Audit job (it reads
+        # the root lock) never sees it. RUSTSEC-2026-0459 is fixed from
+        # libsqlite3-sys 0.39.0; the floor in crates/sp-server/Cargo.toml
+        # holds it there, and this step reads the resolved version back.
+        # A full audit of this lock is #335.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $lock = Get-Content 'src-tauri/Cargo.lock' -Raw
+          $m = [regex]::Match($lock, 'name = "libsqlite3-sys"\r?\nversion = "(\d+)\.(\d+)\.(\d+)"')
+          if (-not $m.Success) { throw 'libsqlite3-sys is not in src-tauri/Cargo.lock' }
+          $major = [int]$m.Groups[1].Value
+          $minor = [int]$m.Groups[2].Value
+          Write-Host "src-tauri resolves libsqlite3-sys $($m.Groups[1].Value).$($m.Groups[2].Value).$($m.Groups[3].Value)"
+          if ($major -eq 0 -and $minor -lt 39) { throw 'the exe would ship a libsqlite3-sys older than 0.39.0 (RUSTSEC-2026-0459)' }
       - name: Check SongPlayer.exe and sp-audio-host.exe declare Common-Controls 6.0 (#223 S2, #233)
         # SongPlayer.exe links the Spout2 SDK (sp-gpu), whose SpoutUtils imports
         # TaskDialogIndirect from comctl32 at load time. Only Common-Controls 6.0
