@@ -432,7 +432,7 @@ version in the job log first (`rust-1.99.0` in the clippy help URLs).
 
 SQLite numbers a bare `?` one above the largest number used so far, so a
 `?` after `?1` and `?2` is parameter 3. But it has no NAME, and sqlx-sqlite
-(0.8.6, `arguments.rs`) binds a nameless parameter from the FIRST value
+(0.8.6 and 0.9.1, `arguments.rs`) binds a nameless parameter from the FIRST value
 (`arg_i += 1` → `values[0]`). Round 8's `kept_local` spliced
 `queue_sql::LYRICS_NOT_PARKED` (`… lyrics_pipeline_version < ?`) after
 `?1` / `?2`: the version compare got the YouTube id (an integer vs a text
@@ -461,6 +461,21 @@ sqlx 0.9.1 takes `libsqlite3-sys` as a range (`>=0.30.1, <0.41.0`), and
 libsqlite3-sys` too when an advisory names it (RUSTSEC-2026-0459 needed
 0.39+). sqlx 0.9 declares `rust-version` 1.94; the workspace still declares
 1.87 and CI builds on stable.
+
+**The root lock is not the exe's lock.** `src-tauri` is its own workspace
+with an untracked `Cargo.lock`, resolved fresh in CI's Build Tauri job. It
+has no `resolver` key, so edition 2024 gives it the MSRV-aware resolver
+(the root sets `resolver = "2"`): with `rust-version` 1.87 it takes the
+newest version that DECLARES Rust <= 1.87 inside a range, so it picked
+`libsqlite3-sys` 0.38.2 (0.39+ declares 1.88) while the root lock and
+`cargo audit` read 0.40.0 (#296 review). A range the exe must not fall
+under gets a floor as a direct dependency of sp-server
+(`libsqlite3-sys = ">=0.39.0, <0.41.0"`, `default-features = false`,
+nothing calls it). Check what the exe gets with a manifests-only copy in
+the scratchpad (every `Cargo.toml`, empty `src/lib.rs` / `main.rs` /
+`build.rs`): `cargo generate-lockfile` in its `src-tauri`, then
+`cargo audit -f Cargo.lock`. A worktree's own `src-tauri` cannot be
+resolved in place (cargo finds the main checkout's workspace above it).
 
 ## Two compile errors review rounds missed (#218/#219 integration)
 

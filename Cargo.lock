@@ -2381,6 +2381,7 @@ dependencies = [
  "if-addrs 0.15.0",
  "jpeg-encoder",
  "libloading",
+ "libsqlite3-sys",
  "mdns-sd 0.21.3",
  "mutants",
  "qrcode",
