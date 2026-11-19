@@ -249,3 +249,35 @@ fn the_pump_wake_and_thread_figures_round_trip_and_default_when_absent() {
     let none: DanteFigures = serde_json::from_str(line).unwrap();
     assert_eq!(none.threads[0].mmcss_task, None);
 }
+
+/// #324: the device's control ports and process id ride on
+/// `outputs[i].dante` under these names; an older line without them reads 0.
+#[test]
+fn the_devices_ports_and_process_id_serialize_by_name() {
+    let d = DanteFigures {
+        arc: 4441,
+        cmc: 8801,
+        flows: 4456,
+        process_id: 1,
+        ..dante()
+    };
+    let json = serde_json::to_value(&d).unwrap();
+    assert_eq!(
+        (
+            &json["arc"],
+            &json["cmc"],
+            &json["flows"],
+            &json["process_id"]
+        ),
+        (
+            &serde_json::json!(4441),
+            &serde_json::json!(8801),
+            &serde_json::json!(4456),
+            &serde_json::json!(1)
+        )
+    );
+    let back: DanteFigures = serde_json::from_value(json).unwrap();
+    assert_eq!(back, d);
+    let old: DanteFigures = serde_json::from_str(r#"{"clock_ready":true}"#).unwrap();
+    assert_eq!((old.arc, old.cmc, old.flows, old.process_id), (0, 0, 0, 0));
+}

@@ -1338,6 +1338,10 @@ ANDed): `#[cfg(test)]` then `#[cfg(windows)]`, and re-list.
 issue** (#223 S2). `block-commit-without-design.sh` blocked a commit whose
 message said "the embedded manifest (resource #1)": it looked for a design
 comment on issue 1. Write such a number without the hash ("resource id 1").
+It also reads its `[no-design: …]` bypass from the COMMAND text only (#324):
+a message given with `git commit -F <file>` is not seen and the commit stays
+blocked. Pass the message with `-m` paragraphs (one `-m` per paragraph, the
+bypass in its own), each commit a plain command of its own.
 
 ## Inserting a `mod` before a `#[cfg(test)]` test module STEALS the gate (#192 r5)
 

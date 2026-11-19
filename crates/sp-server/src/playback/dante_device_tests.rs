@@ -413,6 +413,11 @@ fn the_link_reads_the_running_stack_and_nothing_after_the_close() {
     device.start(rx).unwrap();
     let figures = link.figures().expect("the running stack answers");
     assert!(figures.clock_ready, "the system clock is ready at once");
+    // #324: the device's control ports and process id on the status.
+    assert_eq!(
+        (figures.arc, figures.cmc, figures.flows, figures.process_id),
+        (slot.ports.arc, slot.ports.cmc, slot.ports.flows, slot.id)
+    );
     assert_eq!(figures.live_flows, 0);
     // #325: the engine's wake buckets and the pump's scheduling come from
     // the stack's own line under the names SongPlayer reads (a renamed
@@ -468,9 +473,142 @@ fn an_address_no_adapter_holds_fails_the_start_and_names_no_panic() {
     // the stack judges an address it does not find as in production).
     let mut device = DanteDevice::new(params(dir.path(), Ipv4Addr::new(192, 0, 2, 77)));
     device.open("", [0, 1]).unwrap();
+    // #324: no slot binds on an address no adapter holds: Dante's defaults.
+    assert_eq!(device.ports(), crate::playback::dante_slots::slot(0));
     let (_tx, rx) = rtrb::RingBuffer::new(1024);
     assert!(device.start(rx).is_err());
     device.close();
+}
+
+/// #324: the output's device (no ports given) takes the first free dstack
+/// slot on its address at its open; slot 0's ARC held there skips slot 0.
+#[test]
+fn an_outputs_device_opens_on_the_first_free_slot_of_its_address() {
+    use crate::playback::dante_slots::{binds, slot};
+    let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let ip = test_ipv4();
+    // Ours, or held by another program already: either way not free.
+    let _arc = UdpSocket::bind((ip, DANTE_ARC_PORT));
+    assert!(!binds(ip, &slot(0).0));
+    let mut device = DanteDevice::new(params(dir.path(), ip));
+    device.open("", [0, 1]).unwrap();
+    let (ports, id) = device.ports();
+    assert!((1..15).contains(&id), "slot {id}");
+    assert_eq!((ports, id), slot(id), "a slot's ports and its process id");
+    device.close();
+}
+
+/// Resets `LINGERING` when a test that set it ends, failed or not.
+struct ClearLingering;
+
+impl Drop for ClearLingering {
+    fn drop(&mut self) {
+        *lingering() = None;
+    }
+}
+
+/// #324: ports a stopping predecessor left are the next device's, with no
+/// probe, and its start forgets them.
+#[test]
+fn a_device_takes_the_ports_its_stopping_predecessor_left_and_its_start_forgets_them() {
+    let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
+    let _clear = ClearLingering;
+    let dir = tempfile::tempdir().unwrap();
+    let slot = claim_slot(test_ipv4());
+    *lingering() = Some((slot.ports, slot.id));
+    let mut device = DanteDevice::new(DanteParams {
+        device: format!("SongPlayer-test-{}", slot.id),
+        ..params(dir.path(), slot.ip)
+    });
+    device.open("", [0, 1]).unwrap();
+    assert_eq!(device.ports(), (slot.ports, slot.id));
+    assert_eq!(device.source, dante_slots::Source::Lingering);
+    let (_tx, rx) = rtrb::RingBuffer::new(1024);
+    device.start(rx).unwrap();
+    assert_eq!(*lingering(), None, "a started device forgets them");
+    device.close();
+}
+
+/// #324: a refused start on lingering ports another program holds drops
+/// them; one on ports our own process holds keeps them; a device whose
+/// ports did not linger never touches them.
+#[test]
+fn a_refused_start_on_lingering_ports_drops_them_only_for_another_program() {
+    let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
+    let _clear = ClearLingering;
+    let dir = tempfile::tempdir().unwrap();
+    let left = dante_slots::slot(9);
+    let refused = HostError::Run("ARC on UDP 4449: Address already in use".into());
+    let mut device = DanteDevice::new(params(dir.path(), test_ipv4()));
+    *lingering() = Some(left);
+    device.source = dante_slots::Source::Probed;
+    device.after_refusal(&refused, |_| Some(1));
+    assert_eq!(*lingering(), Some(left), "not this device's ports");
+    device.source = dante_slots::Source::Lingering;
+    device.after_refusal(&refused, |_| Some(std::process::id()));
+    assert_eq!(*lingering(), Some(left), "our own stack still stops");
+    device.after_refusal(&refused, |_| Some(std::process::id() + 1));
+    assert_eq!(*lingering(), None, "another program holds the port");
+}
+
+/// #324 through the real start: ports a stopping predecessor left, one of
+/// them held by another program, refuse the start, the refusal names the
+/// holder, and the ports are dropped so the next open probes.
+#[test]
+fn a_start_refused_by_another_program_on_lingering_ports_names_it_and_drops_them() {
+    let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
+    let _clear = ClearLingering;
+    let dir = tempfile::tempdir().unwrap();
+    let slot = claim_slot(test_ipv4());
+    // "Another program" on the slot's ARC port.
+    let _other = UdpSocket::bind((slot.ip, slot.ports.arc)).unwrap();
+    *lingering() = Some((slot.ports, slot.id));
+    let mut device = DanteDevice::new(DanteParams {
+        device: format!("SongPlayer-test-{}", slot.id),
+        ..params(dir.path(), slot.ip)
+    });
+    device.open("", [0, 1]).unwrap();
+    assert_eq!(device.source, dante_slots::Source::Lingering);
+    let (_tx, rx) = rtrb::RingBuffer::new(1024);
+    let other = std::process::id() + 1;
+    let refused = device
+        .start_with(rx, |_| Some((other, "Other.exe".to_string())))
+        .expect_err("the ARC port is held");
+    let text = format!("{refused:?}");
+    assert!(
+        text.contains(&format!(
+            "UDP {} is held by Other.exe (pid {other})",
+            slot.ports.arc
+        )),
+        "{text}"
+    );
+    assert_eq!(*lingering(), None, "another program's hold drops them");
+    device.close();
+}
+
+/// #324: a refusal of a chosen port names its holder where Windows tells.
+#[test]
+fn a_bind_refusal_names_the_ports_holder() {
+    let holder = |port: u16| (port == 4441).then(|| (812, "Arena.exe".to_string()));
+    let run = HostError::Run("ARC on UDP 4441: Address already in use".into());
+    assert_eq!(
+        reason(run, holder),
+        Reason::Failed(
+            "ARC on UDP 4441: Address already in use; UDP 4441 is held by Arena.exe (pid 812)"
+                .into()
+        )
+    );
+    let setup = HostError::Setup("CMC on UDP 4441: denied".into());
+    assert_eq!(
+        reason(setup, holder),
+        Reason::Refused("CMC on UDP 4441: denied; UDP 4441 is held by Arena.exe (pid 812)".into())
+    );
+    let other = HostError::Run("ARC on UDP 4440: Address already in use".into());
+    assert_eq!(
+        reason(other, holder),
+        Reason::Failed("ARC on UDP 4440: Address already in use".into())
+    );
 }
 
 /// A rebuilt entry's successor starts while its predecessor still stops: it
