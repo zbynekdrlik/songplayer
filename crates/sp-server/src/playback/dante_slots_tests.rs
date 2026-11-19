@@ -88,7 +88,10 @@ const ANY: Ipv4Addr = Ipv4Addr::UNSPECIFIED;
 fn a_port_held_on_the_wildcard_address_only_skips_the_slot() {
     let conmon = [(ANY, 8700), (ANY, 8800)];
     assert!(!binds_with(OURS, &slot(0).0, refusing(&conmon)));
-    assert_eq!(choose(OURS, None, refusing(&conmon)), Some(slot(1)));
+    assert_eq!(
+        choose(OURS, None, None, refusing(&conmon)),
+        (Some(slot(1)), Source::Probed)
+    );
     for port in [4440, 8800, 4455] {
         assert!(
             !binds_with(OURS, &slot(0).0, refusing(&[(ANY, port)])),
@@ -101,9 +104,15 @@ fn a_port_held_on_the_wildcard_address_only_skips_the_slot() {
 /// address's holder does not.
 #[test]
 fn a_port_held_on_the_address_skips_the_slot() {
-    assert_eq!(choose(OURS, None, refusing(&[])), Some(slot(0)));
+    assert_eq!(
+        choose(OURS, None, None, refusing(&[])),
+        (Some(slot(0)), Source::Probed)
+    );
     let first = [(OURS, 4440)];
-    assert_eq!(choose(OURS, None, refusing(&first)), Some(slot(1)));
+    assert_eq!(
+        choose(OURS, None, None, refusing(&first)),
+        (Some(slot(1)), Source::Probed)
+    );
     for port in [4440, 8800, 4455] {
         assert!(
             !binds_with(OURS, &slot(0).0, refusing(&[(OURS, port)])),
@@ -137,21 +146,63 @@ fn each_port_is_probed_on_the_address_then_the_wildcard() {
 
 #[test]
 fn no_slot_free_keeps_dantes_defaults() {
-    assert_eq!(choose(OURS, None, |_| false), None);
+    assert_eq!(
+        choose(OURS, None, None, |_| false),
+        (None, Source::Defaults)
+    );
     assert_eq!(effective(None), slot(0));
     assert_eq!(effective(Some(slot(4))), slot(4));
 }
 
-/// A test device's own slot wins: nothing is probed.
+/// A test device's own slot wins, then the ports a stopping predecessor
+/// left: neither probes.
 #[test]
-fn given_ports_are_kept_and_nothing_is_probed() {
+fn given_then_lingering_ports_are_kept_and_nothing_is_probed() {
     let probed = RefCell::new(0);
-    let got = choose(OURS, Some(slot(7)), |_| {
+    let probe = |_| {
         *probed.borrow_mut() += 1;
         true
-    });
-    assert_eq!(got, Some(slot(7)));
+    };
+    assert_eq!(
+        choose(OURS, Some(slot(7)), Some(slot(3)), probe),
+        (Some(slot(7)), Source::Given)
+    );
+    assert_eq!(
+        choose(OURS, None, Some(slot(3)), probe),
+        (Some(slot(3)), Source::Lingering)
+    );
     assert_eq!(*probed.borrow(), 0);
+    assert_eq!(
+        [
+            Source::Given,
+            Source::Lingering,
+            Source::Probed,
+            Source::Defaults
+        ]
+        .map(Source::name),
+        ["given", "lingering", "probed", "defaults"]
+    );
+}
+
+/// Ports a stopping predecessor left are kept while the refused port is
+/// ours (our stack still stopping) or its holder unknown; another
+/// program's hold drops them.
+#[test]
+fn lingering_ports_go_once_another_program_holds_one() {
+    let text = "CMC on UDP 8803: Address already in use";
+    let asked = RefCell::new(Vec::new());
+    let asked = &asked;
+    let holder = |pid: u32| {
+        move |port: u16| {
+            asked.borrow_mut().push(port);
+            Some(pid)
+        }
+    };
+    assert!(keep_lingering(text, holder(77), 77));
+    assert!(!keep_lingering(text, holder(78), 77));
+    assert_eq!(*asked.borrow(), vec![8803, 8803]);
+    assert!(keep_lingering(text, |_| None, 77));
+    assert!(keep_lingering("the info server: denied", |_| Some(78), 77));
 }
 
 /// On the real sockets: a free port binds; one held on loopback is not free there.

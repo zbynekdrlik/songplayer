@@ -58,10 +58,11 @@ pub struct DanteParams {
     pub network_rate: u32,
     pub dir: PathBuf,
     pub clock: ClockSource,
-    /// The device's control ports and process id, `None` for Dante's
-    /// defaults (ARC 4440, CMC 8800, flows 4455, process 0): the output is
-    /// the one Dante device of its address. A test device takes a slot of
-    /// its own (#323), so the devices of parallel test processes never meet.
+    /// The device's control ports and process id. `None` (the output's):
+    /// `open` takes the first dstack slot free on its address (#324,
+    /// `dante_slots`), Dante's defaults (ARC 4440, CMC 8800, flows 4455,
+    /// process 0) when none is. A test device takes a slot of its own
+    /// (#323), so the devices of parallel test processes never meet.
     pub ports: Option<(Ports, u16)>,
 }
 
@@ -359,6 +360,8 @@ pub struct DanteDevice {
     hold: Option<DriverHold<'static>>,
     /// The ports `open` chose (#324): a slot's, `None` for Dante's defaults.
     chosen: Option<(Ports, u16)>,
+    /// Where they came from.
+    source: dante_slots::Source,
 }
 
 impl DanteDevice {
@@ -376,6 +379,7 @@ impl DanteDevice {
             link,
             hold: None,
             chosen: None,
+            source: dante_slots::Source::Defaults,
         }
     }
 
@@ -383,6 +387,21 @@ impl DanteDevice {
     /// slot's, else Dante's defaults (slot 0).
     pub fn ports(&self) -> (Ports, u16) {
         dante_slots::effective(self.chosen)
+    }
+}
+
+impl DanteDevice {
+    /// After a refused start on ports a stopping predecessor left: another
+    /// program holding the refused port (`holder_pid`) drops them, so the
+    /// next open probes a free slot (#324).
+    fn after_refusal(&self, e: &HostError, holder_pid: impl Fn(u16) -> Option<u32>) {
+        let (HostError::Setup(text) | HostError::Run(text)) = e;
+        if self.source == dante_slots::Source::Lingering
+            && !dante_slots::keep_lingering(text, holder_pid, std::process::id())
+        {
+            warn!(%text, "dante output: another program holds the ports left by the stopping device; the next open takes a free slot");
+            *lingering() = None;
+        }
     }
 }
 
@@ -398,8 +417,11 @@ impl AsioDevice for DanteDevice {
         // #324: the slot is probed only now, with the hold: a predecessor of
         // ours has stopped and given its ports back (or, still stopping,
         // left them to its successor: `LINGERING`).
-        let given = self.params.ports.or(*lingering());
-        self.chosen = dante_slots::choose(self.params.ip, given, |at| UdpSocket::bind(at).is_ok());
+        let left = *lingering();
+        (self.chosen, self.source) =
+            dante_slots::choose(self.params.ip, self.params.ports, left, |at| {
+                UdpSocket::bind(at).is_ok()
+            });
         self.config = Some(self.params.config_on(self.chosen));
         Ok(Opened {
             rate: f64::from(self.params.rate),
@@ -422,8 +444,14 @@ impl AsioDevice for DanteDevice {
         };
         let place = Place::Ip(self.params.ip);
         let ip = self.params.ip;
-        let running = Link::start_on(&config, &place, map, process, self.params.clock)
-            .map_err(|e| reason(e, |port| dante_slots::port_holder(ip, port)))?;
+        let holder = |port| dante_slots::port_holder(ip, port);
+        let running = match Link::start_on(&config, &place, map, process, self.params.clock) {
+            Ok(running) => running,
+            Err(e) => {
+                self.after_refusal(&e, |port| holder(port).map(|(pid, _)| pid));
+                return Err(reason(e, holder));
+            }
+        };
         *lingering() = None;
         let (ports, id) = self.ports();
         info!(
@@ -433,7 +461,7 @@ impl AsioDevice for DanteDevice {
             cmc = ports.cmc,
             flows = ports.flows,
             process_id = id,
-            slot_free = self.chosen.is_some(),
+            source = self.source.name(),
             "dante output: device announced (its control ports: the first dstack slot free on its address)"
         );
         self.link

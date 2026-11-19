@@ -499,6 +499,59 @@ fn an_outputs_device_opens_on_the_first_free_slot_of_its_address() {
     device.close();
 }
 
+/// Resets `LINGERING` when a test that set it ends, failed or not.
+struct ClearLingering;
+
+impl Drop for ClearLingering {
+    fn drop(&mut self) {
+        *lingering() = None;
+    }
+}
+
+/// #324: ports a stopping predecessor left are the next device's, with no
+/// probe, and its start forgets them.
+#[test]
+fn a_device_takes_the_ports_its_stopping_predecessor_left_and_its_start_forgets_them() {
+    let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
+    let _clear = ClearLingering;
+    let dir = tempfile::tempdir().unwrap();
+    let slot = claim_slot(test_ipv4());
+    *lingering() = Some((slot.ports, slot.id));
+    let mut device = DanteDevice::new(DanteParams {
+        device: format!("SongPlayer-test-{}", slot.id),
+        ..params(dir.path(), slot.ip)
+    });
+    device.open("", [0, 1]).unwrap();
+    assert_eq!(device.ports(), (slot.ports, slot.id));
+    assert_eq!(device.source, dante_slots::Source::Lingering);
+    let (_tx, rx) = rtrb::RingBuffer::new(1024);
+    device.start(rx).unwrap();
+    assert_eq!(*lingering(), None, "a started device forgets them");
+    device.close();
+}
+
+/// #324: a refused start on lingering ports another program holds drops
+/// them; one on ports our own process holds keeps them; a device whose
+/// ports did not linger never touches them.
+#[test]
+fn a_refused_start_on_lingering_ports_drops_them_only_for_another_program() {
+    let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
+    let _clear = ClearLingering;
+    let dir = tempfile::tempdir().unwrap();
+    let left = dante_slots::slot(9);
+    let refused = HostError::Run("ARC on UDP 4449: Address already in use".into());
+    let mut device = DanteDevice::new(params(dir.path(), test_ipv4()));
+    *lingering() = Some(left);
+    device.source = dante_slots::Source::Probed;
+    device.after_refusal(&refused, |_| Some(1));
+    assert_eq!(*lingering(), Some(left), "not this device's ports");
+    device.source = dante_slots::Source::Lingering;
+    device.after_refusal(&refused, |_| Some(std::process::id()));
+    assert_eq!(*lingering(), Some(left), "our own stack still stops");
+    device.after_refusal(&refused, |_| Some(std::process::id() + 1));
+    assert_eq!(*lingering(), None, "another program holds the port");
+}
+
 /// #324: a refusal of a chosen port names its holder where Windows tells.
 #[test]
 fn a_bind_refusal_names_the_ports_holder() {

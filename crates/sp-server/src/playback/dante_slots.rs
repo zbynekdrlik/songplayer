@@ -2,7 +2,8 @@
 //
 // `SLOTS`, `slot`, `first_free`, `binds` and `binds_with` are copied from
 // dstack's `crates/dstack-endpoint/src/slots.rs` at tag v0.6.178 (MIT OR
-// Apache-2.0, dstack's LICENSE-MIT is in `THIRD-PARTY-NOTICES.txt`).
+// Apache-2.0, dstack's LICENSE-MIT is in
+// `src-tauri/resources/THIRD-PARTY-NOTICES.txt`).
 // `dstack-endpoint` itself pulls cpal (a second audio stack SongPlayer has no
 // use for), so the 30 lines live here until dstack moves them into `dlink`;
 // then this copy is deleted and the output calls dlink's.
@@ -61,15 +62,64 @@ pub fn binds_with(ip: Ipv4Addr, ports: &Ports, try_bind: impl Fn(SocketAddrV4) -
     })
 }
 
+/// Where a device's ports came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Source {
+    /// Set on the device (a test device's own slot); nothing probed.
+    Given,
+    /// Left by a predecessor of ours whose stack was still stopping.
+    Lingering,
+    /// The first slot free on the device's address.
+    Probed,
+    /// No slot free: Dante's defaults, the stack names the port.
+    Defaults,
+}
+
+impl Source {
+    /// Its name in the log.
+    pub fn name(self) -> &'static str {
+        match self {
+            Source::Given => "given",
+            Source::Lingering => "lingering",
+            Source::Probed => "probed",
+            Source::Defaults => "defaults",
+        }
+    }
+}
+
 /// The ports and process id the output's device starts with on `ip`: the
-/// ones `given` (a test device's own slot) when set, else the first free
-/// slot by `try_bind`; `None` keeps Dante's defaults (no slot free).
+/// ones `given` when set, else the ones a stopping predecessor of ours left
+/// (`lingering`), else the first free slot by `try_bind`; `None` keeps
+/// Dante's defaults (no slot free). Only the last two cases probe.
 pub fn choose(
     ip: Ipv4Addr,
     given: Option<(Ports, u16)>,
+    lingering: Option<(Ports, u16)>,
     try_bind: impl Fn(SocketAddrV4) -> bool,
-) -> Option<(Ports, u16)> {
-    given.or_else(|| first_free(|p| binds_with(ip, p, &try_bind)))
+) -> (Option<(Ports, u16)>, Source) {
+    match (given, lingering) {
+        (Some(p), _) => (Some(p), Source::Given),
+        (None, Some(p)) => (Some(p), Source::Lingering),
+        (None, None) => match first_free(|p| binds_with(ip, p, &try_bind)) {
+            Some(p) => (Some(p), Source::Probed),
+            None => (None, Source::Defaults),
+        },
+    }
+}
+
+/// Whether ports left by a stopping predecessor are kept after a start on
+/// them was refused with `refusal`: kept while the refused port's holder
+/// (`holder_pid`) is this process (`own_pid`: our own stack still
+/// stopping) or cannot be told; dropped when another program holds it, so
+/// the next open probes a free slot instead of retrying for good.
+pub fn keep_lingering(
+    refusal: &str,
+    holder_pid: impl Fn(u16) -> Option<u32>,
+    own_pid: u32,
+) -> bool {
+    refused_port(refusal)
+        .and_then(holder_pid)
+        .is_none_or(|pid| pid == own_pid)
 }
 
 /// The ports a device runs on: the chosen ones, else Dante's defaults
