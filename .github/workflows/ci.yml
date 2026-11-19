@@ -126,6 +126,11 @@ jobs:
         # Build Tauri resolves fresh, so the root audit never saw what the exe
         # ships. Resolve it here the same way (same manifests, same registry,
         # minutes apart) and audit that lock. The UI's lock is tracked.
+        # Accepted (release 0.95.0 review): a crate published between this
+        # job and Build Tauri can make the two resolutions differ, and this
+        # lock also lists Tauri's non-Windows crates, so an advisory in one
+        # of those fails the Gate although the exe does not ship it; such a
+        # one is then judged by hand, never ignored by default.
         run: |
           set -euo pipefail
           (cd src-tauri && cargo generate-lockfile)
