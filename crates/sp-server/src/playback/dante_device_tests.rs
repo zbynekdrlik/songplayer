@@ -552,6 +552,41 @@ fn a_refused_start_on_lingering_ports_drops_them_only_for_another_program() {
     assert_eq!(*lingering(), None, "another program holds the port");
 }
 
+/// #324 through the real start: ports a stopping predecessor left, one of
+/// them held by another program, refuse the start, the refusal names the
+/// holder, and the ports are dropped so the next open probes.
+#[test]
+fn a_start_refused_by_another_program_on_lingering_ports_names_it_and_drops_them() {
+    let _one = ONE_DEVICE.lock().unwrap_or_else(|e| e.into_inner());
+    let _clear = ClearLingering;
+    let dir = tempfile::tempdir().unwrap();
+    let slot = claim_slot(test_ipv4());
+    // "Another program" on the slot's ARC port.
+    let _other = UdpSocket::bind((slot.ip, slot.ports.arc)).unwrap();
+    *lingering() = Some((slot.ports, slot.id));
+    let mut device = DanteDevice::new(DanteParams {
+        device: format!("SongPlayer-test-{}", slot.id),
+        ..params(dir.path(), slot.ip)
+    });
+    device.open("", [0, 1]).unwrap();
+    assert_eq!(device.source, dante_slots::Source::Lingering);
+    let (_tx, rx) = rtrb::RingBuffer::new(1024);
+    let other = std::process::id() + 1;
+    let refused = device
+        .start_with(rx, |_| Some((other, "Other.exe".to_string())))
+        .expect_err("the ARC port is held");
+    let text = format!("{refused:?}");
+    assert!(
+        text.contains(&format!(
+            "UDP {} is held by Other.exe (pid {other})",
+            slot.ports.arc
+        )),
+        "{text}"
+    );
+    assert_eq!(*lingering(), None, "another program's hold drops them");
+    device.close();
+}
+
 /// #324: a refusal of a chosen port names its holder where Windows tells.
 #[test]
 fn a_bind_refusal_names_the_ports_holder() {

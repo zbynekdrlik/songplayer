@@ -342,7 +342,9 @@ const HOLD_NAME: &str = "dante";
 /// wait (#324): its successor takes the same ports, so it fails its start
 /// on them and retries on the backoff until they are free, never moving to
 /// another slot beside a device of ours that still announces the name.
-/// Cleared by the next device that starts.
+/// Cleared by the next device that starts, or dropped when a start on them
+/// is refused on a port another program holds (`keep_lingering`), so the
+/// next open probes a free slot.
 static LINGERING: Mutex<Option<(Ports, u16)>> = Mutex::new(None);
 
 fn lingering() -> std::sync::MutexGuard<'static, Option<(Ports, u16)>> {
@@ -403,6 +405,52 @@ impl DanteDevice {
             *lingering() = None;
         }
     }
+
+    /// The seam's `start`, `holder` answering a refused port's holder as
+    /// `(pid, image)` (`dante_slots::port_holder` in production).
+    fn start_with(
+        &mut self,
+        ring: rtrb::Consumer<f32>,
+        holder: impl Fn(u16) -> Option<(u32, String)>,
+    ) -> Result<Started, Reason> {
+        let config = self
+            .config
+            .take()
+            .ok_or_else(|| Reason::Failed("the Dante device is not open".into()))?;
+        self.counts = Arc::default();
+        let process = RingProcess::new(ring, Arc::clone(&self.counts));
+        let map = Map {
+            rx: Vec::new(),
+            tx: vec![0, 1],
+        };
+        let place = Place::Ip(self.params.ip);
+        let running = match Link::start_on(&config, &place, map, process, self.params.clock) {
+            Ok(running) => running,
+            Err(e) => {
+                self.after_refusal(&e, |port| holder(port).map(|(pid, _)| pid));
+                return Err(reason(e, &holder));
+            }
+        };
+        *lingering() = None;
+        let (ports, id) = self.ports();
+        info!(
+            rate = self.params.rate,
+            network_rate = self.params.network_rate,
+            arc = ports.arc,
+            cmc = ports.cmc,
+            flows = ports.flows,
+            process_id = id,
+            source = self.source.name(),
+            "dante output: device announced"
+        );
+        self.link
+            .set(Some((Arc::clone(running.media()), self.ports())));
+        self.running = Some(running);
+        Ok(Started {
+            output_latency_frames: self.output_latency_frames(),
+            loop_inputs: 0,
+        })
+    }
 }
 
 impl AsioDevice for DanteDevice {
@@ -432,45 +480,8 @@ impl AsioDevice for DanteDevice {
     }
 
     fn start(&mut self, ring: rtrb::Consumer<f32>) -> Result<Started, Reason> {
-        let config = self
-            .config
-            .take()
-            .ok_or_else(|| Reason::Failed("the Dante device is not open".into()))?;
-        self.counts = Arc::default();
-        let process = RingProcess::new(ring, Arc::clone(&self.counts));
-        let map = Map {
-            rx: Vec::new(),
-            tx: vec![0, 1],
-        };
-        let place = Place::Ip(self.params.ip);
         let ip = self.params.ip;
-        let holder = |port| dante_slots::port_holder(ip, port);
-        let running = match Link::start_on(&config, &place, map, process, self.params.clock) {
-            Ok(running) => running,
-            Err(e) => {
-                self.after_refusal(&e, |port| holder(port).map(|(pid, _)| pid));
-                return Err(reason(e, holder));
-            }
-        };
-        *lingering() = None;
-        let (ports, id) = self.ports();
-        info!(
-            rate = self.params.rate,
-            network_rate = self.params.network_rate,
-            arc = ports.arc,
-            cmc = ports.cmc,
-            flows = ports.flows,
-            process_id = id,
-            source = self.source.name(),
-            "dante output: device announced (its control ports: the first dstack slot free on its address)"
-        );
-        self.link
-            .set(Some((Arc::clone(running.media()), self.ports())));
-        self.running = Some(running);
-        Ok(Started {
-            output_latency_frames: self.output_latency_frames(),
-            loop_inputs: 0,
-        })
+        self.start_with(ring, |port| dante_slots::port_holder(ip, port))
     }
 
     fn poll(&mut self) -> DeviceEvents {
