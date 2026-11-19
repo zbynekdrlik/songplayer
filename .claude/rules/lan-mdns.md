@@ -100,7 +100,8 @@ HTTP `:8920` and the remote facade `:4456` keep listening on `0.0.0.0`
 (a bind to the LAN address breaks when it changes) and DROP, unread and
 unanswered, every accepted connection whose LOCAL address
 (`TcpStream::local_addr`) is in a Dante subnet. The app must be safe with
-the firewall off; dstack155's TCP-in block is only the second line.
+the firewall off; dstack's TCP-in block (the group `dstack Dante leg`) is
+only the second line.
 
 - **The set** (`dante_guard.rs`, pure): env `DANTE_SUBNET` (one IPv4 CIDR
   or a comma list, read ONCE at start; one bad item = the whole value
