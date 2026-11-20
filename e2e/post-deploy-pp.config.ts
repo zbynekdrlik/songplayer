@@ -22,7 +22,10 @@ import { defineConfig } from "@playwright/test";
  * `post-deploy-ui-usage.spec.ts` (#256: PP's own usage log answers its
  * summary, and the gate's automated session adds nothing to it) +
  * `post-deploy-block-songs.spec.ts` (#265: PP's own song block page and
- * its list answer, read-only: it never blocks a song).
+ * its list answer, read-only: it never blocks a song) +
+ * `post-deploy-resolume-reach.spec.ts` (#343: SongPlayer reaches every
+ * Resolume host it drives while Arena runs; PP runs two Arenas and its
+ * Arena-Bridge once stopped accepting for hours unnoticed).
  * The SNV suite is post-deploy.config.ts; it ignores post-deploy-pp*.
  */
 export default defineConfig({
@@ -38,6 +41,7 @@ export default defineConfig({
     "**/post-deploy-pp-preview.spec.ts",
     "**/post-deploy-ui-usage.spec.ts",
     "**/post-deploy-block-songs.spec.ts",
+    "**/post-deploy-resolume-reach.spec.ts",
   ],
   timeout: 90_000,
   retries: 0,
