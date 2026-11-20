@@ -20,6 +20,8 @@ paths:
   - "sp-ui/src/components/settings_form.rs"
   - "e2e/program-control.spec.ts"
   - "e2e/settings-program-transition.spec.ts"
+  - "e2e/transition-gate*.ts"
+  - "e2e/post-deploy-transition.spec.ts"
 ---
 
 # Scene transitions on `SP-program` (#215, B5 of EPIC #174)
@@ -660,3 +662,50 @@ sender's `max_picture_us` line (≤ 15 000 since addendum 3, one pass into a
 1920×1080 canvas, and since the #223 follow-up in one pass on the band pool:
 under ~12 000 for a 1440p↔1440p 9-boundary fade, see `program-bus.md`) and
 `health.coalesced` +0, for a 300 ms AND a 1 s fade, with 0 late drops.
+
+## What the operator sees at a cut, and the gate that listens to it (#347)
+
+The owner, 20.11.2026: every switch at the events stutters, and the outgoing
+song is "pulled down hard". Measured on SNV (wall-bridge's engine on Arena's
+"Arena - Screen 2" + SongPlayer's log): SongPlayer's own fades were clean in
+every case. Two causes were OUTSIDE SongPlayer:
+
+- **A Companion button that presses `Blank` before its scene** fades the
+  program to SongPlayer's black + silence (#245: `Blank` through the facade is
+  source -2) for its wait, then into the scene. That is the "song pulled down
+  hard". SNV's 13/0/3 "uvitanie" had `Blank → wait 2000 → INTRO`; its four
+  pre-step actions are DISABLED since 20.11.2026, with the owner's approval.
+  The pre-step is obsolete: SongPlayer parks cg OBS on Blank itself after
+  leaving "OBS manuál" (#327). Read a press's two cuts in the log
+  (`cut scene=Blank source=-2` then the scene ~2 s later).
+- **A Companion scene press switches an Arena column**, and each column has
+  its own copy of the "Yt music" clip (the SP-program-MAX Spout source,
+  each with its own effects). The new copy opens its own Spout receive and
+  holds its stale picture 0.8–1.1 s from the press (9 presses measured). A
+  dashboard cut, with no column change, is clean. The fix is in the
+  operator's composition (wall-bridge#15: one source clip on an always-on
+  layer, the column copies as layer routers).
+
+Never read a Spout sender from a diagnostic script on the box: on
+20.11.2026 a SpoutGL reader's exit damaged Spout's sender list
+(`SP-program\0een 2 | …`), "Arena - Screen 2" vanished, the wall froze,
+and Arena had to be relaunched.
+
+**The gate** `e2e/post-deploy-transition.spec.ts` (SNV), verdict
+`e2e/transition-gate.ts` (unit spec `transition-gate.spec.ts`):
+- it records the program through a temporary VBAN output `e2e-xfade`
+  (48 kHz INT16, loopback), the fan-out after the crossfade and the limiter;
+- it makes one dashboard cut between two playlists (`PREFERRED`), A playing
+  for 5 s first;
+- it fails on: a lost VBAN packet; a digital-zero run ≥ 5 ms or a 100 ms RMS
+  more than 20 dB under the outgoing song's level, between the cut and 80 %
+  of the fade (the outgoing weight cos θ ≥ 0.31 there); `side_fills` /
+  `cue_timeouts` / `filled_owned` grown; the outgoing playlist not `Playing`
+  half way through the fade (`TRANSPORT_FRACTION`: its hold ends one slot
+  after the window, so a later read could find an on-time end).
+- A paused outgoing side shows as the DIP, not as a zero run: the incoming
+  side fades in from its first sample.
+- It puts the program and the output list back; the probe output stops
+  before its socket closes.
+- It does NOT see Arena's column freeze (no Companion press in CI: those
+  drive Arena, the Presenter, strih and the hall lights).
