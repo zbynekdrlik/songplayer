@@ -2318,7 +2318,7 @@ dependencies = [
 
 [[package]]
 name = "sp-core"
-version = "0.98.0"
+version = "0.99.0-dev.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2327,7 +2327,7 @@ dependencies = [
 
 [[package]]
 name = "sp-decoder"
-version = "0.98.0"
+version = "0.99.0-dev.1"
 dependencies = [
  "crossbeam-channel",
  "mutants",
@@ -2341,7 +2341,7 @@ dependencies = [
 
 [[package]]
 name = "sp-gpu"
-version = "0.98.0"
+version = "0.99.0-dev.1"
 dependencies = [
  "cc",
  "mutants",
@@ -2355,7 +2355,7 @@ dependencies = [
 
 [[package]]
 name = "sp-ndi"
-version = "0.98.0"
+version = "0.99.0-dev.1"
 dependencies = [
  "libloading",
  "mutants",
@@ -2365,7 +2365,7 @@ dependencies = [
 
 [[package]]
 name = "sp-server"
-version = "0.98.0"
+version = "0.99.0-dev.1"
 dependencies = [
  "anyhow",
  "async-trait",
