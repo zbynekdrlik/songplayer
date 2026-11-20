@@ -4,9 +4,9 @@
  * Read-only, in SNV's suite and PP's subset. Polls `GET /api/v1/resolume/
  * health` (≤ 60 s: the driver's first reads after the restart) until every
  * host's last refresh was good with its breaker closed; fails naming each
- * host it still does not reach while Arena runs on the box. Arena not
- * running is the operator's setup (#259 comment 6142937258): logged, no
- * failure. The verdict is `resolume-reach-gate.ts`.
+ * host it still does not reach (whether `Arena.exe` runs is only logged:
+ * on PP the driven host is `Arena-Bridge.exe`). The verdict is
+ * `resolume-reach-gate.ts`.
  */
 
 import { test, expect, type APIRequestContext } from "@playwright/test";
@@ -37,19 +37,17 @@ async function readReach(request: APIRequestContext): Promise<ReachRead> {
 }
 
 test.describe("Resolume reach post-deploy verification (#343)", () => {
-  test("SongPlayer reaches every Resolume host it drives while Arena runs", async ({
+  test("SongPlayer reaches every Resolume host it drives", async ({
     page,
     request,
   }) => {
-    test.setTimeout(REACH_WAIT_MS + 30_000);
+    test.setTimeout(REACH_WAIT_MS + 60_000);
     const last = await pollReach(
       () => readReach(request),
       REACH_WAIT_MS,
       (ms) => page.waitForTimeout(ms),
     );
     console.log(`[#343 reach] ${reachSummary(last.hosts, last.arenaRunning)}`);
-    expect(reachFailures(last.hosts, last.arenaRunning), "SongPlayer's reach of Resolume").toEqual(
-      [],
-    );
+    expect(reachFailures(last.hosts), "SongPlayer's reach of Resolume").toEqual([]);
   });
 });

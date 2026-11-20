@@ -18,10 +18,16 @@
  * restart the driver's first reads are still under way) and fails on the
  * hosts still not reached when its window ends.
  *
- * The owner's rule (#259 comment 6142937258): whether Resolume runs is the
- * operator's setup. So a box where Arena is not running
- * (`GET /api/v1/wall` `read.arena_running: false`) is logged and passes;
- * an empty host list passes too (nothing is driven).
+ * A host the box has configured and enabled is the operator's own setup:
+ * SongPlayer is meant to drive it, so not reaching it fails, whether or not
+ * an Arena runs (SNV's `post-deploy.spec.ts` REST test fails on a closed
+ * Arena too). `GET /api/v1/wall` `read.arena_running` is only LOGGED: it
+ * sees an image named `Arena.exe` alone, so on resolume-pp — two Arenas,
+ * the driven host being `Arena-Bridge.exe` — it would hide the very
+ * incident above. An empty host list passes (nothing is driven).
+ * `last_refresh_ok` is written by the liveness probe AND the `/composition`
+ * read: a host whose map cannot be read is not reached either (with no map
+ * SongPlayer pushes nothing).
  */
 
 /** One row of `GET /api/v1/resolume/health`. */
@@ -49,23 +55,16 @@ export function reached(host: ResolumeHostHealth): boolean {
 
 /**
  * The gate's failures: one line per host not reached, naming why.
- * `hosts` null = the route did not answer. `arenaRunning` false = Arena is
- * not running on the box: no failure (the operator's setup); null = not
- * known, judged as running (a SongPlayer that cannot tell must not pass a
- * dead host).
+ * `hosts` null = the route did not answer.
  */
-export function reachFailures(
-  hosts: ResolumeHostHealth[] | null,
-  arenaRunning: boolean | null,
-): string[] {
+export function reachFailures(hosts: ResolumeHostHealth[] | null): string[] {
   if (hosts === null) return ["GET /api/v1/resolume/health did not answer"];
-  if (arenaRunning === false) return [];
   return hosts
     .filter((host) => !reached(host))
     .map(
       (host) =>
-        `SongPlayer reaches no Resolume at ${host.host}: ` +
-        `${host.consecutive_failures} refresh(es) failed in a row` +
+        `SongPlayer does not reach the Resolume host ${host.host}: the last refresh failed ` +
+        `(${host.consecutive_failures} in a row)` +
         (host.circuit_breaker_open ? ", circuit breaker open" : "") +
         (host.last_refresh_ts ? `, last try ${host.last_refresh_ts}` : ", never refreshed"),
     );
@@ -80,7 +79,7 @@ export function reachSummary(hosts: ResolumeHostHealth[] | null, arenaRunning: b
       `${h.host} ${reached(h) ? "reached" : "NOT reached"} (failures ${h.consecutive_failures}, ` +
       `breaker ${h.circuit_breaker_open ? "open" : "closed"}, latency ${h.product_latency_ms ?? "—"} ms)`,
   );
-  return `Arena ${arena}; ${hosts.length} host(s)${each.length ? ": " + each.join("; ") : ""}`;
+  return `Arena.exe ${arena}; ${hosts.length} host(s)${each.length ? ": " + each.join("; ") : ""}`;
 }
 
 /** One read of both facts the verdict needs. */
@@ -90,20 +89,21 @@ export interface ReachRead {
 }
 
 /**
- * Polls `read` until the verdict has no failure or `waitMs` has passed,
- * and returns the read the poll ended on (the one judged).
+ * Polls `read` until the verdict has no failure or `waitMs` has passed on
+ * `now` (elapsed time, reads included), and returns the read the poll ended
+ * on (the one judged).
  */
 export async function pollReach(
   read: () => Promise<ReachRead>,
   waitMs: number,
   sleep: (ms: number) => Promise<void>,
   stepMs: number = REACH_POLL_MS,
+  now: () => number = Date.now,
 ): Promise<ReachRead> {
+  const end = now() + waitMs;
   let last = await read();
-  let waited = 0;
-  while (reachFailures(last.hosts, last.arenaRunning).length > 0 && waited < waitMs) {
+  while (reachFailures(last.hosts).length > 0 && now() < end) {
     await sleep(stepMs);
-    waited += stepMs;
     last = await read();
   }
   return last;

@@ -789,6 +789,11 @@ are the recovery's `on_program_lines`.
 - **The gate:** `e2e/post-deploy-resolume-reach.spec.ts` in SNV's suite and
   PP's subset. It runs the pure verdict `e2e/resolume-reach-gate.ts`, polling
   `GET /api/v1/resolume/health` for ≤ 60 s until every host has
-  `last_refresh_ok` with its breaker closed. If Arena is not running
-  (`/api/v1/wall` `read.arena_running: false`), that is the operator's
-  setup: the gate logs it and passes.
+  `last_refresh_ok` with its breaker closed, measured in elapsed time (the
+  reads' own 10 s timeouts count). An enabled host is the operator's setup,
+  so the gate fails on it whether or not an Arena runs.
+  `/api/v1/wall` `read.arena_running` is only logged: it sees `Arena.exe`
+  alone and would hide PP's Arena-Bridge (review 🔴).
+- **`last_refresh_ok` is also written by a failed `/composition` read**
+  (`driver.rs`), not only by the liveness probe. A host whose map cannot be
+  read is "not reached" too: with no map SongPlayer pushes nothing.
