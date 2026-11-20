@@ -153,6 +153,33 @@ test("a recording that does not cover the cut, or a silent outgoing song, is no 
   expect(transitionFailures(quiet, read())[0]).toContain("was silent before the cut");
 });
 
+test("a song with its own digital silence before the cut is judged by its level only", () => {
+  const s = program("clean");
+  // 10 ms of the song's own silence 2 s before the cut, and a 10 ms hole 0.5 s after it.
+  for (const at of [2, 4.5]) {
+    for (let i = 0; i < 480; i++) {
+      const f = Math.round(at * RATE) + i;
+      s[2 * f] = 0;
+      s[2 * f + 1] = 0;
+    }
+  }
+  expect(transitionFailures(s, read()).filter((x) => x.includes("went silent"))).toEqual([]);
+});
+
+test("a natural quiet passage late in the fade passes; the same drop at its start fails", () => {
+  const quietAt = (sec: number) => {
+    const s = program("clean");
+    for (let i = 0; i < Math.round(0.2 * RATE); i++) {
+      const f = Math.round(sec * RATE) + i;
+      s[2 * f] = Math.round(s[2 * f] * 0.06); // -24 dB on the mix
+      s[2 * f + 1] = Math.round(s[2 * f + 1] * 0.06);
+    }
+    return transitionFailures(s, read()).filter((x) => x.startsWith("the level fell"));
+  };
+  expect(quietAt(4.05).length).toBe(1); // the fade's start: the outgoing still weighs ~1
+  expect(quietAt(5.5)).toEqual([]); // 75 % into the fade: expected -8 dB there
+});
+
 test("the cue's wait moves the judged span", () => {
   // A hole 2.3 s after the cut: outside the span with no wait (0.8 · 2 s = 1.6 s),
   // inside it with a 1 s wait.

@@ -697,12 +697,23 @@ and Arena had to be relaunched.
   (48 kHz INT16, loopback), the fan-out after the crossfade and the limiter;
 - it makes one dashboard cut between two playlists (`PREFERRED`), A playing
   for 5 s first;
-- it fails on: a lost VBAN packet; a digital-zero run ≥ 5 ms or a 100 ms RMS
-  more than 20 dB under the outgoing song's level, between the cut and 80 %
-  of the fade (the outgoing weight cos θ ≥ 0.31 there); `side_fills` /
-  `cue_timeouts` / `filled_owned` grown; the outgoing playlist not `Playing`
-  half way through the fade (`TRANSPORT_FRACTION`: its hold ends one slot
-  after the window, so a later read could find an on-time end).
+- it cuts only once the outgoing song has been audible (median > −50 dBFS)
+  for 2.5 s, at most 45 s of waiting (a song may open silent); the press's
+  arrival time is mapped onto the stream `CUT_MAP_OFFSET_MS` (100 ms) later
+  (the cut lands a boundary after the press, VBAN sends L = 2 slots late);
+- it fails on: a lost VBAN packet; a digital-zero run ≥ 5 ms between the cut
+  and 80 % of the fade (not judged when the song had one of its own in the
+  2.5 s before); a 100 ms RMS more than 20 dB under the outgoing song's
+  EXPECTED level there, its pre-cut median scaled by cos² θ at the window's
+  place in the fade (a natural quiet passage late in the fade passes);
+  `side_fills` / `cue_timeouts` / `filled_owned` grown (read right before
+  the cut and after the fade); the outgoing playlist not `Playing` half way
+  through the fade (`TRANSPORT_FRACTION`: its hold ends one slot after the
+  window, so a later read could find an on-time end);
+- it fails at once, changing nothing, when nothing is on program (the cut
+  API cannot put "nothing" back) and when Nastavenia's `program_transition`
+  is a cut (no fade to judge); a failed restore of the program, or a probe
+  still sending once removed, fails the test.
 - A paused outgoing side shows as the DIP, not as a zero run: the incoming
   side fades in from its first sample.
 - It puts the program and the output list back; the probe output stops

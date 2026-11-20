@@ -33,8 +33,18 @@ export const FORMAT_INT16 = 0x01;
 export const ZERO_RUN_FRAMES = 240;
 /** The level window. */
 export const LEVEL_WINDOW_FRAMES = 4_800; // 100 ms
-/** How far below the outgoing song's level a window may fall in the span. */
+/**
+ * How far below the outgoing song's EXPECTED level a window may fall: its
+ * level before the cut scaled by its fade weight cos² θ at the window's
+ * place (a natural quiet passage in the song stays well inside 20 dB).
+ */
 export const MAX_DIP_DB = 20;
+/**
+ * The program's cut lands one boundary after the press at the earliest, and
+ * a boundary's VBAN packets leave L = 2 slots after it: the frame mapped
+ * from the press's arrival time is moved on by this much (ms).
+ */
+export const CUT_MAP_OFFSET_MS = 100;
 /** The judged span ends at this fraction of the fade. */
 export const SPAN_FRACTION = 0.8;
 /**
@@ -162,22 +172,31 @@ export function transitionFailures(samples: Int16Array, read: CutRead): string[]
     f.push(`the outgoing song was silent before the cut (median ${pre.toFixed(1)} dBFS): no judgement possible`);
     return f;
   }
+  // A song with digital silence of its own before the cut (a hard mute
+  // between sections) cannot tell a hole from itself: the zero-run check is
+  // left to the level check then.
+  const ownSilence = longestZeroRun(samples, preFrom, read.cutFrame).frames >= ZERO_RUN_FRAMES;
   const zero = longestZeroRun(samples, read.cutFrame, spanEnd);
-  if (zero.frames >= ZERO_RUN_FRAMES) {
+  if (!ownSilence && zero.frames >= ZERO_RUN_FRAMES) {
     f.push(
       `the program went silent for ${((zero.frames * 1000) / RATE).toFixed(1)} ms ` +
         `${(((zero.at - read.cutFrame) * 1000) / RATE).toFixed(0)} ms after the cut (the outgoing song still weighs ≥ 31 % there)`,
     );
   }
-  let worst = { db: Infinity, at: read.cutFrame };
+  const fadeStart = read.cutFrame + read.cueFrames;
+  let worst = { under: -Infinity, db: 0, at: read.cutFrame, expected: pre };
   for (let s = read.cutFrame; s + LEVEL_WINDOW_FRAMES <= spanEnd; s += LEVEL_WINDOW_FRAMES / 2) {
     const db = rmsDb(samples, s, s + LEVEL_WINDOW_FRAMES);
-    if (db < worst.db) worst = { db, at: s };
+    const mid = s + LEVEL_WINDOW_FRAMES / 2 - fadeStart;
+    const theta = read.fadeFrames > 0 ? (Math.PI / 2) * Math.min(1, Math.max(0, mid / read.fadeFrames)) : 0;
+    const expected = pre + 20 * Math.log10(Math.cos(theta));
+    const under = expected - db;
+    if (under > worst.under) worst = { under, db, at: s, expected };
   }
-  if (worst.db < pre - MAX_DIP_DB) {
+  if (worst.under > MAX_DIP_DB) {
     f.push(
       `the level fell to ${worst.db.toFixed(1)} dBFS ${(((worst.at - read.cutFrame) * 1000) / RATE).toFixed(0)} ms after the cut, ` +
-        `${(pre - worst.db).toFixed(1)} dB under the outgoing song's ${pre.toFixed(1)} dBFS (allowed ${MAX_DIP_DB})`,
+        `${worst.under.toFixed(1)} dB under the outgoing song's expected ${worst.expected.toFixed(1)} dBFS there (allowed ${MAX_DIP_DB})`,
     );
   }
   for (const k of ["side_fills", "cue_timeouts", "filled_owned"] as const) {

@@ -15,6 +15,7 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import * as dgram from "node:dgram";
 import {
+  CUT_MAP_OFFSET_MS,
   RATE,
   TRANSPORT_FRACTION,
   decode,
@@ -78,6 +79,10 @@ test.describe("program transition post-deploy verification (#347)", () => {
     test.setTimeout(150_000);
     const start = await program(request);
     const original = start.source;
+    // Nothing on program cannot be put back through the cut API: change nothing then.
+    expect(original, "a source on program to come back to (nothing was changed)").not.toBeNull();
+    // A configured hard cut has no fade to judge: say so, never judge it as a broken fade.
+    expect(start.transition.kind, "Nastavenia's program_transition is a fade (the gate judges a fade)").toBe("fade");
     const refused = new Set((start.cut_refused ?? []).map((x) => x.source));
     const lists = (await (await request.get("/api/v1/playlists")).json()) as {
       id: number;
@@ -130,12 +135,22 @@ test.describe("program transition post-deploy verification (#347)", () => {
       await expect
         .poll(() => transport(request, a.id), { message: `${a.ndi_output_name} plays`, timeout: 40_000 })
         .toBe("Playing");
-      await page.waitForTimeout(5_000);
-
-      const before = await program(request);
-      const fadeMs = before.transition.kind === "fade" ? before.transition.duration_ms : 0;
+      // Record until the outgoing song has been audible for the last 2.5 s
+      // (a song may open with a silent intro), at most 45 s.
       recording = true;
       await page.waitForTimeout(3_500);
+      await expect
+        .poll(
+          () => {
+            const d = decode(arrivals, STREAM);
+            const n = d.samples.length / 2;
+            return medianLevelDb(d.samples, n - Math.round(2.5 * RATE), n);
+          },
+          { message: `${a.ndi_output_name}'s song is audible before the cut`, timeout: 45_000, intervals: [500] },
+        )
+        .toBeGreaterThan(-50);
+      const before = await program(request);
+      const fadeMs = before.transition.duration_ms;
       const cutAt = Date.now();
       await cut(request, b.id);
       await page.waitForTimeout(Math.round(fadeMs * TRANSPORT_FRACTION) + 200);
@@ -145,7 +160,7 @@ test.describe("program transition post-deploy verification (#347)", () => {
       const after = await program(request);
 
       const d = decode(arrivals, STREAM);
-      const cutFrame = frameAt(d.marks, cutAt);
+      const cutFrame = frameAt(d.marks, cutAt + CUT_MAP_OFFSET_MS);
       expect(cutFrame, "packets arrived after the cut").not.toBeNull();
       const read: CutRead = {
         cutFrame: cutFrame as number,
@@ -164,11 +179,12 @@ test.describe("program transition post-deploy verification (#347)", () => {
     } finally {
       recording = false;
       // The program back where it was (a playlist, OBS manuál or Blank).
+      let restoreError: unknown = null;
       if (original !== null) {
         try {
           if ((await program(request)).source !== original) await cut(request, original);
         } catch (e) {
-          console.log(`[#347 transition] restoring the program to ${original} failed: ${e}`);
+          restoreError = e;
         }
       }
       let current = kept;
@@ -181,19 +197,24 @@ test.describe("program transition post-deploy verification (#347)", () => {
       const back = await request.patch("/api/v1/settings", {
         data: { audio_outputs: JSON.stringify(current.filter((e) => !e.id.startsWith("e2e-"))) },
       });
+      let stillSending = -1;
       try {
         if (back.status() === 204) {
-          const before = seen;
-          await page.waitForTimeout(7_000);
-          // The probe stops before its socket closes: no packets in the last 2 s.
-          const mark = seen;
-          await page.waitForTimeout(2_000);
-          console.log(`[#347 transition] probe packets after the removal: ${seen - before}, last 2 s ${seen - mark}`);
+          // The probe stops before its socket closes (#257: a send to a closed
+          // port is a loss on the ledger): wait until 2 s pass with no packet.
+          const deadline = Date.now() + 25_000;
+          do {
+            const mark = seen;
+            await page.waitForTimeout(2_000);
+            stillSending = seen - mark;
+          } while (stillSending > 0 && Date.now() < deadline);
         }
       } finally {
         socket.close();
       }
       expect(back.status(), "the stored list is restored").toBe(204);
+      expect(stillSending, "the probe output stopped before its socket closed").toBe(0);
+      expect(restoreError, `the program is back on ${original}`).toBeNull();
     }
   });
 });
