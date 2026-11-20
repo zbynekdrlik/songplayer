@@ -8,6 +8,8 @@ paths:
   - "crates/sp-server/src/playback/seek.rs"
   - "crates/sp-server/src/playback/pipeline_types*.rs"
   - "crates/sp-server/src/playback/tests_title_seek.rs"
+  - "e2e/resolume-reach-gate*.ts"
+  - "e2e/post-deploy-resolume-reach.spec.ts"
 ---
 
 # Resolume host driver — poll policy, NOT READY mapping, stale ids, RecoveryEvent, the wall title (#157, #217)
@@ -770,3 +772,28 @@ are the recovery's `on_program_lines`.
 - **A clock with no window:** build "both instants ahead" with the hide
   point AFTER the show point (`now + hour`, `now + 2 * hour`). Equal
   instants are a window-less clock, which arms nothing.
+
+## The reach gate (#343)
+
+- **resolume-pp runs TWO Arenas.** `Arena.exe` (user `newlevel`,
+  composition "Songs PP", webserver 8100) and `Arena-Bridge.exe` (user
+  `bridge`, started by AutoHotkey, composition "Bridge PP": SP-program-MAX +
+  ProPresenter + NDI to DeckLink SDI, the LED wall, webserver 8090).
+  SongPlayer's host `127.0.0.1:8090` is **Arena-Bridge**. That is where its
+  `#sp-subs*` / `#sp-title` clips are.
+- **Arena's webserver can stop while Arena keeps rendering.** On 19.11.2026
+  at 18:44 CET, Arena-Bridge stopped accepting connections on 8090: the
+  listener stayed, every connect was refused, and 150–170 sockets sat in
+  CLOSE_WAIT. It keeps no log. Only a new start clears it. The dashboard
+  read `Resolume: neodpovedá`, but no gate read SongPlayer's own reach.
+- **The gate:** `e2e/post-deploy-resolume-reach.spec.ts` in SNV's suite and
+  PP's subset. It runs the pure verdict `e2e/resolume-reach-gate.ts`, polling
+  `GET /api/v1/resolume/health` for ≤ 60 s until every host has
+  `last_refresh_ok` with its breaker closed, measured in elapsed time (the
+  reads' own 10 s timeouts count). An enabled host is the operator's setup,
+  so the gate fails on it whether or not an Arena runs.
+  `/api/v1/wall` `read.arena_running` is only logged: it sees `Arena.exe`
+  alone and would hide PP's Arena-Bridge (review 🔴).
+- **`last_refresh_ok` is also written by a failed `/composition` read**
+  (`driver.rs`), not only by the liveness probe. A host whose map cannot be
+  read is "not reached" too: with no map SongPlayer pushes nothing.

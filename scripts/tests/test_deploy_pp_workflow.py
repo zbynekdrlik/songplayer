@@ -293,7 +293,8 @@ def test_snv_never_runs_the_pp_subset_and_pp_runs_it_with_max():
     # environment gate, the audio-fault dashboard check (#257), the LED
     # wall report (#259: fails only when SongPlayer cannot read PP's box),
     # the live preview gate (#266), the usage log's gate (#256) and the
-    # read-only song block page gate (#265), and never the SNV suite.
+    # read-only song block page gate (#265), the Resolume reach gate (#343),
+    # and never the SNV suite.
     assert specs == [
         "**/post-deploy-pp.spec.ts",
         "**/post-deploy-max.spec.ts",
@@ -305,6 +306,7 @@ def test_snv_never_runs_the_pp_subset_and_pp_runs_it_with_max():
         "**/post-deploy-pp-preview.spec.ts",
         "**/post-deploy-ui-usage.spec.ts",
         "**/post-deploy-block-songs.spec.ts",
+        "**/post-deploy-resolume-reach.spec.ts",
     ]
 
 
