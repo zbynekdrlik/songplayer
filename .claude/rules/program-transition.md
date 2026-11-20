@@ -678,13 +678,13 @@ every case. Two causes were OUTSIDE SongPlayer:
   The pre-step is obsolete: SongPlayer parks cg OBS on Blank itself after
   leaving "OBS manuál" (#327). Read a press's two cuts in the log
   (`cut scene=Blank source=-2` then the scene ~2 s later).
-- **A Companion scene press switches an Arena column**, and each column has
-  its own copy of the "Yt music" clip (the SP-program-MAX Spout source,
-  each with its own effects). The new copy opens its own Spout receive and
-  holds its stale picture 0.8–1.1 s from the press (9 presses measured). A
-  dashboard cut, with no column change, is clean. The fix is in the
-  operator's composition (wall-bridge#15: one source clip on an always-on
-  layer, the column copies as layer routers).
+- **A Companion scene press freezes Arena's output 0.8–1.1 s from the
+  press** (9 presses measured); a dashboard cut is clean. The cause is NOT
+  found yet. Disproved by wall-bridge's REST replay (20.11.2026 21:11Z): a
+  composition column connect and a "Yt music" clip connect give no gap (one
+  79 ms gap). Still untested: the press's own Arena action
+  `connect_column_by_name {group: 2}` (a LAYER-GROUP column), and the
+  Presenter / strih-obs / NDI actions that come with it (#347).
 
 Never read a Spout sender from a diagnostic script on the box: on
 20.11.2026 a SpoutGL reader's exit damaged Spout's sender list
@@ -707,5 +707,5 @@ and Arena had to be relaunched.
   side fades in from its first sample.
 - It puts the program and the output list back; the probe output stops
   before its socket closes.
-- It does NOT see Arena's column freeze (no Companion press in CI: those
-  drive Arena, the Presenter, strih and the hall lights).
+- It does NOT see the press freeze (no Companion press in CI: a press drives
+  Arena, the Presenter, strih, the hall lights and the FOH mixer).
