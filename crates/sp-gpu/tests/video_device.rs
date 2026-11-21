@@ -18,7 +18,7 @@
 
 use std::io::Write;
 
-use sp_gpu::{GpuError, VideoDevice, pick_adapter};
+use sp_gpu::{GpuError, VideoDevice, apply_gpu_thread_priority, pick_adapter};
 use windows::Win32::Graphics::Direct3D::{
     D3D_DRIVER_TYPE_UNKNOWN, D3D_DRIVER_TYPE_WARP, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
 };
@@ -202,4 +202,43 @@ fn an_adapter_index_past_the_list_is_no_adapter() {
         VideoDevice::new_on_listed_adapter(count).err(),
         Some(GpuError::NoAdapter)
     );
+}
+
+/// #330: a plain WARP device (BGRA, the compositor's flags: WARP refuses the
+/// video device) takes a GPU thread priority and reads it back, the call a
+/// decode device is given. WARP's answer is not documented, so it is
+/// written to the log; the test asserts only a definite answer per value
+/// and that a value set is the value read back.
+#[test]
+fn a_device_takes_a_gpu_thread_priority_and_reads_it_back() {
+    let mut device: Option<ID3D11Device> = None;
+    unsafe {
+        D3D11CreateDevice(
+            None,
+            D3D_DRIVER_TYPE_WARP,
+            None,
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            Some(&[D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0][..]),
+            D3D11_SDK_VERSION,
+            Some(&mut device),
+            None,
+            None,
+        )
+    }
+    .expect("a plain WARP device");
+    let device = device.expect("D3D11CreateDevice gave no device");
+    for priority in [-7, -3, 0, 7] {
+        let answer = apply_gpu_thread_priority(&device, priority);
+        let _ = writeln!(
+            std::io::stderr(),
+            "#330 WARP SetGPUThreadPriority({priority}) -> {answer:?}"
+        );
+        match answer {
+            Ok(read_back) => assert_eq!(read_back, priority, "set {priority}, read back"),
+            Err(GpuError::Api { call, .. }) => {
+                assert!(call.contains("GPUThreadPriority"), "{call}")
+            }
+            Err(other) => panic!("not a definite answer: {other:?}"),
+        }
+    }
 }

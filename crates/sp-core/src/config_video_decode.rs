@@ -46,9 +46,47 @@ pub fn video_decode(raw: Option<&str>) -> VideoDecode {
     }
 }
 
+/// #330: the GPU scheduling priority SongPlayer's video DECODE device is
+/// given (`IDXGIDevice::SetGPUThreadPriority`, −7..=7): a negative value
+/// lets Arena's rendering on the same GPU go first. The compositor's
+/// device is never touched. Applied from the next song's open.
+pub const SETTING_VIDEO_DECODE_GPU_PRIORITY: &str = "video_decode_gpu_priority";
+
+/// #330: the lowest and highest priority DXGI takes.
+pub const VIDEO_DECODE_GPU_PRIORITY_RANGE: std::ops::RangeInclusive<i32> = -7..=7;
+
+/// #330: a stored `video_decode_gpu_priority`: a whole number in
+/// [`VIDEO_DECODE_GPU_PRIORITY_RANGE`] (trimmed); anything else, absent
+/// included, is 0 (DXGI's default), so a deploy changes nothing.
+pub fn video_decode_gpu_priority(raw: Option<&str>) -> i32 {
+    raw.and_then(|v| v.trim().parse::<i32>().ok())
+        .filter(|p| VIDEO_DECODE_GPU_PRIORITY_RANGE.contains(p))
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{SETTING_VIDEO_DECODE, VideoDecode, video_decode};
+    use super::{
+        SETTING_VIDEO_DECODE, SETTING_VIDEO_DECODE_GPU_PRIORITY, VideoDecode, video_decode,
+        video_decode_gpu_priority,
+    };
+
+    /// #330: only a whole number in −7..=7 is a priority; the edges count,
+    /// one past them and anything else is DXGI's default 0.
+    #[test]
+    fn the_decode_gpu_priority_is_a_whole_number_in_dxgis_range() {
+        assert_eq!(
+            SETTING_VIDEO_DECODE_GPU_PRIORITY,
+            "video_decode_gpu_priority"
+        );
+        assert_eq!(video_decode_gpu_priority(None), 0);
+        assert_eq!(video_decode_gpu_priority(Some("-7")), -7);
+        assert_eq!(video_decode_gpu_priority(Some(" 7\n")), 7);
+        assert_eq!(video_decode_gpu_priority(Some("-3")), -3);
+        for other in ["-8", "8", "", "low", "-7.0", "1e1", "+"] {
+            assert_eq!(video_decode_gpu_priority(Some(other)), 0, "{other:?}");
+        }
+    }
 
     /// #279 P3a: the pictures stay on the GPU only for an explicit `gpu`;
     /// the default (and anything else) is today's software path.

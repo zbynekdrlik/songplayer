@@ -306,7 +306,10 @@ pub fn video_hw_decode(raw: Option<&str>) -> bool {
 // its own file for the 1000-line cap.
 #[path = "config_video_decode.rs"]
 mod video_decode_setting;
-pub use video_decode_setting::{SETTING_VIDEO_DECODE, VideoDecode, video_decode};
+pub use video_decode_setting::{
+    SETTING_VIDEO_DECODE, SETTING_VIDEO_DECODE_GPU_PRIORITY, VIDEO_DECODE_GPU_PRIORITY_RANGE,
+    VideoDecode, video_decode, video_decode_gpu_priority,
+};
 
 /// #223 S12: the automatic in-place video upgrade (`video_upgrade::worker`).
 /// OFF until its safety net is on the box; read at every tick.

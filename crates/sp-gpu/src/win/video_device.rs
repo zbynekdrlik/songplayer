@@ -21,6 +21,7 @@
 
 use windows::Win32::Foundation::TRUE;
 use windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11Multithread};
+use windows::Win32::Graphics::Dxgi::IDXGIDevice;
 use windows::core::Interface;
 
 use super::device::{self, DeviceUse};
@@ -76,6 +77,7 @@ impl VideoDevice {
             device.cast().map_err(|e| failed("ID3D11Multithread", &e))?;
         // Returns whether the protection was on before; it is on after.
         let _was_on = unsafe { multithread.SetMultithreadProtected(TRUE) };
+        give_decode_priority(&device);
         Ok(Self { device, adapter })
     }
 
@@ -88,4 +90,31 @@ impl VideoDevice {
     pub fn adapter(&self) -> &AdapterInfo {
         &self.adapter
     }
+}
+
+/// #330: give a decode device the process's decode priority
+/// ([`crate::decode_priority`]) and read it back. A device that refuses
+/// keeps DXGI's default and is counted, never refused: a song still
+/// decodes. Glue only; the bookkeeping is the pure module's.
+fn give_decode_priority(device: &ID3D11Device) {
+    let requested = crate::decode_priority::requested();
+    match apply_gpu_thread_priority(device, requested) {
+        Ok(read_back) => crate::decode_priority::note_applied(requested, read_back),
+        Err(e) => {
+            crate::decode_priority::note_error();
+            tracing::warn!(requested, error = %e, "sp-gpu: the decode device's GPU priority was not set");
+        }
+    }
+}
+
+/// #330: `IDXGIDevice::SetGPUThreadPriority(priority)` on `device`, then
+/// `GetGPUThreadPriority` read back. Doc-hidden: the Windows test runs it
+/// on a WARP device (WARP refuses the video device itself).
+#[doc(hidden)]
+pub fn apply_gpu_thread_priority(device: &ID3D11Device, priority: i32) -> Result<i32, GpuError> {
+    let dxgi: IDXGIDevice = device.cast().map_err(|e| failed("IDXGIDevice", &e))?;
+    unsafe { dxgi.SetGPUThreadPriority(priority) }
+        .map_err(|e| failed("IDXGIDevice::SetGPUThreadPriority", &e))?;
+    unsafe { dxgi.GetGPUThreadPriority() }
+        .map_err(|e| failed("IDXGIDevice::GetGPUThreadPriority", &e))
 }
