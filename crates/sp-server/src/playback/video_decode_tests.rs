@@ -436,6 +436,17 @@ async fn the_decode_gpu_priority_is_applied_on_its_own() {
     assert_eq!(setting.gpu_priority(), 0);
 }
 
+/// #330: the process status reads sp-gpu's decode priority: a device noted
+/// there shows in `status()` (no other sp-server test notes one: Linux
+/// makes no decode device).
+#[test]
+fn the_process_status_reads_the_decode_devices_priority() {
+    sp_gpu::decode_priority::note_applied(-6, -5);
+    let block = status().gpu_priority;
+    assert_eq!(block.applied, Some(-6));
+    assert_eq!(block.read_back, Some(-5));
+}
+
 /// #330: the status block carries sp-gpu's decode priority as it stands.
 #[test]
 fn the_gpu_priority_status_names_the_last_device() {
