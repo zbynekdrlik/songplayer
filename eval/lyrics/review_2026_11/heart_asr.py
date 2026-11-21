@@ -59,6 +59,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--wav-dir", type=Path, required=True)
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument("--only", nargs="*", default=[])
+    # heartlib's 16 (and even 4: word-timestamp DTW keeps every cross-attention)
+    # OOMs an 8 GB card; the batch only groups independent
+    # 30 s chunks, so a smaller one changes memory, not the transcript.
+    ap.add_argument("--batch-size", type=int, default=16)
     args = ap.parse_args(argv)
 
     import soundfile as sf
@@ -80,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
         device=device,
         dtype=dtype,
         chunk_length_s=30,
-        batch_size=16,
+        batch_size=args.batch_size,
     )
     args.out_dir.mkdir(parents=True, exist_ok=True)
     failed = []
@@ -129,6 +133,7 @@ def main(argv: list[str] | None = None) -> int:
             "metadata": {
                 "model": REPO_ID,
                 "device": device,
+                "batch_size": args.batch_size,
                 "runtime_sec": round(runtime, 3),
             },
         }

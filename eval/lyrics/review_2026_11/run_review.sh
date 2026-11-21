@@ -64,7 +64,7 @@ run_stage() {
       --input mix --wav-dir "$E/wav" --out-dir "$RAW" || rc=$? ;;
     sylla) "$PY" eval/lyrics/review_2026_11/ctc_lyrics.py --model sylla \
       --wav-dir "$E/wav" --out-dir "$RAW" || rc=$? ;;
-    heart) "$PY" -m eval.lyrics.review_2026_11.heart_asr \
+    heart) "$PY" -m eval.lyrics.review_2026_11.heart_asr --batch-size 1 \
       --wav-dir "$E/wav" --out-dir "$RAW" || rc=$? ;;
     *)
       echo "unknown stage $name"
