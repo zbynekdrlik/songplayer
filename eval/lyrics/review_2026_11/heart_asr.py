@@ -91,7 +91,11 @@ def main(argv: list[str] | None = None) -> int:
         wav = args.wav_dir / f"{vid}_vocal16k.wav"
         out_path = args.out_dir / f"{BACKEND_ID}_{vid}.json"
         if not wav.exists():
-            row = {"backend_id": BACKEND_ID, "error": f"no input {wav.name}", "lines": []}
+            row = {
+                "backend_id": BACKEND_ID,
+                "error": f"no input {wav.name}",
+                "lines": [],
+            }
             out_path.write_text(json.dumps(row))
             print(f"{vid}: no input", flush=True)
             continue
