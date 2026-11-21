@@ -962,3 +962,7 @@ fn plan_sleep_tolerates_the_exact_slot_width_on_wide_slots() {
     );
     assert_eq!(d.sleep_100ns, 333_334);
 }
+
+// #289 step 1: every emitted pair pinned through the emit loop.
+#[path = "pacer_tests_commit.rs"]
+mod pacer_tests_commit;
