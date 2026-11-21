@@ -657,14 +657,15 @@ pub(crate) fn decode_and_send_paced(
             // The producer is stopped + joined after the block.
             Err(msg) => break 'song DecodeResult::Error(msg),
         };
+        // #289: one slot before the song's first pair leaves, as before;
+        // the early-end check below then reads the producer at that instant.
+        pacer.wait_one_slot_before_next(&mut sink, sleep_to_boundary);
         // #277: the video ended early before the song started (no picture
         // at all, the observed case): that failure is this Play's answer, as
         // a failed open's is.
         if let Some(reason) = shared.failure() {
             break 'song DecodeResult::Error(reason);
         }
-        // #289: one slot before the song's first pair leaves, as before.
-        pacer.wait_one_slot_before_next(&mut sink, sleep_to_boundary);
         let started = PipelineEvent::Started {
             duration_ms,
             position_ms,

@@ -662,9 +662,14 @@ fn a_flush_on_a_wall_that_stands_still_still_empties_the_line() {
 /// the lead as without it (the engine's title clock counts from it).
 #[test]
 fn the_start_goes_out_one_slot_before_the_first_frame_leaves() {
-    for lead_slots in [0, AUDIO_LEAD_SLOTS] {
+    // Three idle lengths put both slot widths (333 333 / 333 334) before the
+    // song's first boundary.
+    for (lead_slots, idle) in [0, AUDIO_LEAD_SLOTS]
+        .into_iter()
+        .flat_map(|k| [(k, 2), (k, 3), (k, 4)])
+    {
         let mut rig = Rig::new(lead_slots);
-        rig.idle(3);
+        rig.idle(idle);
         rig.preroll(2);
         rig.play(song(30, 1, 10, 1, 0, 0), Vec::new());
         rig.end_scope();
@@ -680,7 +685,7 @@ fn the_start_goes_out_one_slot_before_the_first_frame_leaves() {
 }
 
 /// A `Position` reports the frame due one lead earlier than the one just
-/// taken for the boundary being committed.
+/// taken for the boundary being committed: the frame on the output now.
 #[test]
 fn a_position_reports_the_frame_that_goes_out_next() {
     let k0 = Rig::new(0);

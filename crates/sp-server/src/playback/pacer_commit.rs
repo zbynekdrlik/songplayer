@@ -18,9 +18,13 @@
 //!   the song's end) reaches the pacer at its next decision, so it applies
 //!   from the first boundary not yet committed; the committed pair still
 //!   leaves.
-//! - A scope end (a song, an idle stretch) calls [`Pacer::flush_line`]
-//!   before it hands the grid back to the paced output, so the output
-//!   continues after the last committed stamp.
+//! - A scope end (a song, an idle stretch) ends by `PacedFeed::finish`:
+//!   [`Pacer::flush_line`], then the detach, so the paced output continues
+//!   after the last committed stamp.
+//! - The song's `Started` waits for the wall one slot before its first
+//!   boundary ([`Pacer::wait_one_slot_before_next`]) and a `Position` reads
+//!   [`Pacer::shown_position_ms`], so the engine's title clock and lyrics
+//!   keep their relation to the picture.
 //! - A pair whose stamp lies more than the lead + one slot ahead of the real
 //!   wall (the wall stepped back after the commit) leaves at once, in order,
 //!   as the pacer would have emitted it at its decision.
@@ -253,7 +257,8 @@ impl Pacer {
 
     /// The song position (ms) to report for `decoded_ms`, the frame just
     /// taken for the boundary being committed: the lead earlier, so a
-    /// `Position` reads what goes out next, as before #289 (the lyrics).
+    /// `Position` reads the frame on the output now, as before #289 (the
+    /// lyrics).
     pub fn shown_position_ms(&self, decoded_ms: u64) -> u64 {
         let lead_ms = (self.lead_100ns / 10_000) as u64;
         decoded_ms.saturating_sub(lead_ms)
