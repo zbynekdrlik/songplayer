@@ -38,6 +38,18 @@ catalog).
   `operator torchvision::nms does not exist`, only shows on a direct import of
   the modeling module). Install the matching `torchvision==<v>+cu128` from the
   PyTorch index.
+- **A CTC model's read window is its TRAINED length, context included:**
+  w2v-bert-lyrics / sylla were trained on ≤ 30 s, so each read is 30 s total
+  (26 s kept + 2 s context each side). Reading "30 s + 2 s each side" (34 s)
+  cost the no-text tier 1.1–2.7 pts on 2026-11-21 (aligners ≤ 0.3).
+- **Whisper word timestamps (cross-attention DTW) cannot form lines:** words
+  come back back-to-back (median gap 0 ms), so the 400 ms grouping yields
+  ~0.1× the gold's lines (HeartTranscriptor-oss, 0.1 %). A Whisper-family
+  candidate needs its own segment times, or it is no no-text tier.
+- **The comparable view is the 17 fixtures the production pair has raw for**
+  (`score_review.py` "common"); dev1 CAN download `vpwDdb8r9Bk` /
+  `fHYLw-2tTx4`, and an ASR scored on them reads ~3 pts higher — never
+  compare that "all" view with the baselines.
 - **One GPU stage at a time on the 8 GB card, and HeartTranscriptor at batch
   1:** its word-timestamp DTW keeps every cross-attention, so heartlib's
   batch 16 (and 4) OOM the card even alone; the separation prep holds ~4 GB
