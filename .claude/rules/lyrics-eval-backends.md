@@ -38,8 +38,11 @@ catalog).
   `operator torchvision::nms does not exist`, only shows on a direct import of
   the modeling module). Install the matching `torchvision==<v>+cu128` from the
   PyTorch index.
-- **One GPU stage at a time on the 8 GB card:** HeartTranscriptor (Whisper,
-  fp16, batch 16) OOMs while the separation prep holds ~4 GB.
+- **One GPU stage at a time on the 8 GB card, and HeartTranscriptor at batch
+  1:** its word-timestamp DTW keeps every cross-attention, so heartlib's
+  batch 16 (and 4) OOM the card even alone; the separation prep holds ~4 GB
+  more. `heart_asr.py` defaults to 1 (the batch only groups independent
+  chunks, the transcript is unchanged).
 
 ## Driving win-resolume from a backend session
 

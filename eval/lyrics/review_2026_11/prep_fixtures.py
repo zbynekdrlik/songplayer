@@ -7,7 +7,7 @@ so this rebuilds the same shape locally with the PRODUCTION chain as it is
 today (#144): yt-dlp bestaudio -> Kim Mel-Band RoFormer vocals
 (``vocals_mel_band_roformer.ckpt``, the stems worker's model) -> anvuew
 dereverb (``dereverb_mel_band_roformer_anvuew_sdr_19.1729.ckpt``, the
-lyrics worker's model) -> 16 kHz mono float32, peak-clamped to 1.0.
+lyrics worker's model) -> 16 kHz mono float32, scaled down to a peak of 1.0 only when it exceeds 1.0.
 
 It also keeps the full mix as ``<video_id>_mix16k.wav`` (16 kHz mono) for
 models designed for full mixes.
@@ -137,7 +137,10 @@ def main(argv: list[str] | None = None) -> int:
                 failed.append(vid)
                 print(f"{vid}: FAILED {exc!r}", flush=True)
             for f in work.iterdir():
-                f.unlink()
+                if f.is_dir():
+                    shutil.rmtree(f)
+                else:
+                    f.unlink()
     finally:
         shutil.rmtree(work, ignore_errors=True)
     print(f"done; failed={failed}", flush=True)

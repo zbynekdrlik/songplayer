@@ -59,10 +59,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--wav-dir", type=Path, required=True)
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument("--only", nargs="*", default=[])
-    # heartlib's 16 (and even 4: word-timestamp DTW keeps every cross-attention)
-    # OOMs an 8 GB card; the batch only groups independent
-    # 30 s chunks, so a smaller one changes memory, not the transcript.
-    ap.add_argument("--batch-size", type=int, default=16)
+    # heartlib uses 16, but 16 and even 4 OOM an 8 GB card on their own
+    # (word-timestamp DTW keeps every cross-attention); the batch only groups
+    # independent 30 s chunks, so 1 changes memory, not the transcript.
+    ap.add_argument("--batch-size", type=int, default=1)
     args = ap.parse_args(argv)
 
     import soundfile as sf

@@ -23,8 +23,9 @@ Two modes, one inference pass (logits) per song:
     frame times, grouped into lines at a 400 ms silence gap (the same
     grouping the 2026-09-12 g35t adapter and the AAI/Soniox adapters used).
 
-Long audio follows the model card: 30 s windows with 2 s context on each
-side, only each window's centre kept, logits concatenated.
+Long audio follows the model card ("trained on windows of up to 30 s"):
+each read is at most 30 s — a 26 s centre kept plus 2 s of context on each
+side — and the kept logits are concatenated.
 
 Output: ``<out-dir>/<backend_id>_<video_id>.json`` in the aligner-raw shape
 ``score_aligner.py`` reads. A fixture with no input writes an error row.
@@ -46,8 +47,10 @@ MODELS = {
     "sylla": "radiant-lyrics/sylla-600m-v1",
 }
 FRAME_MS = 20
-WINDOW_S = 30.0
+READ_S = 30.0  # the longest window the model was trained on
 CONTEXT_S = 2.0
+WINDOW_S = READ_S - 2 * CONTEXT_S  # the kept centre of each read
+BLANK_ID = 0
 SR = 16000
 LINE_GAP_MS = 400
 REPO = Path(__file__).resolve().parents[3]
@@ -99,20 +102,24 @@ def logits_for(model, processor, audio, device) -> Any:
         with torch.inference_mode():
             lp = torch.log_softmax(model(**inputs).logits[0].float(), dim=-1).cpu()
         a = frames_for(k0 - r0)
-        b = min(lp.shape[0], a + frames_for(k1 - k0))
-        parts.append(lp[a:b])
+        want = a + frames_for(k1 - k0)
+        if k1 < len(audio) and lp.shape[0] < want:
+            # an interior window short of frames would shift every later frame
+            raise RuntimeError(f"window {k0}-{k1}: {lp.shape[0]} frames < {want}")
+        parts.append(lp[a : min(lp.shape[0], want)])
     return torch.cat(parts, dim=0)
 
 
-def align_lines(lp, vocab: dict[str, int], ref_lines: list[str]) -> list[dict]:
-    """CTC Viterbi of every reference word, in song order, against the whole
-    song's log-probs. Returns produced lines (untimed lines kept, null start)."""
-    import torch
-    import torchaudio.functional as taf
-
+def build_targets(
+    vocab: dict[str, int], ref_lines: list[str]
+) -> tuple[list[int], list[tuple[int, int] | None], list[list[str]]]:
+    """The CTC target sequence for the whole song: every reference word's
+    characters, ``|`` between words. ``owner[i]`` is the (line, word) of
+    target token i (None for a separator); words with no character the
+    model knows are left out (their line may end up untimed)."""
     sep = vocab["|"]
     targets: list[int] = [sep]
-    owner: list[tuple[int, int] | None] = [None]  # (line, word) per token
+    owner: list[tuple[int, int] | None] = [None]
     words_per_line: list[list[str]] = []
     for li, text in enumerate(ref_lines):
         kept = []
@@ -129,26 +136,41 @@ def align_lines(lp, vocab: dict[str, int], ref_lines: list[str]) -> list[dict]:
             targets.append(sep)
             owner.append(None)
         words_per_line.append(kept)
-    timed: dict[tuple[int, int], list[int]] = {}
-    if len(targets) > 1:
-        path, _ = taf.forced_align(
-            lp.unsqueeze(0), torch.tensor([targets], dtype=torch.int32), blank=0
-        )
-        path = path[0].tolist()
-        ti = -1
-        prev = 0
-        for frame, tok in enumerate(path):
-            if tok != 0 and (tok != prev or prev == 0):
-                ti += 1
-            if tok != 0 and owner[ti] is not None:
-                span = timed.setdefault(owner[ti], [frame, frame])
-                span[1] = frame
-            prev = tok
+    return targets, owner, words_per_line
+
+
+def word_spans(
+    path: list[int], owner: list[tuple[int, int] | None]
+) -> dict[tuple[int, int], list[int]]:
+    """Walk a CTC forced-alignment frame path: a new target token starts at
+    every non-blank frame whose token differs from the previous frame's, or
+    follows a blank (a doubled letter always has a blank between its two
+    copies). Returns (line, word) -> [first frame, last frame]."""
+    spans: dict[tuple[int, int], list[int]] = {}
+    ti = -1
+    prev = BLANK_ID
+    for frame, tok in enumerate(path):
+        if tok != BLANK_ID and (tok != prev or prev == BLANK_ID):
+            ti += 1
+        if tok != BLANK_ID and owner[ti] is not None:
+            span = spans.setdefault(owner[ti], [frame, frame])
+            span[1] = frame
+        prev = tok
+    return spans
+
+
+def lines_from_spans(
+    ref_lines: list[str],
+    words_per_line: list[list[str]],
+    spans: dict[tuple[int, int], list[int]],
+) -> list[dict]:
+    """Produced lines in reference order; a line with no aligned word is
+    UNTIMED (null start/end), never guessed."""
     lines = []
     for li, text in enumerate(ref_lines):
         words = []
         for wi, raw in enumerate(words_per_line[li]):
-            span = timed.get((li, wi))
+            span = spans.get((li, wi))
             if span is None:
                 continue
             words.append(
@@ -174,24 +196,43 @@ def align_lines(lp, vocab: dict[str, int], ref_lines: list[str]) -> list[dict]:
     return lines
 
 
-def greedy_words(lp, id_to_tok: dict[int, str]) -> list[dict]:
-    """Greedy CTC decode into words with frame times ('|' = word separator)."""
-    best = lp.argmax(dim=-1).tolist()
+def align_lines(lp, vocab: dict[str, int], ref_lines: list[str]) -> list[dict]:
+    """CTC Viterbi of every reference word, in song order, against the whole
+    song's log-probs. Returns produced lines (untimed lines kept, null start)."""
+    import torch
+    import torchaudio.functional as taf
+
+    targets, owner, words_per_line = build_targets(vocab, ref_lines)
+    spans: dict[tuple[int, int], list[int]] = {}
+    if len(targets) > 1:
+        path, _ = taf.forced_align(
+            lp.unsqueeze(0),
+            torch.tensor([targets], dtype=torch.int32),
+            blank=BLANK_ID,
+        )
+        spans = word_spans(path[0].tolist(), owner)
+    return lines_from_spans(ref_lines, words_per_line, spans)
+
+
+def greedy_words(best: list[int], id_to_tok: dict[int, str]) -> list[dict]:
+    """Greedy CTC decode of the per-frame best token ids into words with
+    frame times (``|`` = word separator). A word's end moves only with a
+    letter actually appended, never with a ``<…>`` special token."""
     words: list[dict] = []
-    cur, start, end, prev = "", None, None, 0
+    cur, start, end, prev = "", None, None, BLANK_ID
     for frame, tok in enumerate(best):
-        if tok != 0 and tok != prev:
+        if tok != BLANK_ID:
             ch = id_to_tok.get(tok, "")
             if ch == "|":
-                if cur:
+                if tok != prev and cur:
                     words.append({"text": cur, "start_ms": start, "end_ms": end})
-                cur, start = "", None
+                    cur, start = "", None
             elif ch and not ch.startswith("<"):
-                if start is None:
-                    start = frame * FRAME_MS
-                cur += ch
-        if tok != 0 and id_to_tok.get(tok) != "|":
-            end = (frame + 1) * FRAME_MS
+                if tok != prev:
+                    if start is None:
+                        start = frame * FRAME_MS
+                    cur += ch
+                end = (frame + 1) * FRAME_MS
         prev = tok
     if cur:
         words.append({"text": cur, "start_ms": start, "end_ms": end})
@@ -243,6 +284,8 @@ def main(argv: list[str] | None = None) -> int:
     processor = Wav2Vec2BertProcessor.from_pretrained(repo)
     model = Wav2Vec2BertForCTC.from_pretrained(repo).eval().to(device)
     vocab = processor.tokenizer.get_vocab()
+    if vocab.get("<blank>") != BLANK_ID:
+        raise RuntimeError(f"{repo}: <blank> is {vocab.get('<blank>')}, not {BLANK_ID}")
     id_to_tok = {v: k for k, v in vocab.items()}
     suffix = "" if args.input == "vocal" else "-mix"
     align_id = f"{args.model}-align{suffix}"
@@ -270,7 +313,7 @@ def main(argv: list[str] | None = None) -> int:
         lp = logits_for(model, processor, audio, device)
         infer_s = time.monotonic() - t0
         duration_ms = int(len(audio) * 1000 / SR)
-        asr_lines = group_lines(greedy_words(lp, id_to_tok))
+        asr_lines = group_lines(greedy_words(lp.argmax(dim=-1).tolist(), id_to_tok))
         out = {
             "backend_id": asr_id,
             "wav_path": str(wav),

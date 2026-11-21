@@ -35,7 +35,13 @@ stage_mtl() {
     out="$RAW/lyrics-alignment-mtl-dev1_${vid}.json"
     [ -f "$out" ] && continue
     if [ ! -f "$wav" ]; then
-      echo "$vid: no wav"
+      # a reference from the old manifest whose video left it is not a failure
+      if grep -q "\"$vid\"" "$W/eval/lyrics/manifest.json"; then
+        rc=1
+        echo "$vid: FAILED no wav"
+      else
+        echo "$vid: not in the manifest"
+      fi
       continue
     fi
     if "$PY" eval/lyrics/aligners/lyrics_alignment_mtl/run.py --wav "$wav" \
@@ -64,7 +70,7 @@ run_stage() {
       --input mix --wav-dir "$E/wav" --out-dir "$RAW" || rc=$? ;;
     sylla) "$PY" eval/lyrics/review_2026_11/ctc_lyrics.py --model sylla \
       --wav-dir "$E/wav" --out-dir "$RAW" || rc=$? ;;
-    heart) "$PY" -m eval.lyrics.review_2026_11.heart_asr --batch-size 1 \
+    heart) "$PY" -m eval.lyrics.review_2026_11.heart_asr \
       --wav-dir "$E/wav" --out-dir "$RAW" || rc=$? ;;
     *)
       echo "unknown stage $name"
@@ -77,6 +83,9 @@ run_stage() {
 
 stages=("$@")
 [ "${#stages[@]}" -eq 0 ] && stages=(mtl w2v w2v-mix sylla heart)
+failed=0
 for s in "${stages[@]}"; do
   run_stage "$s"
+  [ "$(cat "$E/$s.rc")" = "0" ] || failed=1
 done
+exit "$failed"
