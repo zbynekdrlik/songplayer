@@ -602,10 +602,8 @@ pub(crate) fn decode_and_send_paced(
     let mut hb_prev_total: u64 = handoff_ref.submitted();
     let mut hb_prev_instant = Instant::now();
 
-    // #289: the sink outlives the song block, so the committed pair is
-    // flushed into it before the grid is handed back.
-    let mut sink = feed.sink();
     let result: DecodeResult = 'song: {
+        let mut sink = feed.sink();
         // #147 song-start pre-roll (ROZHODNUTÉ 5842127369): while the producer
         // opens the decoder and decodes the first frame, EVERY boundary still
         // carries the standby pair (black + one silent block) through this sink.
@@ -665,6 +663,8 @@ pub(crate) fn decode_and_send_paced(
         if let Some(reason) = shared.failure() {
             break 'song DecodeResult::Error(reason);
         }
+        // #289: one slot before the song's first pair leaves, as before.
+        pacer.wait_one_slot_before_next(&mut sink, sleep_to_boundary);
         let started = PipelineEvent::Started {
             duration_ms,
             position_ms,
@@ -866,7 +866,7 @@ pub(crate) fn decode_and_send_paced(
                         let _ = event_tx.send((
                             playlist_id,
                             PipelineEvent::Position {
-                                position_ms: last_decoded_ms,
+                                position_ms: pacer.shown_position_ms(last_decoded_ms),
                                 duration_ms,
                             },
                         ));
@@ -929,8 +929,7 @@ pub(crate) fn decode_and_send_paced(
     // that used to skip 1–3 slots. Nothing is joined: the consumer is the
     // pipeline's, alive across songs. #289: the pair the pacer committed
     // ahead leaves at its stamp first, so the consumer continues after it.
-    pacer.flush_line(&mut sink, sleep_to_boundary);
-    drop(feed);
+    feed.finish(pacer, sleep_to_boundary);
 
     // Stop the producer + join it so the decoder drops on its own STA thread
     // before this pipeline call returns (#147). A backpressured / post-EOS

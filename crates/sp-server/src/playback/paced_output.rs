@@ -303,6 +303,18 @@ impl<'a> PacedFeed<'a> {
     pub fn sink(&self) -> HandoffSink<'a> {
         HandoffSink::new(self.handoff)
     }
+
+    /// End the scope (#289): hand out every pair `pacer` committed ahead at
+    /// its stamp (`Pacer::flush_line`, `wait` as there), THEN detach, so the
+    /// consumer continues after the last committed stamp. Every scope that
+    /// ends normally ends here; a plain drop (an unwind) only detaches.
+    pub fn finish<W: FnMut(&crate::playback::pacer::Pacer, i64)>(
+        self,
+        pacer: &mut crate::playback::pacer::Pacer,
+        wait: W,
+    ) {
+        pacer.flush_line(&mut self.sink(), wait);
+    }
 }
 
 impl Drop for PacedFeed<'_> {
@@ -721,3 +733,6 @@ mod tests;
 #[cfg(test)]
 #[path = "paced_output_tests_bus.rs"]
 mod tests_bus;
+#[cfg(test)]
+#[path = "paced_output_tests_commit.rs"] // #289 step 1: a scope ends by its flush
+mod tests_commit;

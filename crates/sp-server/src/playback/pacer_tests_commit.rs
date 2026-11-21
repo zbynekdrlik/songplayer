@@ -80,6 +80,8 @@ struct Rec {
     at: Vec<i64>,
     /// The real wall at each command the emit loop read.
     cmds: Vec<i64>,
+    /// The real wall at each song's `Started` (after the pre-roll).
+    starts: Vec<i64>,
 }
 
 impl Rec {
@@ -89,6 +91,7 @@ impl Rec {
             pairs: Vec::new(),
             at: Vec::new(),
             cmds: Vec::new(),
+            starts: Vec::new(),
         }
     }
 
@@ -305,6 +308,9 @@ impl Rig {
             },
             |_, until| Self::wait_to(&clk, lead, until),
         );
+        let wait = |_: &Pacer, until| Self::wait_to(&clk, lead, until);
+        self.pacer.wait_one_slot_before_next(&mut self.rec, wait);
+        self.rec.starts.push(self.clk.get());
     }
 
     /// Play `frames` through the emit loop, `script` read at its iterations;
@@ -650,4 +656,36 @@ fn a_flush_on_a_wall_that_stands_still_still_empties_the_line() {
     assert_eq!(rig.pacer.committed(), 0);
     assert_eq!(rig.rec.pairs.len(), 2);
     assert_eq!(waits, 4, "FLUSH_MAX_WAITS");
+}
+
+/// A song's `Started` goes out one slot before its first pair leaves, with
+/// the lead as without it (the engine's title clock counts from it).
+#[test]
+fn the_start_goes_out_one_slot_before_the_first_frame_leaves() {
+    for lead_slots in [0, AUDIO_LEAD_SLOTS] {
+        let mut rig = Rig::new(lead_slots);
+        rig.idle(3);
+        rig.preroll(2);
+        rig.play(song(30, 1, 10, 1, 0, 0), Vec::new());
+        rig.end_scope();
+        let first = rig.rec.pairs.iter().position(|p| p.kind == Kind::Emit);
+        let first = first.expect("the song's first frame");
+        let previous = rig.rec.pairs[first - 1].vtc;
+        assert_eq!(
+            rig.rec.starts,
+            vec![previous],
+            "K = {lead_slots}: Started at the boundary before the song's first"
+        );
+    }
+}
+
+/// A `Position` reports the frame due one lead earlier than the one just
+/// taken for the boundary being committed.
+#[test]
+fn a_position_reports_the_frame_that_goes_out_next() {
+    let k0 = Rig::new(0);
+    assert_eq!(k0.pacer.shown_position_ms(5_000), 5_000);
+    let k1 = Rig::new(AUDIO_LEAD_SLOTS);
+    assert_eq!(k1.pacer.shown_position_ms(5_000), 4_967);
+    assert_eq!(k1.pacer.shown_position_ms(20), 0, "never below the start");
 }

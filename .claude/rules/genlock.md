@@ -1099,11 +1099,24 @@ is unchanged. Nothing is handed to the bus early yet (step 2).
 - A command read after a commit (pause, resume, seek, stop, a new Play,
   the song's end) applies from the first boundary not yet committed: up to
   one slot later than before.
-- A scope end calls `Pacer::flush_line(&mut sink, sleep_to_boundary)`
-  BEFORE it drops its `PacedFeed` (`decode_and_send_paced`,
-  `run_idle_wait`): the committed pair leaves at its stamp, and the paced
-  output continues after it. A new emit loop that attaches a feed must do
-  the same, or its last committed pair is lost.
+- A scope ends by `PacedFeed::finish(pacer, sleep_to_boundary)`
+  (`decode_and_send_paced`, `run_idle_wait`): `Pacer::flush_line` hands the
+  committed pair out at its stamp, THEN the feed detaches, so the paced
+  output continues after it. A plain drop (an unwind) only detaches, and
+  the pair is lost (`paced_output_tests_commit.rs` pins both). A new emit
+  loop ends its scope by `finish` too.
+- The engine's events keep their relation to the picture: the song's
+  `Started` waits (`Pacer::wait_one_slot_before_next`, handing out the
+  pairs due meanwhile) until the real wall stands one slot before the
+  song's first boundary, as a pacer with no lead stands after its
+  pre-roll (the title clock counts from `Started`); a `Position` reports
+  `Pacer::shown_position_ms` = the taken frame's ms less the lead (33 ms),
+  the frame that goes out next, as before (the lyrics). A `Seeked`
+  (sent by the producer) is unchanged; the seek itself applies a slot
+  later (the command rule above).
+- The lead is the integer slot 333 333 while the grid's slots are 333 333
+  / 333 334 wide, so after a wide slot a pair leaves up to 100 ns after
+  its stamp, never before it.
 - A pair more than lead + one slot ahead of the real wall (a backward wall
   step after the commit) leaves at once, in order (`CommitLine::release`).
 - The lateness telemetry (`late_frames`, `max_late_us`, `jitter_p99_us`,

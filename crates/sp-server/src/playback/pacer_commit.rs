@@ -38,6 +38,7 @@ use super::{FrameBlend, PacedFrame, PacedSink, Pacer, ServiceOutcome, Standby};
 use crate::playback::picture::Picture;
 use crate::playback::program_bus::CUT_LEAD_SLOTS;
 use crate::playback::wallclock::WallClock;
+use sp_core::genlock::floor_boundary_100ns;
 
 /// How many boundaries ahead the pacer commits (#289, K). A cut lands
 /// `CUT_LEAD_SLOTS` after the next boundary, so a boundary decided K ahead
@@ -46,8 +47,10 @@ pub const AUDIO_LEAD_SLOTS: i64 = 1;
 
 const _: () = assert!(CUT_LEAD_SLOTS >= AUDIO_LEAD_SLOTS);
 
-/// The most waits [`Pacer::flush_line`] makes: a line K deep needs K, one
-/// more covers a wall that stood still through a wait (a hold).
+/// The most waits [`Pacer::flush_line`] makes: a line K deep needs K
+/// (1 in production), and a wait that returns early (`sleep_to_boundary`
+/// bails on a backward step, its coarse sleep is clamped to 1 s) gets a few
+/// more before what is left leaves at once.
 const FLUSH_MAX_WAITS: usize = 4;
 
 /// Which [`PacedSink`] method a committed pair leaves through.
@@ -230,6 +233,32 @@ impl Pacer {
         self.line.release_all(sink);
     }
 
+    /// Wait, handing out the pairs due meanwhile, until the REAL wall stands
+    /// one slot before the next boundary: where a pacer with no lead stands
+    /// after a pre-roll. The paced pipeline sends a song's `Started` there,
+    /// so it still reaches the engine (the title clock) one slot before the
+    /// song's first pair leaves; the decision clock then reads that boundary,
+    /// so the first commit is not late. With no lead the wall is already
+    /// past it (`wait` returns at once).
+    pub fn wait_one_slot_before_next<S, W>(&mut self, sink: &mut S, mut wait: W)
+    where
+        S: PacedSink,
+        W: FnMut(&Pacer, i64),
+    {
+        let previous = floor_boundary_100ns(self.next_boundary_100ns - 1, self.grid_fps);
+        let until = previous + self.lead_100ns;
+        wait(&*self, until);
+        self.release_due(sink);
+    }
+
+    /// The song position (ms) to report for `decoded_ms`, the frame just
+    /// taken for the boundary being committed: the lead earlier, so a
+    /// `Position` reads what goes out next, as before #289 (the lyrics).
+    pub fn shown_position_ms(&self, decoded_ms: u64) -> u64 {
+        let lead_ms = (self.lead_100ns / 10_000) as u64;
+        decoded_ms.saturating_sub(lead_ms)
+    }
+
     /// Release the due pairs, run `step` with the line as its sink, release
     /// again (with no lead the step's own pairs leave here).
     fn through_line<S, T>(
@@ -240,6 +269,7 @@ impl Pacer {
     where
         S: PacedSink,
     {
+        // B leaves before B + K's decision work (a pre-decode, a blend).
         self.release_due(sink);
         let mut line = std::mem::take(&mut self.line);
         let out = step(self, &mut line);
