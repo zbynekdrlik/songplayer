@@ -9,6 +9,38 @@ Every shape below was proven against the LIVE API on 2026-08-05, and in several
 cases the vendor docs were WRONG. Trust this file over the docs; re-verify only
 if a call starts failing.
 
+## Monthly model review (owner, 21.11.2026, #349)
+
+A model review runs once a month: the next one is due one month after the
+last report's date (`eval/lyrics/reports/<date>-review.md`; the first was
+2026-11-21, so the next is due 2026-12-21). Each review opens its own ticket
+from #349's checklist: every candidate's newest release read on the vendor's
+own page that day, each run on the current manifest with `score_aligner.py`
+(gold-normalized ≤ 400 ms of ALL gold lines, errored fixtures kept in the
+denominator), the production pair (mtl + Gemini 3.5 Transcribe) re-scored on
+the same manifest, a table of vendor claim vs our number, and `CHAMPION.md`
+updated. A paid candidate with no key in the secret channel is reported as
+"no key", never skipped silently. A winner changes production only through a
+design comment and the owner's ruling (a pipeline-version bump re-runs the
+catalog).
+
+- **dev1 runs the open-weight candidates without the Windows boxes:**
+  `review_2026_11/prep_fixtures.py` rebuilds the fixture WAVs with the
+  production separation chain, and the production aligner itself
+  (LyricsAlignment-MTL, `aligners/lyrics_alignment_mtl/run.py` unchanged,
+  upstream cloned) re-run on them is the input-parity anchor —
+  `review_2026_11/run_review.sh` runs every stage in order. Every model is
+  then read against mtl ON THE SAME AUDIO, never against a number measured on
+  win-resolume's eval-cache alone.
+- **dev1 venv trap:** a CPU `torchvision` wheel next to a `+cu128` torch makes
+  every transformers audio model fail to import with the generic
+  `Could not import module 'Wav2Vec2BertForCTC'` (the real error,
+  `operator torchvision::nms does not exist`, only shows on a direct import of
+  the modeling module). Install the matching `torchvision==<v>+cu128` from the
+  PyTorch index.
+- **One GPU stage at a time on the 8 GB card:** HeartTranscriptor (Whisper,
+  fp16, batch 16) OOMs while the separation prep holds ~4 GB.
+
 ## Driving win-resolume from a backend session
 
 - **`mcp__win-resolume__FileWrite` SILENTLY TRUNCATES content over ~20,000
