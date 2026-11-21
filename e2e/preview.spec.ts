@@ -279,6 +279,29 @@ test("with the lag knob the started preview shows the 'náhľad mešká N s' rea
   expect(n, "the readout must show a lag of at least 3 s").toBeGreaterThanOrEqual(3);
 });
 
+test("the preview stream is live: the <video> still decodes after the fixture's 4 s (#311)", async ({
+  page,
+}) => {
+  // #311: the mock used to send the 4.02 s fixture once and stop, so a runner
+  // slow enough to look later than 4 s after the start found the element at
+  // the end of its only buffered range (readyState 1). The server's stream
+  // never ends; the mock's must not either.
+  const { video } = await startPreview(page);
+  await page.waitForTimeout(6000);
+  await expectDecoded(video);
+  await expect
+    .poll(async () => video.evaluate((el: HTMLVideoElement) => el.currentTime), {
+      message: "playback went past the fixture's 4.02 s",
+      timeout: 10000,
+    })
+    .toBeGreaterThan(4.5);
+  // The buffer stays bounded: the repeats go out at real time, not as a burst.
+  const ahead = await video.evaluate((el: HTMLVideoElement) =>
+    el.buffered.length ? el.buffered.end(el.buffered.length - 1) - el.currentTime : 0,
+  );
+  expect(ahead, "seconds buffered ahead of the play position").toBeLessThan(6);
+});
+
 test("without the lag knob the live preview shows no lag readout (#184)", async ({
   page,
 }) => {
