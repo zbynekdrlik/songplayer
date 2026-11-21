@@ -32,15 +32,15 @@
 //! that fails, or a decode error on the GPU path, falls back to software for
 //! that file with a WARN — never a dead song.
 
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use sp_core::config::{
     DEFAULT_VIDEO_HW_DECODE, NdiSource, SETTING_MAX_RESOLUTION, SETTING_PROGRAM_NDI_SOURCE,
-    SETTING_VIDEO_DECODE, SETTING_VIDEO_DECODE_GPU_PRIORITY, SETTING_VIDEO_HW_DECODE, VideoDecode,
-    program_ndi_source, video_decode, video_decode_gpu_priority, video_hw_decode,
+    SETTING_VIDEO_DECODE, SETTING_VIDEO_HW_DECODE, VideoDecode, program_ndi_source, video_decode,
+    video_hw_decode,
 };
 use sp_decoder::{DecodeMode, DetachedCounts, HwDecodeStats};
 use sqlx::SqlitePool;
@@ -68,8 +68,6 @@ pub struct HwDecodeSetting {
     resident: AtomicBool,
     /// #279 P3a: `program_ndi_source` = `gpu` (the precondition).
     ndi_gpu: AtomicBool,
-    /// #330: `video_decode_gpu_priority`, the decode devices' GPU priority.
-    gpu_priority: AtomicI32,
 }
 
 impl Default for HwDecodeSetting {
@@ -79,7 +77,6 @@ impl Default for HwDecodeSetting {
             max_height: AtomicU32::new(max_resolution(None, DEFAULT_VIDEO_HW_DECODE)),
             resident: AtomicBool::new(false),
             ndi_gpu: AtomicBool::new(false),
-            gpu_priority: AtomicI32::new(0),
         }
     }
 }
@@ -133,16 +130,6 @@ impl HwDecodeSetting {
         self.ndi_gpu.swap(gpu, Ordering::Relaxed) != gpu
     }
 
-    /// #330: the decode devices' GPU priority, as last applied.
-    pub fn gpu_priority(&self) -> i32 {
-        self.gpu_priority.load(Ordering::Relaxed)
-    }
-
-    /// #330: apply the decode devices' GPU priority; whether it changed.
-    pub fn set_gpu_priority(&self, priority: i32) -> bool {
-        self.gpu_priority.swap(priority, Ordering::Relaxed) != priority
-    }
-
     /// #279 P3a: whether a song opened now decodes GPU-resident.
     pub fn resident(&self) -> Resident {
         let ndi = if self.ndi_gpu.load(Ordering::Relaxed) {
@@ -180,7 +167,6 @@ struct Stored {
     max_height: u32,
     decode: VideoDecode,
     ndi: NdiSource,
-    gpu_priority: i32,
 }
 
 /// `video_hw_decode`, the decode cap it gives `max_resolution`, and (#279
@@ -199,17 +185,11 @@ async fn load_settings(pool: &SqlitePool) -> Result<Stored, sqlx::Error> {
     // `video_hw_decode` off.
     let on_gpu = hw || Resident::of(decode, ndi) == Resident::On;
     let max_height = load_max_height(pool, on_gpu).await?;
-    let gpu_priority = video_decode_gpu_priority(
-        get_setting(pool, SETTING_VIDEO_DECODE_GPU_PRIORITY)
-            .await?
-            .as_deref(),
-    );
     Ok(Stored {
         hw,
         max_height,
         decode,
         ndi,
-        gpu_priority,
     })
 }
 
@@ -235,15 +215,12 @@ pub async fn apply_setting_to(
             let cap_changed = setting.set_max_height(stored.max_height);
             let decode_changed = setting.set_video_decode(stored.decode);
             let ndi_changed = setting.set_ndi_source(stored.ndi);
-            let priority_changed = setting.set_gpu_priority(stored.gpu_priority);
-            let changed =
-                hw_changed || cap_changed || decode_changed || ndi_changed || priority_changed;
+            let changed = hw_changed || cap_changed || decode_changed || ndi_changed;
             if changed {
                 info!(
                     hw_decode = stored.hw,
                     max_height = stored.max_height,
                     video_decode = stored.decode.as_str(),
-                    gpu_priority = stored.gpu_priority,
                     "video decode: settings applied (from the next song)"
                 );
             }
@@ -270,7 +247,6 @@ pub async fn run_settings_task(
             _ = shutdown.recv() => break,
             _ = tokio::time::sleep(poll) => {
                 apply_setting(&pool, &setting).await;
-                sp_gpu::decode_priority::set_requested(setting.gpu_priority());
             }
         }
     }
@@ -282,7 +258,6 @@ pub async fn run_settings_task(
 pub async fn start(pool: &SqlitePool, shutdown: &broadcast::Sender<()>) {
     let setting = global();
     apply_setting(pool, &setting).await;
-    sp_gpu::decode_priority::set_requested(setting.gpu_priority());
     info!(
         hw_decode = setting.hw(),
         max_height = setting.max_height(),
@@ -352,34 +327,6 @@ pub struct VideoDecodeStatus {
     /// #319: of those, the ones whose read has not returned yet: each still
     /// holds its file and, GPU-resident, one ring slot.
     pub stuck_video_readers_now: u64,
-    /// #330: the decode devices' GPU priority.
-    pub gpu_priority: GpuPriorityStatus,
-}
-
-/// #330: `video_decode.gpu_priority`: what a decode device made now is
-/// given, what the last one read back, and the devices that refused.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct GpuPriorityStatus {
-    /// The priority a decode device made now is given (the setting).
-    pub requested: i32,
-    /// The priority the last decode device was given, `null` before one.
-    pub applied: Option<i32>,
-    /// That device's `GetGPUThreadPriority`, `null` before one.
-    pub read_back: Option<i32>,
-    /// Decode devices whose priority could not be set or read back.
-    pub errors: u64,
-}
-
-impl From<sp_gpu::decode_priority::DecodePriorityStatus> for GpuPriorityStatus {
-    fn from(s: sp_gpu::decode_priority::DecodePriorityStatus) -> Self {
-        GpuPriorityStatus {
-            requested: s.requested,
-            applied: s.last.map(|a| a.requested),
-            read_back: s.last.map(|a| a.read_back),
-            errors: s.errors,
-        }
-    }
 }
 
 /// The status of `setting`, `stats`, `pipelines` and the stuck video
@@ -408,22 +355,18 @@ pub fn status_of(
         pipelines,
         stuck_video_readers: readers.stuck,
         stuck_video_readers_now: readers.stuck_now,
-        gpu_priority: GpuPriorityStatus::default(),
     }
 }
 
 /// The process's status (the global setting, `sp_decoder::hw_counters`,
 /// the GPU-resident pipelines' table and `sp_decoder::detached_readers`).
 pub fn status() -> VideoDecodeStatus {
-    VideoDecodeStatus {
-        gpu_priority: sp_gpu::decode_priority::status().into(),
-        ..status_of(
-            &global(),
-            sp_decoder::hw_counters().snapshot(),
-            pipelines().status(),
-            sp_decoder::detached_readers().snapshot(),
-        )
-    }
+    status_of(
+        &global(),
+        sp_decoder::hw_counters().snapshot(),
+        pipelines().status(),
+        sp_decoder::detached_readers().snapshot(),
+    )
 }
 
 #[cfg(test)]

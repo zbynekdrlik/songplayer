@@ -49,7 +49,7 @@ pub use spout_lock::{ListSentinel, mutex_holder, spout_list_holder};
 pub use spout_registry::{spout_sender_info, spout_sender_names};
 pub use spout_sender::SpoutSender;
 pub use vblank::VblankTracker;
-pub use video_device::{VideoDevice, apply_gpu_thread_priority};
+pub use video_device::VideoDevice;
 
 use crate::adapter::AdapterInfo;
 use crate::composition::{CANVAS_HEIGHT, CANVAS_WIDTH, Composition, Fit, MAX_FIT, Side, Target};

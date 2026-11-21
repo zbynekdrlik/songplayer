@@ -103,7 +103,6 @@
 mod adapter;
 mod color;
 mod composition;
-pub mod decode_priority;
 mod error;
 mod picture;
 pub mod probe;
@@ -169,6 +168,6 @@ pub use stub::{
 #[cfg(windows)]
 pub use win::{
     Compositor, ListSentinel, PictureRing, ProducerGpu, SpoutSender, VblankTracker, VideoDevice,
-    adapters, apply_gpu_thread_priority, mutex_holder, probe_gpu, probe_on_listed_adapter,
-    probe_warp, read_shared_texture, spout_list_holder, spout_sender_info, spout_sender_names,
+    adapters, mutex_holder, probe_gpu, probe_on_listed_adapter, probe_warp, read_shared_texture,
+    spout_list_holder, spout_sender_info, spout_sender_names,
 };

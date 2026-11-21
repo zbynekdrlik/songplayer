@@ -1830,21 +1830,3 @@ came 22 s after a software-decoded open. The cause is not separated (a
 Dante-network change elsewhere ran the same night), but the audio risk is
 real, so this setting is no A/B lever on SNV. Separate the steps of a song
 change another way (timestamps, or moving the title text-set in time).
-
-## The decode devices' GPU priority (#330)
-
-Setting `video_decode_gpu_priority` (`sp_core::config::video_decode_gpu_priority`:
-a whole number in −7..=7, trimmed; anything else 0 = DXGI's default). The 5 s
-settings task applies it to `HwDecodeSetting::gpu_priority`, and the GLOBAL
-paths only (`start`, `run_settings_task`) push it into
-`sp_gpu::decode_priority::set_requested`; tests apply to their own instance
-and never touch the process value. Every `VideoDevice` made after that (a
-`Hardware` reader's, a #279 producer's) is given it with
-`IDXGIDevice::SetGPUThreadPriority` and reads it back
-(`apply_gpu_thread_priority`, doc-hidden; a refusal is counted and WARNed,
-never a refused song). The compositor's device is never given it. So it
-takes effect from the next song's open. `GET /api/v1/status`
-`video_decode.gpu_priority {requested, applied, read_back, errors}`.
-It is #330's lever (d): Arena's rendering on the same GPU goes first; judge
-it only by an A/B/A ×2 with wall-bridge's slow shows AND the Dante pump's
-counters (#325), never one take.

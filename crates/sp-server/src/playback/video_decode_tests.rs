@@ -253,7 +253,6 @@ fn the_status_carries_the_setting_and_the_counters() {
             pipelines: rows,
             stuck_video_readers: 3,
             stuck_video_readers_now: 1,
-            gpu_priority: super::GpuPriorityStatus::default(),
         }
     );
     setting.set_video_decode(VideoDecode::Gpu);
@@ -316,12 +315,6 @@ fn the_status_serializes_to_the_documented_json() {
         }],
         stuck_video_readers: 2,
         stuck_video_readers_now: 1,
-        gpu_priority: super::GpuPriorityStatus {
-            requested: -4,
-            applied: Some(-4),
-            read_back: Some(-4),
-            errors: 0,
-        },
     })
     .unwrap();
     assert_eq!(json["hw_decode"], true);
@@ -356,8 +349,6 @@ fn the_status_serializes_to_the_documented_json() {
     // #319.
     assert_eq!(json["stuck_video_readers"], 2);
     assert_eq!(json["stuck_video_readers_now"], 1);
-    // #330.
-    assert_eq!(json["gpu_priority"]["requested"], -4);
     // A block from an older build, missing keys: each reads as its zero.
     let old: VideoDecodeStatus = serde_json::from_str(r#"{"hw_decode": true}"#).unwrap();
     assert_eq!(
@@ -410,73 +401,6 @@ async fn the_status_route_carries_the_video_decode_block() {
     }
     assert!(block["video_decode"].is_string(), "{json}");
     assert!(block["pipelines"].is_array(), "{json}");
-    let priority = &block["gpu_priority"];
-    assert!(priority["requested"].is_i64(), "{json}");
-    assert!(priority["errors"].is_u64(), "{json}");
-}
-
-/// #330: the decode devices' GPU priority is a change the task applies on
-/// its own, read in DXGI's range; anything else is the default 0.
-#[tokio::test]
-async fn the_decode_gpu_priority_is_applied_on_its_own() {
-    let pool = settings_pool().await;
-    let setting = HwDecodeSetting::default();
-    assert!(!apply_setting(&pool, &setting).await, "the defaults");
-    assert_eq!(setting.gpu_priority(), 0);
-    set_setting(&pool, "video_decode_gpu_priority", "-4")
-        .await
-        .unwrap();
-    assert!(apply_setting(&pool, &setting).await, "the priority alone");
-    assert_eq!(setting.gpu_priority(), -4);
-    assert!(!apply_setting(&pool, &setting).await, "nothing changed");
-    set_setting(&pool, "video_decode_gpu_priority", "-9")
-        .await
-        .unwrap();
-    assert!(apply_setting(&pool, &setting).await, "out of range = 0");
-    assert_eq!(setting.gpu_priority(), 0);
-}
-
-/// #330: the status block carries sp-gpu's decode priority as it stands.
-#[test]
-fn the_gpu_priority_status_names_the_last_device() {
-    use super::GpuPriorityStatus;
-    use sp_gpu::decode_priority::{Applied, DecodePriorityStatus};
-    let none = GpuPriorityStatus::from(DecodePriorityStatus {
-        requested: -3,
-        last: None,
-        errors: 0,
-    });
-    assert_eq!(
-        none,
-        GpuPriorityStatus {
-            requested: -3,
-            applied: None,
-            read_back: None,
-            errors: 0
-        }
-    );
-    let one = GpuPriorityStatus::from(DecodePriorityStatus {
-        requested: -5,
-        last: Some(Applied {
-            requested: -4,
-            read_back: -2,
-        }),
-        errors: 7,
-    });
-    assert_eq!(
-        one,
-        GpuPriorityStatus {
-            requested: -5,
-            applied: Some(-4),
-            read_back: Some(-2),
-            errors: 7
-        }
-    );
-    let wire = serde_json::to_value(&one).unwrap();
-    assert_eq!(
-        wire,
-        serde_json::json!({"requested": -5, "applied": -4, "read_back": -2, "errors": 7})
-    );
 }
 
 /// #279 P3a: `video_decode` = `gpu` takes effect only while NDI comes from
