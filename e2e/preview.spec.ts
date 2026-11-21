@@ -206,9 +206,9 @@ test("the Dabing Player preview survives position ticks — WS opened once, neve
     // The regression proof: the SAME Player + <video> elements are still
     // connected (the Player was NOT re-created by the ticks) and the preview WS
     // opened exactly once and NEVER closed across the 8 s of ticks. (We do not
-    // re-assert readyState here — the mock streams a FINITE canned fMP4 fragment
-    // list, so after ~2 s the short clip has played out and readyState drops;
-    // the initial readyState>=3 above already proved it decoded, and a torn-down
+    // re-assert readyState here — the initial readyState>=3 above already
+    // proved it decoded (#311: the mock's stream no longer ends, the #311 test
+    // proves it keeps decoding), and a torn-down
     // preview would have shown up as a closed/duplicate WS, which it did not.)
     expect(await playerHandle!.evaluate((el) => el.isConnected)).toBe(true);
     expect(await videoHandle!.evaluate((el) => el.isConnected)).toBe(true);
@@ -277,6 +277,29 @@ test("with the lag knob the started preview shows the 'náhľad mešká N s' rea
   await expect(lag).toContainText("mešká");
   const n = Number((await lag.textContent())?.match(/\d+/)?.[0] ?? "0");
   expect(n, "the readout must show a lag of at least 3 s").toBeGreaterThanOrEqual(3);
+});
+
+test("the preview stream is live: the <video> still decodes after the fixture's 4 s (#311)", async ({
+  page,
+}) => {
+  // #311: the mock used to send the 4.02 s fixture once and stop, so a runner
+  // slow enough to look later than 4 s after the start found the element at
+  // the end of its only buffered range (readyState 1). The server's stream
+  // never ends; the mock's must not either.
+  const { video } = await startPreview(page);
+  await page.waitForTimeout(6000);
+  await expectDecoded(video);
+  await expect
+    .poll(async () => video.evaluate((el: HTMLVideoElement) => el.currentTime), {
+      message: "playback went past the fixture's 4.02 s",
+      timeout: 10000,
+    })
+    .toBeGreaterThan(4.5);
+  // The buffer stays bounded: the repeats go out at real time, not as a burst.
+  const ahead = await video.evaluate((el: HTMLVideoElement) =>
+    el.buffered.length ? el.buffered.end(el.buffered.length - 1) - el.currentTime : 0,
+  );
+  expect(ahead, "seconds buffered ahead of the play position").toBeLessThan(6);
 });
 
 test("without the lag knob the live preview shows no lag readout (#184)", async ({
