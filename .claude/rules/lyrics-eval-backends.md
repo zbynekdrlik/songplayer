@@ -11,6 +11,16 @@ if a call starts failing.
 
 ## Monthly model review (owner, 21.11.2026, #349)
 
+**Scope first (owner's ruling, 21.11.2026, after the November run measured
+the wrong things):** a candidate is run ONLY when it is a SOTA release NEWER
+than the last review (a new version of a vendor's flagship) AND it can
+plausibly beat production on quality AND cost both — its price per song is
+written next to production's BEFORE any run. Never re-run a model or a line
+already tested and closed as unusable (AssemblyAI U3-Pro, WhisperX, the
+CTC / open-weight aligners, Qwen) unless the vendor shipped a NEW version.
+Spending a review's budget on candidates that cannot improve and cheapen
+both is a wasted review.
+
 A model review runs once a month: the next one is due one month after the
 last report's date (`eval/lyrics/reports/<date>-review.md`; the first was
 2026-11-21, so the next is due 2026-12-21). Each review opens its own ticket
