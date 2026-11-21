@@ -120,7 +120,8 @@ pub(crate) fn run_idle_wait(
 
     // Hand the grid back to the paced output: it services every boundary until
     // the next scope (the song the queued command starts, or the next idle
-    // stretch) attaches.
+    // stretch) attaches. #289: the committed pair leaves at its stamp first.
+    pacer.flush_line(&mut sink, sleep_to_boundary);
     drop(feed);
     let gap_resyncs = pacer.stats().resyncs.saturating_sub(resyncs_before);
     if gap_resyncs > 0 {

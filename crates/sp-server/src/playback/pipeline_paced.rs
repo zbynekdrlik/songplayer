@@ -602,9 +602,10 @@ pub(crate) fn decode_and_send_paced(
     let mut hb_prev_total: u64 = handoff_ref.submitted();
     let mut hb_prev_instant = Instant::now();
 
+    // #289: the sink outlives the song block, so the committed pair is
+    // flushed into it before the grid is handed back.
+    let mut sink = feed.sink();
     let result: DecodeResult = 'song: {
-        let mut sink = feed.sink();
-
         // #147 song-start pre-roll (ROZHODNUTÉ 5842127369): while the producer
         // opens the decoder and decodes the first frame, EVERY boundary still
         // carries the standby pair (black + one silent block) through this sink.
@@ -926,7 +927,9 @@ pub(crate) fn decode_and_send_paced(
     // consumer services every boundary (the held picture + silence) while the
     // producer's MF decoder is torn down and the next song opens — the window
     // that used to skip 1–3 slots. Nothing is joined: the consumer is the
-    // pipeline's, alive across songs.
+    // pipeline's, alive across songs. #289: the pair the pacer committed
+    // ahead leaves at its stamp first, so the consumer continues after it.
+    pacer.flush_line(&mut sink, sleep_to_boundary);
     drop(feed);
 
     // Stop the producer + join it so the decoder drops on its own STA thread

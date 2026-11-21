@@ -13,11 +13,13 @@
 
 use std::collections::VecDeque;
 
+use sp_core::genlock::strict_next_boundary_100ns;
 use sp_ndi::AudioFrame;
 
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::pacer::{
-    FrameBlend, PacedFrame, PacedSink, Pacer, ServiceOutcome, Standby, StandbyBlack,
+    AUDIO_LEAD_SLOTS, FrameBlend, PacedFrame, PacedSink, Pacer, ServiceOutcome, Standby,
+    StandbyBlack,
 };
 use crate::playback::picture::Picture;
 use crate::playback::wallclock::{SettableClock, WallClock};
@@ -76,6 +78,8 @@ struct Rec {
     clk: SettableClock,
     pairs: Vec<Pair>,
     at: Vec<i64>,
+    /// The real wall at each command the emit loop read.
+    cmds: Vec<i64>,
 }
 
 impl Rec {
@@ -84,6 +88,7 @@ impl Rec {
             clk,
             pairs: Vec::new(),
             at: Vec::new(),
+            cmds: Vec::new(),
         }
     }
 
@@ -222,29 +227,36 @@ enum Cmd {
 struct Rig {
     pacer: Pacer,
     clk: SettableClock,
+    /// The commit lead (100 ns): the decision clock reads the wall + it.
+    lead: i64,
     rec: Rec,
     black: Picture,
 }
 
 impl Rig {
-    /// A pacer whose decision clock starts at timeline 0.
-    fn new() -> Self {
-        let (wall, clk) = WallClock::settable(0);
-        let pacer = Pacer::with_wallclock(30, true, wall);
+    /// A pacer committing `lead_slots` ahead, its decision clock starting at
+    /// timeline 0.
+    fn new(lead_slots: i64) -> Self {
+        let lead = lead_slots * 333_333;
+        let (wall, clk) = WallClock::settable(-lead);
+        let pacer = Pacer::with_lead(30, true, wall, lead_slots);
+        assert_eq!(pacer.lead_100ns(), lead);
         let mut px = vec![0u8; 12];
         px[..2].copy_from_slice(&BLACK_ID.to_le_bytes());
         Self {
             pacer,
             rec: Rec::new(clk.clone()),
             clk,
+            lead,
             black: SharedFrame::new(px).into(),
         }
     }
 
-    /// The real wall reaches the decision instant `until`.
-    fn wait_to(clk: &SettableClock, until: i64) {
-        if clk.get() < until {
-            clk.set(until);
+    /// The real wall reaches the instant the decision clock reads `until`
+    /// (production: `sleep_to_boundary` over `pacer.now_100ns()`).
+    fn wait_to(clk: &SettableClock, lead: i64, until: i64) {
+        if clk.get() < until - lead {
+            clk.set(until - lead);
         }
     }
 
@@ -262,7 +274,9 @@ impl Rig {
                 video: &self.black,
             };
             match self.pacer.service_standby(black.standby(), &mut self.rec) {
-                ServiceOutcome::Wait { until_100ns } => Self::wait_to(&self.clk, until_100ns),
+                ServiceOutcome::Wait { until_100ns } => {
+                    Self::wait_to(&self.clk, self.lead, until_100ns)
+                }
                 _ => {
                     self.pacer.tick_wall();
                     served += 1;
@@ -281,7 +295,7 @@ impl Rig {
             stride: 4,
             video: &self.black,
         };
-        let clk = self.clk.clone();
+        let (clk, lead) = (self.clk.clone(), self.lead);
         self.pacer.preroll(
             black,
             &mut self.rec,
@@ -289,14 +303,14 @@ impl Rig {
                 polls += 1;
                 (polls >= ready_at).then_some(())
             },
-            |_, until| Self::wait_to(&clk, until),
+            |_, until| Self::wait_to(&clk, lead, until),
         );
     }
 
     /// Play `frames` through the emit loop, `script` read at its iterations;
     /// returns at the song's end (after the play-out) or at a stop.
     fn play(&mut self, mut frames: VecDeque<PacedFrame>, mut script: Vec<(usize, Cmd)>) {
-        let clk = self.clk.clone();
+        let (clk, lead) = (self.clk.clone(), self.lead);
         let pacer = &mut self.pacer;
         let rec = &mut self.rec;
         let mut paused = false;
@@ -306,6 +320,7 @@ impl Rig {
                 frames = refill.take().expect("checked").1;
             }
             if let Some(pos) = script.iter().position(|(at, _)| *at == i) {
+                rec.cmds.push(clk.get());
                 match script.remove(pos).1 {
                     Cmd::Pause => paused = true,
                     Cmd::Resume => {
@@ -322,7 +337,7 @@ impl Rig {
             }
             if paused {
                 match pacer.service_standby(Standby::FrozenLast, &mut *rec) {
-                    ServiceOutcome::Wait { until_100ns } => Self::wait_to(&clk, until_100ns),
+                    ServiceOutcome::Wait { until_100ns } => Self::wait_to(&clk, lead, until_100ns),
                     _ => pacer.tick_wall(),
                 }
                 continue;
@@ -332,16 +347,17 @@ impl Rig {
             if frames.is_empty() && refill.is_none() {
                 pacer.audio_source_ended();
             }
-            Self::wait_to(&clk, target);
+            Self::wait_to(&clk, lead, target);
             match pacer.service(|| None, &mut *rec) {
                 ServiceOutcome::Wait { until_100ns }
                 | ServiceOutcome::Reanchored { until_100ns, .. } => {
-                    Self::wait_to(&clk, until_100ns)
+                    Self::wait_to(&clk, lead, until_100ns)
                 }
                 _ => {
                     pacer.tick_wall();
                     if frames.is_empty() && refill.is_none() && !pacer.has_pending() {
-                        pacer.play_out_audio(&mut *rec, |_, until| Self::wait_to(&clk, until));
+                        pacer
+                            .play_out_audio(&mut *rec, |_, until| Self::wait_to(&clk, lead, until));
                         return;
                     }
                 }
@@ -350,8 +366,14 @@ impl Rig {
         panic!("the song never ended");
     }
 
-    /// The scope ends: every pair handed out.
-    fn end_scope(&mut self) {}
+    /// The scope ends: every committed pair handed out at its stamp, as the
+    /// emit loops do before they drop their feed.
+    fn end_scope(&mut self) {
+        let (clk, lead) = (self.clk.clone(), self.lead);
+        let wait = |_: &Pacer, until| Self::wait_to(&clk, lead, until);
+        self.pacer.flush_line(&mut self.rec, wait);
+        assert_eq!(self.pacer.committed(), 0, "nothing left in the line");
+    }
 }
 
 /// 64-bit FNV-1a over the pairs' `Debug` text, in order.
@@ -405,22 +427,30 @@ fn census(pairs: &[Pair]) -> (usize, usize, usize, usize, usize) {
     )
 }
 
-/// Run one scenario and check its pairs against the pin.
-fn check(rig: Rig, census_pin: (usize, usize, usize, usize, usize), fp_pin: u64) {
-    assert_on_grid(&rig.rec);
-    let pairs = &rig.rec.pairs;
-    assert_eq!(census(pairs), census_pin, "kinds + audible pairs");
-    assert_eq!(
-        fingerprint(pairs),
-        fp_pin,
-        "every pair as before #289 step 1"
-    );
+/// Run one scenario with no lead and with the production lead, and check
+/// each run's pairs against the pin.
+fn check(scenario: fn(i64) -> Rig, census_pin: (usize, usize, usize, usize, usize), fp_pin: u64) {
+    for lead_slots in [0, AUDIO_LEAD_SLOTS] {
+        let rig = scenario(lead_slots);
+        assert_on_grid(&rig.rec);
+        let pairs = &rig.rec.pairs;
+        assert_eq!(
+            census(pairs),
+            census_pin,
+            "K = {lead_slots}: kinds + audible pairs"
+        );
+        assert_eq!(
+            fingerprint(pairs),
+            fp_pin,
+            "K = {lead_slots}: every pair as before #289 step 1"
+        );
+    }
 }
 
 /// A 30 fps song with audio, its audio 500 ms past the picture: idle, the
 /// pre-roll, the song, its play-out, idle.
-fn song_30() -> Rig {
-    let mut rig = Rig::new();
+fn song_30(lead_slots: i64) -> Rig {
+    let mut rig = Rig::new(lead_slots);
     rig.idle(4);
     rig.preroll(3);
     rig.play(song(30, 1, 90, 1, 0, 500), Vec::new());
@@ -431,12 +461,12 @@ fn song_30() -> Rig {
 
 #[test]
 fn a_30fps_song_emits_the_same_pairs() {
-    check(song_30(), (90, 15, 0, 10, 105), 8_643_186_858_566_154_753);
+    check(song_30, (90, 15, 0, 10, 105), 8_643_186_858_566_154_753);
 }
 
 /// A 25 fps song on the 30 fps grid: boundaries between two frames blend.
-fn song_25() -> Rig {
-    let mut rig = Rig::new();
+fn song_25(lead_slots: i64) -> Rig {
+    let mut rig = Rig::new(lead_slots);
     rig.idle(2);
     rig.preroll(2);
     rig.play(song(25, 1, 75, 1, 0, 0), Vec::new());
@@ -447,14 +477,14 @@ fn song_25() -> Rig {
 
 #[test]
 fn a_blended_25fps_song_emits_the_same_pairs() {
-    check(song_25(), (16, 1, 74, 6, 90), 14_227_950_745_936_186_259);
+    check(song_25, (16, 1, 74, 6, 90), 14_227_950_745_936_186_259);
 }
 
 /// A seek 30 boundaries in, its frames 4 iterations later: the refill holds
 /// the pre-seek picture, then the
 /// song plays on from 4 s.
-fn seek() -> Rig {
-    let mut rig = Rig::new();
+fn seek(lead_slots: i64) -> Rig {
+    let mut rig = Rig::new(lead_slots);
     rig.idle(2);
     rig.preroll(2);
     let script = vec![(30, Cmd::Seek(song(30, 1, 60, 1000, 4000, 0), 4))];
@@ -466,12 +496,12 @@ fn seek() -> Rig {
 
 #[test]
 fn a_seek_emits_the_same_pairs() {
-    check(seek(), (85, 1, 0, 9, 85), 4_719_203_122_329_271_307);
+    check(seek, (85, 1, 0, 9, 85), 4_719_203_122_329_271_307);
 }
 
 /// A pause 20 boundaries in, resumed 12 later.
-fn pause_resume() -> Rig {
-    let mut rig = Rig::new();
+fn pause_resume(lead_slots: i64) -> Rig {
+    let mut rig = Rig::new(lead_slots);
     rig.idle(2);
     rig.preroll(2);
     let script = vec![(20, Cmd::Pause), (32, Cmd::Resume)];
@@ -483,16 +513,12 @@ fn pause_resume() -> Rig {
 
 #[test]
 fn a_pause_and_resume_emit_the_same_pairs() {
-    check(
-        pause_resume(),
-        (12, 7, 54, 5, 66),
-        16_810_695_633_823_938_371,
-    );
+    check(pause_resume, (12, 7, 54, 5, 66), 16_810_695_633_823_938_371);
 }
 
 /// A stop 25 boundaries in (no play-out), then idle.
-fn stop() -> Rig {
-    let mut rig = Rig::new();
+fn stop(lead_slots: i64) -> Rig {
+    let mut rig = Rig::new(lead_slots);
     rig.idle(2);
     rig.preroll(1);
     rig.play(song(30, 1, 90, 1, 0, 0), vec![(25, Cmd::Stop)]);
@@ -504,5 +530,124 @@ fn stop() -> Rig {
 
 #[test]
 fn a_stop_emits_the_same_pairs() {
-    check(stop(), (24, 0, 0, 5, 24), 2_164_604_794_920_010_690);
+    check(stop, (24, 0, 0, 5, 24), 2_164_604_794_920_010_690);
+}
+
+/// A pause read between two boundaries freezes the first boundary not yet
+/// committed: with no lead the next one, with the production lead the one
+/// after it (the next one already left the decision with a fresh frame).
+#[test]
+fn a_pause_applies_from_the_first_boundary_not_yet_committed() {
+    for (lead_slots, slots) in [(0, 1), (AUDIO_LEAD_SLOTS, 2)] {
+        let mut rig = Rig::new(lead_slots);
+        rig.idle(2);
+        rig.preroll(1);
+        let script = vec![(10, Cmd::Pause), (14, Cmd::Stop)];
+        rig.play(song(30, 1, 90, 1, 0, 0), script);
+        rig.end_scope();
+        let paused_at = rig.rec.cmds[0];
+        let frozen = rig.rec.pairs.iter().position(|p| p.kind == Kind::Standby);
+        let first = rig.rec.pairs[frozen.expect("the pause froze a boundary")].vtc;
+        let before = rig.rec.pairs[..frozen.unwrap()]
+            .last()
+            .expect("a pair before");
+        assert_eq!(
+            before.kind,
+            Kind::Emit,
+            "K = {lead_slots}: a fresh frame before"
+        );
+        let after = first - paused_at;
+        assert!(
+            after > (slots - 1) * 333_333 && after <= slots * 333_334,
+            "K = {lead_slots}: the first frozen boundary {after} after the pause"
+        );
+    }
+}
+
+/// Between two boundaries the production line holds exactly the pair it
+/// committed ahead, stamped one slot after the pair that just left; with no
+/// lead nothing waits.
+#[test]
+fn the_line_holds_one_committed_pair_between_boundaries() {
+    for (lead_slots, held) in [(0, 0), (AUDIO_LEAD_SLOTS, 1)] {
+        let mut rig = Rig::new(lead_slots);
+        for n in 1..=6 {
+            rig.idle(1);
+            assert_eq!(
+                rig.pacer.committed(),
+                held,
+                "K = {lead_slots}, boundary {n}"
+            );
+            assert_eq!(rig.rec.pairs.len(), n - held, "K = {lead_slots}: pairs out");
+        }
+        rig.end_scope();
+        assert_eq!(
+            rig.rec.pairs.len(),
+            6,
+            "K = {lead_slots}: the flush hands it out"
+        );
+        assert_on_grid(&rig.rec);
+    }
+}
+
+/// `Pacer::new` (production) commits `AUDIO_LEAD_SLOTS` = one slot ahead.
+#[test]
+fn the_production_pacer_commits_one_slot_ahead() {
+    let pacer = Pacer::new(30, true);
+    assert_eq!(pacer.lead_100ns(), 333_333);
+    let real = pacer.wall_now_100ns();
+    let decision = pacer.now_100ns();
+    let ahead = decision - real;
+    assert!(
+        (333_333..333_333 + 10_000_000).contains(&ahead),
+        "the decision clock reads one slot ahead of the wall ({ahead})"
+    );
+}
+
+/// A committed pair the wall fell more than the lead + one slot behind (a
+/// backward step) leaves at the next call, in order; one exactly the lead +
+/// one slot ahead still waits.
+#[test]
+fn a_pair_stranded_by_a_backward_wall_step_leaves_at_once() {
+    let mut rig = Rig::new(AUDIO_LEAD_SLOTS);
+    rig.idle(3);
+    let held = rig.pacer.committed();
+    assert_eq!(held, 1);
+    let out = rig.rec.pairs.len();
+    let stamp = strict_next_boundary_100ns(rig.rec.pairs[out - 1].vtc, 30);
+    rig.clk.set(stamp - 666_666);
+    let black = rig.black.clone();
+    let standby = StandbyBlack {
+        width: 4,
+        height: 2,
+        stride: 4,
+        video: &black,
+    };
+    rig.pacer.service_standby(standby.standby(), &mut rig.rec);
+    assert_eq!(
+        rig.rec.pairs.len(),
+        out,
+        "exactly lead + one slot ahead: it waits"
+    );
+    rig.clk.set(stamp - 666_667);
+    rig.pacer.service_standby(standby.standby(), &mut rig.rec);
+    assert_eq!(rig.rec.pairs.len(), out + 1, "stranded: it leaves at once");
+    assert!(
+        rig.rec.pairs[out].vtc > rig.rec.pairs[out - 1].vtc,
+        "in order"
+    );
+}
+
+/// A flush whose waits never move the wall hands every pair out anyway,
+/// after its bounded waits.
+#[test]
+fn a_flush_on_a_wall_that_stands_still_still_empties_the_line() {
+    let mut rig = Rig::new(AUDIO_LEAD_SLOTS);
+    rig.idle(2);
+    assert_eq!(rig.pacer.committed(), 1);
+    let mut waits = 0;
+    rig.pacer.flush_line(&mut rig.rec, |_, _| waits += 1);
+    assert_eq!(rig.pacer.committed(), 0);
+    assert_eq!(rig.rec.pairs.len(), 2);
+    assert_eq!(waits, 4, "FLUSH_MAX_WAITS");
 }
