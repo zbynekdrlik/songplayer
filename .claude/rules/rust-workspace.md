@@ -991,6 +991,12 @@ the test that kills each one BEFORE CI's mutation gate runs.
   and ~4 min a shard on dev1, so each stays inside one Bash call (a call
   over ~3 min is moved to the background; wait on its output file with
   `inotifywait -t 170`, never end the turn on it). Sum the four summaries.
+  Every shard copies the worktree when IT starts, so a commit or edit
+  between shards makes the next one stop with "The diff might be out of
+  date with this source tree" (#289 step 1): hold the tree still for the
+  whole run, or re-list from a fresh diff and run only the mutants not yet
+  tested (one `--re '^<escaped list line>$'` each; the earlier shards'
+  `mutants.out/caught.txt` / `unviable.txt` name the tested ones).
 - **A new `PacingStats` field must read its `Default` until the pacer's
   first emit** (#289 step 0): `pacer_tests::disabled_pacer_reports_default_stats`
   compares a disabled pacer's whole `stats()` with `PacingStats::default()`;

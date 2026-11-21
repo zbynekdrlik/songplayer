@@ -1083,6 +1083,59 @@ Now:
 - **Layout.** `PacingStats` lives in `playback/pacing_stats.rs` (split out of
   `ndi_health.rs` for the 1000-line cap) and is re-exported from `ndi_health`.
 
+## The pacer commits one slot ahead (#289 step 1)
+
+`Pacer::now_100ns` is the DECISION clock: the wall plus `lead_100ns` =
+`AUDIO_LEAD_SLOTS` (1) slots (`Pacer::new`; `with_wallclock`, the unit
+tests' constructor, keeps 0; `with_lead` builds any). So the pacer decides
+boundary B + 1 at boundary B, by the unchanged decision path
+(`service_now` / `service_standby_now` in `pacer.rs`), and every pair is
+the one it gave before. The public `service` / `service_standby`
+(`pacer_commit.rs`) sink each decision into a `CommitLine` and replay a
+pair, through the same `PacedSink` method, once the REAL wall
+(`wall_now_100ns`) reaches its stamp; what an output receives, and when,
+is unchanged. Nothing is handed to the bus early yet (step 2).
+
+- A command read after a commit (pause, resume, seek, stop, a new Play,
+  the song's end) applies from the first boundary not yet committed: up to
+  one slot later than before.
+- A scope ends by `PacedFeed::finish(pacer, sleep_to_boundary)`
+  (`decode_and_send_paced`, `run_idle_wait`): `Pacer::flush_line` hands the
+  committed pair out at its stamp, THEN the feed detaches, so the paced
+  output continues after it. A plain drop (an unwind) only detaches, and
+  the pair is lost (`paced_output_tests_commit.rs` pins both). A new emit
+  loop ends its scope by `finish` too.
+- The engine's events keep their relation to the picture: the song's
+  `Started` waits (`Pacer::wait_one_slot_before_next`, handing out the
+  pairs due meanwhile) until the real wall stands one slot before the
+  song's first boundary, as a pacer with no lead stands after its
+  pre-roll (the title clock counts from `Started`); a `Position` reports
+  `Pacer::shown_position_ms` = the taken frame's ms less the lead (33 ms),
+  the frame that goes out next, as before (the lyrics). A `Seeked`
+  (sent by the producer) is unchanged; the seek itself applies a slot
+  later (the command rule above).
+- The lead is the integer slot 333 333 while the grid's slots are 333 333
+  / 333 334 wide, so after a wide slot a pair leaves up to 100 ns after
+  its stamp, never before it.
+- A pair more than lead + one slot ahead of the real wall (a backward wall
+  step after the commit) leaves at once, in order (`CommitLine::release`).
+- The lateness telemetry (`late_frames`, `max_late_us`, `jitter_p99_us`,
+  `emit_late_hist`, the lag gauge) now measures the COMMIT against its
+  boundary: the instant step 2 hands the audio out.
+- A GPU-resident song holds one more ring frame (the committed pair).
+- `const _: () = assert!(CUT_LEAD_SLOTS >= AUDIO_LEAD_SLOTS)`: a cut lands
+  after the boundary a lead decides.
+- Tests: `pacer_tests_commit.rs` runs the emit loop's order (command,
+  prepare, sleep, service, end check, play-out, flush) over the idle
+  standby, the pre-roll, a 30 fps song with an audio tail, a blended 25 fps
+  song, a delayed-refill seek, a pause / resume and a stop at K = 0 and
+  K = 1, each against ONE pinned FNV-1a fingerprint of every pair taken
+  over the pacer before step 1, every pair leaving at or after its stamp
+  inside its slot; plus the line's own contract (one pair held, the pause's
+  first frozen boundary, the stranded release at exactly lead + one slot,
+  the bounded flush). A rig that drives the pacer by a settable wall sets
+  the REAL wall to `until − lead` for a decision instant `until`.
+
 ## Emit lateness, bucketed (#289 step 0)
 
 `pacing.emit_late_hist {edges_us, counts}` on `/api/v1/ndi/health`: every
