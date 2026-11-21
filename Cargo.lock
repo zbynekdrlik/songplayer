@@ -480,8 +480,8 @@ dependencies = [
 
 [[package]]
 name = "dlink"
-version = "0.6.178"
-source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.178#1b0475e98ab90a9de630f5df63605729c5471715"
+version = "0.6.209"
+source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.209#8a0a53dbcfd400d580a33fbd9ee606f634818645"
 dependencies = [
  "dstack",
  "dstack-audio-io",
@@ -498,8 +498,8 @@ checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
 name = "dstack"
-version = "0.6.178"
-source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.178#1b0475e98ab90a9de630f5df63605729c5471715"
+version = "0.6.209"
+source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.209#8a0a53dbcfd400d580a33fbd9ee606f634818645"
 dependencies = [
  "dstack-audio-io",
  "dsync-ptp",
@@ -521,21 +521,21 @@ dependencies = [
 
 [[package]]
 name = "dstack-audio-io"
-version = "0.6.178"
-source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.178#1b0475e98ab90a9de630f5df63605729c5471715"
+version = "0.6.209"
+source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.209#8a0a53dbcfd400d580a33fbd9ee606f634818645"
 
 [[package]]
 name = "dstack-resample"
-version = "0.6.178"
-source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.178#1b0475e98ab90a9de630f5df63605729c5471715"
+version = "0.6.209"
+source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.209#8a0a53dbcfd400d580a33fbd9ee606f634818645"
 dependencies = [
  "rubato",
 ]
 
 [[package]]
 name = "dsync-ptp"
-version = "1.33.1"
-source = "git+https://github.com/zbynekdrlik/dsync?tag=v1.33.1#f45090fb0be4eb756441f9eed3ed0c10d6ffeb0e"
+version = "1.35.14"
+source = "git+https://github.com/zbynekdrlik/dsync?tag=v1.35.14#10b75f07456c99886ac873beaf0094f266b23ead"
 dependencies = [
  "anyhow",
  "byteorder",
@@ -579,7 +579,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1392,7 +1392,7 @@ dependencies = [
 [[package]]
 name = "mdns-sd"
 version = "0.21.6"
-source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.178#1b0475e98ab90a9de630f5df63605729c5471715"
+source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.209#8a0a53dbcfd400d580a33fbd9ee606f634818645"
 dependencies = [
  "fastrand",
  "flume",
@@ -1493,7 +1493,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1709,7 +1709,7 @@ dependencies = [
  "once_cell",
  "socket2 0.6.3",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2009,7 +2009,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2745,7 +2745,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
