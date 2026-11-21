@@ -168,11 +168,10 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-SongPlayer.exe contains dstack 0.6.178 (its crates dlink, dstack,
+SongPlayer.exe contains dstack 0.6.209 (its crates dlink, dstack,
 dstack-audio-io and dstack-resample), https://github.com/zbynekdrlik/dstack,
-the native Dante output and the ASIO output's resampler and drift controller
-(#285), and a copy of dstack-endpoint's device-slot rule
-(crates/sp-server/src/playback/dante_slots.rs, #324). Every dstack crate is
+the native Dante output, its device-slot rule (dlink::slots) and the ASIO
+output's resampler and drift controller (#285). Every dstack crate is
 dual-licensed MIT OR Apache-2.0; SongPlayer uses them under the MIT license
 (its LICENSE-MIT, verbatim):
 
