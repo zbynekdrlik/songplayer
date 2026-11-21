@@ -252,7 +252,7 @@ impl Pacer {
     /// step); returns the stamp of the next one still waiting.
     fn release_due<S: PacedSink>(&mut self, sink: &mut S) -> Option<i64> {
         let stranded_after = self.lead_100ns + self.interval_100ns;
-        let now = self.now_100ns();
+        let now = self.wall_now_100ns();
         self.line.release(now, stranded_after, sink);
         self.line.front_stamp()
     }
