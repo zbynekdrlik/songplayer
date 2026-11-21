@@ -61,6 +61,133 @@ const PREVIEW_FMP4 = splitFmp4(
   readFileSync(join(__dirname, "fixtures", "preview-fixture.mp4")),
 );
 
+// #311: the server's preview stream never ends, so the mock's must not either.
+// It repeats the fixture's fragments with every `tfdt` moved on by its track's
+// own span and every `mfhd` sequence number moved on, so MSE (mode
+// 'segments') appends each repeat after the one before. A fragment's media
+// time comes from its boxes: `tfdt` + each `trun` sample's duration (else the
+// `tfhd` default, else the `trex` default).
+function fmp4Children(buf, from, to) {
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const out = [];
+  for (let o = from; o + 8 <= to; ) {
+    const size = dv.getUint32(o);
+    if (size < 8 || o + size > to) break;
+    out.push({ type: String.fromCharCode(buf[o + 4], buf[o + 5], buf[o + 6], buf[o + 7]), start: o, end: o + size });
+    o += size;
+  }
+  return out;
+}
+
+function fmp4Timing([init, ...frags]) {
+  const dv = (b) => new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const timescale = new Map();
+  const trexDuration = new Map();
+  // tkhd / mdhd pair up per trak; trex per track id.
+  for (const moov of fmp4Children(init, 0, init.length).filter((b) => b.type === "moov")) {
+    for (const box of fmp4Children(init, moov.start + 8, moov.end)) {
+      if (box.type === "trak") {
+        let id = null;
+        let scale = null;
+        for (const t of fmp4Children(init, box.start + 8, box.end)) {
+          if (t.type === "tkhd") id = dv(init).getUint32(t.start + (init[t.start + 8] === 1 ? 28 : 20));
+          if (t.type === "mdia") {
+            for (const m of fmp4Children(init, t.start + 8, t.end)) {
+              if (m.type === "mdhd") scale = dv(init).getUint32(m.start + (init[m.start + 8] === 1 ? 28 : 20));
+            }
+          }
+        }
+        if (id !== null && scale !== null) timescale.set(id, scale);
+      }
+      if (box.type === "mvex") {
+        for (const t of fmp4Children(init, box.start + 8, box.end)) {
+          if (t.type === "trex") trexDuration.set(dv(init).getUint32(t.start + 12), dv(init).getUint32(t.start + 20));
+        }
+      }
+    }
+  }
+  // Per fragment: each traf's track, tfdt offset (v1 = 64 bit), start and end.
+  const parsed = frags.map((frag) => {
+    const d = dv(frag);
+    const out = { mfhdSeq: null, trafs: [] };
+    for (const moof of fmp4Children(frag, 0, frag.length).filter((b) => b.type === "moof")) {
+      for (const box of fmp4Children(frag, moof.start + 8, moof.end)) {
+        if (box.type === "mfhd") out.mfhdSeq = box.start + 12;
+        if (box.type !== "traf") continue;
+        let track = null;
+        let defDur = null;
+        let tfdt = null;
+        let dur = 0;
+        for (const t of fmp4Children(frag, box.start + 8, box.end)) {
+          if (t.type === "tfhd") {
+            const flags = d.getUint32(t.start + 8) & 0xffffff;
+            track = d.getUint32(t.start + 12);
+            let o = t.start + 16;
+            if (flags & 0x1) o += 8;
+            if (flags & 0x2) o += 4;
+            if (flags & 0x8) defDur = d.getUint32(o);
+          }
+          if (t.type === "tfdt") {
+            const v1 = frag[t.start + 8] === 1;
+            tfdt = { at: t.start + 12, v1, value: v1 ? Number(d.getBigUint64(t.start + 12)) : d.getUint32(t.start + 12) };
+          }
+          if (t.type === "trun") {
+            const flags = d.getUint32(t.start + 8) & 0xffffff;
+            const count = d.getUint32(t.start + 12);
+            let o = t.start + 16;
+            if (flags & 0x1) o += 4;
+            if (flags & 0x4) o += 4;
+            const per = ((flags & 0x100) ? 4 : 0) + ((flags & 0x200) ? 4 : 0) + ((flags & 0x400) ? 4 : 0) + ((flags & 0x800) ? 4 : 0);
+            for (let i = 0; i < count; i++) {
+              dur += flags & 0x100 ? d.getUint32(o + i * per) : (defDur ?? trexDuration.get(track) ?? 0);
+            }
+          }
+        }
+        if (track !== null && tfdt) out.trafs.push({ track, tfdt, end: tfdt.value + dur });
+      }
+    }
+    return out;
+  });
+  // A track's span: its first fragment's start to its last fragment's end.
+  const span = new Map();
+  const first = new Map();
+  for (const f of parsed) {
+    for (const t of f.trafs) {
+      if (!first.has(t.track)) first.set(t.track, t.tfdt.value);
+      span.set(t.track, t.end - first.get(t.track));
+    }
+  }
+  return { parsed, span, timescale };
+}
+
+const PREVIEW_TIMING = fmp4Timing(PREVIEW_FMP4);
+const PREVIEW_VIDEO_TRACK = [...PREVIEW_TIMING.timescale.keys()][0];
+
+/** Fragment `i` of repeat `k` (k = 0: the fixture's own bytes). */
+function previewFragment(k, i) {
+  const frag = PREVIEW_FMP4[1 + i];
+  if (k === 0) return frag;
+  const copy = Buffer.from(frag);
+  const d = new DataView(copy.buffer, copy.byteOffset, copy.byteLength);
+  const f = PREVIEW_TIMING.parsed[i];
+  if (f.mfhdSeq !== null) d.setUint32(f.mfhdSeq, d.getUint32(f.mfhdSeq) + k * PREVIEW_TIMING.parsed.length);
+  for (const t of f.trafs) {
+    const v = t.tfdt.value + k * PREVIEW_TIMING.span.get(t.track);
+    if (t.tfdt.v1) d.setBigUint64(t.tfdt.at, BigInt(v));
+    else d.setUint32(t.tfdt.at, v);
+  }
+  return copy;
+}
+
+/** Fragment `i`'s video media time (ms): its start in repeat `k`, and its length. */
+function previewFragmentMs(k, i) {
+  const t = PREVIEW_TIMING.parsed[i].trafs.find((x) => x.track === PREVIEW_VIDEO_TRACK);
+  const scale = PREVIEW_TIMING.timescale.get(PREVIEW_VIDEO_TRACK);
+  if (!t) return { endMs: 0, lengthMs: 0 };
+  const shift = k * PREVIEW_TIMING.span.get(PREVIEW_VIDEO_TRACK);
+  return { endMs: ((t.end + shift) * 1000) / scale, lengthMs: ((t.end - t.tfdt.value) * 1000) / scale };
+}
+
 const app = express();
 app.use(express.json());
 
@@ -3390,7 +3517,7 @@ app.post("/__mock/preview-close", (_req, res) => {
 
 // #178: stream the canned fMP4 fixture — init segment first, then each fragment
 // with a small gap — so the card's MSE <video> reaches readyState>=3 and its
-// currentTime advances.
+// currentTime advances. #311: then the fixture repeats at real time, forever.
 previewWss.on("connection", (ws, req) => {
   const fault = previewFaultQueue.shift() || {};
   const [init, ...frags] = PREVIEW_FMP4;
@@ -3448,30 +3575,40 @@ previewWss.on("connection", (ws, req) => {
   } catch {
     return;
   }
-  let i = 0;
   let fragsSent = 0;
+  let producedMs = 0;
   // #184 round F: the SAME 1 Hz lag beacon the real server sends — produced
-  // media time = (fragments sent) × 500 ms, plus the mock lag knob. Send one
+  // media time = the end of the last video fragment sent (#311: its real
+  // media time, the stream repeats), plus the mock lag knob. Send one
   // immediately so the readout appears without waiting a full second.
   const sendBeacon = () => {
     if (ws.readyState !== ws.OPEN) return;
-    deliver(JSON.stringify({ produced_ms: fragsSent * 500 + lagMs }));
+    deliver(JSON.stringify({ produced_ms: Math.round(producedMs) + lagMs }));
   };
   sendBeacon();
-  const timer = setInterval(() => {
-    if (ws.readyState !== ws.OPEN || i >= frags.length) {
-      clearInterval(timer);
-      return;
-    }
+  // #311: the stream never ends, like the server's. The fixture's first pass
+  // goes out every 120 ms (the tests start fast); every repeat after it at
+  // real time (each fragment after its own length), so the browser's buffer
+  // stays bounded.
+  let timer = null;
+  const sendNext = () => {
+    timer = null;
+    if (ws.readyState !== ws.OPEN) return;
     if (closeAfterFrags !== null && fragsSent >= closeAfterFrags) {
       // The one-shot "server closed the socket" fault.
-      clearInterval(timer);
       ws.close();
       return;
     }
-    deliver(frags[i++]);
+    const k = Math.floor(fragsSent / frags.length);
+    const i = fragsSent % frags.length;
+    deliver(previewFragment(k, i));
+    const { endMs, lengthMs } = previewFragmentMs(k, i);
+    producedMs = Math.max(producedMs, endMs);
     fragsSent++;
-  }, 120);
+    const nextK = Math.floor(fragsSent / frags.length);
+    timer = setTimeout(sendNext, nextK === 0 ? 120 : Math.max(50, lengthMs));
+  };
+  timer = setTimeout(sendNext, 120);
   const beacon = setInterval(sendBeacon, 1000);
   // #184 round G: answer the shim's application-level `{"ping":N}` with
   // `{"pong":N}` (the same echo `api/preview.rs::pong_frame` does), queued
@@ -3489,7 +3626,7 @@ previewWss.on("connection", (ws, req) => {
     }
   });
   const stop = () => {
-    clearInterval(timer);
+    if (timer) clearTimeout(timer);
     clearInterval(beacon);
     for (const t of pending) clearTimeout(t);
     pending.clear();
