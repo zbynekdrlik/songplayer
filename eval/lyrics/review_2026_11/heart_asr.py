@@ -100,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
                 "error": f"no input {wav.name}",
                 "lines": [],
             }
+            failed.append(vid)
             out_path.write_text(json.dumps(row))
             print(f"{vid}: no input", flush=True)
             continue

@@ -29,7 +29,22 @@ def test_window_plan_join_frames_line_up():
     r0, _, k0, k1 = plan[1]
     # the kept slice of window 1 starts at its context, in 20 ms frames
     assert c.frames_for(k0 - r0) == 100
-    assert c.frames_for(k1 - k0) == int(c.WINDOW_S * 1000 / c.FRAME_MS)
+    assert c.frames_for(k1 - k0) == 1300  # 26 s kept / 20 ms
+
+
+def test_kept_slice_interior_short_raises_last_short_is_cut():
+    n = int(60 * c.SR)
+    r0, _, k0, k1 = c.window_plan(n)[1]
+    assert c.kept_slice(1500, r0, k0, k1, n) == (100, 1400)
+    try:
+        c.kept_slice(1399, r0, k0, k1, n)
+    except RuntimeError as exc:
+        assert "1399 frames < 1400" in str(exc)
+    else:
+        raise AssertionError("an interior window short of frames must raise")
+    r0, _, k0, k1 = c.window_plan(n)[-1]
+    assert k1 == n
+    assert c.kept_slice(450, r0, k0, k1, n) == (100, 450)  # tail cut at the end
 
 
 def test_build_targets_skips_unknown_words_and_tracks_owners():

@@ -92,6 +92,20 @@ def frames_for(samples: int) -> int:
     return samples // (SR * FRAME_MS // 1000)
 
 
+def kept_slice(
+    n_frames: int, r0: int, k0: int, k1: int, n_samples: int
+) -> tuple[int, int]:
+    """The frame slice [a, b) of one window's logits that covers its kept
+    samples [k0, k1). An interior window with fewer frames than that would
+    shift every later frame by its shortfall, so it raises; only the last
+    window may come up short (its tail is cut where the audio ends)."""
+    a = frames_for(k0 - r0)
+    want = a + frames_for(k1 - k0)
+    if k1 < n_samples and n_frames < want:
+        raise RuntimeError(f"window {k0}-{k1}: {n_frames} frames < {want}")
+    return a, min(n_frames, want)
+
+
 def logits_for(model, processor, audio, device) -> Any:
     import torch
 
@@ -101,12 +115,8 @@ def logits_for(model, processor, audio, device) -> Any:
         inputs = {k: v.to(device) for k, v in inputs.items()}
         with torch.inference_mode():
             lp = torch.log_softmax(model(**inputs).logits[0].float(), dim=-1).cpu()
-        a = frames_for(k0 - r0)
-        want = a + frames_for(k1 - k0)
-        if k1 < len(audio) and lp.shape[0] < want:
-            # an interior window short of frames would shift every later frame
-            raise RuntimeError(f"window {k0}-{k1}: {lp.shape[0]} frames < {want}")
-        parts.append(lp[a : min(lp.shape[0], want)])
+        a, b = kept_slice(lp.shape[0], r0, k0, k1, len(audio))
+        parts.append(lp[a:b])
     return torch.cat(parts, dim=0)
 
 
@@ -293,6 +303,7 @@ def main(argv: list[str] | None = None) -> int:
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
     fixtures = json.loads(MANIFEST.read_text())["fixtures"]
+    failed = []
     for fx in fixtures:
         vid = fx["video_id"]
         if vid == POISONED or (args.only and vid not in args.only):
@@ -304,7 +315,8 @@ def main(argv: list[str] | None = None) -> int:
             for bid in (align_id, asr_id):
                 row = {"backend_id": bid, "error": f"no input {wav.name}", "lines": []}
                 (args.out_dir / f"{bid}_{vid}.json").write_text(json.dumps(row))
-            print(f"{vid}: no input", flush=True)
+            failed.append(vid)
+            print(f"{vid}: FAILED no input", flush=True)
             continue
         audio, sr = sf.read(str(wav), dtype="float32")
         if sr != SR:
@@ -340,7 +352,8 @@ def main(argv: list[str] | None = None) -> int:
             }
             (args.out_dir / f"{align_id}_{vid}.json").write_text(json.dumps(out))
         print(f"{vid}: asr {len(asr_lines)} lines, {infer_s:.1f}s", flush=True)
-    return 0
+    print(f"done; failed={failed}", flush=True)
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

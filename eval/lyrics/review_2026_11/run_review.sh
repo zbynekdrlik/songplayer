@@ -36,12 +36,19 @@ stage_mtl() {
     [ -f "$out" ] && continue
     if [ ! -f "$wav" ]; then
       # a reference from the old manifest whose video left it is not a failure
-      if grep -q "\"$vid\"" "$W/eval/lyrics/manifest.json"; then
-        rc=1
-        echo "$vid: FAILED no wav"
-      else
-        echo "$vid: not in the manifest"
-      fi
+      local found=0
+      grep -q "\"$vid\"" "$W/eval/lyrics/manifest.json" || found=$?
+      case "$found" in
+        0)
+          rc=1
+          echo "$vid: FAILED no wav"
+          ;;
+        1) echo "$vid: not in the manifest" ;;
+        *)
+          rc=1
+          echo "$vid: FAILED cannot read the manifest"
+          ;;
+      esac
       continue
     fi
     if "$PY" eval/lyrics/aligners/lyrics_alignment_mtl/run.py --wav "$wav" \

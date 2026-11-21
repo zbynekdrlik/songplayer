@@ -19,7 +19,7 @@ clear margin on the comparable figure:
   0.6 pts, less than the 0.8 pts mtl itself moved between two copies of the
   same audio. Hypothesis (to be confirmed by #129's hand-verified gold): the
   gold's own timing noise caps this metric, so it cannot rank aligners.
-  w2v-bert / sylla are ≈ 5× faster (mean 11–12 s vs 65.5 s per song on
+  w2v-bert / sylla are 5.4–5.8× faster (mean 11–12 s vs 65.5 s per song on
   dev1's RTX 2070 SUPER) — an operational, not a quality, argument.
 - No-text tier: w2v-bert reads 23.0 % vs g35t 21.3 % on the headline but
   13.2 % vs 15.6 % on the order-respecting (monotonic) view, and it
