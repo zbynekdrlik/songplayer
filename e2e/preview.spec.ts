@@ -206,9 +206,9 @@ test("the Dabing Player preview survives position ticks — WS opened once, neve
     // The regression proof: the SAME Player + <video> elements are still
     // connected (the Player was NOT re-created by the ticks) and the preview WS
     // opened exactly once and NEVER closed across the 8 s of ticks. (We do not
-    // re-assert readyState here — the mock streams a FINITE canned fMP4 fragment
-    // list, so after ~2 s the short clip has played out and readyState drops;
-    // the initial readyState>=3 above already proved it decoded, and a torn-down
+    // re-assert readyState here — the initial readyState>=3 above already
+    // proved it decoded (#311: the mock's stream no longer ends, the #311 test
+    // proves it keeps decoding), and a torn-down
     // preview would have shown up as a closed/duplicate WS, which it did not.)
     expect(await playerHandle!.evaluate((el) => el.isConnected)).toBe(true);
     expect(await videoHandle!.evaluate((el) => el.isConnected)).toBe(true);
