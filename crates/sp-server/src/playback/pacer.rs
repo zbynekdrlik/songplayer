@@ -311,13 +311,18 @@ pub struct Pacer {
     av: pacer_av_align::AvAlign,
     /// Starve fill: black, or the held pre-seek picture (#147, `preroll`).
     standby_fill: Option<pacer_preroll::StandbyFill>,
+    /// #289: decisions run this far ahead of the wall; the committed pairs
+    /// wait in `line` for their stamps (`pacer_commit.rs`).
+    lead_100ns: i64,
+    line: pacer_commit::CommitLine,
 }
 
 impl Pacer {
     /// Build a pacer for `grid_fps` (the fixed integer grid rate, e.g.
-    /// `GENLOCK_GRID_FPS = 30`) over the production system wall clock.
+    /// `GENLOCK_GRID_FPS = 30`) over the production system wall clock,
+    /// committing `AUDIO_LEAD_SLOTS` ahead (#289).
     pub fn new(grid_fps: i64, enabled: bool) -> Self {
-        Self::with_wallclock(grid_fps, enabled, WallClock::system())
+        Self::with_lead(grid_fps, enabled, WallClock::system(), AUDIO_LEAD_SLOTS)
     }
 
     /// Build a pacer over an injected [`WallClock`] (deterministic in tests).
@@ -360,14 +365,15 @@ impl Pacer {
             audio_buf: AudioGridBuffer::new(AUDIO_GRID_RATE_HZ),
             av: pacer_av_align::AvAlign::default(),
             standby_fill: None,
+            lead_100ns: 0,
+            line: Default::default(),
         }
     }
 
-    /// The wall's internal TIMELINE now, 100-ns units: UTC since the Unix epoch
-    /// less the fleet relabel D(K) (#224 part 2; production read path —
-    /// MediaFoundation decode + wall grid share this).
+    /// The DECISION clock (100 ns): the wall's internal timeline (UTC less the
+    /// fleet relabel D(K), #224 part 2) plus the commit lead (#289).
     pub fn now_100ns(&self) -> i64 {
-        self.wall.now_100ns()
+        self.wall.now_100ns() + self.lead_100ns
     }
 
     /// One grid interval in 100-ns units (`1e7 / grid_fps`); 0 = genlock off.
@@ -439,7 +445,7 @@ impl Pacer {
     /// (#147 change 5). The serviced boundary is the video stamp (on-grid,
     /// never future-dated), and so is the boundary's audio block: it belongs
     /// to that boundary's timeline instant, never the emit instant (#224).
-    pub fn service<F, S>(&mut self, mut pull: F, sink: &mut S) -> ServiceOutcome
+    fn service_now<F, S>(&mut self, mut pull: F, sink: &mut S) -> ServiceOutcome
     where
         F: FnMut() -> Option<PacedFrame>,
         S: PacedSink,
@@ -675,7 +681,7 @@ impl Pacer {
     /// boundary is due, then [`ServiceOutcome::Repeated`] (frozen) /
     /// [`ServiceOutcome::Emitted`] (black), or [`ServiceOutcome::Starved`] when
     /// a frozen standby has no last frame yet.
-    pub fn service_standby<S>(&mut self, standby: Standby, sink: &mut S) -> ServiceOutcome
+    fn service_standby_now<S>(&mut self, standby: Standby, sink: &mut S) -> ServiceOutcome
     where
         S: PacedSink,
     {
@@ -948,8 +954,11 @@ pub use pacer_blend::FrameBlend;
 
 // A song's natural end plays out every sample it buffered; the underrun phases
 // and the audio telemetry (#257).
+#[path = "pacer_commit.rs"] // #289 step 1: the pacer commits ahead
+mod pacer_commit;
 #[path = "pacer_play_out.rs"]
 mod pacer_play_out;
+pub use pacer_commit::AUDIO_LEAD_SLOTS;
 
 #[cfg(test)]
 #[path = "pacer_tests.rs"]

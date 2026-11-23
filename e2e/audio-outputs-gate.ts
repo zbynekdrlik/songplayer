@@ -343,33 +343,40 @@ export function deviceLatencyFailures(o: OutputStatus): string[] {
   return [];
 }
 
-/** SNV's lv1 destination. FOH has no VBAN since 5.11.2026 (the owner, #257): it
- * takes SongPlayer over Dante, gated by `post-deploy-audio-asio.spec.ts`. */
-export const LV1_TARGET = "lv1.lan:6980";
-/** lv1's rate. */
-export const LV1_RATE = 48000;
-/** Blocks that must go out between the two reads (30 per second). */
-export const MIN_BLOCKS = 25;
+/** SNV's old lv1 destination. #350 (the owner, 23.11.2026): lv1 is on the
+ * Dante network through dsg's bridge now, so the VBAN output to it is switched
+ * OFF (the VBAN code stays). FOH has no VBAN since 5.11.2026 (#257). */
+export const LV1_HOST = "lv1.lan";
+export const LV1_PORT = 6980;
 
-function lv1Of(list: OutputStatus[]): OutputStatus | undefined {
-  return list.find((o) => o.type === "vban" && o.vban?.targets[0]?.target === LV1_TARGET);
+/** A stored `audio_outputs` entry, as far as this check reads it. */
+export interface StoredOutput {
+  id: string;
+  type: string;
+  enabled: boolean;
+  vban?: { host?: string; port?: number };
 }
 
-/** Why lv1's path is broken, between two reads of `outputs[]`. */
-export function lv1PathFailures(first: OutputStatus[], second: OutputStatus[]): string[] {
-  const a = lv1Of(first);
-  const b = lv1Of(second);
-  if (!a || !b) return [`no VBAN output to ${LV1_TARGET}`];
+/** Why a VBAN output to lv1 is not off as the owner ruled (#350): the stored
+ * entry must be disabled (or gone), and the running output must read
+ * `disabled` and send nothing between the two reads. */
+export function lv1OffFailures(stored: StoredOutput[], first: OutputStatus[], second: OutputStatus[]): string[] {
+  const entries = stored.filter(
+    (e) => e.type === "vban" && e.vban?.host?.toLowerCase() === LV1_HOST && e.vban?.port === LV1_PORT,
+  );
   const f: string[] = [];
-  if (b.state !== "running") f.push(`the lv1 output is ${b.state}${b.reason ? ` (${b.reason})` : ""}`);
-  if (b.rate !== LV1_RATE) f.push(`the lv1 output runs at ${b.rate} Hz, not ${LV1_RATE}`);
-  if (b.format !== "int24") f.push(`the lv1 output sends ${b.format}, not int24`);
-  if (b.vban?.stream_name !== "sp-program") f.push(`the lv1 stream is ${b.vban?.stream_name}, not sp-program`);
-  if (b.delay_ms !== 0) f.push(`the lv1 output is delayed ${b.delay_ms} ms`);
-  const sent = b.blocks_sent - a.blocks_sent;
-  if (sent < MIN_BLOCKS) f.push(`only ${sent} lv1 blocks went out between the reads`);
-  const errors = (b.vban?.send_errors ?? 0) - (a.vban?.send_errors ?? 0);
-  if (errors > 0) f.push(`${errors} lv1 send errors between the reads`);
+  for (const e of entries) {
+    if (e.enabled) f.push(`the VBAN output ${e.id} to ${LV1_HOST}:${LV1_PORT} is enabled (#350: off, lv1 is on Dante)`);
+    const a = first.find((o) => o.id === e.id);
+    const b = second.find((o) => o.id === e.id);
+    if (!a || !b) {
+      f.push(`the VBAN output ${e.id} is not listed on GET /api/v1/program`);
+      continue;
+    }
+    if (b.state !== "disabled") f.push(`the VBAN output ${e.id} is ${b.state}, not disabled`);
+    const sent = b.blocks_sent - a.blocks_sent;
+    if (sent !== 0) f.push(`the VBAN output ${e.id} sent ${sent} blocks between the reads`);
+  }
   return f;
 }
 

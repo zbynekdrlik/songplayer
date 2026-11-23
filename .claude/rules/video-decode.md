@@ -1830,3 +1830,13 @@ came 22 s after a software-decoded open. The cause is not separated (a
 Dante-network change elsewhere ran the same night), but the audio risk is
 real, so this setting is no A/B lever on SNV. Separate the steps of a song
 change another way (timestamps, or moving the title text-set in time).
+
+## A lower GPU priority for the decode device does not help the wall (#330, measured, removed)
+
+`IDXGIDevice::SetGPUThreadPriority(−7)` on every decode `VideoDevice`
+(the compositor untouched) was built (d2392bc7) and A/B/A ×2'd on SNV
+21.11.2026 04:04–07:25Z, ytfast AV1 on program, 40 min blocks, the −7 read
+back on the device: wall-bridge's 8–20 ms slow shows per hour read 264 / 1257
+/ 948 / 892 / 243 (0 / −7 / 0 / −7 / 0), the 10 s windows 65 / 55 / 44 / 63 /
+60 — no effect, the counts follow the song. Reverted (6e518e64, b0c8f288).
+Never ship a decode-device priority knob again without a new reason.

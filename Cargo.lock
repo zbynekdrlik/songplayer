@@ -480,8 +480,8 @@ dependencies = [
 
 [[package]]
 name = "dlink"
-version = "0.6.178"
-source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.178#1b0475e98ab90a9de630f5df63605729c5471715"
+version = "0.6.214"
+source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.214#e27a2996708083a25be0874a9fc6f868f01a24e6"
 dependencies = [
  "dstack",
  "dstack-audio-io",
@@ -498,8 +498,8 @@ checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
 name = "dstack"
-version = "0.6.178"
-source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.178#1b0475e98ab90a9de630f5df63605729c5471715"
+version = "0.6.214"
+source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.214#e27a2996708083a25be0874a9fc6f868f01a24e6"
 dependencies = [
  "dstack-audio-io",
  "dsync-ptp",
@@ -521,21 +521,21 @@ dependencies = [
 
 [[package]]
 name = "dstack-audio-io"
-version = "0.6.178"
-source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.178#1b0475e98ab90a9de630f5df63605729c5471715"
+version = "0.6.214"
+source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.214#e27a2996708083a25be0874a9fc6f868f01a24e6"
 
 [[package]]
 name = "dstack-resample"
-version = "0.6.178"
-source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.178#1b0475e98ab90a9de630f5df63605729c5471715"
+version = "0.6.214"
+source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.214#e27a2996708083a25be0874a9fc6f868f01a24e6"
 dependencies = [
  "rubato",
 ]
 
 [[package]]
 name = "dsync-ptp"
-version = "1.33.1"
-source = "git+https://github.com/zbynekdrlik/dsync?tag=v1.33.1#f45090fb0be4eb756441f9eed3ed0c10d6ffeb0e"
+version = "1.35.14"
+source = "git+https://github.com/zbynekdrlik/dsync?tag=v1.35.14#10b75f07456c99886ac873beaf0094f266b23ead"
 dependencies = [
  "anyhow",
  "byteorder",
@@ -656,9 +656,9 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "form_urlencoded"
-version = "1.2.2"
+version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
+checksum = "afa489199eaffb1211795df1c6236ce1ad0d41a6fa45250add73e3b02420f06e"
 dependencies = [
  "percent-encoding",
 ]
@@ -1392,7 +1392,7 @@ dependencies = [
 [[package]]
 name = "mdns-sd"
 version = "0.21.6"
-source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.178#1b0475e98ab90a9de630f5df63605729c5471715"
+source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.214#e27a2996708083a25be0874a9fc6f868f01a24e6"
 dependencies = [
  "fastrand",
  "flume",
@@ -2318,7 +2318,7 @@ dependencies = [
 
 [[package]]
 name = "sp-core"
-version = "0.99.0"
+version = "0.100.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2327,7 +2327,7 @@ dependencies = [
 
 [[package]]
 name = "sp-decoder"
-version = "0.99.0"
+version = "0.100.0"
 dependencies = [
  "crossbeam-channel",
  "mutants",
@@ -2341,7 +2341,7 @@ dependencies = [
 
 [[package]]
 name = "sp-gpu"
-version = "0.99.0"
+version = "0.100.0"
 dependencies = [
  "cc",
  "mutants",
@@ -2355,7 +2355,7 @@ dependencies = [
 
 [[package]]
 name = "sp-ndi"
-version = "0.99.0"
+version = "0.100.0"
 dependencies = [
  "libloading",
  "mutants",
@@ -2365,7 +2365,7 @@ dependencies = [
 
 [[package]]
 name = "sp-server"
-version = "0.99.0"
+version = "0.100.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3166,9 +3166,9 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "url"
-version = "2.5.8"
+version = "2.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
+checksum = "f00cd2407bb42c0ef17be88d4cf020f5cceffd121665bac9b8b9493a369b3b1a"
 dependencies = [
  "form_urlencoded",
  "idna",

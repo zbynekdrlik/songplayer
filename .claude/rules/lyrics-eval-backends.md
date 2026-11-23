@@ -9,6 +9,63 @@ Every shape below was proven against the LIVE API on 2026-08-05, and in several
 cases the vendor docs were WRONG. Trust this file over the docs; re-verify only
 if a call starts failing.
 
+## Monthly model review (owner, 21.11.2026, #349)
+
+**Scope first (owner's ruling, 21.11.2026, after the November run measured
+the wrong things):** a candidate is run ONLY when it is a SOTA release NEWER
+than the last review (a new version of a vendor's flagship) AND it can
+plausibly beat production on quality AND cost both — its price per song is
+written next to production's BEFORE any run. Never re-run a model or a line
+already tested and closed as unusable (AssemblyAI U3-Pro, WhisperX, the
+CTC / open-weight aligners, Qwen) unless the vendor shipped a NEW version.
+Spending a review's budget on candidates that cannot improve and cheapen
+both is a wasted review.
+
+A model review runs once a month: the next one is due one month after the
+last report's date (`eval/lyrics/reports/<date>-review.md`; the first was
+2026-11-21, so the next is due 2026-12-21). Each review opens its own ticket
+from #349's checklist: every candidate's newest release read on the vendor's
+own page that day, each run on the current manifest with `score_aligner.py`
+(gold-normalized ≤ 400 ms of ALL gold lines, errored fixtures kept in the
+denominator), the production pair (mtl + Gemini 3.5 Transcribe) re-scored on
+the same manifest, a table of vendor claim vs our number, and `CHAMPION.md`
+updated. A paid candidate with no key in the secret channel is reported as
+"no key", never skipped silently. A winner changes production only through a
+design comment and the owner's ruling (a pipeline-version bump re-runs the
+catalog).
+
+- **dev1 runs the open-weight candidates without the Windows boxes:**
+  `review_2026_11/prep_fixtures.py` rebuilds the fixture WAVs with the
+  production separation chain, and the production aligner itself
+  (LyricsAlignment-MTL, `aligners/lyrics_alignment_mtl/run.py` unchanged,
+  upstream cloned) re-run on them is the input-parity anchor —
+  `review_2026_11/run_review.sh` runs every stage in order. Every model is
+  then read against mtl ON THE SAME AUDIO, never against a number measured on
+  win-resolume's eval-cache alone.
+- **dev1 venv trap:** a CPU `torchvision` wheel next to a `+cu128` torch makes
+  every transformers audio model fail to import with the generic
+  `Could not import module 'Wav2Vec2BertForCTC'` (the real error,
+  `operator torchvision::nms does not exist`, only shows on a direct import of
+  the modeling module). Install the matching `torchvision==<v>+cu128` from the
+  PyTorch index.
+- **A CTC model's read window is its TRAINED length, context included:**
+  w2v-bert-lyrics / sylla were trained on ≤ 30 s, so each read is 30 s total
+  (26 s kept + 2 s context each side). Reading "30 s + 2 s each side" (34 s)
+  cost the no-text tier 1.1–2.7 pts on 2026-11-21 (aligners ≤ 0.3).
+- **Whisper word timestamps (cross-attention DTW) cannot form lines:** words
+  come back back-to-back (median gap 0 ms), so the 400 ms grouping yields
+  ~0.1× the gold's lines (HeartTranscriptor-oss, 0.1 %). A Whisper-family
+  candidate needs its own segment times, or it is no no-text tier.
+- **The comparable view is the 17 fixtures the production pair has raw for**
+  (`score_review.py` "common"); dev1 CAN download `vpwDdb8r9Bk` /
+  `fHYLw-2tTx4`, and an ASR scored on them reads ~3 pts higher — never
+  compare that "all" view with the baselines.
+- **One GPU stage at a time on the 8 GB card, and HeartTranscriptor at batch
+  1:** its word-timestamp DTW keeps every cross-attention, so heartlib's
+  batch 16 (and 4) OOM the card even alone; the separation prep holds ~4 GB
+  more. `heart_asr.py` defaults to 1 (the batch only groups independent
+  chunks, the transcript is unchanged).
+
 ## Driving win-resolume from a backend session
 
 - **`mcp__win-resolume__FileWrite` SILENTLY TRUNCATES content over ~20,000

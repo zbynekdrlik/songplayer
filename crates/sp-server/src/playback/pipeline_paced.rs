@@ -604,7 +604,6 @@ pub(crate) fn decode_and_send_paced(
 
     let result: DecodeResult = 'song: {
         let mut sink = feed.sink();
-
         // #147 song-start pre-roll (ROZHODNUTÉ 5842127369): while the producer
         // opens the decoder and decodes the first frame, EVERY boundary still
         // carries the standby pair (black + one silent block) through this sink.
@@ -658,6 +657,9 @@ pub(crate) fn decode_and_send_paced(
             // The producer is stopped + joined after the block.
             Err(msg) => break 'song DecodeResult::Error(msg),
         };
+        // #289: one slot before the song's first pair leaves, as before;
+        // the early-end check below then reads the producer at that instant.
+        pacer.wait_one_slot_before_next(&mut sink, sleep_to_boundary);
         // #277: the video ended early before the song started (no picture
         // at all, the observed case): that failure is this Play's answer, as
         // a failed open's is.
@@ -865,7 +867,7 @@ pub(crate) fn decode_and_send_paced(
                         let _ = event_tx.send((
                             playlist_id,
                             PipelineEvent::Position {
-                                position_ms: last_decoded_ms,
+                                position_ms: pacer.shown_position_ms(last_decoded_ms),
                                 duration_ms,
                             },
                         ));
@@ -926,8 +928,9 @@ pub(crate) fn decode_and_send_paced(
     // consumer services every boundary (the held picture + silence) while the
     // producer's MF decoder is torn down and the next song opens — the window
     // that used to skip 1–3 slots. Nothing is joined: the consumer is the
-    // pipeline's, alive across songs.
-    drop(feed);
+    // pipeline's, alive across songs. #289: the pair the pacer committed
+    // ahead leaves at its stamp first, so the consumer continues after it.
+    feed.finish(pacer, sleep_to_boundary);
 
     // Stop the producer + join it so the decoder drops on its own STA thread
     // before this pipeline call returns (#147). A backpressured / post-EOS

@@ -1,13 +1,3 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
-//
-// `SLOTS`, `slot`, `first_free`, `binds` and `binds_with` are copied from
-// dstack's `crates/dstack-endpoint/src/slots.rs` at tag v0.6.178 (MIT OR
-// Apache-2.0, dstack's LICENSE-MIT is in
-// `src-tauri/resources/THIRD-PARTY-NOTICES.txt`).
-// `dstack-endpoint` itself pulls cpal (a second audio stack SongPlayer has no
-// use for), so the 30 lines live here until dstack moves them into `dlink`;
-// then this copy is deleted and the output calls dlink's.
-
 //! #324: the native Dante output's control ports, picked as dstack's own
 //! apps pick theirs. Slot `k` is ARC `4440 + k`, CMC `8800 + k`, flows
 //! `4455 + k` and process id `k`; the first slot whose three ports are free
@@ -21,46 +11,15 @@
 //! Windows can tell (`holder_text`, the UDP table read through the IP
 //! Helper in `dante_slots_win.rs`; no process is spawned).
 
-use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+use std::net::{Ipv4Addr, SocketAddrV4};
 
 use dlink::Ports;
 
-/// How many slots are tried: ARC 4440-4454 never meets flows 4455 up.
-pub const SLOTS: u16 = 15;
-
-/// Slot `k`'s ports and process id.
-pub fn slot(k: u16) -> (Ports, u16) {
-    (
-        Ports {
-            arc: 4440 + k,
-            cmc: 8800 + k,
-            flows: 4455 + k,
-        },
-        k,
-    )
-}
-
-/// The first of the [`SLOTS`] whose ports `free` says are free.
-pub fn first_free(free: impl Fn(&Ports) -> bool) -> Option<(Ports, u16)> {
-    (0..SLOTS).map(slot).find(|(p, _)| free(p))
-}
-
-/// Whether UDP `ports` are all free for a device on `ip` now
-/// ([`binds_with`] on real sockets, which close again).
-pub fn binds(ip: Ipv4Addr, ports: &Ports) -> bool {
-    binds_with(ip, ports, |at| UdpSocket::bind(at).is_ok())
-}
-
-/// Whether `ports` are all free for a device on `ip`, `try_bind` saying
-/// whether a UDP socket binds at an address and port now: each port binds
-/// on `ip` (no other device holds it there) and on the wildcard address (no
-/// other program holds it there, such as Audinate's ConMon).
-pub fn binds_with(ip: Ipv4Addr, ports: &Ports, try_bind: impl Fn(SocketAddrV4) -> bool) -> bool {
-    [ports.arc, ports.cmc, ports.flows].iter().all(|&port| {
-        try_bind(SocketAddrV4::new(ip, port))
-            && try_bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port))
-    })
-}
+/// #342: the slot rule is dlink's own (`dlink::slots`, dstack v0.6.191+):
+/// slot `k` = ARC `4440 + k`, CMC `8800 + k`, flows `4455 + k`, process id
+/// `k`, the first whose ports bind on the device's address and on the
+/// wildcard. SongPlayer keeps only its own chooser below.
+pub use dlink::slots::{SLOTS, binds, binds_with, first_free, slot};
 
 /// Where a device's ports came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

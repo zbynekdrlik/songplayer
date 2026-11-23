@@ -7,7 +7,7 @@ import {
   danteGateLog,
   DANTE_LATE_TOP_BINS,
   DANTE_PUMP_SCHEDULING,
-  lv1PathFailures,
+  lv1OffFailures,
   gatedAsioOutputs,
   dvsExpected,
   waitingForClock,
@@ -18,6 +18,7 @@ import {
   type AsioTelemetry,
   type DanteTelemetry,
   type OutputStatus,
+  type StoredOutput,
 } from "./audio-outputs-gate";
 
 // #233: the post-deploy gate's pure functions (`audio-outputs-gate.ts`), run in
@@ -56,43 +57,29 @@ function packet(sr: number, frames: number, bit: number, name: string, counter: 
 }
 
 test.describe("audio outputs gate (#233)", () => {
-  test("lv1 sending 48 kHz INT24 sp-program passes", () => {
-    expect(lv1PathFailures([lv1(100)], [lv1(130)])).toEqual([]);
-    expect(lv1PathFailures([lv1(100)], [lv1(125)]), "exactly 25 blocks").toEqual([]);
+  test("lv1's VBAN output off and silent passes; gone passes too (#350)", () => {
+    const stored: StoredOutput[] = [
+      { id: "out-2", type: "vban", enabled: false, vban: { host: "lv1.lan", port: 6980 } },
+      { id: "out-4", type: "dante", enabled: true },
+    ];
+    const off = lv1(0, { id: "out-2", state: "disabled" });
+    expect(lv1OffFailures(stored, [off], [off])).toEqual([]);
+    expect(lv1OffFailures([{ id: "out-4", type: "dante", enabled: true }], [], [])).toEqual([]);
+    const upper: StoredOutput[] = [{ id: "out-2", type: "vban", enabled: false, vban: { host: "LV1.lan", port: 6980 } }];
+    expect(lv1OffFailures(upper, [off], [off]), "the host ignoring case").toEqual([]);
   });
 
-  test("a missing lv1 output fails", () => {
-    expect(lv1PathFailures([], [])).toEqual(["no VBAN output to lv1.lan:6980"]);
-    const elsewhere = lv1(130, {
-      vban: { stream_name: "sp-program", packets_sent: 0, send_errors: 0, targets: [{ target: "fohabl.lan:6980", addr: null, error: null }] },
-    });
-    expect(lv1PathFailures([lv1(100)], [elsewhere])).toEqual(["no VBAN output to lv1.lan:6980"]);
-  });
-
-  test("an lv1 output moved off 48 kHz INT24 fails with each reason", () => {
-    const moved = lv1(130, { rate: 96000, format: "int16", state: "waiting", reason: "no IPv4 address" });
-    expect(lv1PathFailures([lv1(100)], [moved])).toEqual([
-      "the lv1 output is waiting (no IPv4 address)",
-      "the lv1 output runs at 96000 Hz, not 48000",
-      "the lv1 output sends int16, not int24",
+  test("an lv1 VBAN output still enabled, running or sending fails by name (#350)", () => {
+    const on: StoredOutput[] = [{ id: "out-2", type: "vban", enabled: true, vban: { host: "lv1.lan", port: 6980 } }];
+    expect(lv1OffFailures(on, [lv1(100, { id: "out-2", state: "running" })], [lv1(130, { id: "out-2", state: "running" })])).toEqual([
+      "the VBAN output out-2 to lv1.lan:6980 is enabled (#350: off, lv1 is on Dante)",
+      "the VBAN output out-2 is running, not disabled",
+      "the VBAN output out-2 sent 30 blocks between the reads",
     ]);
-    const renamed = lv1(130, { delay_ms: 20, state: "opening" });
-    renamed.vban!.stream_name = "cg";
-    expect(lv1PathFailures([lv1(100)], [renamed])).toEqual([
-      "the lv1 output is opening",
-      "the lv1 stream is cg, not sp-program",
-      "the lv1 output is delayed 20 ms",
-    ]);
-  });
-
-  test("an lv1 output that stalled or errors fails", () => {
-    const stalled = lv1(110);
-    stalled.vban!.send_errors = 3;
-    expect(lv1PathFailures([lv1(100)], [stalled])).toEqual([
-      "only 10 lv1 blocks went out between the reads",
-      "3 lv1 send errors between the reads",
-    ]);
-    expect(lv1PathFailures([lv1(100)], [lv1(124)])).toEqual(["only 24 lv1 blocks went out between the reads"]);
+    const off: StoredOutput[] = [{ id: "out-2", type: "vban", enabled: false, vban: { host: "lv1.lan", port: 6980 } }];
+    expect(lv1OffFailures(off, [], [])).toEqual(["the VBAN output out-2 is not listed on GET /api/v1/program"]);
+    const otherPort: StoredOutput[] = [{ id: "out-9", type: "vban", enabled: true, vban: { host: "lv1.lan", port: 6981 } }];
+    expect(lv1OffFailures(otherPort, [], []), "another lv1 port is not SNV's lv1 entry").toEqual([]);
   });
 
   test("a VBAN header parses", () => {

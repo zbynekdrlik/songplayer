@@ -1164,3 +1164,14 @@ moment it is shown with `window`'s `focus` event (`usage.rs`,
 `sp_core::ui_usage::PageViews`). A Playwright page reads visible AND
 focused (focus emulation): fake the app window by overriding
 `document.hasFocus` in an init script (`e2e/ui-usage.spec.ts`).
+
+## The mock's preview stream never ends (#311)
+
+The server's `preview.ws` streams forever; a mock that sends its 4 s fixture
+once lets a slow runner look after the clip played out and read readyState
+1 for the whole poll (#311: `currentTime 3.92` of `0.000-4.021`). The mock
+repeats the fixture with each fragment's `tfdt` moved on by its track's
+span (trun / tfhd / trex durations) and `mfhd` sequence moved on, the first
+pass every 120 ms, the repeats at real time; the lag beacon is the media
+time sent. A new canned feed (a fixture, a fault knob) keeps that: a mock
+stream that stops is no model of a live one.

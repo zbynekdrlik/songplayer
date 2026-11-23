@@ -1,8 +1,3 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
-//
-// The slot table and probe tests are dstack's (`crates/dstack-endpoint/src/
-// slots/tests.rs`, tag v0.6.178), kept so the copy stays dstack's rule.
-
 //! #324: the Dante output's slot pick and the named refusal.
 
 use std::cell::RefCell;

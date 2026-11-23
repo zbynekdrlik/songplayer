@@ -808,10 +808,12 @@ knobs: `/__mock/fail-mode {kind: "settings"}` and `/__mock/outputs-skip
 
 ## Live gates (`e2e/post-deploy-audio-outputs.spec.ts`)
 
-lv1 (`lv1.lan:6980`) at `LV1_RATE` 48 kHz INT24 (FOH left VBAN on 5.11.2026, the owner, #257: VB-Matrix is off on fohabl and FOH takes SongPlayer over Dante) `sp-program`, no delay, ≥ 25
-blocks between two reads, no send errors (`audio-outputs-gate.ts`, unit-
-tested in the mock suite), polled for first (after a restart lv1 is listed
-only once the outputs task's first pass ran); a temporary `e2e-96k` entry to a UDP receiver on
+lv1 is OFF (#350, the owner 23.11.2026: lv1 is on the Dante network through
+dsg's bridge now): a stored VBAN entry to `lv1.lan:6980` must be disabled,
+read `disabled` and send nothing between two reads 2 s apart
+(`audio-outputs-gate.ts::lv1OffFailures`); no such entry passes too. The
+VBAN code stays (the owner: switch the output off, never delete the code).
+FOH left VBAN on 5.11.2026 (#257). Then a temporary `e2e-96k` entry to a UDP receiver on
 127.0.0.1 reads index 4, 200-frame INT24 packets, a contiguous counter
 (480/s); `finally` restores the list stored NOW (an operator may have
 saved one meanwhile) without the probe. The probe needs a STORED list first:
@@ -1629,7 +1631,7 @@ difference with its UTC time.
   Since dstack v0.6.12 (dstack #102, 3.11.2026) every dstack crate is MIT OR
   Apache-2.0 (checked in the checkout's Cargo.toml files), so the license no
   longer keeps #285 off `main`. `THIRD-PARTY-NOTICES.txt` names dstack
-  0.6.178 (dlink, dstack, dstack-audio-io, dstack-resample) with its
+  0.6.214 (dlink, dstack, dstack-audio-io, dstack-resample) with its
   LICENSE-MIT verbatim (it named 0.5.11 under the GPL until step 3).
 - `type: dante` in `audio_outputs`, at most one, `DanteDest {device, ip}`: the
   device name by Dante's own rule, the `ip` one IPv4 of this PC (a second
@@ -1637,7 +1639,7 @@ difference with its UTC time.
 - `DanteDevice` (`dante_device.rs`) implements the `AsioDevice` seam **in this
   process**, on every platform, with no `sp-dante-host` (the owner's ruling):
   `asio_out`'s worker, ring, `asrc_servo` and status serve it, so a second servo
-  never appears. dstack by git tag (v0.6.178), no Dante protocol code here.
+  never appears. dstack by git tag (v0.6.214 since 23.11.2026), no Dante protocol code here.
   #328 (dstack#366): every test Dante device serves on 127.0.0.1 —
   `.cargo/config.toml` `[env] DSTACK_TEST_LOOPBACK = "1"` reaches cargo test,
   nextest and cargo-mutants, and the stack then refuses any other address the
@@ -1676,10 +1678,9 @@ difference with its UTC time.
   against it applied to the old pump, not to dlink.
 - **The control ports come from the first free dstack slot** (#324, design
   7004285679): slot k = ARC 4440 + k, CMC 8800 + k, flows 4455 + k, process
-  id k, k in 0..15 (`dante_slots.rs`, copied from dstack v0.6.178
-  `crates/dstack-endpoint/src/slots.rs`, MIT OR Apache-2.0, origin in its
-  header; deleted once dstack moves it into dlink — `dstack-endpoint` pulls
-  cpal). `DanteDevice::open` probes AFTER it holds `HELD` (a predecessor of
+  id k, k in 0..15 (`dlink::slots`, re-exported by `dante_slots.rs` since
+  #342; SongPlayer keeps only its own chooser: the lingering predecessor's
+  ports, the holder naming). `DanteDevice::open` probes AFTER it holds `HELD` (a predecessor of
   ours has stopped and given its ports back), each port on the device's IP
   and then on the wildcard address (ConMon's 0.0.0.0:8800, dstack #200), and
   builds the stack's config on `Some(slot)`; no slot free = `None`,
