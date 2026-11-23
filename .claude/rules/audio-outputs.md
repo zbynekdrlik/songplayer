@@ -808,10 +808,12 @@ knobs: `/__mock/fail-mode {kind: "settings"}` and `/__mock/outputs-skip
 
 ## Live gates (`e2e/post-deploy-audio-outputs.spec.ts`)
 
-lv1 (`lv1.lan:6980`) at `LV1_RATE` 48 kHz INT24 (FOH left VBAN on 5.11.2026, the owner, #257: VB-Matrix is off on fohabl and FOH takes SongPlayer over Dante) `sp-program`, no delay, ≥ 25
-blocks between two reads, no send errors (`audio-outputs-gate.ts`, unit-
-tested in the mock suite), polled for first (after a restart lv1 is listed
-only once the outputs task's first pass ran); a temporary `e2e-96k` entry to a UDP receiver on
+lv1 is OFF (#350, the owner 23.11.2026: lv1 is on the Dante network through
+dsg's bridge now): a stored VBAN entry to `lv1.lan:6980` must be disabled,
+read `disabled` and send nothing between two reads 2 s apart
+(`audio-outputs-gate.ts::lv1OffFailures`); no such entry passes too. The
+VBAN code stays (the owner: switch the output off, never delete the code).
+FOH left VBAN on 5.11.2026 (#257). Then a temporary `e2e-96k` entry to a UDP receiver on
 127.0.0.1 reads index 4, 200-frame INT24 packets, a contiguous counter
 (480/s); `finally` restores the list stored NOW (an operator may have
 saved one meanwhile) without the probe. The probe needs a STORED list first:
