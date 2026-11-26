@@ -110,6 +110,32 @@ fn the_program_loses_its_owned_fills_and_resyncs_and_coalesced_boundaries() {
     );
 }
 
+/// #289 step 2: an audio job the audio side dropped and a block NDI never
+/// got from the line are lost program boundaries, with the sender's own:
+/// the audio job a boundary lost shows as its missing block, so the loss
+/// is the sender's coalesced + the missing, each boundary once.
+#[test]
+fn the_audio_side_s_lost_boundaries_count_as_coalesced() {
+    let mut status = ProgramBus::new().status();
+    status.health.coalesced = 1;
+    status.health.audio.coalesced = 2;
+    status.health.audio.line.missing = 4;
+    status.health.audio.line.stale = 100;
+    let probe = program_probe(&status, 0, 0);
+    let coalesced = probe.counters.iter().find(|c| c.kind == kinds::COALESCED);
+    assert_eq!(
+        coalesced,
+        Some(&Counter::loss(kinds::COALESCED, 5)),
+        "the sender's own + the boundaries NDI got no block for"
+    );
+    // Review round 2: a missing block after earlier sender coalesces still
+    // grows the counter the ledger records.
+    status.health.audio.line.missing = 5;
+    let probe = program_probe(&status, 0, 0);
+    let coalesced = probe.counters.iter().find(|c| c.kind == kinds::COALESCED);
+    assert_eq!(coalesced, Some(&Counter::loss(kinds::COALESCED, 6)));
+}
+
 /// An output's line as `GET /api/v1/program` serves it, with no transport
 /// block.
 fn output(id: &str, enabled: bool, sent: u64, dropped: u64) -> OutputStatus {

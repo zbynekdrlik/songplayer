@@ -4,6 +4,7 @@ paths:
   - "crates/sp-server/src/playback/mmcss*.rs"
   - "crates/sp-server/src/playback/stat_window*.rs"
   - "crates/sp-server/src/playback/program_output*.rs"
+  - "crates/sp-server/src/playback/program_audio*.rs"
   - "crates/sp-server/src/api/program*.rs"
   - "crates/sp-server/src/playback/audio_out*.rs"
   - "sp-ui/src/components/settings_form.rs"
@@ -35,7 +36,9 @@ sender, and its 48 kHz INT24 bytes are #210's.
     paints the picture (`paint_mix`) and submits.
 
   The order is structural: `serve` = `split` (the audio side, no video work)
-  → `feed_outputs` → `submit_video` (#223: a source picture's canvas fit, a
+  → `feed_outputs` → `submit_video` (#289 step 2: the first three are
+  `AudioSide::process`, on the `program-audio` thread in production;
+  #223: a source picture's canvas fit, a
   mix's picture, the standby black, then the NDI submit), and the run of
   mixed boundaries ends only after the unmixed
   boundary went out. So no video-side cost of a boundary — a slow NDI send,
@@ -58,7 +61,9 @@ sender, and its 48 kHz INT24 bytes are #210's.
   `split` and `feed_outputs`, in place on the pair's audio:
   - ONE `sp_decoder::PeakLimiter` (the #184 limiter, now `pub`: ceiling
     0.98, stereo-linked, instant attack, 50 ms release, bit-identical at
-    rest) owned by the `ProgramOutput`;
+    rest) owned by the program's ONE `AudioSide` (#289 step 2,
+    `program_audio.rs`: on the `program-audio` thread in production, inline
+    in the tests' `ProgramOutput`);
   - every program block goes through it: a forwarded pair's, a fade's
     crossfaded block, the standby silence (0 × gain stays 0; the tail
     decays in step with time). Its state carries from one boundary to the

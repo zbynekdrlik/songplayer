@@ -1094,7 +1094,10 @@ the one it gave before. The public `service` / `service_standby`
 (`pacer_commit.rs`) sink each decision into a `CommitLine` and replay a
 pair, through the same `PacedSink` method, once the REAL wall
 (`wall_now_100ns`) reaches its stamp; what an output receives, and when,
-is unchanged. Nothing is handed to the bus early yet (step 2).
+is unchanged. #289 step 2: the production pacer (`Pacer::new`) hands each
+pair out at its commit instead, one slot before its stamp
+(`handing_ahead`, `audio-outputs.md` "step 2"); `with_lead` keeps the
+release at the stamp.
 
 - A command read after a commit (pause, resume, seek, stop, a new Play,
   the song's end) applies from the first boundary not yet committed: up to

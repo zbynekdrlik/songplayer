@@ -11,6 +11,7 @@
 //! blend and audio samples, in order), so a later pacer must give exactly the
 //! same pairs.
 
+use std::cell::Cell;
 use std::collections::VecDeque;
 
 use sp_core::genlock::strict_next_boundary_100ns;
@@ -23,6 +24,12 @@ use crate::playback::pacer::{
 };
 use crate::playback::picture::Picture;
 use crate::playback::wallclock::{SettableClock, WallClock};
+
+// #289 step 2: the rigs built while this is set hand each pair out at its
+// commit (`Pacer::handing_ahead`, production).
+thread_local! {
+    static HANDING: Cell<bool> = const { Cell::new(false) };
+}
 
 /// A bound on every loop here: every scenario ends long before it.
 const MAX_BOUNDARIES: usize = 2_000;
@@ -243,6 +250,11 @@ impl Rig {
         let lead = lead_slots * 333_333;
         let (wall, clk) = WallClock::settable(-lead);
         let pacer = Pacer::with_lead(30, true, wall, lead_slots);
+        let pacer = if HANDING.get() {
+            pacer.handing_ahead()
+        } else {
+            pacer
+        };
         assert_eq!(pacer.lead_100ns(), lead);
         let mut px = vec![0u8; 12];
         px[..2].copy_from_slice(&BLACK_ID.to_le_bytes());
@@ -693,4 +705,42 @@ fn a_position_reports_the_frame_that_goes_out_next() {
     let k1 = Rig::new(AUDIO_LEAD_SLOTS);
     assert_eq!(k1.pacer.shown_position_ms(5_000), 4_967);
     assert_eq!(k1.pacer.shown_position_ms(20), 0, "never below the start");
+}
+
+/// #289 step 2: the production pacer hands every pair out at its commit,
+/// one slot before its stamp, and they are the very pairs step 1 pinned.
+#[test]
+fn handed_out_at_the_commit_every_pair_is_the_same_one_slot_early() {
+    type Case = (fn(i64) -> Rig, (usize, usize, usize, usize, usize), u64);
+    let cases: [Case; 5] = [
+        (song_30, (90, 15, 0, 10, 105), 8_643_186_858_566_154_753),
+        (song_25, (16, 1, 74, 6, 90), 14_227_950_745_936_186_259),
+        (seek, (85, 1, 0, 9, 85), 4_719_203_122_329_271_307),
+        (pause_resume, (12, 7, 54, 5, 66), 16_810_695_633_823_938_371),
+        (stop, (24, 0, 0, 5, 24), 2_164_604_794_920_010_690),
+    ];
+    for (n, (scenario, census_pin, fp_pin)) in cases.into_iter().enumerate() {
+        HANDING.set(true);
+        let rig = scenario(AUDIO_LEAD_SLOTS);
+        HANDING.set(false);
+        assert_eq!(rig.pacer.hand_ahead_100ns(), rig.lead, "case {n}");
+        assert_eq!(census(&rig.rec.pairs), census_pin, "case {n}: kinds");
+        assert_eq!(fingerprint(&rig.rec.pairs), fp_pin, "case {n}: every pair");
+        for (i, p) in rig.rec.pairs.iter().enumerate() {
+            let early = p.vtc - rig.rec.at[i];
+            assert!(
+                early > 0 && early <= rig.lead,
+                "case {n}, pair {i}: left {early} before its stamp"
+            );
+        }
+    }
+}
+
+/// The production pacer (`Pacer::new`) hands out ahead; `with_lead` keeps
+/// step 1's release at the stamp.
+#[test]
+fn only_the_production_pacer_hands_out_ahead() {
+    assert_eq!(Pacer::new(30, true).hand_ahead_100ns(), 333_333);
+    let (wall, _clk) = WallClock::settable(0);
+    assert_eq!(Pacer::with_lead(30, true, wall, 1).hand_ahead_100ns(), 0);
 }

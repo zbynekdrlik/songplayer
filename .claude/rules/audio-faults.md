@@ -182,7 +182,7 @@ first).
 ### Limiter overs (`sp_decoder::PeakLimiter::over_frames`)
 
 Frames whose OWN peak was over the ceiling (`needed > 0`), never the release
-tail. `ProgramOutput::limit` notes the overs of every boundary that is NOT a
+tail. `AudioSide::limit` (`program_audio.rs`, #289 step 2) notes the overs of every boundary that is NOT a
 mix (`Pair::Mix`: a fade's sum is the crossfade's own) on
 `AudioOutputs::note_limiter_overs`. Tests: `peak_limiter_tests.rs`,
 `program_output_tests_limit.rs`.

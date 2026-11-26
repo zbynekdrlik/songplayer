@@ -13,7 +13,8 @@
 //! from `from` to `to` at `cut_boundary`, `to` owns every stamp `>= cut_boundary` and `from`
 //! owns every stamp `< cut_boundary`. A cut lands on the NEXT boundary + [`CUT_LEAD_SLOTS`]
 //! slot: far enough ahead that both sources emit it after the cut is recorded, so exactly one
-//! frame per boundary reaches the program — no hole, no double.
+//! frame per boundary reaches the program — no hole, no double. #289 step 2: with the sources
+//! committing a slot ahead, the lead counts that slot (`program_bus_audio.rs`).
 //!
 //! **One clock domain: the sources' stamps.** The API's realtime clock and a submit thread's
 //! per-song wall can both sit off the stamp walls after a UTC step (the pacer walls slew it in at
@@ -72,12 +73,11 @@ use sp_core::genlock::{
     GENLOCK_GRID_FPS, GENLOCK_MAX_CATCHUP_INTERVALS, UNITS_PER_SECOND, floor_boundary_100ns,
     interval_100ns, lag_slots_100ns, strict_next_boundary_100ns,
 };
-use sqlx::SqlitePool;
 use tokio::sync::watch;
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::playback::audio_out::AudioOutputs;
-use crate::playback::fleet_shift::{self, FleetShift, timeline_now_100ns};
+use crate::playback::fleet_shift::{self, FleetShift};
 use crate::playback::ndi_input::NdiInputShared;
 use crate::playback::program_max::MaxOut;
 use crate::playback::program_on_air::OnAir;
@@ -128,6 +128,10 @@ const MAX_RELEASE_STEPS: usize = 64;
 #[path = "program_bus_window.rs"]
 mod window;
 use window::{Delivery, WindowStep};
+// #289 step 2: decide once, read twice (the audio side), a child too.
+#[path = "program_bus_audio.rs"]
+mod audio;
+pub use audio::AudioTake;
 
 /// One program boundary for the `SP-program` sender.
 pub enum ProgramJob {
@@ -196,6 +200,8 @@ pub struct ProgramHealth {
     pub last_stamp_100ns: i64,
     /// #210: how late the sender served its boundaries, per stage.
     pub timing: BoundaryTimingStatus,
+    /// #289 step 2: the audio side (`program_audio.rs`).
+    pub audio: crate::playback::program_audio::AudioAheadStatus,
 }
 
 /// The program state served by `GET /api/v1/program`.
@@ -276,6 +282,8 @@ pub struct ProgramCore {
     receivers_dark: bool,
     /// #210: the sender's per-boundary timing window (`health.timing`).
     timing: BoundaryTiming,
+    /// #289 step 2: the audio side (off by default).
+    ahead: audio::AudioAhead,
 }
 
 impl Default for ProgramCore {
@@ -302,6 +310,7 @@ impl ProgramCore {
             health: ProgramHealth::default(),
             receivers_dark: false,
             timing: BoundaryTiming::default(),
+            ahead: audio::AudioAhead::default(),
         }
     }
 
@@ -359,7 +368,8 @@ impl ProgramCore {
     /// Cut the program to `pid`. The cut boundary is the next boundary after
     /// the newest stamp the involved sources (the program's segments + `pid` +
     /// every window's `from`) or the program itself reached — `now_100ns` (the
-    /// caller's clock) only when nothing was seen — plus [`CUT_LEAD_SLOTS`].
+    /// caller's clock) only when nothing was seen — plus [`CUT_LEAD_SLOTS`]
+    /// (#289 step 2: less the sources' lead, so a click lands as before).
     /// The previous owner keeps every stamp before it. A later cut replaces one
     /// recorded on the same or a later boundary; a cut back to the source that
     /// still owns that boundary cancels the pending cut. #215: the cut opens a
@@ -376,20 +386,16 @@ impl ProgramCore {
         // Cut in the sources' stamp domain (module doc): the newest stamp the
         // involved sources or the program reached; the caller's clock only as
         // the fallback.
+        // #289 step 2: each stamp with the lead its source commits at.
         let seen = self
             .segments
             .iter()
             .map(|&(_, p)| p)
             .chain(std::iter::once(pid))
             .chain(self.windows.iter().filter_map(|w| w.from))
-            .filter_map(|p| self.last_offer.get(&p).copied())
-            .chain(self.last)
-            .max();
-        let from = seen.unwrap_or(now_100ns);
-        let mut boundary = strict_next_boundary_100ns(from, self.fps);
-        for _ in 0..CUT_LEAD_SLOTS {
-            boundary = strict_next_boundary_100ns(boundary, self.fps);
-        }
+            .filter_map(|p| Some((*self.last_offer.get(&p)?, self.ahead.lead_of(p))))
+            .chain(self.last.map(|last| (last, self.ahead.last_lead())));
+        let boundary = self.ahead.cut_boundary(self.fps, seen, now_100ns);
         self.segments.retain(|&(first, _)| first < boundary);
         // #215: the source on air, read BEFORE the windows this cut replaces
         // are dropped: a waiting one cut ON the boundary kept its outgoing
@@ -581,8 +587,9 @@ impl ProgramCore {
     /// Queue one boundary for the `SP-program` sender and advance. #147:
     /// with the source it shows, decided now (a pruned segment no longer
     /// names the owner of a boundary the sender takes later).
-    fn commit(&mut self, job: ProgramJob, source: Option<i64>) {
+    fn commit(&mut self, mut job: ProgramJob, source: Option<i64>) {
         self.last = Some(job.stamp_100ns());
+        self.ahead.split(&mut job, source); // #289 step 2: its audio to the audio side
         if let HandoffOutcome::Coalesced { .. } = self.queue.offer((job, source)) {
             self.health.coalesced += 1;
         }
@@ -653,6 +660,7 @@ impl ProgramCore {
     /// #210: the sender served one boundary at `marks`; the boundary to
     /// WARN about, if any ([`BoundaryTiming::observe`]).
     pub fn record_timing(&mut self, marks: &BoundaryMarks) -> Option<LateBoundary> {
+        self.ahead.observe(marks);
         self.timing.observe(marks)
     }
 
@@ -669,6 +677,7 @@ impl ProgramCore {
                 .filter(|&first| first != i64::MIN),
             health: ProgramHealth {
                 timing: self.timing.status(),
+                audio: self.ahead.status(),
                 ..self.health
             },
             transition: TransitionStatus {
@@ -710,8 +719,11 @@ struct BusState {
 pub struct ProgramBus {
     state: Mutex<BusState>,
     ready: Condvar,
-    /// #210 + #233: the program's audio outputs, fed by the `SP-program`
-    /// sender thread and reported under `outputs` on `GET /api/v1/program`.
+    /// #289 step 2: wakes the `program-audio` thread; its limited blocks.
+    audio_ready: Condvar,
+    line: Arc<crate::playback::program_audio::AudioLine>,
+    /// #210 + #233: the program's audio outputs, fed by the `program-audio`
+    /// thread (#289 step 2) and reported under `outputs` on `GET /api/v1/program`.
     outputs: Arc<AudioOutputs>,
     /// #212: the NDI input "OBS manuál" (source id `PROGRAM_INPUT_ID`): its
     /// settings, stop flag and telemetry (`input` on `GET /api/v1/program`).
@@ -750,6 +762,8 @@ impl ProgramBus {
                 stop: false,
             }),
             ready: Condvar::new(),
+            audio_ready: Condvar::new(),
+            line: Arc::default(),
             outputs: Arc::new(AudioOutputs::new()),
             input: Arc::new(NdiInputShared::default()),
             remote: Arc::new(RemoteShared::default()),
@@ -819,14 +833,14 @@ impl ProgramBus {
     /// See [`ProgramCore::offer`].
     pub fn offer(&self, pid: i64, job: SubmitJob) -> OfferOutcome {
         let outcome = self.lock().core.offer(pid, job);
-        self.ready.notify_one(); // the waiter re-checks the queue itself
+        self.notify(); // the waiters re-check their queues themselves
         outcome
     }
 
     /// Release missed boundaries (the sender thread's per-boundary check).
     pub fn release_due(&self, now_100ns: i64) {
         self.lock().core.release(now_100ns);
-        self.ready.notify_one();
+        self.notify();
     }
 
     /// Cut the program to `pid` (see [`ProgramCore::cut`]), publish it as on
@@ -837,7 +851,11 @@ impl ProgramBus {
         let mut st = self.lock();
         st.core.cut(pid, now_100ns);
         self.publish(pid, scene);
-        st.core.status().on_wire(fleet_shift::global())
+        let line = self.line.status();
+        st.core
+            .status()
+            .with_line(line)
+            .on_wire(fleet_shift::global())
     }
 
     /// See [`ProgramCore::select_initial`]; published as on air for `scene`.
@@ -871,7 +889,10 @@ impl ProgramBus {
     }
 
     pub fn status(&self) -> ProgramStatus {
-        self.lock().core.status().on_wire(fleet_shift::global())
+        let status = self.lock().core.status();
+        status
+            .with_line(self.line.status())
+            .on_wire(fleet_shift::global())
     }
 
     /// Sender thread: the next queued boundary, waiting at most `wait` for one.
@@ -907,6 +928,7 @@ impl ProgramBus {
     pub fn stop(&self) {
         self.lock().stop = true;
         self.ready.notify_all();
+        self.audio_ready.notify_all();
     }
 }
 
@@ -923,72 +945,17 @@ pub fn installed() -> Option<&'static Arc<ProgramBus>> {
     PROGRAM_BUS.get()
 }
 
-/// Persist the selected program source (a playlist id).
-pub async fn persist_selected_source(pool: &SqlitePool, pid: i64) -> Result<(), sqlx::Error> {
-    crate::db::models::set_setting(pool, SETTING_PROGRAM_SOURCE, &pid.to_string()).await
-}
-
-/// Persist `pid` as the selected source FIRST, then cut the program to it (a
-/// failed write cuts nothing) and publish it as on air for `scene` (#221). The
-/// one cut path of `POST /api/v1/program/cut` and the #213 remote control; two
-/// cuts never interleave, so the persisted source is always the one on
-/// program.
-pub async fn persist_and_cut(
-    pool: &SqlitePool,
-    bus: &ProgramBus,
-    pid: i64,
-    scene: Option<&str>,
-) -> Result<ProgramStatus, sqlx::Error> {
-    let _serial = bus.cut_serial.lock().await;
-    persist_selected_source(pool, pid).await?;
-    Ok(bus.cut(pid, timeline_now_100ns(), scene)) // #224 part 2: the stamps' timeline
-}
-
-/// Restore the persisted program source into `bus` (startup). Returns the
-/// restored source id; a missing or unreadable setting leaves the program on
-/// its standby pair. The #212 NDI input (`PROGRAM_INPUT_ID`) is restored only
-/// while it is active (enabled with a source) — otherwise it is not a source.
-/// #221: published as on air with the playlist's catalog scene
-/// (`scene_catalog::scene_of_source`; none for the input).
-pub async fn restore_selected_source(pool: &SqlitePool, bus: &ProgramBus) -> Option<i64> {
-    let raw = match crate::db::models::get_setting(pool, SETTING_PROGRAM_SOURCE).await {
-        Ok(v) => v?,
-        Err(e) => {
-            warn!(%e, "program bus: reading the persisted source failed");
-            return None;
-        }
-    };
-    let pid = match raw.trim().parse::<i64>() {
-        Ok(pid) => pid,
-        Err(e) => {
-            warn!(%e, raw = %raw, "program bus: persisted source is not a source id");
-            return None;
-        }
-    };
-    if pid == sp_core::config::PROGRAM_INPUT_ID && !input_active(pool).await {
-        warn!(
-            source = pid,
-            "program bus: the persisted source is the NDI input, which is disabled or has no source — not restored"
-        );
-        return None;
-    }
-    let scene = crate::playback::scene_catalog::scene_of_source(pool, pid).await;
-    bus.select_initial(pid, scene.as_deref());
-    info!(source = pid, scene = ?scene, "program bus: restored the selected source");
-    Some(pid)
-}
-
-/// #212: whether the stored settings make the NDI input a source (enabled
-/// with a source name; an unreadable setting counts as not).
-async fn input_active(pool: &SqlitePool) -> bool {
-    crate::playback::ndi_input::load_input_settings(pool)
-        .await
-        .is_ok_and(|s| s.active())
-}
+// The selected source's persistence (#209), a child for the 1000-line cap.
+#[path = "program_bus_persist.rs"]
+mod persist;
+pub use persist::{persist_and_cut, persist_selected_source, restore_selected_source};
 
 #[cfg(test)]
 #[path = "program_bus_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "program_bus_tests_audio.rs"]
+mod tests_audio;
 #[cfg(test)]
 #[path = "program_bus_tests_cue.rs"]
 mod tests_cue;

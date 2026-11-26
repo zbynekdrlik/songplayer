@@ -32,6 +32,13 @@
 //! With K = 0 (`Pacer::with_wallclock`, the unit tests' constructor) every
 //! pair leaves in the call that decided it: the path before step 1.
 //!
+//! #289 step 2: the production pacer ([`Pacer::new`]) also HANDS each pair
+//! out at its commit, one slot before its stamp ([`Pacer::handing_ahead`]):
+//! the bus decides it then, its audio reaches the outputs a slot early, and
+//! the `SP-program` sender holds the picture to its stamp
+//! (`program_audio.rs`). The pairs are the same; only when they leave the
+//! pacer moves. [`Pacer::with_lead`] keeps step 1's release at the stamp.
+//!
 //! A child of `pacer.rs` (1000-line cap), like `pacer_prepare.rs`.
 
 use std::collections::VecDeque;
@@ -100,6 +107,8 @@ impl Committed {
 #[derive(Default)]
 pub(super) struct CommitLine {
     pairs: VecDeque<Committed>,
+    /// #289 step 2: how long (100 ns) before its stamp a pair leaves.
+    hand_ahead_100ns: i64,
 }
 
 impl CommitLine {
@@ -113,12 +122,12 @@ impl CommitLine {
     }
 
     /// Hand out, oldest first, every pair whose stamp the real wall `now`
-    /// reached, and a pair stranded more than `stranded_after` ahead of it
-    /// (a backward wall step).
+    /// reached (or comes within the hand-ahead of), and a pair stranded more
+    /// than `stranded_after` ahead of it (a backward wall step).
     fn release<S: PacedSink>(&mut self, now: i64, stranded_after: i64, sink: &mut S) {
         while let Some(front) = self.pairs.front() {
             let ahead = front.video_tc_100ns - now;
-            if ahead > 0 && ahead <= stranded_after {
+            if ahead > self.hand_ahead_100ns && ahead <= stranded_after {
                 return;
             }
             let pair = self.pairs.pop_front().expect("the front was just read");
@@ -187,6 +196,19 @@ impl Pacer {
         pacer
     }
 
+    /// #289 step 2: hand each committed pair out at once, the lead before
+    /// its stamp, instead of at its stamp (production, via [`Pacer::new`]).
+    pub fn handing_ahead(mut self) -> Self {
+        self.line.hand_ahead_100ns = self.lead_100ns;
+        self
+    }
+
+    /// How far (100 ns) before its stamp a committed pair leaves.
+    #[cfg(test)]
+    pub fn hand_ahead_100ns(&self) -> i64 {
+        self.line.hand_ahead_100ns
+    }
+
     /// How far (100 ns) the decisions run ahead of the wall.
     pub fn lead_100ns(&self) -> i64 {
         self.lead_100ns
@@ -241,7 +263,9 @@ impl Pacer {
     /// one slot before the next boundary: where a pacer with no lead stands
     /// after a pre-roll. The paced pipeline sends a song's `Started` there,
     /// so it still reaches the engine (the title clock) one slot before the
-    /// song's first pair leaves; the decision clock then reads that boundary,
+    /// song's first boundary (#289 step 2: the production pacer hands that
+    /// pair out right then, the program shows it at its stamp); the decision
+    /// clock then reads that boundary,
     /// so the first commit is not late. With no lead the wall is already
     /// past it (`wait` returns at once).
     pub fn wait_one_slot_before_next<S, W>(&mut self, sink: &mut S, mut wait: W)

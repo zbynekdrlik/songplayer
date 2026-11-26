@@ -11,6 +11,7 @@ paths:
   - "crates/sp-server/src/playback/scene_catalog*.rs"
   - "crates/sp-server/src/playback/ndi_health_expect*.rs"
   - "crates/sp-server/src/playback/program_output*.rs"
+  - "crates/sp-server/src/playback/program_audio*.rs"
   - "crates/sp-server/src/playback/program_trace*.rs"
   - "crates/sp-server/src/playback/program_video_quiet*.rs"
   - "crates/sp-server/src/playback/handle_pipeline_event*.rs"
@@ -137,7 +138,11 @@ output of its own and feeds this bus alone (`pipeline-testability.md`).
   boundary's `BoundaryMarks`, which the loop records
   (`ProgramBus::record_timing` → `health.timing`, the rate-limited WARN of a
   VBAN hand-off after its block's first packet was due, over VBAN's send
-  latency L, #210 part 2; `vban-out.md` "The program boundary's timing"). `ProgramOutput::submit` is only the tests' shorthand
+  latency L, #210 part 2; `vban-out.md` "The program boundary's timing"). #289 step 2: in production the audio side
+  (`split` → `limit` → `feed_outputs` = `program_audio::AudioSide::process`)
+  runs on the `program-audio` thread, the sender holds each job (now one
+  slot early) to its stamp and takes its limited block from the line
+  (`audio-outputs.md` "step 2"). `ProgramOutput::submit` is only the tests' shorthand
   (`#[cfg(test)]`, no clock, returns the stamp). #279 P1b: the video side
   is `submit_ndi` — the canvas (`submit_video`), or, from the GPU
   readback, the delay line ("NDI from the GPU readback" below).
