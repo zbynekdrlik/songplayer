@@ -7,6 +7,8 @@ paths:
   - "crates/sp-core/src/asio_resampling*.rs"
   - "crates/sp-server/src/playback/resample_quality.rs"
   - "crates/sp-server/src/playback/audio_out*.rs"
+  - "crates/sp-server/src/playback/program_audio*.rs"
+  - "crates/sp-server/src/playback/program_bus_audio*.rs"
   - "crates/sp-server/src/playback/vban_rate*.rs"
   - "crates/sp-server/src/playback/vban_out_tests_dest.rs"
   - "crates/sp-server/src/playback/vban_packet_tests_format.rs"
@@ -132,6 +134,63 @@ start):
   every VBAN output and keeps an ASIO one, a pass reads the stored value);
   `settings_tests_audio.rs` (the PATCH); `program_tests_outputs.rs` (the
   top-level field).
+
+## The timestamped-audio rebuild, step 2: the audio side on its own thread (#289, design 6814927800 + 7180172596)
+
+Decide once, read twice. Nothing audible moves: every output still plays
+at stamp + 66.7 ms (+ its delay, + FOH's conversion), because VBAN
+schedules on the stamp and the ASIO / Dante servo reads latency as
+buffered / rate + (handled − stamp). An earlier hand-off only grows the
+margin.
+
+- **The pacer hands each pair out at its commit** (`Pacer::new` =
+  `with_lead(..).handing_ahead()`, `CommitLine::hand_ahead_100ns`): one
+  slot before its stamp, the same pairs step 1 pinned
+  (`pacer_tests_commit.rs::handed_out_at_the_commit_every_pair_is_the_same_one_slot_early`).
+  `with_lead` keeps step 1's release at the stamp.
+- **The bus decides once** (`ProgramCore::commit`, unchanged). With the
+  audio side on (`ProgramBus::with_audio_ahead(AUDIO_LEAD_SLOTS)`, built
+  so in `lib.rs`; `ProgramCore::new` / `ProgramBus::new` keep it OFF, so
+  every older bus test is unchanged) each commit MOVES the boundary's
+  audio into an `AudioJob` (`program_audio::take_audio`: a forward's
+  block, a window boundary's two first blocks + `sample_span`, or the
+  standby) on a bounded queue (10, the oldest dropped, `health.audio.coalesced`);
+  the sender's job keeps its picture (`program_bus_audio.rs`).
+- **The cut lead counts the sources' slot**: `strict_next(newest seen)` +
+  (`CUT_LEAD_SLOTS` − lead) slots, the clock fallback read the lead ahead,
+  so a click in (B, B + 1) still lands on B + 2
+  (`program_bus_tests_audio.rs`).
+- **The `program-audio` thread** (`program_audio::spawn_audio_thread`,
+  Windows, MMCSS "Pro Audio", started with the `SP-program` sender after
+  its NDI sender exists) runs `run_audio_loop`: each job through ONE
+  `AudioSide` (the crossfade, the program's peak limiter with its reset
+  rule, the limiter's overs for the ledger, `AudioOutputs::offer`, all
+  moved verbatim out of `ProgramOutput`), the limited block into the
+  stamp-keyed `AudioLine` (12 deep, the oldest dropped).
+- **The sender** (`ProgramOutput::with_audio_line`) holds a job that came
+  ahead to its stamp on its `SendClock` (`hold_to_stamp`; a job more than
+  lead + one slot ahead goes at once, `HOLD_MAX_100NS`), then takes the
+  block from the line (`LINE_WAIT` 5 ms for a fill committed as it took
+  it; never found = the silence on NDI, `line.missing`; blocks it passed
+  over = `line.stale`). MAX, the item, the trace and the NDI submit get
+  B at B as before; `ready_late_us` is measured after the hold.
+- **Not moved in step 2**: a fill is still released on the sender's wall
+  (the one clock domain), so its audio reaches the outputs at the
+  boundary as before; the NDI input "OBS manuál" stays stamped on its
+  capture boundary (its + K stamp moves to step 4, where the outputs
+  target the stamp itself).
+- **Telemetry**: `health.audio {lead_slots, boundaries_ahead,
+  margin_us_min (stamp − hand-off, µs, the window minimum; negative =
+  after the stamp), coalesced, line {stale, missing, dropped}}` on
+  `GET /api/v1/program`. The ledger's program `coalesced` loss also counts
+  `audio.coalesced` + `audio.line.missing`. Box read after the deploy:
+  `boundaries_ahead` rising with `boundaries`, `margin_us_min` ≈ 30 ms
+  with a playlist on program, `line.missing` +0, the audio ledger 0 losses.
+- **The tests' `ProgramOutput`** (no line) runs the same `AudioSide`
+  inline: `program_output_tests_audio.rs` pins every output block and the
+  NDI audio of one scripted run (hot blocks, a 300 ms fade, a fill) over
+  the pre-step-2 sender, and requires the line path to give the same
+  fingerprint.
 
 ## The timestamped-audio rebuild, step 0: measure (#289, design 6814927800)
 

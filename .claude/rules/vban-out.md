@@ -4,6 +4,7 @@ paths:
   - "crates/sp-server/src/playback/mmcss*.rs"
   - "crates/sp-server/src/playback/stat_window*.rs"
   - "crates/sp-server/src/playback/program_output*.rs"
+  - "crates/sp-server/src/playback/program_audio*.rs"
   - "crates/sp-server/src/api/program*.rs"
   - "crates/sp-server/src/playback/audio_out*.rs"
   - "sp-ui/src/components/settings_form.rs"
@@ -58,7 +59,9 @@ sender, and its 48 kHz INT24 bytes are #210's.
   `split` and `feed_outputs`, in place on the pair's audio:
   - ONE `sp_decoder::PeakLimiter` (the #184 limiter, now `pub`: ceiling
     0.98, stereo-linked, instant attack, 50 ms release, bit-identical at
-    rest) owned by the `ProgramOutput`;
+    rest) owned by the program's ONE `AudioSide` (#289 step 2,
+    `program_audio.rs`: on the `program-audio` thread in production, inline
+    in the tests' `ProgramOutput`);
   - every program block goes through it: a forwarded pair's, a fade's
     crossfaded block, the standby silence (0 × gain stays 0; the tail
     decays in step with time). Its state carries from one boundary to the
