@@ -971,6 +971,9 @@ fn spawn_program_thread(backend: Option<super::SharedNdiBackend>, bus: Arc<Progr
 #[path = "program_output_tests.rs"]
 mod tests;
 #[cfg(test)]
+#[path = "program_output_tests_audio.rs"]
+mod tests_audio;
+#[cfg(test)]
 #[path = "program_output_tests_burn.rs"]
 mod tests_burn;
 #[cfg(test)]
