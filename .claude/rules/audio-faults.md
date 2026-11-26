@@ -153,6 +153,16 @@ Rules:
   within `PROGRAM_LIVE_WINDOW_100NS` — a source that hung BEFORE the cut
   would still wait forever. A running fade's stalled outgoing source cut
   back to waits the same 10 s from the cut back.
+- **The restored selection owes only from its FIRST delivered boundary**
+  (#289 step 2 regression: its pipeline hands that boundary S a slot
+  ahead, so the offer path fills S − 1 right after noting S — at the first
+  start on step 2 a `program` `filled` loss). `Delivery` keeps each
+  source's first delivered stamp; a boundary whose next boundary is not
+  after it is a wait (the grace still bounds it). A source a CUT made the
+  owner owes from the cut boundary as before (a cut boundary lost
+  upstream stays owned). Tests:
+  `the_restored_selection_owes_nothing_before_its_first_delivered_boundary`,
+  `a_source_cut_to_owes_the_cut_boundary_it_never_delivered`.
 - A source that delivered and then missed a boundary (its pipeline fell
   behind, a coalesce gap) still counts at once: `filled_owned`,
   `resyncs_owned`, a fade's missing side.

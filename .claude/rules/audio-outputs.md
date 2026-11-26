@@ -211,6 +211,19 @@ margin.
   coalesce leaves its block stale, never missing). Never a largest-of: the
   ledger records each counter's growth, so a max hides a later loss in the
   smaller counters (review round 2).
+- **A start's pair arrives back to back** (the step-2 regression, #289
+  comment 7183138409, root cause 7183255195): the restored playlist's
+  first boundary S is handed a slot ahead, at the instant the sender's wall
+  reaches S − 1, so the fill of S − 1 and S reach the outputs within µs.
+  The ASIO / Dante worker pushes a block handled within one slot of its
+  priming (`Run::primed_at_100ns`, the same hand-off) before the driver's
+  first tick; before, it dropped it and the next block hard-re-centred
+  (deficit ≈ 30 ms, lateness ≈ −33 ms) once per start. Later blocks still
+  wait for the tick (#233 PP). The bus's owed-fill rule for the same start:
+  `audio-faults.md` "Owned fills". Tests: `asio_out_tests_timing.rs`
+  (`a_start_pair_handed_back_to_back_primes_with_no_hard_recentre`,
+  `a_driver_with_no_callback_after_the_priming_takes_no_later_block`).
+  VBAN needs nothing: each packet is scheduled on its own block's stamp.
 - **The audio thread starts first**, in `start_program` before the
   `SP-program` port wait, whatever the NDI sender does.
 - **The tests' `ProgramOutput`** (no line) runs the same `AudioSide`
