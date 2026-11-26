@@ -142,6 +142,7 @@ fn the_line_hands_out_a_stamp_s_block_passing_older_ones_over() {
 
 #[test]
 fn a_full_line_drops_its_oldest_block() {
+    assert_eq!(LINE_BOUND, 12, "a full program queue's worth and two");
     let mut line = LineState::default();
     for k in 0..=LINE_BOUND as i64 {
         line.push(limited(T0 + k));
@@ -163,7 +164,7 @@ fn the_sender_waits_for_a_block_the_audio_thread_is_about_to_push() {
         std::thread::sleep(Duration::from_millis(20));
         pusher.push(limited(T0));
     });
-    let got = line.take(T0, Duration::from_secs(20));
+    let got = line.take(T0, Duration::from_secs(5));
     thread.join().unwrap();
     assert_eq!(got.expect("the block").stamp_100ns, T0);
     assert_eq!(line.status().missing, 0);
@@ -289,14 +290,14 @@ fn the_audio_loop_feeds_the_line_and_ends_on_a_stop() {
     let b1 = sp_core::genlock::strict_next_boundary_100ns(b0, 30);
     bus.offer(5, pair(b0, 0.1));
     bus.offer(5, pair(b1, 0.2));
-    let first = bus.audio_line().take(b0, Duration::from_secs(20));
+    let first = bus.audio_line().take(b0, Duration::from_secs(5));
     let first = first.expect("b0's block");
     assert_eq!(first.fed_100ns, 42);
     assert_eq!(first.audio.unwrap()[0].data[0], 0.1);
-    let second = bus.audio_line().take(b1, Duration::from_secs(20));
+    let second = bus.audio_line().take(b1, Duration::from_secs(5));
     assert_eq!(second.expect("b1's block").audio.unwrap()[0].data[0], 0.2);
     bus.stop();
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let deadline = Instant::now() + Duration::from_secs(5);
     while !thread.is_finished() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(5));
     }
@@ -307,4 +308,35 @@ fn the_audio_loop_feeds_the_line_and_ends_on_a_stop() {
         AudioTake::Stopped
     ));
     assert_eq!(bus.status().health.audio.lead_slots, 1);
+}
+
+/// Both readers are woken by a commit, never left to their own timeouts:
+/// the audio thread and the sender each wait a minute and get the boundary
+/// at once.
+#[test]
+fn a_commit_wakes_the_audio_thread_and_the_sender() {
+    let bus = Arc::new(ProgramBus::new().with_audio_ahead(1));
+    bus.select_initial(5, None);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let audio_bus = bus.clone();
+    let audio_tx = tx.clone();
+    let audio = std::thread::spawn(move || {
+        let got = audio_bus.take_audio_timeout(Duration::from_secs(60));
+        audio_tx.send(matches!(got, AudioTake::Job(_))).unwrap();
+    });
+    let video_bus = bus.clone();
+    let video = std::thread::spawn(move || {
+        let got = video_bus.take_timeout(Duration::from_secs(60));
+        let job = matches!(got, crate::playback::program_bus::Take::Job(..));
+        tx.send(job).unwrap();
+    });
+    std::thread::sleep(Duration::from_millis(30));
+    bus.offer(5, pair(sp_core::genlock::floor_boundary_100ns(T0, 30), 0.1));
+    let first = rx.recv_timeout(Duration::from_secs(5));
+    let second = rx.recv_timeout(Duration::from_secs(5));
+    bus.stop(); // frees a reader a mutant left waiting
+    audio.join().unwrap();
+    video.join().unwrap();
+    assert_eq!(first, Ok(true), "woken with the boundary");
+    assert_eq!(second, Ok(true), "both woken with it");
 }

@@ -176,3 +176,12 @@ fn the_status_carries_the_margin_and_the_line() {
     assert_eq!(audio.margin_us_min, Some(-3));
     assert_eq!((audio.line.stale, audio.line.missing), (1, 1));
 }
+
+/// The clock fallback reads exactly the lead ahead: a click one 100 ns
+/// tick before the lead puts it on a boundary still lands there.
+#[test]
+fn the_clock_fallback_adds_exactly_one_slot() {
+    let mut core = ProgramCore::new().with_audio_ahead(1);
+    assert!(core.cut(SRC_B, b(7) - 333_334));
+    assert_eq!(core.status().cut_boundary_100ns, Some(b(7)));
+}
