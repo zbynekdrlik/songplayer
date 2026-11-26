@@ -85,6 +85,15 @@ pub fn on_program(status: &ProgramStatus) -> BTreeSet<i64> {
     status.source.into_iter().chain(fading_out).collect()
 }
 
+/// #289 step 2: the program's lost boundaries. The sender's coalesced job,
+/// the audio side's coalesced job and a block NDI never got from the line
+/// are three views of a loss, and one boundary can show in two of them (a
+/// coalesced audio job then also reads missing at the sender), so the
+/// largest view counts: never 0 while any of them lost one.
+fn lost_boundaries(h: &crate::playback::program_bus::ProgramHealth) -> u64 {
+    h.coalesced.max(h.audio.coalesced).max(h.audio.line.missing)
+}
+
 /// The program's probe: its health, the limiter's engagements outside a
 /// fade and the trace's late boundaries.
 pub fn program_probe(status: &ProgramStatus, limiter_overs: u64, ndi_late: u64) -> Probe {
@@ -98,12 +107,7 @@ pub fn program_probe(status: &ProgramStatus, limiter_overs: u64, ndi_late: u64) 
             Counter::loss(kinds::FILLED, h.filled_owned),
             Counter::loss(kinds::RESYNC, h.resyncs_owned),
             Counter::risk(kinds::LATE_DROPPED, h.late_dropped),
-            // #289 step 2: an audio job the audio side dropped, or a block
-            // NDI never got, is a lost program boundary too.
-            Counter::loss(
-                kinds::COALESCED,
-                h.coalesced + h.audio.coalesced + h.audio.line.missing,
-            ),
+            Counter::loss(kinds::COALESCED, lost_boundaries(h)),
             Counter::risk(kinds::VBAN_FEED_LATE, h.timing.vban_feed_late_over_budget),
             Counter::risk(kinds::LIMITED, limiter_overs),
             Counter::risk(kinds::NDI_LATE, ndi_late),

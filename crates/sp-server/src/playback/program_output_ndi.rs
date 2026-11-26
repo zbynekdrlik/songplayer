@@ -4,8 +4,10 @@
 //! the 1000-line cap). Design: #279 comment 6218637444; plan
 //! `docs/superpowers/plans/2026-10-16-gpu-video-path.md` §5.6.
 //!
-//! `serve` stays `split` → `limit` → `feed_outputs` (VBAN, boundary b) →
-//! `offer_max` (b) → the quiet wait → the video side, which is
+//! `serve` stays the audio side (`AudioSide::process`: the crossfade, the
+//! limiter, the outputs' feed; #289 step 2: on the `program-audio` thread,
+//! the limited block taken from the line) → `offer_max` (b) → the quiet
+//! wait → the video side, which is
 //! [`ProgramOutput::submit_ndi`]:
 //!
 //! - NDI's source for b is decided first ([`ndi_source_for`]): the GPU
@@ -25,7 +27,7 @@
 //!   standby pair), its stamps, its item frame (the #228 burn) and its
 //!   picture: the compositor's UYVY readback of b − 1 (`ndi_feed.rs`), the
 //!   canvas's size, stride `width · 2`. No canvas fit, no fade picture, no
-//!   band-pool work: a fade's audio is still crossfaded in `split`, its
+//!   band-pool work: a fade's audio is still crossfaded by the audio side, its
 //!   picture is the compositor's fade. Then b's pair is held. A picture that
 //!   did not come (the worker late, a coalesce, a failed compose) repeats
 //!   the last one sent (`ndi.repeats`), the constant UYVY black before any:

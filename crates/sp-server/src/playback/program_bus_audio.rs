@@ -13,11 +13,13 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use sp_core::genlock::interval_100ns;
+use sp_core::genlock::{interval_100ns, strict_next_boundary_100ns};
 
-use super::{CUT_LEAD_SLOTS, PROGRAM_QUEUE_BOUND, ProgramBus, ProgramCore, ProgramJob};
+use super::{
+    CUT_LEAD_SLOTS, PROGRAM_QUEUE_BOUND, ProgramBus, ProgramCore, ProgramJob, ProgramStatus,
+};
 use crate::playback::program_audio::{
-    AudioAheadStatus, AudioJob, AudioLine, MarginWindow, take_audio,
+    AudioAheadStatus, AudioJob, AudioLine, LineStatus, MarginWindow, take_audio,
 };
 use crate::playback::program_output_timing::BoundaryMarks;
 use crate::playback::submit_handoff::{HandoffOutcome, SubmitQueue};
@@ -31,6 +33,8 @@ pub(super) struct AudioAhead {
     queue: Option<SubmitQueue<AudioJob>>,
     coalesced: u64,
     margin: MarginWindow,
+    /// The lead of the source whose boundary was committed last.
+    last_lead_slots: i64,
 }
 
 impl AudioAhead {
@@ -39,14 +43,52 @@ impl AudioAhead {
         self.lead_slots * interval_100ns(fps)
     }
 
-    /// The slots a cut is placed after the boundary following the newest
-    /// stamp seen: [`CUT_LEAD_SLOTS`] less the sources' lead.
-    pub(super) fn cut_lead_slots(&self) -> i64 {
-        CUT_LEAD_SLOTS - self.lead_slots
+    /// The slots source `pid` commits ahead: a playlist's paced pipeline
+    /// the lead; the NDI input "OBS manuál" (-1, stamped on its capture)
+    /// and Blank (-2, nobody offers it) none.
+    pub(super) fn lead_of(&self, pid: i64) -> i64 {
+        if pid >= 0 { self.lead_slots } else { 0 }
     }
 
-    /// A boundary is committed: queue its audio (moved out of `job`).
-    pub(super) fn split(&mut self, job: &mut ProgramJob) {
+    /// The lead of the boundary committed last: its source's for a forward
+    /// or a mix, none for the program's own fill.
+    pub(super) fn last_lead(&self) -> i64 {
+        self.last_lead_slots
+    }
+
+    /// Where a cut lands: for each stamp seen, the boundary after it plus
+    /// [`CUT_LEAD_SLOTS`] less its source's lead (a click in (B, B + 1)
+    /// lands on B + 2, whichever sources are ahead), the latest of them;
+    /// with nothing seen, the caller's clock read the lead ahead.
+    pub(super) fn cut_boundary(
+        &self,
+        fps: i64,
+        seen: impl Iterator<Item = (i64, i64)>,
+        now_100ns: i64,
+    ) -> i64 {
+        let mut seen = seen.peekable();
+        let fallback = (now_100ns + self.lead_100ns(fps), self.lead_slots);
+        let fallback = seen.peek().is_none().then_some(fallback);
+        seen.chain(fallback)
+            .map(|(stamp, lead)| {
+                let mut boundary = strict_next_boundary_100ns(stamp, fps);
+                for _ in 0..CUT_LEAD_SLOTS - lead {
+                    boundary = strict_next_boundary_100ns(boundary, fps);
+                }
+                boundary
+            })
+            .max()
+            .expect("a stamp or the fallback")
+    }
+
+    /// A boundary is committed: queue its audio (moved out of `job`) and
+    /// note its source's lead (`source`, the one it shows).
+    pub(super) fn split(&mut self, job: &mut ProgramJob, source: Option<i64>) {
+        let fill = matches!(job, ProgramJob::Standby { .. });
+        self.last_lead_slots = match source {
+            Some(pid) if !fill => self.lead_of(pid),
+            _ => 0,
+        };
         if let Some(queue) = &mut self.queue
             && let HandoffOutcome::Coalesced { .. } = queue.offer(take_audio(job))
         {
@@ -87,6 +129,14 @@ impl ProgramCore {
     /// Audio jobs queued.
     pub fn audio_queued(&self) -> usize {
         self.ahead.queue.as_ref().map_or(0, SubmitQueue::depth)
+    }
+}
+
+impl ProgramStatus {
+    /// The status with the line's counters (the bus holds the line).
+    pub(super) fn with_line(mut self, line: LineStatus) -> Self {
+        self.health.audio.line = line;
+        self
     }
 }
 

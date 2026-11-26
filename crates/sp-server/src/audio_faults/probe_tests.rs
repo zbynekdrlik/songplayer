@@ -111,7 +111,8 @@ fn the_program_loses_its_owned_fills_and_resyncs_and_coalesced_boundaries() {
 }
 
 /// #289 step 2: an audio job the audio side dropped and a block NDI never
-/// got from the line are lost program boundaries, with the sender's own.
+/// got from the line are lost program boundaries, with the sender's own;
+/// the largest of the three views counts (one loss can show in two).
 #[test]
 fn the_audio_side_s_lost_boundaries_count_as_coalesced() {
     let mut status = ProgramBus::new().status();
@@ -121,7 +122,15 @@ fn the_audio_side_s_lost_boundaries_count_as_coalesced() {
     status.health.audio.line.stale = 100;
     let probe = program_probe(&status, 0, 0);
     let coalesced = probe.counters.iter().find(|c| c.kind == kinds::COALESCED);
-    assert_eq!(coalesced, Some(&Counter::loss(kinds::COALESCED, 7)));
+    assert_eq!(coalesced, Some(&Counter::loss(kinds::COALESCED, 4)));
+    status.health.audio.line.missing = 0;
+    let probe = program_probe(&status, 0, 0);
+    let coalesced = probe.counters.iter().find(|c| c.kind == kinds::COALESCED);
+    assert_eq!(coalesced, Some(&Counter::loss(kinds::COALESCED, 2)));
+    status.health.audio.coalesced = 0;
+    let probe = program_probe(&status, 0, 0);
+    let coalesced = probe.counters.iter().find(|c| c.kind == kinds::COALESCED);
+    assert_eq!(coalesced, Some(&Counter::loss(kinds::COALESCED, 1)));
 }
 
 /// An output's line as `GET /api/v1/program` serves it, with no transport

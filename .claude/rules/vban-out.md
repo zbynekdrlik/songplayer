@@ -36,7 +36,9 @@ sender, and its 48 kHz INT24 bytes are #210's.
     paints the picture (`paint_mix`) and submits.
 
   The order is structural: `serve` = `split` (the audio side, no video work)
-  → `feed_outputs` → `submit_video` (#223: a source picture's canvas fit, a
+  → `feed_outputs` → `submit_video` (#289 step 2: the first three are
+  `AudioSide::process`, on the `program-audio` thread in production;
+  #223: a source picture's canvas fit, a
   mix's picture, the standby black, then the NDI submit), and the run of
   mixed boundaries ends only after the unmixed
   boundary went out. So no video-side cost of a boundary — a slow NDI send,

@@ -185,3 +185,74 @@ fn the_clock_fallback_adds_exactly_one_slot() {
     assert!(core.cut(SRC_B, b(7) - 333_334));
     assert_eq!(core.status().cut_boundary_100ns, Some(b(7)));
 }
+
+/// A source that does NOT commit ahead (the NDI input "OBS manuál", the
+/// program's own fills) keeps the whole cut lead: a click in (B, B + 1)
+/// lands on B + 2 there too, never a slot early.
+#[test]
+fn a_cut_between_sources_not_ahead_keeps_the_whole_lead() {
+    let input = sp_core::config::PROGRAM_INPUT_ID;
+    let blank = sp_core::config::PROGRAM_BLANK_ID;
+    let fa = frame(4, 2);
+    // The input on program, offering its capture boundary b(5).
+    let mut core = ProgramCore::new().with_audio_ahead(1);
+    core.select_initial(input);
+    core.offer(input, job(4, &fa, b(5), 0.1));
+    assert!(core.cut(blank, b(5) + 5 * MS));
+    assert_eq!(
+        core.status().cut_boundary_100ns,
+        Some(b(7)),
+        "input -> Blank"
+    );
+    // Blank on program: only the program's fills, committed at b(5).
+    let mut core = ProgramCore::new().with_audio_ahead(1);
+    core.select_initial(blank);
+    core.release(b(5) + MS);
+    assert!(core.cut(input, b(5) + 5 * MS));
+    assert_eq!(
+        core.status().cut_boundary_100ns,
+        Some(b(7)),
+        "Blank -> input"
+    );
+    // A playlist a slot ahead (b(6)) and the input at b(5): still b(7).
+    let mut core = ProgramCore::new().with_audio_ahead(1);
+    core.select_initial(input);
+    core.offer(input, job(4, &fa, b(5), 0.1));
+    core.touch(SRC_A, b(6));
+    assert!(core.cut(SRC_A, b(5) + 5 * MS));
+    assert_eq!(core.status().cut_boundary_100ns, Some(b(7)), "input -> A");
+}
+
+/// The program's last committed boundary counts with its source's lead:
+/// a playlist's forward a slot ahead, a fill none.
+#[test]
+fn the_last_committed_boundary_carries_its_source_s_lead() {
+    let fa = frame(4, 2);
+    let mut core = ProgramCore::new().with_audio_ahead(1);
+    core.select_initial(SRC_A);
+    core.offer(SRC_A, job(4, &fa, b(6), 0.1));
+    core.last_offer.clear(); // only the program's own last boundary is seen
+    assert!(core.cut(SRC_B, b(5) + 5 * MS));
+    assert_eq!(
+        core.status().cut_boundary_100ns,
+        Some(b(7)),
+        "a forward: ahead"
+    );
+    let mut core = ProgramCore::new().with_audio_ahead(1);
+    core.release(b(5) + MS); // nobody selected: the program fills b(5)
+    assert!(core.cut(SRC_B, b(5) + 5 * MS));
+    assert_eq!(
+        core.status().cut_boundary_100ns,
+        Some(b(7)),
+        "a fill: not ahead"
+    );
+}
+
+/// The cut's own answer carries the line's counters, like the status.
+#[test]
+fn the_cut_answer_carries_the_line() {
+    let bus = ProgramBus::new().with_audio_ahead(1);
+    let _ = bus.audio_line().take(b(2), std::time::Duration::ZERO);
+    let answer = bus.cut(SRC_A, b(5), None);
+    assert_eq!(answer.health.audio.line.missing, 1);
+}

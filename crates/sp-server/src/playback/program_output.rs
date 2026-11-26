@@ -49,8 +49,9 @@
 //! boundary's audio. The tests' output runs the same `AudioSide` inline.
 //!
 //! #215: a [`ProgramJob::Mix`] (one boundary inside a transition window) is
-//! crossfaded here, on the sender thread: the audio per sample with the
-//! equal-power curve, the picture blended into a `frame_pool` buffer, painted
+//! crossfaded: the audio per sample with the equal-power curve by the audio
+//! side (#289 step 2: on the `program-audio` thread), the picture here, on
+//! the sender thread, blended into a `frame_pool` buffer, painted
 //! in row bands (`program_transition::mix_nv12_into`, #215 addendum 3) on the
 //! sender's persistent band workers (`band_pool.rs`, #223 follow-up: started
 //! once with the output, never per picture). `start_program` also starts the
@@ -105,6 +106,7 @@ use sp_ndi::{AudioFrame, NdiBackend, NdiSender, PixelFormat};
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
+#[cfg(test)]
 use crate::playback::audio_out::AudioOutputs;
 use crate::playback::band_pool::BandPool;
 use crate::playback::frame_buf::SharedFrame;
@@ -375,7 +377,8 @@ impl<B: NdiBackend> ProgramOutput<B> {
     }
 
     /// #233: also hand every submitted pair's audio block to the outputs.
-    /// (The audio side inline, as before #289 step 2.)
+    /// (The tests: the audio side inline, as before #289 step 2.)
+    #[cfg(test)]
     pub fn with_outputs(mut self, outputs: Arc<AudioOutputs>) -> Self {
         self.audio = AudioPath::Inline(AudioSide::new().with_outputs(outputs));
         self
@@ -815,6 +818,8 @@ impl super::PlaybackEngine {
         }
         #[cfg(windows)]
         {
+            // #289 step 2: the audio side first, whatever the NDI sender does.
+            super::program_audio::spawn_audio_thread(bus.clone());
             crate::playback::startup_pipelines::wait_for_program_ports().await;
             spawn_program_thread(self.ndi_backend.clone(), bus.clone());
         }
@@ -894,7 +899,6 @@ fn spawn_program_thread(backend: Option<super::SharedNdiBackend>, bus: Arc<Progr
                     return;
                 }
             };
-            super::program_audio::spawn_audio_thread(bus.clone()); // #289 step 2
             let mut out = ProgramOutput::fhd(sender)
                 .with_audio_line(bus.audio_line().clone())
                 .with_max(bus.max().clone())

@@ -161,8 +161,8 @@ margin.
   so a click in (B, B + 1) still lands on B + 2
   (`program_bus_tests_audio.rs`).
 - **The `program-audio` thread** (`program_audio::spawn_audio_thread`,
-  Windows, MMCSS "Pro Audio", started with the `SP-program` sender after
-  its NDI sender exists) runs `run_audio_loop`: each job through ONE
+  Windows, MMCSS "Pro Audio", started in `start_program` before the
+  `SP-program` port wait) runs `run_audio_loop`: each job through ONE
   `AudioSide` (the crossfade, the program's peak limiter with its reset
   rule, the limiter's overs for the ledger, `AudioOutputs::offer`, all
   moved verbatim out of `ProgramOutput`), the limited block into the
@@ -186,6 +186,28 @@ margin.
   `audio.coalesced` + `audio.line.missing`. Box read after the deploy:
   `boundaries_ahead` rising with `boundaries`, `margin_us_min` ≈ 30 ms
   with a playlist on program, `line.missing` +0, the audio ledger 0 losses.
+- **Telemetry that moved with it** (review round 1): the pipeline's
+  `late_frames` / `max_late_us` (the paced consumer's delivery, floored at
+  0) now see only a job more than a slot late, since every job reaches the
+  consumer a slot early; `health.timing.vban_feed_late_us` is the audio
+  thread's hand-off (its instant read off `fleet_shift::timeline_now_100ns`,
+  the other marks off the sender's wall: the same registry, µs apart);
+  `ready_late_us` is the sender's start after the hold.
+- **Cost**: the hold is `SpinClock` (a sleep, then ~2 ms of spin per
+  boundary on the `program-output` thread, ~6 % of a core); read the box's
+  CPU before calling it free (#243: spin costs on PP).
+- **The cut lead is per source** (`AudioAhead::cut_boundary`): a playlist
+  (id ≥ 0) counts the lead, the NDI input (-1), Blank (-2) and a program
+  fill none (the program's last boundary carries its source's), so a cut
+  among sources not ahead keeps the whole `CUT_LEAD_SLOTS`. Residual: a
+  playlist between two scopes (its consumer's fills are not ahead) reads
+  as ahead, so a cut whose newest stamp is such a fill lands a slot
+  earlier (no hole, no double: the ownership is decided at the offer).
+- **The lost-boundary count**: the ledger's program `coalesced` loss is the
+  LARGEST of `health.coalesced`, `audio.coalesced` and `audio.line.missing`
+  (one loss can show in two of them).
+- **The audio thread starts first**, in `start_program` before the
+  `SP-program` port wait, whatever the NDI sender does.
 - **The tests' `ProgramOutput`** (no line) runs the same `AudioSide`
   inline: `program_output_tests_audio.rs` pins every output block and the
   NDI audio of one scripted run (hot blocks, a 300 ms fade, a fill) over
@@ -709,9 +731,10 @@ the list (a box with no list keeps them for this move). A rollback to
 
 ## The fan-out (`audio_out.rs`)
 
-`ProgramOutput::serve` → `split` → `limit` → `feed_outputs` (ONE `Arc<[f32]>`
-copy of the limited block, `ProgramBlock`, `audio_out_block.rs`) → MAX →
-video side + NDI submit. `AudioOutputs` (owned by `ProgramBus`,
+The audio side (`program_audio::AudioSide::process`: the crossfade → the
+limiter → the feed, ONE `Arc<[f32]>` copy of the limited block,
+`ProgramBlock`, `audio_out_block.rs`; #289 step 2: on the `program-audio`
+thread) → (the sender) MAX → video side + NDI submit. `AudioOutputs` (owned by `ProgramBus`,
 `outputs()`) holds the running list as one `Arc` snapshot swapped whole by
 the task; `offer` pushes into every running output's own drop-oldest queue
 and never waits. Every output's queue is ONE type,

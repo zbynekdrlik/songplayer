@@ -386,20 +386,16 @@ impl ProgramCore {
         // Cut in the sources' stamp domain (module doc): the newest stamp the
         // involved sources or the program reached; the caller's clock only as
         // the fallback.
+        // #289 step 2: each stamp with the lead its source commits at.
         let seen = self
             .segments
             .iter()
             .map(|&(_, p)| p)
             .chain(std::iter::once(pid))
             .chain(self.windows.iter().filter_map(|w| w.from))
-            .filter_map(|p| self.last_offer.get(&p).copied())
-            .chain(self.last)
-            .max();
-        let from = seen.unwrap_or(now_100ns + self.ahead.lead_100ns(self.fps));
-        let mut boundary = strict_next_boundary_100ns(from, self.fps);
-        for _ in 0..self.ahead.cut_lead_slots() {
-            boundary = strict_next_boundary_100ns(boundary, self.fps);
-        }
+            .filter_map(|p| Some((*self.last_offer.get(&p)?, self.ahead.lead_of(p))))
+            .chain(self.last.map(|last| (last, self.ahead.last_lead())));
+        let boundary = self.ahead.cut_boundary(self.fps, seen, now_100ns);
         self.segments.retain(|&(first, _)| first < boundary);
         // #215: the source on air, read BEFORE the windows this cut replaces
         // are dropped: a waiting one cut ON the boundary kept its outgoing
@@ -593,7 +589,7 @@ impl ProgramCore {
     /// names the owner of a boundary the sender takes later).
     fn commit(&mut self, mut job: ProgramJob, source: Option<i64>) {
         self.last = Some(job.stamp_100ns());
-        self.ahead.split(&mut job); // #289 step 2: its audio to the audio side
+        self.ahead.split(&mut job, source); // #289 step 2: its audio to the audio side
         if let HandoffOutcome::Coalesced { .. } = self.queue.offer((job, source)) {
             self.health.coalesced += 1;
         }
@@ -726,8 +722,8 @@ pub struct ProgramBus {
     /// #289 step 2: wakes the `program-audio` thread; its limited blocks.
     audio_ready: Condvar,
     line: Arc<crate::playback::program_audio::AudioLine>,
-    /// #210 + #233: the program's audio outputs, fed by the `SP-program`
-    /// sender thread and reported under `outputs` on `GET /api/v1/program`.
+    /// #210 + #233: the program's audio outputs, fed by the `program-audio`
+    /// thread (#289 step 2) and reported under `outputs` on `GET /api/v1/program`.
     outputs: Arc<AudioOutputs>,
     /// #212: the NDI input "OBS manuál" (source id `PROGRAM_INPUT_ID`): its
     /// settings, stop flag and telemetry (`input` on `GET /api/v1/program`).
@@ -855,7 +851,11 @@ impl ProgramBus {
         let mut st = self.lock();
         st.core.cut(pid, now_100ns);
         self.publish(pid, scene);
-        st.core.status().on_wire(fleet_shift::global())
+        let line = self.line.status();
+        st.core
+            .status()
+            .with_line(line)
+            .on_wire(fleet_shift::global())
     }
 
     /// See [`ProgramCore::select_initial`]; published as on air for `scene`.
@@ -889,9 +889,10 @@ impl ProgramBus {
     }
 
     pub fn status(&self) -> ProgramStatus {
-        let mut status = self.lock().core.status();
-        status.health.audio.line = self.line.status();
-        status.on_wire(fleet_shift::global())
+        let status = self.lock().core.status();
+        status
+            .with_line(self.line.status())
+            .on_wire(fleet_shift::global())
     }
 
     /// Sender thread: the next queued boundary, waiting at most `wait` for one.

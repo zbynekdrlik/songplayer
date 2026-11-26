@@ -204,6 +204,7 @@ impl Pacer {
     }
 
     /// How far (100 ns) before its stamp a committed pair leaves.
+    #[cfg(test)]
     pub fn hand_ahead_100ns(&self) -> i64 {
         self.line.hand_ahead_100ns
     }
@@ -262,7 +263,9 @@ impl Pacer {
     /// one slot before the next boundary: where a pacer with no lead stands
     /// after a pre-roll. The paced pipeline sends a song's `Started` there,
     /// so it still reaches the engine (the title clock) one slot before the
-    /// song's first pair leaves; the decision clock then reads that boundary,
+    /// song's first boundary (#289 step 2: the production pacer hands that
+    /// pair out right then, the program shows it at its stamp); the decision
+    /// clock then reads that boundary,
     /// so the first commit is not late. With no lead the wall is already
     /// past it (`wait` returns at once).
     pub fn wait_one_slot_before_next<S, W>(&mut self, sink: &mut S, mut wait: W)

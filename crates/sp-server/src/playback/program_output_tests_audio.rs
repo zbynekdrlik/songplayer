@@ -286,3 +286,77 @@ fn a_block_missing_from_the_line_is_the_silence_on_ndi() {
     let status = line.status();
     assert_eq!((status.missing, status.stale), (1, 0));
 }
+
+/// A clock that records the wait asked of it and how many NDI audio sends
+/// had gone out by then.
+struct HoldClock {
+    start: std::time::Instant,
+    backend: Arc<MockNdiBackend>,
+    waited: Arc<std::sync::Mutex<Option<(std::time::Duration, usize)>>>,
+}
+
+impl crate::playback::program_max_send::SendClock for HoldClock {
+    fn now(&mut self) -> std::time::Instant {
+        self.start
+    }
+    fn wait_until(&mut self, due: std::time::Instant) {
+        let sent = self
+            .backend
+            .calls()
+            .iter()
+            .filter(|c| c.starts_with("send_audio"))
+            .count();
+        let mut waited = self.waited.lock().unwrap();
+        waited.get_or_insert((due - self.start, sent));
+    }
+}
+
+/// #289 step 2, the production order: a job that came a slot early is
+/// held to its stamp BEFORE anything of it goes out, the boundary is taken
+/// after the hold (`ready_late_us`), and NDI carries its own limited block.
+#[test]
+fn a_job_ahead_is_held_to_its_stamp_before_its_ndi_submit() {
+    let line = Arc::new(AudioLine::default());
+    let mut side = AudioSide::new();
+    let backend = Arc::new(MockNdiBackend::new());
+    let sender = NdiSender::new_with_clocking(backend.clone(), PROGRAM_NDI_NAME, false, false)
+        .expect("mock sender");
+    let waited = Arc::new(std::sync::Mutex::new(None));
+    let clock = HoldClock {
+        start: std::time::Instant::now(),
+        backend: backend.clone(),
+        waited: waited.clone(),
+    };
+    let mut out = ProgramOutput::new(sender, 2, 2)
+        .with_audio_line(line.clone())
+        .with_video_clock(Box::new(clock));
+    let mut job = ProgramJob::Source(pair(SRC_A, 3));
+    let block = side.process(take_audio(&mut job), &|| 0);
+    let sent_block = block.audio.as_ref().unwrap()[0].data.clone();
+    line.push(block);
+    let reads = std::cell::Cell::new(0);
+    let now = || {
+        reads.set(reads.get() + 1);
+        if reads.get() == 1 {
+            b(3) - 300_000
+        } else {
+            b(3) + 40
+        }
+    };
+    let marks = out.serve(job, Some(SRC_A), now);
+    let held = *waited.lock().unwrap();
+    assert_eq!(
+        held,
+        Some((std::time::Duration::from_millis(30), 0)),
+        "held 30 ms to its stamp, before any NDI send"
+    );
+    assert_eq!(marks.taken_100ns, b(3) + 40, "taken after the hold");
+    let ndi = backend.last_audio_planar();
+    let left: Vec<f32> = sent_block.iter().step_by(2).copied().collect();
+    assert_eq!(
+        &ndi[..1600],
+        &left[..],
+        "NDI carries the boundary's own block"
+    );
+    let _ = out;
+}

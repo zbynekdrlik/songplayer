@@ -38,7 +38,7 @@ const CEILING_SLACK: f32 = 1e-6;
 /// Frames per boundary: 48 kHz on the 30 fps grid.
 const FRAMES: usize = 1600;
 
-/// The program's audio format, as `ProgramOutput::split` mixes a fade.
+/// The program's audio format, as the audio side (`AudioSide`) mixes a fade.
 const FORMAT: AudioFormat = AudioFormat {
     frames: FRAMES,
     channels: 2,
