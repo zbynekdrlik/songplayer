@@ -74,6 +74,7 @@ mod playlist_mode; // #225 unit 2: a mode the playlist's row holds — applied +
 mod position_update;
 pub mod preview; // #15 part 2: live low-res video preview tap
 pub mod proc_mem; // #147 r9: SongPlayer's own page faults/min + working set on the paced loop-stats line
+pub mod program_audio; // #289 step 2: the program audio side on its own thread, the line
 mod program_authority; // #221 L4b: SP-program's playlist drives playback
 pub mod program_burn; // #228: SP-program's burn-id QR 911014 (payload, place, paint; pure)
 pub mod program_bus; // #209: the program bus (SongPlayer = master switcher, NDI SP-program)

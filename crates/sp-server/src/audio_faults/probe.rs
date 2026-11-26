@@ -98,7 +98,12 @@ pub fn program_probe(status: &ProgramStatus, limiter_overs: u64, ndi_late: u64) 
             Counter::loss(kinds::FILLED, h.filled_owned),
             Counter::loss(kinds::RESYNC, h.resyncs_owned),
             Counter::risk(kinds::LATE_DROPPED, h.late_dropped),
-            Counter::loss(kinds::COALESCED, h.coalesced),
+            // #289 step 2: an audio job the audio side dropped, or a block
+            // NDI never got, is a lost program boundary too.
+            Counter::loss(
+                kinds::COALESCED,
+                h.coalesced + h.audio.coalesced + h.audio.line.missing,
+            ),
             Counter::risk(kinds::VBAN_FEED_LATE, h.timing.vban_feed_late_over_budget),
             Counter::risk(kinds::LIMITED, limiter_overs),
             Counter::risk(kinds::NDI_LATE, ndi_late),

@@ -18,7 +18,9 @@ use sp_ndi::test_util::MockNdiBackend;
 use sp_ndi::{AudioFrame, NdiSender};
 
 use super::ProgramOutput;
+use crate::playback::audio_out::AudioOutputs;
 use crate::playback::frame_buf::SharedFrame;
+use crate::playback::program_audio::{AudioLine, AudioSide, LineStatus, take_audio};
 use crate::playback::program_bus::{PROGRAM_NDI_NAME, ProgramCore, ProgramJob};
 use crate::playback::program_transition::{SpecSource, TransitionSpec};
 use crate::playback::submit_handoff::SubmitJob;
@@ -87,9 +89,19 @@ fn pair(pid: i64, k: usize) -> SubmitJob {
 /// boundary, a 300 ms fade to B cut after b(5), B missing b(20). Returns the
 /// program boundaries in the order the bus queued them.
 pub(super) fn script(core: &mut ProgramCore) -> Vec<ProgramJob> {
+    let mut jobs = Vec::new();
+    script_with(core, |core| {
+        while let Some(job) = core.take() {
+            jobs.push(job);
+        }
+    });
+    jobs
+}
+
+/// The script, with `step` run on the core after every boundary's release.
+pub(super) fn script_with(core: &mut ProgramCore, mut step: impl FnMut(&mut ProgramCore)) {
     core.select_initial(SRC_A);
     core.set_transition(TransitionSpec::fade(300, SpecSource::Setting));
-    let mut jobs = Vec::new();
     for k in 1..=BOUNDARIES {
         core.touch(SRC_A, b(k));
         core.offer(SRC_A, pair(SRC_A, k));
@@ -101,11 +113,8 @@ pub(super) fn script(core: &mut ProgramCore) -> Vec<ProgramJob> {
             assert!(core.cut(SRC_B, b(5) + 5 * MS));
         }
         core.release(b(k) + MS);
-        while let Some(job) = core.take() {
-            jobs.push(job);
-        }
+        step(core);
     }
-    jobs
 }
 
 /// The program output on a mock sender with one VBAN output, and both.
@@ -199,4 +208,81 @@ fn the_sender_alone_gives_the_pinned_audio() {
     let limited = all.iter().filter(|h| at_the_ceiling(h)).count();
     assert!(limited >= 2, "the hot blocks were limited: {limited}");
     assert_eq!(fingerprint(&all), PIN_FINGERPRINT, "every block as before");
+}
+
+/// #289 step 2: the bus moves each boundary's audio out at its commit, the
+/// audio side (the `program-audio` thread's) limits it and feeds the outputs,
+/// and the sender takes the limited block from the line: the outputs and NDI
+/// get exactly the pinned blocks.
+#[test]
+fn the_audio_side_on_its_own_gives_the_pinned_audio() {
+    let mut core = ProgramCore::new().with_audio_ahead(0);
+    let line = Arc::new(AudioLine::default());
+    let vban = Arc::new(VbanOut::new());
+    let outputs = Arc::new(AudioOutputs::single_vban(vban.clone()));
+    let mut side = AudioSide::new().with_outputs(outputs);
+    let backend = Arc::new(MockNdiBackend::new());
+    let sender = NdiSender::new_with_clocking(backend.clone(), PROGRAM_NDI_NAME, false, false)
+        .expect("mock sender");
+    let mut out = ProgramOutput::new(sender, 2, 2).with_audio_line(line.clone());
+    let mut all = Vec::new();
+    script_with(&mut core, |core| {
+        let mut audio = Vec::new();
+        while let Some(job) = core.take_audio() {
+            audio.push(job.stamp_100ns());
+            line.push(side.process(job, &|| 0));
+        }
+        let mut jobs = Vec::new();
+        while let Some(job) = core.take() {
+            jobs.push(job);
+        }
+        let stamps: Vec<i64> = jobs.iter().map(ProgramJob::stamp_100ns).collect();
+        assert_eq!(
+            audio, stamps,
+            "one audio job per committed boundary, in order"
+        );
+        for job in jobs {
+            if let ProgramJob::Source(source) = &job {
+                assert!(source.audio.is_empty(), "the job's audio was moved out");
+            }
+            out.submit(job);
+            all.push(heard(&vban, &backend));
+        }
+    });
+    assert_eq!(all.len(), PIN_BOUNDARIES);
+    assert_eq!(fingerprint(&all), PIN_FINGERPRINT, "every block as before");
+    assert_eq!(
+        line.status(),
+        LineStatus::default(),
+        "nothing stale or missing"
+    );
+}
+
+/// A boundary whose block never reached the line goes to NDI with the
+/// silence, counted, and the next one still finds its own block.
+#[test]
+fn a_block_missing_from_the_line_is_the_silence_on_ndi() {
+    let line = Arc::new(AudioLine::default());
+    let mut side = AudioSide::new();
+    let backend = Arc::new(MockNdiBackend::new());
+    let sender = NdiSender::new_with_clocking(backend.clone(), PROGRAM_NDI_NAME, false, false)
+        .expect("mock sender");
+    let mut out = ProgramOutput::new(sender, 2, 2).with_audio_line(line.clone());
+    let mut job = ProgramJob::Source(pair(SRC_A, 1));
+    let mut next = ProgramJob::Source(pair(SRC_A, 2));
+    let _lost = take_audio(&mut job);
+    line.push(side.process(take_audio(&mut next), &|| 0));
+    out.submit(job);
+    assert!(
+        backend.last_audio_planar().iter().all(|&s| s == 0.0),
+        "the silence"
+    );
+    assert_eq!(backend.last_audio_planar().len(), 3200);
+    out.submit(next);
+    assert!(
+        backend.last_audio_planar().iter().any(|&s| s != 0.0),
+        "its own block"
+    );
+    let status = line.status();
+    assert_eq!((status.missing, status.stale), (1, 0));
 }

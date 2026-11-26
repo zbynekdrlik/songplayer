@@ -448,7 +448,7 @@ fn the_fade_line_counts_the_frames_the_limiter_scaled() {
 #[test]
 fn the_limiter_engaging_outside_a_fade_is_counted_never_a_fade_or_its_tail() {
     let (mut out, vban, backend) = output();
-    let overs = |out: &ProgramOutput<MockNdiBackend>| out.outputs.as_ref().unwrap().limiter_overs();
+    let overs = |out: &ProgramOutput<MockNdiBackend>| out.audio_outputs().limiter_overs();
     let hot = || vec![1.2_f32; FRAMES * 2];
     serve(
         &mut out,

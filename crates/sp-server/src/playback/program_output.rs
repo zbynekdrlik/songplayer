@@ -40,6 +40,14 @@
 //! (the NDI input "OBS manuál" forwards cg OBS's audio as it comes) is
 //! limited too, where VBAN used to clamp it.
 //!
+//! #289 step 2: in production that audio side (the crossfade, the limiter,
+//! the outputs' feed) runs on the `program-audio` thread
+//! (`program_audio.rs`): the bus moves each committed boundary's audio out
+//! to it, the paced sources commit a slot ahead, and this sender holds a
+//! job to its stamp and takes the boundary's limited block from the line
+//! for its NDI submit. So a long video side no longer delays the next
+//! boundary's audio. The tests' output runs the same `AudioSide` inline.
+//!
 //! #215: a [`ProgramJob::Mix`] (one boundary inside a transition window) is
 //! crossfaded here, on the sender thread: the audio per sample with the
 //! equal-power curve, the picture blended into a `frame_pool` buffer, painted
@@ -89,21 +97,21 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use sp_core::genlock::audio::samples_per_boundary;
 use sp_core::genlock::{
     GENLOCK_GRID_FPS, GENLOCK_MAX_CATCHUP_INTERVALS, floor_boundary_100ns, lag_slots_100ns,
     strict_next_boundary_100ns,
 };
-use sp_decoder::PeakLimiter;
 use sp_ndi::{AudioFrame, NdiBackend, NdiSender, PixelFormat};
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
 use crate::playback::audio_out::AudioOutputs;
-use crate::playback::audio_out_block::{ProgramBlock, is_program_block};
 use crate::playback::band_pool::BandPool;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::picture::{CpuMisses, CpuUse};
+use crate::playback::program_audio::{
+    AudioLine, AudioSide, LINE_WAIT, Limited, hold_to_stamp, silent_block, take_audio,
+};
 use crate::playback::program_bus::{
     PROGRAM_NDI_NAME, ProgramBus, ProgramJob, Take, install, restore_selected_source,
 };
@@ -113,9 +121,7 @@ use crate::playback::program_max::{MaxJob, MaxOut, MaxPicture};
 use crate::playback::program_max_send::{NoWait, SendClock};
 use crate::playback::program_output_timing::{BoundaryMarks, warn_late_boundary};
 use crate::playback::program_trace::{JobShape, ProgramTrace, TraceWriter};
-use crate::playback::program_transition::{
-    AudioFormat, Layout, MIX_THREAD_NAME, MixJob, mix_audio_block, mix_bands,
-};
+use crate::playback::program_transition::{Layout, MIX_THREAD_NAME, MixJob, mix_bands};
 use crate::playback::submit_handoff::SubmitJob;
 use crate::playback::submitter::FrameSubmitter;
 use crate::playback::wallclock::WallClock;
@@ -127,16 +133,6 @@ mod ndi;
 /// (`program_canvas.rs`). The NDI input's standby black is this size too.
 pub const PROGRAM_STANDBY_W: u32 = 1920;
 pub const PROGRAM_STANDBY_H: u32 = 1080;
-
-/// The program's silent block: 48 kHz stereo, one grid slot.
-const PROGRAM_AUDIO_RATE_HZ: u32 = 48_000;
-const PROGRAM_AUDIO_CHANNELS: u32 = 2;
-
-// #210: the VBAN output carries exactly the program's audio format.
-const _: () = assert!(
-    PROGRAM_AUDIO_RATE_HZ as i64 == crate::playback::vban_packet::VBAN_SAMPLE_RATE_HZ
-        && PROGRAM_AUDIO_CHANNELS as usize == crate::playback::vban_packet::VBAN_CHANNELS
-);
 
 /// Poll the `SP-program` receiver connection count every this many submitted
 /// pairs (~1 s at 30 fps), as the source submit threads do.
@@ -154,11 +150,8 @@ pub struct ProgramOutput<B: NdiBackend> {
     /// #223: the program's ONE picture layout, every picture it sends (the
     /// standby black included), with the fit plans into it.
     canvas: Canvas,
-    /// #210 + #233: the program's audio outputs (`audio_out.rs`): each
-    /// submitted pair's limited block, copied once and shared.
-    outputs: Option<Arc<AudioOutputs>>,
-    /// #215: audio frames per boundary (1600).
-    spc: usize,
+    /// #289 step 2: where its audio side runs (`program_audio.rs`).
+    audio: AudioPath,
     /// #215 addendum 3 + #223 follow-up: the row bands a mixed or fitted
     /// picture is painted in (`mix_bands` of the box's logical processors):
     /// this thread and the persistent `program-mix-<i>` workers, started
@@ -167,12 +160,6 @@ pub struct ProgramOutput<B: NdiBackend> {
     /// The run of mixed boundaries being sent (a window), logged once when
     /// the next unmixed boundary ends it.
     mix_run: MixRun,
-    /// #210: the program's peak limiter. Every program block goes through it
-    /// before VBAN and the NDI submit get it ([`limit`](Self::limit)).
-    limiter: PeakLimiter,
-    /// #210: the boundary the limiter last ran on. A stamp that is not the
-    /// grid boundary right after it is a restart of the program's timeline.
-    limited_through: Option<i64>,
     /// #223 S2: the `SP-program-MAX` hand-off each boundary is offered to,
     /// after VBAN's block and before the video side.
     max: Option<Arc<MaxOut>>,
@@ -228,6 +215,17 @@ fn has_picture(mix: &MixJob) -> bool {
     mix.from.is_some() || mix.to.is_some()
 }
 
+/// #289 step 2: a boundary whose limited block never reached the line: NDI
+/// carries the silence; no hand-off happened (`fed` = when it was served).
+fn missing(stamp_100ns: i64, served_100ns: i64) -> Limited {
+    Limited {
+        stamp_100ns,
+        audio: None,
+        fed_100ns: served_100ns,
+        limited_frames: 0,
+    }
+}
+
 /// #223 follow-up: a window boundary's side as `Canvas::fade` reads it: its
 /// picture's layout and bytes, or `None` when the side is missing (#279 P2:
 /// or a GPU picture, counted in `misses`: the black).
@@ -237,9 +235,17 @@ fn fade_side<'a>(job: &'a Option<SubmitJob>, misses: &mut CpuMisses) -> FadeSide
     Some((Layout::of(job), &video[..]))
 }
 
-/// #210: one program boundary split at the VBAN hand-off
-/// ([`ProgramOutput::split`]): its audio is decided, its video work is
-/// still to do ([`ProgramOutput::submit_video`]).
+/// #289 step 2: the program's audio side, inline (the tests' output, the
+/// sender before step 2) or on the `program-audio` thread, whose limited
+/// blocks the sender takes from the line.
+enum AudioPath {
+    Inline(AudioSide),
+    Line(Arc<AudioLine>),
+}
+
+/// #210: one program boundary at the VBAN hand-off ([`Pair::of`]): its
+/// audio is decided and limited, its video work is still to do
+/// ([`ProgramOutput::submit_video`]).
 enum Pair {
     /// A forwarded source pair, as it came.
     Source(SubmitJob),
@@ -273,14 +279,23 @@ fn send<B: NdiBackend>(
 }
 
 impl Pair {
-    /// #210: the audio this pair carries to VBAN and NDI: a forwarded
-    /// pair's own, a fade's crossfaded block, or the program's one silent
-    /// block for a standby pair (`silence`).
-    fn audio_mut<'a>(&'a mut self, silence: &'a mut [AudioFrame]) -> &'a mut [AudioFrame] {
-        match self {
-            Pair::Source(job) => &mut job.audio,
-            Pair::Standby => silence,
-            Pair::Mix { audio, .. } => audio,
+    /// #289 step 2: the boundary `job` (its audio taken out) with its
+    /// limited block (`None`: the standby silence, or a block that never
+    /// came: then NDI carries `silence`). A mix with neither side is the
+    /// standby pair.
+    fn of(job: ProgramJob, audio: Option<Vec<AudioFrame>>, silence: &[AudioFrame]) -> Self {
+        let audio = || audio.unwrap_or_else(|| silence.to_vec());
+        match job {
+            ProgramJob::Source(mut job) => {
+                job.audio = audio();
+                Pair::Source(job)
+            }
+            ProgramJob::Standby { .. } => Pair::Standby,
+            ProgramJob::Mix(mix) if !has_picture(&mix) => Pair::Standby,
+            ProgramJob::Mix(mix) => Pair::Mix {
+                mix,
+                audio: audio(),
+            },
         }
     }
 
@@ -323,17 +338,6 @@ impl Pair {
             Pair::Mix { mix, .. } => mix.to.as_ref().and_then(|job| job.media_pts_100ns),
         }
     }
-
-    /// What the audio outputs get for the boundary on `stamp_100ns`: the
-    /// pair's own block, COPIED once (its NDI submit still borrows it), or
-    /// the standby silence.
-    fn program_block(&self, stamp_100ns: i64) -> ProgramBlock {
-        match self {
-            Pair::Source(job) => ProgramBlock::copied(stamp_100ns, &job.audio),
-            Pair::Standby => ProgramBlock::silence(stamp_100ns),
-            Pair::Mix { audio, .. } => ProgramBlock::copied(stamp_100ns, audio),
-        }
-    }
 }
 
 impl<B: NdiBackend> ProgramOutput<B> {
@@ -343,26 +347,17 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// 1920×1080 in production; the tests use small canvases).
     pub fn new(sender: NdiSender<B>, width: u32, height: u32) -> Self {
         let submitter = FrameSubmitter::new(sender, GENLOCK_GRID_FPS as i32, 1);
-        let spc = samples_per_boundary(PROGRAM_AUDIO_RATE_HZ as i64, GENLOCK_GRID_FPS);
-        let silence = vec![AudioFrame {
-            data: vec![0.0; spc * PROGRAM_AUDIO_CHANNELS as usize],
-            channels: PROGRAM_AUDIO_CHANNELS,
-            sample_rate: PROGRAM_AUDIO_RATE_HZ,
-            timecode_100ns: None,
-        }];
+        let silence = silent_block();
         Self {
             submitter,
             silence,
             canvas: Canvas::new(width, height),
-            outputs: None,
-            spc,
+            audio: AudioPath::Inline(AudioSide::new()),
             bands: BandPool::new(
                 MIX_THREAD_NAME,
                 mix_bands(crate::lyrics::heavy_slot::logical_cores()),
             ),
             mix_run: MixRun::default(),
-            limiter: PeakLimiter::new(PROGRAM_AUDIO_RATE_HZ),
-            limited_through: None,
             max: None,
             video_clock: Box::new(NoWait),
             trace: None,
@@ -380,9 +375,27 @@ impl<B: NdiBackend> ProgramOutput<B> {
     }
 
     /// #233: also hand every submitted pair's audio block to the outputs.
+    /// (The audio side inline, as before #289 step 2.)
     pub fn with_outputs(mut self, outputs: Arc<AudioOutputs>) -> Self {
-        self.outputs = Some(outputs);
+        self.audio = AudioPath::Inline(AudioSide::new().with_outputs(outputs));
         self
+    }
+
+    /// #289 step 2: the audio side runs on the `program-audio` thread; the
+    /// sender takes each boundary's limited block from `line` and holds a
+    /// job that came ahead to its stamp (production).
+    pub fn with_audio_line(mut self, line: Arc<AudioLine>) -> Self {
+        self.audio = AudioPath::Line(line);
+        self
+    }
+
+    /// The audio outputs the inline audio side feeds (the tests' view).
+    #[cfg(test)]
+    pub(crate) fn audio_outputs(&self) -> &AudioOutputs {
+        match &self.audio {
+            AudioPath::Inline(side) => side.outputs().expect("audio outputs"),
+            AudioPath::Line(_) => panic!("the audio side runs on its thread"),
+        }
     }
 
     /// Tests: one VBAN output as the whole fan-out (the #210 tests' seam).
@@ -448,17 +461,10 @@ impl<B: NdiBackend> ProgramOutput<B> {
         }
     }
 
-    /// #210 + #233: hand one pair's audio block to every output (never
-    /// blocks); returns the instant it was handed over, read off `now`.
-    fn feed_outputs(&self, block: ProgramBlock, now: &impl Fn() -> i64) -> i64 {
-        if let Some(outputs) = &self.outputs {
-            outputs.offer(&block);
-        }
-        now()
-    }
-
-    /// Serve one program boundary: its audio side ([`split`](Self::split),
-    /// no video work) goes to the audio outputs (VBAN, #233) FIRST, then the
+    /// Serve one program boundary: its audio side (`AudioSide::process`,
+    /// no video work; #289 step 2: on the `program-audio` thread, the block
+    /// taken from the line after the job is held to its stamp) goes to the
+    /// audio outputs (VBAN, #233) FIRST, then the
     /// boundary is offered to
     /// `SP-program-MAX` (#223 S2, [`offer_max`](Self::offer_max)), then (#251
     /// step 4) it waits out the quiet window after the vblank, then the
@@ -478,16 +484,25 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// is `submit_ndi` (from the GPU: the boundary before goes out).
     pub fn serve(
         &mut self,
-        job: ProgramJob,
+        mut job: ProgramJob,
         source: Option<i64>,
         now: impl Fn() -> i64,
     ) -> BoundaryMarks {
-        let taken_100ns = now();
+        let mut taken_100ns = now();
         let stamp_100ns = job.stamp_100ns();
         let shape = JobShape::of(&job); // #147: read before the job is consumed
-        let mut pair = self.split(job);
-        self.limit(&mut pair, stamp_100ns);
-        let fed_100ns = self.feed_outputs(pair.program_block(stamp_100ns), &now);
+        let limited = match &mut self.audio {
+            AudioPath::Inline(side) => side.process(take_audio(&mut job), &now),
+            AudioPath::Line(line) => {
+                let clock = &mut *self.video_clock; // #289 step 2: B at B
+                taken_100ns = hold_to_stamp(clock, stamp_100ns, taken_100ns, &now);
+                line.take(stamp_100ns, LINE_WAIT)
+                    .unwrap_or_else(|| missing(stamp_100ns, taken_100ns))
+            }
+        };
+        self.mix_run.limited += limited.limited_frames;
+        let fed_100ns = limited.fed_100ns;
+        let pair = Pair::of(job, limited.audio, &self.silence);
         self.offer_max(&pair, stamp_100ns);
         let ends_run = !matches!(pair, Pair::Mix { .. });
         let shown = self.observe_item(&pair, source, stamp_100ns); // #228
@@ -526,69 +541,6 @@ impl<B: NdiBackend> ProgramOutput<B> {
     #[cfg(test)]
     pub fn submit(&mut self, job: ProgramJob) -> i64 {
         self.serve(job, None, || 0).stamp_100ns
-    }
-
-    /// #210: the audio side of `job`, with no video work: a window
-    /// boundary's crossfaded block is computed here (#215; a mix with
-    /// neither side — the bus never queues one — is the standby pair).
-    fn split(&self, job: ProgramJob) -> Pair {
-        match job {
-            ProgramJob::Source(job) => Pair::Source(job),
-            ProgramJob::Standby { .. } => Pair::Standby,
-            ProgramJob::Mix(mix) if !has_picture(&mix) => Pair::Standby,
-            ProgramJob::Mix(mix) => {
-                let (first, total) = mix.sample_span(self.spc);
-                let format = AudioFormat {
-                    frames: self.spc,
-                    channels: PROGRAM_AUDIO_CHANNELS,
-                    sample_rate: PROGRAM_AUDIO_RATE_HZ,
-                };
-                let audio = vec![mix_audio_block(
-                    mix.from.as_ref().and_then(|j| j.audio.first()),
-                    mix.to.as_ref().and_then(|j| j.audio.first()),
-                    first,
-                    total,
-                    format,
-                )];
-                Pair::Mix { mix, audio }
-            }
-        }
-    }
-
-    /// #210: run the boundary's audio through the program's peak limiter,
-    /// in place, BEFORE VBAN's copy and the NDI submit: both then carry the
-    /// same limited block, VBAN first. Every program block goes through it
-    /// (a forwarded pair's, a fade's crossfaded block, the standby silence:
-    /// 0 × gain stays 0, and its tail decays in step with time), so its
-    /// state, and the gain, carry from one boundary to the next. A stamp that
-    /// is not the grid boundary right after the last one (the first boundary,
-    /// a resync that skipped stamps) restarts the program's timeline: the
-    /// audio after it is unrelated, so the release tail is dropped. A block
-    /// that is not one program block (48 kHz stereo, one boundary: what VBAN
-    /// carries; VBAN sends silence for anything else) passes as it came.
-    fn limit(&mut self, pair: &mut Pair, stamp_100ns: i64) {
-        let follows = self
-            .limited_through
-            .is_some_and(|last| strict_next_boundary_100ns(last, GENLOCK_GRID_FPS) == stamp_100ns);
-        if !follows {
-            self.limiter.reset();
-        }
-        self.limited_through = Some(stamp_100ns);
-        let before = self.limiter.limited_frames();
-        let overs = self.limiter.over_frames();
-        for frame in pair.audio_mut(&mut self.silence) {
-            if is_program_block(frame) {
-                let channels = frame.channels as usize;
-                self.limiter.process(&mut frame.data, channels);
-            }
-        }
-        self.mix_run.limited += self.limiter.limited_frames() - before;
-        // #257: a source over the ceiling outside a fade (a fade's sum is
-        // the crossfade's own, by design) is the audio fault ledger's risk.
-        let fade = matches!(pair, Pair::Mix { .. });
-        if !fade && let Some(outputs) = &self.outputs {
-            outputs.note_limiter_overs(self.limiter.over_frames() - overs);
-        }
     }
 
     /// #210: the video side of a boundary VBAN already has, then its NDI
@@ -942,8 +894,9 @@ fn spawn_program_thread(backend: Option<super::SharedNdiBackend>, bus: Arc<Progr
                     return;
                 }
             };
+            super::program_audio::spawn_audio_thread(bus.clone()); // #289 step 2
             let mut out = ProgramOutput::fhd(sender)
-                .with_outputs(bus.outputs().clone())
+                .with_audio_line(bus.audio_line().clone())
                 .with_max(bus.max().clone())
                 .with_video_clock(Box::new(super::program_max_send::SpinClock))
                 .with_item(bus.item().clone())

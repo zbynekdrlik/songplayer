@@ -320,9 +320,9 @@ pub struct Pacer {
 impl Pacer {
     /// Build a pacer for `grid_fps` (the fixed integer grid rate, e.g.
     /// `GENLOCK_GRID_FPS = 30`) over the production system wall clock,
-    /// committing `AUDIO_LEAD_SLOTS` ahead (#289).
+    /// committing `AUDIO_LEAD_SLOTS` ahead, each pair handed out at its commit (#289).
     pub fn new(grid_fps: i64, enabled: bool) -> Self {
-        Self::with_lead(grid_fps, enabled, WallClock::system(), AUDIO_LEAD_SLOTS)
+        Self::with_lead(grid_fps, enabled, WallClock::system(), AUDIO_LEAD_SLOTS).handing_ahead()
     }
 
     /// Build a pacer over an injected [`WallClock`] (deterministic in tests).
