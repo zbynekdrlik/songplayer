@@ -422,7 +422,8 @@ impl ProgramCore {
         // waiting cue kept on air takes the boundaries over with no window.
         if outgoing != Some(pid) {
             self.segments.push((boundary, pid));
-            self.delivery.became_owner(pid, boundary); // #257: a new owner delivers anew
+            let warm = self.last_offer.contains_key(&pid); // #257, #289: delivers anew
+            self.delivery.became_owner(pid, boundary, warm);
             let window = Window::cued(outgoing, pid, boundary, &self.spec);
             self.windows.push(window);
         } else if self.selected() != Some(pid) {
