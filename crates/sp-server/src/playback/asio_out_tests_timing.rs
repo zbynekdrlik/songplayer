@@ -197,7 +197,9 @@ fn a_driver_with_no_callback_after_the_priming_takes_no_later_block() {
     let mut d = FakeDevice::answering(vec![Ok(dvs(96_000.0))]);
     let mut w = AsioWorker::new(T0);
     w.step(&o, &mut d, T0, None);
-    w.step(&o, &mut d, T0 + SLOT + 4_000, Some(block(1)));
+    // The pair at one instant, so b(3) comes exactly one slot after the
+    // priming: the first block that waits.
+    w.step(&o, &mut d, T0 + SLOT + 5_000, Some(block(1)));
     w.step(&o, &mut d, T0 + SLOT + 5_000, Some(block(2)));
     let handed = d.ring_frames();
     for k in 3..10 {
