@@ -338,12 +338,10 @@ impl LineState {
         }
     }
 
-    pub fn len(&self) -> usize {
+    /// The blocks kept (the tests' view).
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
         self.blocks.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.blocks.is_empty()
     }
 
     pub fn status(&self) -> LineStatus {

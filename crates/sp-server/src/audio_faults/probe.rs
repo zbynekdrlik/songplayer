@@ -85,13 +85,16 @@ pub fn on_program(status: &ProgramStatus) -> BTreeSet<i64> {
     status.source.into_iter().chain(fading_out).collect()
 }
 
-/// #289 step 2: the program's lost boundaries. The sender's coalesced job,
-/// the audio side's coalesced job and a block NDI never got from the line
-/// are three views of a loss, and one boundary can show in two of them (a
-/// coalesced audio job then also reads missing at the sender), so the
-/// largest view counts: never 0 while any of them lost one.
+/// #289 step 2: the program's lost boundaries, each counted once: the
+/// sender's coalesced job (its line block is then passed over as stale,
+/// never missing), and a boundary the sender found no limited block for
+/// (an audio job the audio side coalesced, a block it dropped over the
+/// line's bound, a `LINE_WAIT` that ran out). A boundary both lost is never
+/// asked for by the sender, so the sum never counts one twice; the ledger
+/// records each counter's growth, so a sum (never a largest-of) shows every
+/// new loss.
 fn lost_boundaries(h: &crate::playback::program_bus::ProgramHealth) -> u64 {
-    h.coalesced.max(h.audio.coalesced).max(h.audio.line.missing)
+    h.coalesced + h.audio.line.missing
 }
 
 /// The program's probe: its health, the limiter's engagements outside a

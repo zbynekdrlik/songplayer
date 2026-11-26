@@ -182,10 +182,12 @@ margin.
 - **Telemetry**: `health.audio {lead_slots, boundaries_ahead,
   margin_us_min (stamp − hand-off, µs, the window minimum; negative =
   after the stamp), coalesced, line {stale, missing, dropped}}` on
-  `GET /api/v1/program`. The ledger's program `coalesced` loss also counts
-  `audio.coalesced` + `audio.line.missing`. Box read after the deploy:
-  `boundaries_ahead` rising with `boundaries`, `margin_us_min` ≈ 30 ms
-  with a playlist on program, `line.missing` +0, the audio ledger 0 losses.
+  `GET /api/v1/program`. To check on the box after the deploy (not yet
+  observed): `boundaries_ahead` rising with `boundaries`,
+  `margin_us_min` ≈ 30 ms with a playlist on program, `line.missing` +0,
+  the audio ledger 0 losses. A boundary NDI got no block for reads its
+  served instant as its hand-off (a margin ≈ 0): the loss itself is
+  `line.missing`.
 - **Telemetry that moved with it** (review round 1): the pipeline's
   `late_frames` / `max_late_us` (the paced consumer's delivery, floored at
   0) now see only a job more than a slot late, since every job reaches the
@@ -203,9 +205,12 @@ margin.
   playlist between two scopes (its consumer's fills are not ahead) reads
   as ahead, so a cut whose newest stamp is such a fill lands a slot
   earlier (no hole, no double: the ownership is decided at the offer).
-- **The lost-boundary count**: the ledger's program `coalesced` loss is the
-  LARGEST of `health.coalesced`, `audio.coalesced` and `audio.line.missing`
-  (one loss can show in two of them).
+- **The lost-boundary count**: the ledger's program `coalesced` loss is
+  `health.coalesced` + `audio.line.missing`, each lost boundary once (an
+  audio job the audio side coalesced shows as its missing block; a sender
+  coalesce leaves its block stale, never missing). Never a largest-of: the
+  ledger records each counter's growth, so a max hides a later loss in the
+  smaller counters (review round 2).
 - **The audio thread starts first**, in `start_program` before the
   `SP-program` port wait, whatever the NDI sender does.
 - **The tests' `ProgramOutput`** (no line) runs the same `AudioSide`

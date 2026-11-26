@@ -126,7 +126,7 @@ fn a_mix_carries_both_sides_first_blocks_and_its_place_in_the_window() {
 #[test]
 fn the_line_hands_out_a_stamp_s_block_passing_older_ones_over() {
     let mut line = LineState::default();
-    assert!(line.is_empty());
+    assert_eq!(line.len(), 0);
     assert!(matches!(line.take(T0), LineTake::NotYet));
     line.push(limited(T0));
     line.push(limited(T0 + 1));
@@ -136,7 +136,7 @@ fn the_line_hands_out_a_stamp_s_block_passing_older_ones_over() {
     assert_eq!(line.status().stale, 1, "T0 was passed over");
     assert!(matches!(line.take(T0 + 2), LineTake::Missing));
     assert!(matches!(line.take(T0 + 3), LineTake::Block(_)));
-    assert!(line.is_empty());
+    assert_eq!(line.len(), 0);
     assert_eq!(line.status().stale, 1);
 }
 
