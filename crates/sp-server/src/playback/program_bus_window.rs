@@ -90,7 +90,10 @@ impl Delivery {
     /// owner (the selection restored at the start) owes only from its FIRST
     /// delivered boundary — its pipeline hands that one a slot ahead, so the
     /// offer path can fill the boundary before it once it is noted; a cut's
-    /// owner owes from the cut boundary as before.
+    /// owner owes from the cut boundary as before. A resync is judged by its
+    /// first skipped boundary, which never lies before a first delivery it
+    /// skips past: that delivered pair is pending, so the release forwards
+    /// it and the skip ends before it.
     fn owes(&self, pid: i64, stamp_100ns: i64, next_100ns: i64) -> bool {
         let since = self.since.get(&pid).copied();
         let delivered = self.delivered.get(&pid);
