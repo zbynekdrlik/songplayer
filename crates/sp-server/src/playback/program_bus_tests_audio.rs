@@ -5,7 +5,7 @@
 //! line's counters on the status. Reuses the #209 rig (`program_bus_tests.rs`).
 //! Wired via `#[cfg(test)] #[path = "program_bus_tests_audio.rs"] mod tests_audio;`.
 
-use super::tests::{MS, SRC_A, SRC_B, b, frame, job};
+use super::tests::{MS, SRC_A, SRC_B, b, frame, grace, job};
 use super::*;
 use crate::playback::program_audio::{AudioJob, Limited};
 use crate::playback::program_output_timing::BoundaryMarks;
@@ -255,4 +255,18 @@ fn the_cut_answer_carries_the_line() {
     let _ = bus.audio_line().take(b(2), std::time::Duration::ZERO);
     let answer = bus.cut(SRC_A, b(5), None);
     assert_eq!(answer.health.audio.line.missing, 1);
+}
+
+/// A fill of a playlist's boundary (the program's own standby, shown for
+/// that playlist) is not ahead: it is committed on the sender's wall.
+#[test]
+fn a_fill_of_a_playlist_s_boundary_carries_no_lead() {
+    let mut core = ProgramCore::new().with_audio_ahead(1);
+    core.select_initial(SRC_A);
+    core.offer(SRC_A, job(4, &frame(4, 2), b(4), 0.1));
+    core.release(b(5) + grace() + MS); // A stalled: b(5) is filled for A
+    while core.take().is_some() {}
+    core.last_offer.clear(); // only the program's own last boundary is seen
+    assert!(core.cut(SRC_B, b(5) + 5 * MS));
+    assert_eq!(core.status().cut_boundary_100ns, Some(b(7)));
 }
