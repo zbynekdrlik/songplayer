@@ -251,6 +251,24 @@ fn the_restored_selection_owes_nothing_before_its_first_delivered_boundary() {
     );
 }
 
+/// #289 step 2: the first-delivery rule is the restored selection's only. A
+/// source a CUT made the owner owes from the cut boundary: B's first
+/// boundary since the cut on b(5) is b(6) (its b(5) was lost upstream), so
+/// the fill of b(5) is its audio gone, as before.
+#[test]
+fn a_source_cut_to_owes_the_cut_boundary_it_never_delivered() {
+    let mut core = ProgramCore::new();
+    core.select_initial(SRC_A);
+    let (fa, fb) = (frame(4, 2), frame(8, 2));
+    for k in 1..=3 {
+        core.offer(SRC_A, job(4, &fa, b(k), 0.1));
+    }
+    assert!(core.cut(SRC_B, b(3) + 5 * MS));
+    core.offer(SRC_A, job(4, &fa, b(4), 0.1)); // A's last: the cut is on b(5)
+    core.offer(SRC_B, job(8, &fb, b(6), 0.2));
+    assert_eq!(fills_and_resyncs(&core), (1, 1, 0, 0));
+}
+
 /// A cut to B, which has not delivered since the cut: its first missed
 /// boundary is a wait (B's touch from BEFORE the cut does not count: it must
 /// deliver since it became the owner). Once B delivered b(6), its miss of
