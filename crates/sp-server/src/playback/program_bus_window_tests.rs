@@ -251,22 +251,39 @@ fn the_restored_selection_owes_nothing_before_its_first_delivered_boundary() {
     );
 }
 
-/// #289 step 2: the first-delivery rule is the restored selection's only. A
-/// source a CUT made the owner owes from the cut boundary: B's first
-/// boundary since the cut on b(5) is b(6) (its b(5) was lost upstream), so
-/// the fill of b(5) is its audio gone, as before.
-#[test]
-fn a_source_cut_to_owes_the_cut_boundary_it_never_delivered() {
+/// A on program through b(4), a cut to B on b(5): `warm` = B touched the
+/// bus (b(3)) before the cut. B's first boundary since the cut is b(6).
+fn cut_to_b_whose_first_boundary_is_b6(warm: bool) -> (u64, u64, u64, u64) {
     let mut core = ProgramCore::new();
     core.select_initial(SRC_A);
     let (fa, fb) = (frame(4, 2), frame(8, 2));
     for k in 1..=3 {
         core.offer(SRC_A, job(4, &fa, b(k), 0.1));
     }
+    if warm {
+        core.touch(SRC_B, b(3));
+    }
     assert!(core.cut(SRC_B, b(3) + 5 * MS));
     core.offer(SRC_A, job(4, &fa, b(4), 0.1)); // A's last: the cut is on b(5)
     core.offer(SRC_B, job(8, &fb, b(6), 0.2));
-    assert_eq!(fills_and_resyncs(&core), (1, 1, 0, 0));
+    fills_and_resyncs(&core)
+}
+
+/// #289 step 2: a source already at the bus when a cut made it the owner
+/// owes from the cut boundary: B's b(5) was lost upstream, so the fill of
+/// b(5) is its audio gone, as before.
+#[test]
+fn a_source_cut_to_owes_the_cut_boundary_it_never_delivered() {
+    assert_eq!(cut_to_b_whose_first_boundary_is_b6(true), (1, 1, 0, 0));
+}
+
+/// #289 step 2 review round 2: a source cut to that was not at the bus yet
+/// (its pipeline made for the cut) starts like the restored selection: its
+/// first pair b(6) is handed a slot ahead, so the offer path fills b(5)
+/// right after noting it — a wait, never its audio gone.
+#[test]
+fn a_cold_source_cut_to_owes_nothing_before_its_first_delivered_boundary() {
+    assert_eq!(cut_to_b_whose_first_boundary_is_b6(false), (1, 0, 0, 0));
 }
 
 /// A cut to B, which has not delivered since the cut: its first missed
