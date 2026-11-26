@@ -224,6 +224,33 @@ fn the_restored_selection_owes_nothing_before_it_delivered() {
     );
 }
 
+/// #289 step 2 regression (resolume-snv, 26.11.2026 05:52:43 Bratislava: a
+/// `program` `filled` loss at the first start on step 2). The restored
+/// selection's pipeline hands its first boundary b(3) a slot ahead, at the
+/// instant the sender's wall reaches b(2), so the offer can come first: the
+/// offer path then fills b(2), a boundary BEFORE the source's first
+/// delivery — a wait, never its audio gone. A boundary it misses after its
+/// first delivery is owned, as before.
+#[test]
+fn the_restored_selection_owes_nothing_before_its_first_delivered_boundary() {
+    let mut core = ProgramCore::new().with_audio_ahead(1);
+    core.select_initial(SRC_A);
+    core.release(b(1) + MS);
+    let fa = frame(4, 2);
+    core.offer(SRC_A, job(4, &fa, b(3), 0.1));
+    assert_eq!(
+        fills_and_resyncs(&core),
+        (2, 0, 0, 0),
+        "b(2) before the first delivery: a wait"
+    );
+    core.offer(SRC_A, job(4, &fa, b(5), 0.1));
+    assert_eq!(
+        fills_and_resyncs(&core),
+        (3, 1, 0, 0),
+        "b(4) after it: its audio gone"
+    );
+}
+
 /// A cut to B, which has not delivered since the cut: its first missed
 /// boundary is a wait (B's touch from BEFORE the cut does not count: it must
 /// deliver since it became the owner). Once B delivered b(6), its miss of

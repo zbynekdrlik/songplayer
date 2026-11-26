@@ -146,3 +146,64 @@ fn the_device_latency_is_the_drivers_own_and_follows_its_change() {
         ("waiting", Some(5.0))
     );
 }
+
+/// Block `k` handed a slot ahead of its stamp (#289 step 2: the pacer hands
+/// each pair out at its commit): when it is handled, and the block.
+fn ahead(k: i64) -> (i64, ProgramBlock) {
+    (T0 + (k - 1) * SLOT + 5_000, block(k))
+}
+
+/// #289 step 2 regression (resolume-snv, 26.11.2026 05:52:38 Bratislava:
+/// the first start on step 2 logged `cause="deficit" ms=30.6333
+/// lateness_ms=-32.8209` on out-4). At a start the program commits the
+/// fill of S − 1 and the first playlist boundary S at the same instant (S
+/// is handed a slot ahead), so the output gets both back to back, before
+/// the driver's first callback. The second block belongs to the same
+/// hand-off: it is played, never dropped, and the steady blocks a slot
+/// ahead after it hold the target with no hard re-centre.
+#[test]
+fn a_start_pair_handed_back_to_back_primes_with_no_hard_recentre() {
+    let o = out();
+    let mut d = FakeDevice::answering(vec![Ok(dvs(96_000.0))]);
+    let mut w = AsioWorker::new(T0);
+    w.step(&o, &mut d, T0, None);
+    // The fill of b(1), handled at its boundary, primes the ring; b(2), a
+    // slot ahead, comes 0.1 ms later with no callback in between.
+    w.step(&o, &mut d, T0 + SLOT + 4_000, Some(block(1)));
+    w.step(&o, &mut d, T0 + SLOT + 5_000, Some(block(2)));
+    d.drain(25);
+    for k in 3..3 + 30 * 5 {
+        let (at, b) = ahead(k);
+        w.step(&o, &mut d, at, Some(b));
+        d.drain(25);
+    }
+    let snap = o.snapshot();
+    let s = &snap.status;
+    assert_eq!(
+        (s.hard_recentres, s.last_hard_recentre.is_some()),
+        (0, false),
+        "{s:?}"
+    );
+    assert_eq!((snap.blocks_sent, snap.blocks_dropped), (152, 0));
+    assert_eq!((d.underruns, s.overflows), (0, 0));
+}
+
+/// The PP rule stays (#233): a driver that never calls back after the
+/// priming takes the start's hand-off, never a pile-up: a block handled a
+/// slot or more after the priming waits for the driver's first tick.
+#[test]
+fn a_driver_with_no_callback_after_the_priming_takes_no_later_block() {
+    let o = out();
+    let mut d = FakeDevice::answering(vec![Ok(dvs(96_000.0))]);
+    let mut w = AsioWorker::new(T0);
+    w.step(&o, &mut d, T0, None);
+    w.step(&o, &mut d, T0 + SLOT + 4_000, Some(block(1)));
+    w.step(&o, &mut d, T0 + SLOT + 5_000, Some(block(2)));
+    let handed = d.ring_frames();
+    for k in 3..10 {
+        let (at, b) = ahead(k);
+        w.step(&o, &mut d, at, Some(b));
+    }
+    assert_eq!(d.ring_frames(), handed, "no block after the hand-off");
+    assert_eq!(o.snapshot().blocks_sent, 2);
+}
