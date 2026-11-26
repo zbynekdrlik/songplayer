@@ -404,7 +404,9 @@ impl AudioLine {
 /// else not at all.
 pub fn hold_100ns(stamp_100ns: i64, now_100ns: i64) -> i64 {
     let ahead = stamp_100ns - now_100ns;
-    if ahead > 0 && ahead <= HOLD_MAX_100NS {
+    // A range, not `ahead > 0`: at 0 both branches give 0 (an equivalent
+    // `>=` mutant).
+    if (1..=HOLD_MAX_100NS).contains(&ahead) {
         ahead
     } else {
         0

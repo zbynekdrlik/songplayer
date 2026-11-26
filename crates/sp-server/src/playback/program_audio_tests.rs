@@ -183,6 +183,7 @@ fn a_job_is_held_to_its_stamp_only_within_the_lead_and_a_slot() {
         "a backward step"
     );
     assert_eq!(hold_100ns(T0, T0), 0);
+    assert_eq!(hold_100ns(T0 + 1, T0), 1, "100 ns ahead is held");
     assert_eq!(hold_100ns(T0 - 5, T0), 0, "late: at once");
 }
 
