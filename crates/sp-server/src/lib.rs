@@ -250,7 +250,11 @@ pub async fn start(
     // the engine (registers a tap per pipeline at spawn; the decode loops feed
     // it). Idle taps cost one atomic load per decoded frame.
     let preview_registry = Arc::new(playback::preview::PreviewRegistry::new());
-    let program_bus = Arc::new(playback::program_bus::ProgramBus::new()); // #209
+    // #209; #289 step 2: the sources commit a slot ahead, the audio side
+    // runs on the `program-audio` thread.
+    let program_bus = playback::program_bus::ProgramBus::new()
+        .with_audio_ahead(playback::pacer::AUDIO_LEAD_SLOTS);
+    let program_bus = Arc::new(program_bus);
 
     // #51: shared LAN sp.local status — the mDNS task (spawned after AppState)
     // writes it, `/api/v1/status` reads it. Starts empty until the task

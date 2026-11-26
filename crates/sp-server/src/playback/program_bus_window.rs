@@ -27,6 +27,7 @@
 use std::collections::{HashMap, HashSet};
 
 use sp_core::config::PROGRAM_BLANK_ID;
+use sp_core::genlock::strict_next_boundary_100ns;
 use tracing::{info, warn};
 
 use super::{ProgramCore, ProgramJob};
@@ -58,10 +59,14 @@ pub(super) const DELIVERY_GRACE_100NS: i64 = 100_000_000;
 #[derive(Debug, Default)]
 pub(super) struct Delivery {
     /// The sources that touched or offered a boundary since they became the
-    /// owner.
-    delivered: HashSet<i64>,
+    /// owner, each with the first boundary it delivered.
+    delivered: HashMap<i64, i64>,
     /// The boundary each source became the owner on (a cut to it).
     since: HashMap<i64, i64>,
+    /// #289: the sources a cut made the owner while they were at the bus
+    /// already (they had touched or offered a boundary): they owe from the
+    /// cut boundary. Any other owner owes from its first delivered boundary.
+    warm: HashSet<i64>,
     /// The first boundary the core counted (a fill, a resync, a mix): where
     /// the selection restored at the start, which no cut made the owner,
     /// owns from.
@@ -71,9 +76,14 @@ pub(super) struct Delivery {
 impl Delivery {
     /// `pid` becomes the owner on boundary `stamp_100ns` (a cut to it): it
     /// delivers anew from there (a touch from before the cut does not count).
-    pub(super) fn became_owner(&mut self, pid: i64, stamp_100ns: i64) {
+    /// `warm`: it was at the bus already.
+    pub(super) fn became_owner(&mut self, pid: i64, stamp_100ns: i64, warm: bool) {
         self.delivered.remove(&pid);
         self.since.insert(pid, stamp_100ns);
+        // A source once at the bus stays known (`last_offer` only grows).
+        if warm {
+            self.warm.insert(pid);
+        }
     }
 
     /// The core counts boundary `stamp_100ns` (a fill, a resync, a mix): the
@@ -82,13 +92,24 @@ impl Delivery {
         self.start = self.start.or(Some(stamp_100ns));
     }
 
-    /// Whether `pid` owes boundary `stamp_100ns`: it delivered since it
-    /// became the owner, or [`DELIVERY_GRACE_100NS`] passed since then (since
-    /// the start for a source no cut made the owner).
-    fn owes(&self, pid: i64, stamp_100ns: i64) -> bool {
-        let since = self.since.get(&pid).copied().or(self.start);
-        self.delivered.contains(&pid)
-            || stamp_100ns - since.unwrap_or(stamp_100ns) >= DELIVERY_GRACE_100NS
+    /// Whether `pid` owes boundary `stamp_100ns` (`next_100ns` the boundary
+    /// after it): it delivered since it became the owner, or
+    /// [`DELIVERY_GRACE_100NS`] passed since then (since the start for a
+    /// source no cut made the owner). #289 step 2: an owner that was not at
+    /// the bus yet (the selection restored at the start, a source cut to
+    /// before its pipeline reached the bus) owes only from its FIRST
+    /// delivered boundary — its pipeline hands that one a slot ahead, so the
+    /// offer path can fill the boundary before it once it is noted; a warm
+    /// cut's owner owes from the cut boundary as before. A resync is judged by its
+    /// first skipped boundary, which never lies before a first delivery it
+    /// skips past: that delivered pair is pending, so the release forwards
+    /// it and the skip ends before it.
+    fn owes(&self, pid: i64, stamp_100ns: i64, next_100ns: i64) -> bool {
+        let since = self.since.get(&pid).copied();
+        let delivered = self.delivered.get(&pid);
+        let warm = self.warm.contains(&pid);
+        delivered.is_some_and(|&first| warm || next_100ns > first)
+            || stamp_100ns - since.or(self.start).unwrap_or(stamp_100ns) >= DELIVERY_GRACE_100NS
     }
 }
 
@@ -107,7 +128,8 @@ impl ProgramCore {
     /// owner ([`Self::delivering`]).
     pub(super) fn note_progress(&mut self, pid: i64, stamp_100ns: i64) {
         self.last_offer.insert(pid, stamp_100ns);
-        self.delivery.delivered.insert(pid);
+        let first = self.delivery.delivered.entry(pid).or_insert(stamp_100ns);
+        *first = (*first).min(stamp_100ns);
     }
 
     /// #257: whether `source` is a real source that owes boundary
@@ -119,7 +141,8 @@ impl ProgramCore {
     /// offers (SNV 12.10.2026: a `program` loss after every deploy), a cut to
     /// a source that has not reached the bus yet — for 10 s at most.
     fn delivering(&self, source: Option<i64>, stamp_100ns: i64) -> bool {
-        real_source(source) && source.is_some_and(|s| self.delivery.owes(s, stamp_100ns))
+        let next = strict_next_boundary_100ns(stamp_100ns, self.fps);
+        real_source(source) && source.is_some_and(|s| self.delivery.owes(s, stamp_100ns, next))
     }
 
     /// Boundary `stamp_100ns` filled with the program's standby pair,

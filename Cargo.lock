@@ -480,8 +480,8 @@ dependencies = [
 
 [[package]]
 name = "dlink"
-version = "0.6.214"
-source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.214#e27a2996708083a25be0874a9fc6f868f01a24e6"
+version = "0.6.215"
+source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.215#83b67668ffb05fcf031551f1a8383a9ab9f60cda"
 dependencies = [
  "dstack",
  "dstack-audio-io",
@@ -498,8 +498,8 @@ checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
 name = "dstack"
-version = "0.6.214"
-source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.214#e27a2996708083a25be0874a9fc6f868f01a24e6"
+version = "0.6.215"
+source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.215#83b67668ffb05fcf031551f1a8383a9ab9f60cda"
 dependencies = [
  "dstack-audio-io",
  "dsync-ptp",
@@ -521,13 +521,13 @@ dependencies = [
 
 [[package]]
 name = "dstack-audio-io"
-version = "0.6.214"
-source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.214#e27a2996708083a25be0874a9fc6f868f01a24e6"
+version = "0.6.215"
+source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.215#83b67668ffb05fcf031551f1a8383a9ab9f60cda"
 
 [[package]]
 name = "dstack-resample"
-version = "0.6.214"
-source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.214#e27a2996708083a25be0874a9fc6f868f01a24e6"
+version = "0.6.215"
+source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.215#83b67668ffb05fcf031551f1a8383a9ab9f60cda"
 dependencies = [
  "rubato",
 ]
@@ -579,7 +579,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1392,7 +1392,7 @@ dependencies = [
 [[package]]
 name = "mdns-sd"
 version = "0.21.6"
-source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.214#e27a2996708083a25be0874a9fc6f868f01a24e6"
+source = "git+https://github.com/zbynekdrlik/dstack?tag=v0.6.215#83b67668ffb05fcf031551f1a8383a9ab9f60cda"
 dependencies = [
  "fastrand",
  "flume",
@@ -1493,7 +1493,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1709,7 +1709,7 @@ dependencies = [
  "once_cell",
  "socket2 0.6.3",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2009,7 +2009,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2318,7 +2318,7 @@ dependencies = [
 
 [[package]]
 name = "sp-core"
-version = "0.100.0"
+version = "0.101.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2327,7 +2327,7 @@ dependencies = [
 
 [[package]]
 name = "sp-decoder"
-version = "0.100.0"
+version = "0.101.0"
 dependencies = [
  "crossbeam-channel",
  "mutants",
@@ -2341,7 +2341,7 @@ dependencies = [
 
 [[package]]
 name = "sp-gpu"
-version = "0.100.0"
+version = "0.101.0"
 dependencies = [
  "cc",
  "mutants",
@@ -2355,7 +2355,7 @@ dependencies = [
 
 [[package]]
 name = "sp-ndi"
-version = "0.100.0"
+version = "0.101.0"
 dependencies = [
  "libloading",
  "mutants",
@@ -2365,7 +2365,7 @@ dependencies = [
 
 [[package]]
 name = "sp-server"
-version = "0.100.0"
+version = "0.101.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2745,7 +2745,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

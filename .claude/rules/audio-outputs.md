@@ -7,6 +7,8 @@ paths:
   - "crates/sp-core/src/asio_resampling*.rs"
   - "crates/sp-server/src/playback/resample_quality.rs"
   - "crates/sp-server/src/playback/audio_out*.rs"
+  - "crates/sp-server/src/playback/program_audio*.rs"
+  - "crates/sp-server/src/playback/program_bus_audio*.rs"
   - "crates/sp-server/src/playback/vban_rate*.rs"
   - "crates/sp-server/src/playback/vban_out_tests_dest.rs"
   - "crates/sp-server/src/playback/vban_packet_tests_format.rs"
@@ -132,6 +134,103 @@ start):
   every VBAN output and keeps an ASIO one, a pass reads the stored value);
   `settings_tests_audio.rs` (the PATCH); `program_tests_outputs.rs` (the
   top-level field).
+
+## The timestamped-audio rebuild, step 2: the audio side on its own thread (#289, design 6814927800 + 7180172596)
+
+Decide once, read twice. Nothing audible moves: every output still plays
+at stamp + 66.7 ms (+ its delay, + FOH's conversion), because VBAN
+schedules on the stamp and the ASIO / Dante servo reads latency as
+buffered / rate + (handled − stamp). An earlier hand-off only grows the
+margin.
+
+- **The pacer hands each pair out at its commit** (`Pacer::new` =
+  `with_lead(..).handing_ahead()`, `CommitLine::hand_ahead_100ns`): one
+  slot before its stamp, the same pairs step 1 pinned
+  (`pacer_tests_commit.rs::handed_out_at_the_commit_every_pair_is_the_same_one_slot_early`).
+  `with_lead` keeps step 1's release at the stamp.
+- **The bus decides once** (`ProgramCore::commit`, unchanged). With the
+  audio side on (`ProgramBus::with_audio_ahead(AUDIO_LEAD_SLOTS)`, built
+  so in `lib.rs`; `ProgramCore::new` / `ProgramBus::new` keep it OFF, so
+  every older bus test is unchanged) each commit MOVES the boundary's
+  audio into an `AudioJob` (`program_audio::take_audio`: a forward's
+  block, a window boundary's two first blocks + `sample_span`, or the
+  standby) on a bounded queue (10, the oldest dropped, `health.audio.coalesced`);
+  the sender's job keeps its picture (`program_bus_audio.rs`).
+- **The cut lead counts the sources' slot**: `strict_next(newest seen)` +
+  (`CUT_LEAD_SLOTS` − lead) slots, the clock fallback read the lead ahead,
+  so a click in (B, B + 1) still lands on B + 2
+  (`program_bus_tests_audio.rs`).
+- **The `program-audio` thread** (`program_audio::spawn_audio_thread`,
+  Windows, MMCSS "Pro Audio", started in `start_program` before the
+  `SP-program` port wait) runs `run_audio_loop`: each job through ONE
+  `AudioSide` (the crossfade, the program's peak limiter with its reset
+  rule, the limiter's overs for the ledger, `AudioOutputs::offer`, all
+  moved verbatim out of `ProgramOutput`), the limited block into the
+  stamp-keyed `AudioLine` (12 deep, the oldest dropped).
+- **The sender** (`ProgramOutput::with_audio_line`) holds a job that came
+  ahead to its stamp on its `SendClock` (`hold_to_stamp`; a job more than
+  lead + one slot ahead goes at once, `HOLD_MAX_100NS`), then takes the
+  block from the line (`LINE_WAIT` 5 ms for a fill committed as it took
+  it; never found = the silence on NDI, `line.missing`; blocks it passed
+  over = `line.stale`). MAX, the item, the trace and the NDI submit get
+  B at B as before; `ready_late_us` is measured after the hold.
+- **Not moved in step 2**: a fill is still released on the sender's wall
+  (the one clock domain), so its audio reaches the outputs at the
+  boundary as before; the NDI input "OBS manuál" stays stamped on its
+  capture boundary (its + K stamp moves to step 4, where the outputs
+  target the stamp itself).
+- **Telemetry**: `health.audio {lead_slots, boundaries_ahead,
+  margin_us_min (stamp − hand-off, µs, the window minimum; negative =
+  after the stamp), coalesced, line {stale, missing, dropped}}` on
+  `GET /api/v1/program`. To check on the box after the deploy (not yet
+  observed): `boundaries_ahead` rising with `boundaries`,
+  `margin_us_min` ≈ 30 ms with a playlist on program, `line.missing` +0,
+  the audio ledger 0 losses. A boundary NDI got no block for reads its
+  served instant as its hand-off (a margin ≈ 0): the loss itself is
+  `line.missing`.
+- **Telemetry that moved with it** (review round 1): the pipeline's
+  `late_frames` / `max_late_us` (the paced consumer's delivery, floored at
+  0) now see only a job more than a slot late, since every job reaches the
+  consumer a slot early; `health.timing.vban_feed_late_us` is the audio
+  thread's hand-off (its instant read off `fleet_shift::timeline_now_100ns`,
+  the other marks off the sender's wall: the same registry, µs apart);
+  `ready_late_us` is the sender's start after the hold.
+- **Cost**: the hold is `SpinClock` (a sleep, then ~2 ms of spin per
+  boundary on the `program-output` thread, ~6 % of a core); read the box's
+  CPU before calling it free (#243: spin costs on PP).
+- **The cut lead is per source** (`AudioAhead::cut_boundary`): a playlist
+  (id ≥ 0) counts the lead, the NDI input (-1), Blank (-2) and a program
+  fill none (the program's last boundary carries its source's), so a cut
+  among sources not ahead keeps the whole `CUT_LEAD_SLOTS`. Residual: a
+  playlist between two scopes (its consumer's fills are not ahead) reads
+  as ahead, so a cut whose newest stamp is such a fill lands a slot
+  earlier (no hole, no double: the ownership is decided at the offer).
+- **The lost-boundary count**: the ledger's program `coalesced` loss is
+  `health.coalesced` + `audio.line.missing`, each lost boundary once (an
+  audio job the audio side coalesced shows as its missing block; a sender
+  coalesce leaves its block stale, never missing). Never a largest-of: the
+  ledger records each counter's growth, so a max hides a later loss in the
+  smaller counters (review round 2).
+- **A start's pair arrives back to back** (the step-2 regression, #289
+  comment 7183138409, root cause 7183255195): the restored playlist's
+  first boundary S is handed a slot ahead, at the instant the sender's wall
+  reaches S − 1, so the fill of S − 1 and S reach the outputs within µs.
+  The ASIO / Dante worker pushes a block handled within one slot of its
+  priming (`Run::primed_at_100ns`, the same hand-off) before the driver's
+  first tick; before, it dropped it and the next block hard-re-centred
+  (deficit ≈ 30 ms, lateness ≈ −33 ms) once per start. Later blocks still
+  wait for the tick (#233 PP). The bus's owed-fill rule for the same start:
+  `audio-faults.md` "Owned fills". Tests: `asio_out_tests_timing.rs`
+  (`a_start_pair_handed_back_to_back_primes_with_no_hard_recentre`,
+  `a_driver_with_no_callback_after_the_priming_takes_no_later_block`).
+  VBAN needs nothing: each packet is scheduled on its own block's stamp.
+- **The audio thread starts first**, in `start_program` before the
+  `SP-program` port wait, whatever the NDI sender does.
+- **The tests' `ProgramOutput`** (no line) runs the same `AudioSide`
+  inline: `program_output_tests_audio.rs` pins every output block and the
+  NDI audio of one scripted run (hot blocks, a 300 ms fade, a fill) over
+  the pre-step-2 sender, and requires the line path to give the same
+  fingerprint.
 
 ## The timestamped-audio rebuild, step 0: measure (#289, design 6814927800)
 
@@ -650,9 +749,10 @@ the list (a box with no list keeps them for this move). A rollback to
 
 ## The fan-out (`audio_out.rs`)
 
-`ProgramOutput::serve` → `split` → `limit` → `feed_outputs` (ONE `Arc<[f32]>`
-copy of the limited block, `ProgramBlock`, `audio_out_block.rs`) → MAX →
-video side + NDI submit. `AudioOutputs` (owned by `ProgramBus`,
+The audio side (`program_audio::AudioSide::process`: the crossfade → the
+limiter → the feed, ONE `Arc<[f32]>` copy of the limited block,
+`ProgramBlock`, `audio_out_block.rs`; #289 step 2: on the `program-audio`
+thread) → (the sender) MAX → video side + NDI submit. `AudioOutputs` (owned by `ProgramBus`,
 `outputs()`) holds the running list as one `Arc` snapshot swapped whole by
 the task; `offer` pushes into every running output's own drop-oldest queue
 and never waits. Every output's queue is ONE type,
@@ -1631,7 +1731,7 @@ difference with its UTC time.
   Since dstack v0.6.12 (dstack #102, 3.11.2026) every dstack crate is MIT OR
   Apache-2.0 (checked in the checkout's Cargo.toml files), so the license no
   longer keeps #285 off `main`. `THIRD-PARTY-NOTICES.txt` names dstack
-  0.6.214 (dlink, dstack, dstack-audio-io, dstack-resample) with its
+  0.6.215 (dlink, dstack, dstack-audio-io, dstack-resample) with its
   LICENSE-MIT verbatim (it named 0.5.11 under the GPL until step 3).
 - `type: dante` in `audio_outputs`, at most one, `DanteDest {device, ip}`: the
   device name by Dante's own rule, the `ip` one IPv4 of this PC (a second
@@ -1639,7 +1739,7 @@ difference with its UTC time.
 - `DanteDevice` (`dante_device.rs`) implements the `AsioDevice` seam **in this
   process**, on every platform, with no `sp-dante-host` (the owner's ruling):
   `asio_out`'s worker, ring, `asrc_servo` and status serve it, so a second servo
-  never appears. dstack by git tag (v0.6.214 since 23.11.2026), no Dante protocol code here.
+  never appears. dstack by git tag (v0.6.215 since 25.11.2026), no Dante protocol code here.
   #328 (dstack#366): every test Dante device serves on 127.0.0.1 —
   `.cargo/config.toml` `[env] DSTACK_TEST_LOOPBACK = "1"` reaches cargo test,
   nextest and cargo-mutants, and the stack then refuses any other address the

@@ -334,7 +334,7 @@ fn a_mixed_boundarys_block_reaches_vban_while_its_ndi_submit_is_held() {
     // The two pictures differ in size, so the video side also fits and
     // blends the outgoing picture. This test sees only the held NDI send;
     // that the picture comes after the hand-off too is `serve`'s structure
-    // (`split` has no video work, `submit_video` runs after the feed).
+    // (the audio side has no video work, `submit_video` runs after the feed).
     let stamp = at(2);
     let mix = MixJob {
         stamp_100ns: stamp,

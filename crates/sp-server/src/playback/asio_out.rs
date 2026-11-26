@@ -25,8 +25,9 @@
 //!
 //! A closed output drops the blocks it is handed (they would be stale), and
 //! so does a running one after its priming until the driver's first tick
-//! since the priming (a driver that opens and never calls back would
-//! otherwise count a hard re-centre every few slots; #233, found at PP).
+//! since the priming, but for a block within a slot of the priming (#289:
+//! the same hand-off). A driver that opens and never calls back would
+//! otherwise count a hard re-centre every few slots (#233, found at PP).
 //!
 //! A driver that opens and gives no clock (no tick since the priming: DVS
 //! not running, no Dante PTP clock on its network) is a calm, visible wait
@@ -59,7 +60,7 @@ use crate::playback::asio_state::{
 };
 use crate::playback::asrc::{Asrc, Splice};
 use crate::playback::asrc_servo::{
-    BASE_LATENCY_100NS, Observation, Recentre, Servo, frames_from_100ns,
+    BASE_LATENCY_100NS, Observation, Recentre, SLOT_100NS, Servo, frames_from_100ns,
 };
 use crate::playback::audio_out::{STATE_OPENING, STATE_WAITING};
 use crate::playback::audio_out_block::ProgramBlock;
@@ -337,6 +338,9 @@ struct Run {
     late_callbacks: u64,
     fast_callbacks: u64,
     primed: bool,
+    /// When the first block primed the ring (#289: a block handled within a
+    /// slot of it is the same hand-off).
+    primed_at_100ns: i64,
     /// The frames the card had taken when the first block primed the ring:
     /// the driver's ticks count from there (a burst of callbacks at the
     /// open, then nothing, is no clock).
@@ -547,7 +551,10 @@ impl AsioWorker {
         // After the priming, a block waits for the driver's first tick: what
         // a card that takes nothing would pile up is no fault of the output
         // (#233, PP): neither observed nor pushed. A silent run feeds none.
-        let block = block.filter(|_| !run.proving && (!run.primed || ticking));
+        // #289 step 2: a block handled within a slot of the priming is the
+        // same hand-off (a start's fill + first boundary, back to back).
+        let handoff = now_100ns - run.primed_at_100ns < SLOT_100NS;
+        let block = block.filter(|_| !run.proving && (!run.primed || ticking || handoff));
         if let Some(hard) = block.and_then(|b| process(run, out, device, now_100ns, b)) {
             if let Some(held_back) = self.hard_warns.admit(now_100ns, HARD_WARN_EVERY_100NS) {
                 log_hard(&out.id, &hard, held_back);
@@ -762,6 +769,7 @@ fn build(
         late_callbacks: 0,
         fast_callbacks: 0,
         primed: false,
+        primed_at_100ns: 0,
         consumed_at_prime: 0,
         clock_base: false,
         proving: false,
@@ -839,6 +847,7 @@ fn process(
     if !run.primed {
         device.mark_primed();
         run.primed = true;
+        run.primed_at_100ns = now_100ns;
         // A silent run's ticks count from its first step (#229).
         if !run.clock_base {
             run.clock_base = true;

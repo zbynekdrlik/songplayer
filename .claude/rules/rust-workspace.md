@@ -997,6 +997,14 @@ the test that kills each one BEFORE CI's mutation gate runs.
   whole run, or re-list from a fresh diff and run only the mutants not yet
   tested (one `--re '^<escaped list line>$'` each; the earlier shards'
   `mutants.out/caught.txt` / `unviable.txt` name the tested ones).
+- **A large diff's local gate: filter the per-mutant tests** (#289 step
+  2): 181 mutants over the whole sp-server suite ran ~3 a minute; with
+  `-- -E 'test(/program|pacer|paced|audio_faults/)'` (nextest's filterset,
+  passed through after `--`) the same run took 38 min at `--jobs 4`. It is
+  a LOCAL proxy only (CI runs the full suite per mutant): a `MISSED` under
+  the filter is checked against the full suite before it is called real.
+  Re-run only the mutants a later fix adds with `--re '<fn names>'` from a
+  fresh diff.
 - **A new `PacingStats` field must read its `Default` until the pacer's
   first emit** (#289 step 0): `pacer_tests::disabled_pacer_reports_default_stats`
   compares a disabled pacer's whole `stats()` with `PacingStats::default()`;
